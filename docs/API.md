@@ -290,10 +290,18 @@ Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
 "study_mode"?: bool}`. `source_ids` narrows retrieval to the selected sources; an
 absent or empty list searches the whole workspace.
 
-`use_web` is **refused** with 400 `validation` until Phase 3 implements the search
-arm. Accepting it would make three things untrue at once: the prompt would tell the
-model web search is on with no web context, the stored turn would assert
-`used_web: true`, and the model would claim to have searched.
+`use_web` runs a web search and puts the results in the prompt as a separate
+`<web_results>` block, labelled `[W1]`, `[W2]`. A tier that fails is recorded and
+the walk continues: a query no tier answered is not an error, and the turn answers
+from the workspace's own sources. A cache hit is not charged; a search that called a
+provider costs `web_search` credits on top of the message.
+
+`used_web` on the stored turn means the turn **used** web context, not that the
+toggle was on: a toggle-on turn where every tier returned nothing stores false.
+
+A web citation is `{"type":"web","url":"...","title":"...","doi":"..."|null}`.
+`doi` is present only when the tier provided one (the academic tier does), and it
+is the stable identifier: the same paper is often reachable at two hosts.
 
 Order of operations, which is the contract rather than an implementation detail:
 verified email, owned workspace, `use_web` refusal, provider configured, daily

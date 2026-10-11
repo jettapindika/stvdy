@@ -504,6 +504,74 @@ debug, `npm run build`, and `tauri build` in release. The server's release binar
 is a Phase 15 packaging concern, and the Docker image builds on Linux, where this
 does not arise.
 
+## Web search (Phase 3)
+
+A composite of four tier groups behind the one `SearchProvider` trait (A3), so a
+caller cannot tell them apart:
+
+| Order | Tier | Key | DOI | Published date |
+|---|---|---|---|---|
+| 1a-f | OpenAlex, Crossref, arXiv, DOAJ, ERIC, PubMed | keyless or free | yes | yes |
+| 2 | self-hosted SearXNG | `SEARXNG_URL` | no | no |
+| 3 | Exa | `EXA_API_KEY` | no | yes |
+| 4 | Tavily | `SEARCH_API_KEY` | no | no |
+
+**The academic tier is first because it is free, official, and better for a study
+app than a SERP**, and it is the tier that carries a DOI. Which specific API
+answers is not stable: they return empty under load without erroring, so two
+identical queries can be answered by two different providers. That fact drives two
+design decisions below.
+
+**A failing tier is never fatal.** It is recorded in `unresponsive` and the walk
+continues; a query every tier failed produces an empty result set and the chat
+turn answers from the user's own sources. Only "the composite could not run at
+all" is an error, and even then the turn proceeds with no web context rather than
+failing.
+
+### The cache, and why it is read before the walk
+
+`search_cache` is keyed `(normalized_query, provider, max_results)` and is
+**global, not per-user** (A40): a query string carries no user data, and per-user
+rows would multiply storage by the user count for no benefit. An entry lives
+`SEARCH_CACHE_TTL_HOURS` (default 24).
+
+The read happens for **every tier before any tier is called** (A75). Reading per
+tier inside the walk looks equivalent and is not: because which API answers is not
+stable, a repeat of the same query could miss the entry the previous answer wrote
+under a different provider, call the network again, and bill a second search for a
+question already answered. The smoke run found this by making two identical calls
+that two tiers answered.
+
+A cache hit is not charged, and it still writes a `usage_events` row with
+`cache_hit = true`. Without that row a cache hit and a search that never ran are
+indistinguishable in the margin report. `search_tier` records which tier answered
+and `unresponsive_engines` carries SearXNG's own engine-health list, so silent
+degradation of the free path shows up in the report instead of being discovered by
+a user.
+
+### Ranking and normalisation
+
+Pure functions in `crates/core/src/search/`, with eighteen tests. Dedupe is by DOI
+first, then by normalised URL; a hit whose URL will not normalise is dropped rather
+than ranked, because it cannot be cited usefully. The sort is Academic before Web,
+a DOI before none, `published_at` descending with **`None` last** (a naive
+comparison on an `Option` puts it first), then tier order, then score, then
+normalised URL so the order is total and two runs agree.
+
+### Fetching pages, and the SSRF guard
+
+`PageFetcher` is Exa `/contents`, then the `moli` CLI, then `reqwest` plus
+readability, because each covers what the previous misses: clean text and upstream
+robots handling, JavaScript, and the cheapest case.
+
+Ingestion accepts an arbitrary URL from a user, so an unguarded fetch reads the
+server's own network and its cloud metadata endpoint. Every path refuses a
+non-http scheme and a target that resolves into a private range; the address is
+pinned per request so a second DNS answer cannot move it; and every redirect hop is
+re-checked, because a public URL that redirects to `169.254.169.254` is the
+standard bypass. `crates/server/tests/ssrf.rs` covers each range, including the two
+usually missed: carrier-grade NAT and an IPv4-mapped IPv6 address.
+
 ## CORS origins
 
 `routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist
