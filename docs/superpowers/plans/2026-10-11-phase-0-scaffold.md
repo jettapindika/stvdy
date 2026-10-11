@@ -5051,3 +5051,34 @@ All must be true before the phase is called done:
 **Type consistency** — `PlanId`, `PlanConfig`, `BillingPolicy`, `Platform`, `AppConfig`, `AppState`, `AppError`, `Entity`, `Op`, `Change`, `Mutation`, `MutationResult`, `PullResponse`, `PushRequest/Response`, `Platform`/`PlatformKind`/`FormFactor` are each defined exactly once and referenced by name thereafter. `Entity::ALL` has 17 variants and `dependency_rank()` returns a dense 1..=17, asserted by the wire test. The schema test's `SYNC_TABLES` list (16 tables) plus `user_settings` matches `0017_sync_triggers.sql` exactly, and `tables_added_beyond_the_spec_are_deliberate` carries `report_revisions` + `cheatsheets` as the documented deviations.
 
 **Known risks carried into execution** — (1) exact crate versions are pinned to values verified on 2026-10-11; if one is unavailable on the target platform the fix is to re-verify that pin, never to loosen it to `*`; (2) `keyring-core` + per-platform store wiring is the Phase 1 prototype precisely because the research flagged iOS/Android cross-compilation as unverified — the API surface itself is now verified from crate sources, and the Android `ndk-context` initialization is settled (android-activity provides it; do **not** add a shim, which would be a second call and panic); (3) `#[sqlx::test]` needs a superuser connection to `create extension vector` — the CI service and the compose file both use `postgres`, which is superuser; (4) the `desktop` CI job builds `--no-bundle` so unsigned artifacts are produced without certificates, which arrive in Phase 15; (5) `npm run tauri init` output is a starting point, not gospel — Task 13 Step 2 replaces `tauri.conf.json` wholesale, so review the generated file rather than trusting it.
+
+## Execution notes (Phase 0, as built)
+
+Deviations and discoveries from actually running the plan. The plan text above is left as written so the next phase can see what changed and why.
+
+1. **`sqlx-cli` feature name.** The plan said `--features postgres,rustls-ring`; the real feature is `rustls`. Also `cargo install --locked sqlx-cli` no longer works in 0.9.
+2. **`src-tauri` placement.** `tauri init` creates `app/src-tauri`, but the CLI resolves `src-tauri` only as a *subfolder of the working directory* — it does not search upward. The shell lives at the repo root and `justfile` invokes `./app/node_modules/.bin/tauri` from there, which is what makes `frontendDist: "../app/dist"` and the `beforeBuildCommand` cwd (A36) correct.
+3. **`protocol-asset` needs config.** Enabling the feature without `app.security.assetProtocol` fails the build ("features do not match the allowlist").
+4. **The updater cannot ship in Phase 0.** It panics at startup without a `plugins.updater` config, and it needs a signing keypair plus a release endpoint. Registering it with placeholder config would be a fake capability, so it moved to Phase 15 — along with `createUpdaterArtifacts: true`, which needs `TAURI_SIGNING_PRIVATE_KEY` at build time.
+5. **`plans` must be seeded by the migration, not only at boot.** `users.plan_id` is `not null default 'free'` and references `plans`, so the default must be satisfiable by the schema alone; otherwise every `insert into users` fails with `users_plan_id_fkey` (10 tests caught this).
+6. **Cascade deletes must not be logged.** Deleting a user cascades to its rows, whose AFTER DELETE triggers then tried to insert a `change_log` row for a user that no longer exists — FK violation, making account deletion impossible. `log_change()` now skips the log when the owner is gone; the rows cascade away anyway, so those tombstones could never be pulled.
+7. **`PlansFile.plans` is `#[serde(default)]`** so a config with no plan tables reports "must define a [free] plan" instead of serde's "missing field `plans`".
+8. **TypeScript 7 removed `baseUrl`.** `paths` now resolves relative to `tsconfig.json`.
+9. **Haptics exports are `impactFeedback`/`notificationFeedback`**, not `hapticImpact`/`hapticNotification` — caught by `tsc`.
+10. **`i64::div_ceil` is unstable**; the long-document multiplier uses manual ceiling division.
+11. **Tests must not mutate the process environment** (it is global and racy), so `AppConfig::from_env_at` takes explicit overrides.
+
+### Phase 0 verification (as executed)
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean; `unwrap_used` proven to fire on a deliberate probe, and proven relaxed inside tests |
+| `cargo test --workspace` | **62 passing**, 0 failing |
+| `npm --prefix app test` | **11 passing** |
+| `npm --prefix app run build` | clean (348 kB / 110 kB gzip) |
+| `src-tauri` build + `cargo test` | builds; keychain round-trip **PASS** (real macOS keychain) |
+| Shell launch | `tauri build --debug --no-bundle` → runs and holds a window |
+| Fresh DB `sqlx migrate run` | 17 migrations, **34 triggers**, `insert into users` works with no app code |
+| Server smoke | `/health` → `{env:dev,plans:3,status:ok,version:0.1.0}`; `/nope` → typed 404; `x-request-id` propagated |
+| Web render | verified in headless Chrome: shell renders, deep route returns 200 |
