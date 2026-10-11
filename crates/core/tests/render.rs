@@ -183,6 +183,109 @@ fn a_disallowed_svg_attribute_is_refused() {
     }
 }
 
+/// A single-quoted attribute value cannot smuggle an attribute past the allowlist.
+///
+/// The scanner reads a value between whichever quotes the source used and writes it back
+/// inside double quotes, so `width='1" onload="alert(1)'` was parsed as one allowed
+/// attribute and emitted as `<rect width="1" onload="alert(1)"/>`: `onload` was never
+/// checked because it was never parsed, and the result lands in a document headless
+/// Chromium prints and the SPA serves in a frame. The value is escaped for the quote it is
+/// emitted in now, and this case asserts the property from both ends: no attribute boundary
+/// survives inside the value, and the emitted markup still passes this same allowlist when
+/// it is re-scanned.
+#[test]
+fn a_single_quoted_attribute_value_cannot_inject_an_attribute() {
+    let svg = r#"<svg viewBox="0 0 10 10"><rect width='1" onload="alert(1)' height="1"/></svg>"#;
+    let prefixed = check_and_prefix(svg, "b1").unwrap();
+
+    assert!(
+        !prefixed.contains(r#"" onload=""#),
+        "the embedded quote must not close the attribute: {prefixed}"
+    );
+    assert!(
+        prefixed.contains("&quot; onload=&quot;alert(1)"),
+        "the injected text must appear escaped, not interpreted: {prefixed}"
+    );
+    check_and_prefix(&prefixed, "b1").expect(
+        "the emitted markup must pass the same allowlist, or an attribute reached the output \
+         that the scanner never parsed",
+    );
+}
+
+/// The `id` branch has the same hole as the general one, so it gets the same case.
+///
+/// Prefixing the id is no protection at all, because the prefix goes *inside* the quotes
+/// the value escaped from: `id='a" onerror="alert(1)'` emitted
+/// `<rect id="b1-a" onerror="alert(1)"/>` — the handler again, in a printed document.
+#[test]
+fn a_single_quoted_id_cannot_inject_an_attribute() {
+    let svg =
+        r#"<svg viewBox="0 0 10 10"><rect id='a" onerror="alert(1)' width="1" height="1"/></svg>"#;
+    let prefixed = check_and_prefix(svg, "b1").unwrap();
+
+    assert!(
+        !prefixed.contains(r#"" onerror=""#),
+        "the embedded quote must not close the id: {prefixed}"
+    );
+    assert!(
+        prefixed.contains("&quot; onerror=&quot;alert(1)"),
+        "the injected text must appear escaped, not interpreted: {prefixed}"
+    );
+    check_and_prefix(&prefixed, "b1")
+        .expect("the prefixed id must not carry an attribute the scanner never parsed");
+}
+
+/// The escape is complete, and applied once.
+///
+/// A value containing `&` and `<` must come out as `&amp;` and `&lt;`. Escaping `&` last
+/// turns `<`'s escape into `&amp;lt;`, which is the double escaping that makes every later
+/// reader decode a different value than the model wrote.
+///
+/// `>` cannot reach this point today — the scanner ends a tag at the first `>` it sees, so
+/// a value containing one is refused as an unterminated attribute rather than emitted — and
+/// the case pins that too, because the replacement for `>` is only reachable through that
+/// rule changing.
+#[test]
+fn an_attribute_value_is_escaped_completely_and_only_once() {
+    let svg = r#"<svg viewBox="0 0 10 10"><text x="1" y="1" aria-label="a & b < c"/></svg>"#;
+    let prefixed = check_and_prefix(svg, "b1").unwrap();
+
+    assert!(
+        prefixed.contains(r#"aria-label="a &amp; b &lt; c""#),
+        "{prefixed}"
+    );
+    assert!(!prefixed.contains("&amp;lt;"), "escaped twice: {prefixed}");
+
+    let with_gt = r#"<svg viewBox="0 0 10 10"><text aria-label="a > b"/></svg>"#;
+    assert!(
+        check_and_prefix(with_gt, "b1").is_err(),
+        "a `>` ends the tag, so the value must be refused rather than half-emitted"
+    );
+}
+
+/// A legitimate diagram round-trips: its id and its reference are prefixed, and nothing is
+/// escaped that was not there to escape.
+///
+/// This guards the fix rather than the bug. Escaping a value that is already in its emitted
+/// form, or escaping the prefixed id a second time, would show up here as an entity in a
+/// document that contained no `&` at all — and the arrowhead reference the student's
+/// diagram depends on would stop resolving.
+#[test]
+fn a_diagram_with_an_id_and_a_reference_round_trips() {
+    let svg = r#"<svg viewBox="0 0 10 10"><defs><marker id="arrowhead"/></defs><line x1="0" y1="0" x2="1" y2="1" marker-end="url(#arrowhead)"/></svg>"#;
+    let prefixed = check_and_prefix(svg, "b1").unwrap();
+
+    assert!(prefixed.contains(r#"id="b1-arrowhead""#), "{prefixed}");
+    assert!(
+        prefixed.contains(r#"marker-end="url(#b1-arrowhead)""#),
+        "the reference must resolve to the prefixed definition: {prefixed}"
+    );
+    assert!(
+        !prefixed.contains('&'),
+        "nothing here needed escaping, so an entity means double escaping: {prefixed}"
+    );
+}
+
 /// Two diagrams in one section must not collide either.
 ///
 /// Asserted on the *property* (distinct ids, each reference resolving to its own

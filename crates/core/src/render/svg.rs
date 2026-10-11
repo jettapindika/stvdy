@@ -6,6 +6,11 @@
 //! **The allowlist is closed.** An element or attribute outside it drops the whole block
 //! rather than being stripped: a diagram with its `<script>` removed is not the diagram the
 //! model drew, and rendering a mutilated version of it is a quiet lie about the content.
+//! Closed for attribute *values* too, which is a separate half: a value is parsed between
+//! whichever quote the source used and re-emitted in double quotes, so a `'`-quoted value
+//! containing a `"` would otherwise end its attribute early and inject an attribute the
+//! scanner never saw — `onload` reaches a document Chromium prints. `escape_attribute_value`
+//! is what keeps the parsed set of attributes and the emitted set of attributes the same.
 //!
 //! **Every `id` and every `url(#…)` is prefixed per block.** Every id inside an inline SVG
 //! is document-global, so two diagrams that both define `arrowhead` collide and the second
@@ -179,12 +184,13 @@ pub fn check_and_prefix(svg: &str, prefix: &str) -> Result<String, SvgRejection>
                 // Recorded now, applied after the walk: the reference may appear before
                 // the definition (a `<line>` can precede its `<marker>`'s `<defs>`).
                 ids.push(value.to_string());
-                rewritten.push_str(&format!(" {attribute}=\"{prefix}-{value}\""));
+                let prefixed = escape_attribute_value(&format!("{prefix}-{value}"));
+                rewritten.push_str(&format!(" {attribute}=\"{prefixed}\""));
             } else {
                 // `url(#name)` and `href`-style references inside an attribute value are
                 // rewritten to the prefixed id. `url(#…)` is the only form this subset
                 // uses; a bare `#name` in `marker-end` without `url()` is not valid SVG.
-                let value = rewrite_url_refs(value, prefix);
+                let value = escape_attribute_value(&rewrite_url_refs(value, prefix));
                 rewritten.push_str(&format!(" {attribute}=\"{value}\""));
             }
             rest = after[end + 1..].trim_start();
@@ -199,6 +205,27 @@ pub fn check_and_prefix(svg: &str, prefix: &str) -> Result<String, SvgRejection>
         return reject("no <svg> element".to_string());
     }
     Ok(out)
+}
+
+/// Escapes an attribute value for the double-quoted context it is re-emitted into.
+///
+/// The value is parsed between whichever quote the source used, and it is always written
+/// back out inside double quotes — so the source quote kind is not the output quote kind,
+/// and a `'`-quoted value may legitimately contain a `"`. Without this,
+/// `<rect width='1" onload="alert(1)'/>` ends its own `width` attribute at the embedded
+/// quote and the tag grows an `onload` that `ALLOWED_ATTRIBUTES` never saw, because it was
+/// never parsed. That output is a document headless Chromium prints and the SPA serves in
+/// a frame, so the escape is what makes "the allowlist is closed" true of the *attributes*
+/// and not only of the elements.
+///
+/// `&` is escaped first: doing it after the others would turn this function's own
+/// `&quot;` into `&amp;quot;`.
+fn escape_attribute_value(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Rewrites every `url(#name)` in an attribute value to the prefixed form.
