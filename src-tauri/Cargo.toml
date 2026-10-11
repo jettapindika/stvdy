@@ -1,0 +1,72 @@
+[package]
+name = "stvdy-shell"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+publish = false
+
+[lib]
+name = "stvdy_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.3", features = ["protocol-asset"] }
+tauri-plugin-deep-link = "2.6.1"
+tauri-plugin-notification = "2.6.0"
+tauri-plugin-dialog = "2.8.2"
+tauri-plugin-fs = "2.7.0"
+tauri-plugin-opener = "2.7.1"
+tauri-plugin-os = "2.4.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# Secure storage: keyring-core plus a per-platform store. The `keyring` crate's
+# default feature set is desktop-only (Entry::new returns NoDefaultStore on
+# iOS/Android), so each target wires its own store explicitly.
+keyring-core = "1.0.0"
+
+# Desktop-only plugins must not be linked into mobile builds.
+#
+# tauri-plugin-updater is deliberately NOT here: it needs a signing keypair and a
+# release endpoint (both Phase 15), and registering it with placeholder config
+# panics at startup ("Error deserializing 'plugins.updater'"). An updater that
+# cannot check for updates is a fake capability, so it arrives with the release
+# pipeline instead.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "2.4.0"
+
+# macOS uses the legacy keychain (works for unsigned dev builds); iOS has only
+# the protected data store. The crate exposes them as separate feature-gated
+# modules, so the features must differ per target.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1.1.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "1.0.0"
+
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+tauri-plugin-haptics = "2.4.2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

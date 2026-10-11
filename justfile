@@ -17,8 +17,13 @@ server:
 web:
     npm --prefix app run dev
 
+# The Tauri CLI resolves `src-tauri` as a subfolder of the working directory, so
+# these must run from the repo root. The CLI binary is the one npm installed.
 tauri:
-    cargo tauri dev
+    ./app/node_modules/.bin/tauri dev
+
+tauri-build:
+    ./app/node_modules/.bin/tauri build
 
 # --- quality gates (must all pass before a phase is called done) ---
 check:

@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Baseline capabilities available on every platform.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "os:default",
+    "opener:default",
+    "notification:default",
+    "dialog:default",
+    "fs:default",
+    "deep-link:default"
+  ]
+}

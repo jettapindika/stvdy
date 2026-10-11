@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-only",
+  "description": "Haptics are mobile only.",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": ["haptics:default"]
+}
