@@ -402,3 +402,310 @@ async fn the_spend_takes_the_lock_before_reading_the_ledger(pool: PgPool) {
         .expect("the task did not panic");
     assert!(result.is_ok(), "the spend must succeed: {result:?}");
 }
+
+/// The ceiling is enforced, not configured.
+///
+/// `provider_cost_ceiling_usd` had no reader at all before this: the config validated it
+/// and nothing compared against it, which the roadmap calls out as worse than no control,
+/// because it looks like one. A `usage_events` row putting the account's local month at
+/// the ceiling must refuse the next spend with 422 `limit_reached`, name the next plan in
+/// `min_plan`, and leave the ledger untouched — a refusal that had already written a
+/// ledger row would charge for the call it refused.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_account_over_its_provider_cost_ceiling_is_refused(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "ceiling@example.test").await;
+
+    let user_id = signed_up_user(&harness).await;
+
+    // The month's provider spend has reached the free plan's ceiling, which is what a
+    // user who spent their allowance looks like.
+    sqlx::query(
+        "insert into usage_events (user_id, action, credits, provider_cost_usd)
+         values ($1, 'chat_message', 0, $2)",
+    )
+    .bind(user_id)
+    .bind(ceiling(&harness, PlanId::Free))
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let before = first_balance(&harness, user_id).await;
+    let error = credits::spend(
+        &harness.state,
+        user_id,
+        PlanId::Free,
+        "chat_message",
+        1,
+        [None, None],
+    )
+    .await
+    .expect_err("an account at its ceiling must not spend");
+
+    assert_eq!(
+        error.status(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "the ceiling's refusal is the 422 the roadmap's table maps limit_reached to"
+    );
+    match &error {
+        stvdy_server::error::AppError::Entitlement {
+            code,
+            message,
+            min_plan,
+            limit,
+            used,
+        } => {
+            assert_eq!(*code, "limit_reached");
+            assert_eq!(
+                *min_plan,
+                Some("pro"),
+                "the refusal names the plan whose ceiling is higher"
+            );
+            assert!(
+                message.contains("resets on"),
+                "the refusal has to say when it resets: {message}"
+            );
+            // Dollars are not plan-matrix numbers: a client that rendered them would
+            // read "the limit is 0.5 and you have 2".
+            assert_eq!(*limit, None);
+            assert_eq!(*used, None);
+        }
+        other => panic!("expected a limit_reached refusal, got {other:?}"),
+    }
+
+    assert_eq!(
+        first_balance(&harness, user_id).await,
+        before,
+        "a refused spend must not write a ledger row"
+    );
+    let usage_rows: i64 =
+        sqlx::query_scalar("select count(*) from usage_events where user_id = $1")
+            .bind(user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(usage_rows, 1, "a refused spend must not record usage");
+}
+
+/// A higher plan has a higher ceiling, so the refusal's upgrade hint is a real remedy.
+///
+/// The same month's spend that stops a free account is under a pro account's ceiling:
+/// the number comes from `provider_cost_ceiling_usd[plan]`, not from a constant.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_higher_plan_has_a_higher_ceiling(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "ceiling-pro@example.test").await;
+
+    let user_id = signed_up_user(&harness).await;
+    // A live pro subscription is what makes the effective plan pro (A146).
+    sqlx::query("update users set plan_id = 'pro' where id = $1")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into subscriptions
+           (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+         values ($1, 'pro', 'active', 'monthly', now(), now() + interval '30 days')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "insert into usage_events (user_id, action, credits, provider_cost_usd)
+         values ($1, 'chat_message', 0, $2)",
+    )
+    .bind(user_id)
+    .bind(ceiling(&harness, PlanId::Free))
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    credits::spend(
+        &harness.state,
+        user_id,
+        PlanId::Pro,
+        "chat_message",
+        1,
+        [None, None],
+    )
+    .await
+    .expect("pro's ceiling is higher than the spend that stops free");
+}
+
+/// A BYOK action does not count against the ceiling (A156): the user's own key paid, so
+/// pausing the account for it would pause them for spending their own money.
+#[sqlx::test(migrations = "../../migrations")]
+async fn byok_usage_does_not_count_against_the_ceiling(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "byok@example.test").await;
+
+    let user_id = signed_up_user(&harness).await;
+    sqlx::query(
+        "insert into usage_events (user_id, action, credits, provider_cost_usd, byok)
+         values ($1, 'chat_message', 0, $2, true)",
+    )
+    .bind(user_id)
+    .bind(ceiling(&harness, PlanId::Free) * 4.0)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    credits::spend(
+        &harness.state,
+        user_id,
+        PlanId::Free,
+        "chat_message",
+        1,
+        [None, None],
+    )
+    .await
+    .expect("a call on the user's own key is not our cost");
+
+    // The same exclusion the spend's check makes, so a view that reports the pause cannot
+    // disagree with the spend that enforces it.
+    let since = chrono::Utc::now() - chrono::Duration::hours(1);
+    let counted = credits::month_provider_cost(&harness.state.pool, user_id, since)
+        .await
+        .expect("the provider cost is readable");
+    assert_eq!(counted, 0.0, "BYOK spend is not our provider cost");
+}
+
+/// **The concurrency proof.** Eight 1-credit spends race for a balance of exactly five,
+/// and exactly five succeed.
+///
+/// Deliberately not a timing test: a test that runs two spends and hopes they interleave
+/// passes on a fast local Postgres even with the lock removed, which makes it worse than
+/// no test. This one asserts an outcome that cannot be satisfied by luck — five 1-credit
+/// spends against a 5-credit balance must produce exactly five successes, exactly three
+/// `insufficient_credits` refusals, a final balance of zero, and no bucket below zero.
+/// Remove the advisory lock and the count of successes goes up.
+///
+/// The barrier is a start line, not a duration assertion: it is what makes all eight
+/// transactions read the ledger before any of them commits, which is the interleaving the
+/// lock exists to serialise.
+#[sqlx::test(migrations = "../../migrations")]
+async fn concurrent_spends_never_double_spend(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "race@example.test").await;
+
+    let user_id = signed_up_user(&harness).await;
+
+    // Exactly five credits, whatever the plan's allowance happens to be.
+    let allowance = harness
+        .state
+        .config
+        .plans
+        .get(PlanId::Free)
+        .credits_per_month;
+    sqlx::query(
+        "insert into credit_ledger (user_id, delta, bucket, reason)
+         values ($1, $2, 'monthly', 'test')",
+    )
+    .bind(user_id)
+    .bind(-(allowance - 5))
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(first_balance(&harness, user_id).await, 5);
+
+    const SPENDS: usize = 8;
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(SPENDS));
+    let mut tasks = Vec::with_capacity(SPENDS);
+    for _ in 0..SPENDS {
+        let state = harness.state.clone();
+        let barrier = barrier.clone();
+        tasks.push(tokio::spawn(async move {
+            barrier.wait().await;
+            credits::spend(
+                &state,
+                user_id,
+                PlanId::Free,
+                "chat_message",
+                1,
+                [None, None],
+            )
+            .await
+        }));
+    }
+
+    let mut succeeded = 0;
+    let mut refused = 0;
+    for task in tasks {
+        match task.await.expect("a spend task panicked") {
+            Ok(_) => succeeded += 1,
+            Err(error) => {
+                assert_eq!(
+                    error.code(),
+                    "insufficient_credits",
+                    "the only refusal a 5-credit balance can produce is a short balance"
+                );
+                refused += 1;
+            }
+        }
+    }
+
+    assert_eq!(
+        succeeded, 5,
+        "five 1-credit spends must consume a 5-credit balance exactly once each"
+    );
+    assert_eq!(refused, 3, "the other three must be refused, not served");
+    assert_eq!(
+        first_balance(&harness, user_id).await,
+        0,
+        "the balance must land on zero, not below it"
+    );
+
+    let buckets: Vec<(String, i64)> = sqlx::query_as(
+        "select bucket, coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = $1 group by bucket order by bucket",
+    )
+    .bind(user_id)
+    .fetch_all(&harness.state.pool)
+    .await
+    .unwrap();
+    for (bucket, total) in &buckets {
+        assert!(
+            *total >= 0,
+            "the {bucket} bucket went negative ({total}): a spend was served twice"
+        );
+    }
+
+    let spends: i64 = sqlx::query_scalar(
+        "select count(*) from credit_ledger where user_id = $1 and delta < 0 and reason = 'usage:chat_message'",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(spends, 5, "exactly five ledger rows may name a charge");
+}
+
+/// The signed-up account's id, which every test here needs exactly one of.
+async fn signed_up_user(harness: &TestState) -> uuid::Uuid {
+    sqlx::query_scalar("select id from users limit 1")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap()
+}
+
+/// The plan's provider-cost ceiling, from the loaded config rather than a literal.
+fn ceiling(harness: &TestState, plan: PlanId) -> f64 {
+    *harness
+        .state
+        .config
+        .plans
+        .provider_cost_ceiling_usd
+        .get(&plan)
+        .expect("every plan has a ceiling (the config validates it)")
+}

@@ -58,6 +58,74 @@ pub fn monthly_allowance(state: &AppState, plan: stvdy_core::config::PlanId) -> 
     state.config.plans.get(plan).credits_per_month
 }
 
+/// Grants `credits` into the monthly bucket, **once per `period_key`** (A152).
+///
+/// The returned `bool` says whether *this* call was the one that granted, which is what
+/// lets a caller log a real grant instead of a no-op.
+///
+/// Idempotent by construction, not by scheduling: `credit_ledger` carries a partial
+/// unique index on `(user_id, period_key)`, and this is an `insert … on conflict do
+/// nothing` against it. `jobs.dedupe_key` alone cannot close this hole — the signup grant
+/// (A64) and the recurring `monthly_grant` job can both run inside one month, and a
+/// duplicate `monthly_grant` would double-grant.
+///
+/// `plan` is the effective plan at the moment of the grant, and it is logged rather than
+/// used to compute anything: the amount is the caller's, because the caller is the one
+/// that knows which period it is granting for.
+pub async fn grant(
+    pool: &PgPool,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+    period_key: &str,
+    credits: i64,
+) -> AppResult<bool> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("acquiring a connection: {error}")))?;
+    grant_in(&mut conn, user_id, plan, period_key, credits).await
+}
+
+/// [`grant`] against a connection the caller owns, so the expiry of the previous
+/// period's unspent monthly balance and the new grant can commit together.
+pub async fn grant_in(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+    period_key: &str,
+    credits: i64,
+) -> AppResult<bool> {
+    if credits <= 0 {
+        // A plan with no monthly allowance grants nothing rather than writing a
+        // zero row that would confuse a later sum.
+        return Ok(false);
+    }
+
+    // The `where` clause is required: the unique index is partial
+    // (`where period_key is not null`), and Postgres will not infer a partial index as
+    // a conflict target without the same predicate.
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "insert into credit_ledger (user_id, delta, bucket, reason, period_key)
+         values ($1, $2, 'monthly', 'monthly_grant', $3)
+         on conflict (user_id, period_key) where period_key is not null do nothing
+         returning id",
+    )
+    .bind(user_id)
+    .bind(credits)
+    .bind(period_key)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("granting monthly credits: {error}")))?;
+
+    let granted = inserted.is_some();
+    if granted {
+        tracing::info!(%user_id, %plan, period_key, credits, "monthly credit grant");
+    } else {
+        tracing::debug!(%user_id, %plan, period_key, "monthly credit grant skipped: this period already granted");
+    }
+    Ok(granted)
+}
+
 /// The plan whose monthly allowance is larger than `plan`'s, for an upgrade hint.
 ///
 /// `None` on the top plan: there is no higher tier, so suggesting one would be a
@@ -170,6 +238,61 @@ pub async fn spend_in(
         .execute(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the spend lock: {error}")))?;
+
+    // The ceiling, checked under the same lock as everything else that can refuse a
+    // spend. It has to be here and not before the transaction: the sum it reads is a
+    // sum of `usage_events`, and two concurrent requests that each read it just under
+    // the ceiling would both pass. The worst-case overshoot is the concurrent-action
+    // count, which is what the per-account rate cap bounds (A155).
+    //
+    // The account's own timezone is read here rather than passed in because the spend
+    // does not take a session: the month is the *user's* month, and Postgres cannot do
+    // IANA arithmetic on a text timezone (A6), so the boundary is computed in Rust.
+    let timezone: Option<String> = sqlx::query_scalar("select timezone from users where id = $1")
+        .bind(user_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the timezone: {error}")))?;
+    // A user row that is gone cannot complete the spend (the ledger's FK refuses it),
+    // so UTC here is a total-function fallback, not a silent choice about a real user.
+    let timezone = timezone.unwrap_or_else(|| "UTC".to_string());
+    let month_start = crate::util::local_month_start(&timezone, state.clock.as_ref());
+
+    let ceiling = state
+        .config
+        .plans
+        .provider_cost_ceiling_usd
+        .get(&plan)
+        .copied()
+        .unwrap_or(0.0);
+    // `byok = false`: a call on the user's own key was paid for with the user's own key,
+    // so counting it against our ceiling would pause an account for spending someone
+    // else's money (A156).
+    let spent_usd: f64 = sqlx::query_scalar(
+        "select coalesce(sum(provider_cost_usd), 0)::float8 from usage_events
+          where user_id = $1 and created_at >= $2 and byok = false",
+    )
+    .bind(user_id)
+    .bind(month_start)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the provider cost: {error}")))?;
+
+    if spent_usd >= ceiling {
+        return Err(AppError::Entitlement {
+            code: "limit_reached",
+            message: format!(
+                "this account has reached its plan's monthly AI usage limit; it resets on {}",
+                crate::util::next_local_month_start(&timezone, state.clock.as_ref()).date_naive()
+            ),
+            min_plan: plan_for_more_credits(plan),
+            // Dollars do not belong in the plan-matrix fields: a client that rendered
+            // them as "the limit is 0.50 and you have 2" would be reading a different
+            // sentence than the one the numbers came from (A148).
+            limit: None,
+            used: None,
+        });
+    }
 
     for cap in daily_caps.iter().flatten() {
         let used: i64 = sqlx::query_scalar(
@@ -667,6 +790,84 @@ pub fn chat_message_cost(state: &AppState) -> i64 {
     state.config.plans.credits.chat_message
 }
 
+/// What this account has spent at the provider since `since`, in USD.
+///
+/// `byok = false` for the same reason the ceiling excludes it (A156): a call on the
+/// user's own key is not our cost, so counting it here would both pause an account for
+/// spending someone else's money and overstate our margin.
+pub async fn month_provider_cost(
+    pool: &PgPool,
+    user_id: Uuid,
+    since: DateTime<Utc>,
+) -> AppResult<f64> {
+    let spent: f64 = sqlx::query_scalar(
+        "select coalesce(sum(provider_cost_usd), 0)::float8 from usage_events
+          where user_id = $1 and created_at >= $2 and byok = false",
+    )
+    .bind(user_id)
+    .bind(since)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the provider cost: {error}")))?;
+    Ok(spent)
+}
+
+/// Whether the account has reached its plan's monthly provider-cost ceiling.
+///
+/// The *same* comparison `spend_in` makes under its lock, read here so `GET /usage` can
+/// report the pause without becoming a second answer to "how much have they spent"
+/// (A159). The figures themselves stay admin-only: the view carries `paused` and the
+/// reset instant, never the dollars.
+///
+/// A read error is `false`, not a panic and not a claim: this only decides what a screen
+/// says, while the spend path re-checks the ceiling inside its own transaction and fails
+/// the request if the sum cannot be read.
+pub async fn ceiling_paused(
+    state: &AppState,
+    user: &crate::auth::extract::AuthUser,
+    snapshot: &stvdy_core::entitlements::UsageSnapshot,
+) -> bool {
+    let ceiling = state
+        .config
+        .plans
+        .provider_cost_ceiling_usd
+        .get(&snapshot.plan)
+        .copied()
+        .unwrap_or(0.0);
+    let since = crate::util::local_month_start(&user.timezone, state.clock.as_ref());
+    match month_provider_cost(&state.pool, user.user_id, since).await {
+        Ok(spent) => spent >= ceiling,
+        Err(error) => {
+            tracing::warn!(%error, "reading the provider cost ceiling for the usage view");
+            false
+        }
+    }
+}
+
+/// The `costs` block every surface that quotes a price serves.
+///
+/// One function, so the number a Studio panel shows, the number `GET /usage` reports and
+/// the number the route actually charges cannot drift (roadmap gate 7(d)). Every value
+/// comes from the loaded `config/plans.toml`; nothing here is a literal, and a retuned
+/// cost table changes all three surfaces at once.
+pub fn costs(plans: &stvdy_core::config::PlansFile) -> serde_json::Value {
+    let credits = &plans.credits;
+    serde_json::json!({
+        "chat_message": credits.chat_message,
+        "web_search": credits.web_search,
+        "flashcard_batch_10": credits.flashcard_batch_10,
+        "quiz_10": credits.quiz_10,
+        "report_outline": credits.report_outline,
+        "report_section": credits.report_section,
+        "task_breakdown": credits.task_breakdown,
+        "syllabus_import": credits.syllabus_import,
+        "plan_generation": credits.plan_generation,
+        "agent_turn": credits.agent_turn,
+        "long_doc_threshold_tokens": credits.long_doc_threshold_tokens,
+        "long_doc_credits_per_1k_tokens": credits.long_doc_credits_per_1k_tokens,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +877,40 @@ mod tests {
         // The order is the contract (A9): purchased credits never expire, so
         // spending them first would waste the monthly grant that does.
         assert_eq!(BUCKETS, ["monthly", "purchased"]);
+    }
+
+    #[test]
+    fn the_costs_view_is_the_config_tables_own_numbers() {
+        // The one source for every surface that quotes a price: if this drifts from
+        // `plans.toml`, a panel shows a number the route does not charge.
+        let plans = crate::testing::plans();
+        let costs = costs(&plans);
+        let credits = &plans.credits;
+
+        for (key, expected) in [
+            ("chat_message", credits.chat_message),
+            ("web_search", credits.web_search),
+            ("flashcard_batch_10", credits.flashcard_batch_10),
+            ("quiz_10", credits.quiz_10),
+            ("report_outline", credits.report_outline),
+            ("report_section", credits.report_section),
+            ("task_breakdown", credits.task_breakdown),
+            ("syllabus_import", credits.syllabus_import),
+            ("plan_generation", credits.plan_generation),
+            ("agent_turn", credits.agent_turn),
+            (
+                "long_doc_threshold_tokens",
+                credits.long_doc_threshold_tokens,
+            ),
+            (
+                "long_doc_credits_per_1k_tokens",
+                credits.long_doc_credits_per_1k_tokens,
+            ),
+        ] {
+            assert_eq!(
+                costs[key], expected,
+                "the costs view must carry the config's {key}"
+            );
+        }
     }
 }
