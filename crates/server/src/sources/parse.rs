@@ -156,22 +156,31 @@ fn read_member(
         .map_err(|_| format!("{name} is not valid UTF-8"))
 }
 
-/// The text of one OOXML part: every run of `run_tag` in order, with a line break
-/// at each paragraph boundary.
+/// The text of one OOXML part: every run of `run_tag` in order, one line per
+/// paragraph.
 ///
 /// `run_tag` is the local name of the element that carries text — `t` inside
 /// `w:t` for a DOCX and inside `a:t` for a PPTX. Matching on the *local* name is
 /// deliberate: the prefix is a namespace alias the document chooses, so `w:t` in
 /// one file and `ns0:t` in another are the same element.
+///
+/// Whitespace is handled per **paragraph**, not per run or per text event, and that
+/// is the whole subtlety:
+///   * per event, the reader's `trim_text` would eat the space in `a &amp; b` (the
+///     entity splits one text node into three events) and the leading space in a run
+///     like ` membrane`;
+///   * per run, trimming would join `Cell` and ` membrane` into `Cellmembrane`.
+///
+/// So runs are accumulated verbatim and the *paragraph* is trimmed and collapsed,
+/// which drops Word's whitespace-only spacer runs while preserving every space that
+/// carries meaning.
 fn part_text(xml: &str, run_tag: &str, paragraph_tag: &str) -> Result<String, String> {
     let mut reader = Reader::from_str(xml);
-    // A run's text is trimmed by the reader, which drops the whitespace-only runs
-    // Word uses for spacing. That is what we want: those runs carry no content.
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut out = String::new();
-    let mut depth: usize = 0;
-    let mut in_run: Option<usize> = None;
+    let mut in_run = false;
+    let mut paragraph = String::new();
 
     loop {
         match reader
@@ -180,30 +189,67 @@ fn part_text(xml: &str, run_tag: &str, paragraph_tag: &str) -> Result<String, St
         {
             Event::Eof => break,
             Event::Start(element) => {
-                depth += 1;
                 if element.local_name().into_inner() == run_tag {
-                    in_run = Some(depth);
+                    in_run = true;
                 }
             }
             Event::End(element) => {
-                if in_run == Some(depth) {
-                    in_run = None;
+                if element.local_name().into_inner() == run_tag {
+                    in_run = false;
                 }
                 if element.local_name().into_inner() == paragraph_tag {
-                    // A paragraph boundary is a word boundary for the chunker, so a
-                    // document's structure survives into the chunks.
-                    out.push('\n');
+                    let text = collapse_whitespace(&paragraph);
+                    if !text.is_empty() {
+                        out.push_str(&text);
+                        out.push('\n');
+                    }
+                    paragraph.clear();
                 }
-                depth = depth.saturating_sub(1);
             }
-            Event::Text(text) if in_run.is_some() => {
-                out.push_str(&text.xml_content(quick_xml::XmlVersion::Implicit1_0));
+            Event::Text(text) if in_run => {
+                paragraph.push_str(&text.xml_content(quick_xml::XmlVersion::Implicit1_0));
+            }
+            // An entity is its own event in this reader, so `&amp;` arrives as a
+            // reference rather than as text. Dropping it would silently delete a
+            // character from the document; an unresolvable one is kept as written,
+            // which is what the reader would show a human opening the file.
+            Event::GeneralRef(reference) if in_run => {
+                let raw = reference.into_inner();
+                match resolve_reference(raw.as_ref()) {
+                    Some(resolved) => paragraph.push_str(&resolved),
+                    None => {
+                        paragraph.push('&');
+                        paragraph.push_str(raw.as_ref());
+                        paragraph.push(';');
+                    }
+                }
             }
             _ => {}
         }
     }
 
     Ok(out)
+}
+
+/// Resolves a `GeneralRef`'s content: a predefined entity name, or a numeric
+/// character reference.
+fn resolve_reference(reference: &str) -> Option<String> {
+    if let Some(digits) = reference.strip_prefix('#') {
+        let codepoint = match digits.strip_prefix(['x', 'X']) {
+            Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+            None => digits.parse::<u32>().ok()?,
+        };
+        return char::from_u32(codepoint).map(String::from);
+    }
+    quick_xml::escape::resolve_predefined_entity(reference).map(String::from)
+}
+
+/// Trims a paragraph and collapses its internal whitespace runs to one space.
+///
+/// A paragraph is a unit of meaning, so its edges are not part of it; the runs
+/// inside it are, so the spaces between them survive.
+fn collapse_whitespace(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// A DOCX is zip + OOXML: `word/document.xml`, every `<w:t>` run in order, and no
@@ -381,5 +427,40 @@ mod tests {
         let xml = r#"<w:p xmlns:w="w"><w:r><w:t>a &amp; b</w:t></w:r></w:p>"#;
         let text = part_text(xml, "t", "p").expect("the document parses");
         assert_eq!(text.trim(), "a & b");
+    }
+
+    #[test]
+    fn the_spaces_around_an_entity_and_between_runs_survive() {
+        // The entity splits one text node into three events, and a run may carry its
+        // own leading space; a reader that trimmed per event would eat both, which is
+        // the difference between "a & b" and "ab".
+        let xml = r#"<w:p xmlns:w="w"><w:r><w:t>a &amp; b</w:t></w:r></w:p>"#;
+        assert_eq!(part_text(xml, "t", "p").unwrap().trim(), "a & b");
+
+        let split =
+            r#"<w:p xmlns:w="w"><w:r><w:t>Cell</w:t></w:r><w:r><w:t> membrane</w:t></w:r></w:p>"#;
+        assert_eq!(
+            part_text(split, "t", "p").unwrap().trim(),
+            "Cell membrane",
+            "a run's own leading space is content"
+        );
+    }
+
+    #[test]
+    fn a_whitespace_only_paragraph_contributes_nothing() {
+        // Word emits these for spacing, and an empty line in the extracted text would
+        // become a chunk boundary for no reason.
+        let xml = r#"<w:body xmlns:w="w">
+            <w:p><w:r><w:t>First</w:t></w:r></w:p>
+            <w:p><w:r><w:t>   </w:t></w:r></w:p>
+            <w:p><w:r><w:t>Second</w:t></w:r></w:p>
+        </w:body>"#;
+        assert_eq!(part_text(xml, "t", "p").unwrap(), "First\nSecond\n");
+    }
+
+    #[test]
+    fn a_numeric_character_reference_resolves() {
+        let xml = r#"<w:p xmlns:w="w"><w:r><w:t>&#38;</w:t></w:r></w:p>"#;
+        assert_eq!(part_text(xml, "t", "p").unwrap().trim(), "&");
     }
 }
