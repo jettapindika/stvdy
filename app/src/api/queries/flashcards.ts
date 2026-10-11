@@ -113,7 +113,12 @@ export function useReviewCard(deckId: string) {
         { id: input.id, rating: input.rating, reviewed_at: input.reviewedAt },
       ),
     // The queue is local state during a session, so only the deck's own data is
-    // invalidated: refetching the due list mid-review would reshuffle it.
-    onSuccess: () => client.invalidateQueries({ queryKey: flashcardKeys.deck(deckId) }),
+    // invalidated. `exact` matters: query keys match by prefix, so an inexact
+    // invalidation of `['decks', id]` also matches `['decks', id, 'due']` and
+    // refetches the queue the study screen has deliberately taken ownership of. A
+    // failure in that refetch would also flip the screen's error gate and tear the
+    // card down mid-session.
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: flashcardKeys.deck(deckId), exact: true }),
   })
 }

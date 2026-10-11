@@ -44,17 +44,15 @@ const KEY_RATING: Record<string, Rating> = {
   '4': 'easy',
 }
 
-/** A failed review keeps its id, so a resend cannot grade the same card twice. */
+/**
+ * A review that failed and is still unresolved.
+ *
+ * It carries the id that was sent, because the next attempt for this card must
+ * resend it: see the rule in `grade`.
+ */
 interface FailedReview {
   rating: Rating
   id: string
-  /**
-   * Whether the next attempt must resend `id`. True for a failure that reached
-   * the server (the review may already have applied, so the server's
-   * `applied: false` path must see the same id); false for a network failure,
-   * where the request never left and a fresh id is safe.
-   */
-  reuseId: boolean
 }
 
 export function StudyScreen() {
@@ -67,27 +65,38 @@ export function StudyScreen() {
   const sources = useSources(workspaceId)
 
   const [queue, setQueue] = useState<StudyCard[] | null>(null)
+  const [seedNow, setSeedNow] = useState<Date | null>(null)
   const [index, setIndex] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [failed, setFailed] = useState<FailedReview | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const endRef = useRef<HTMLDivElement>(null)
   const advanceFocus = useRef(false)
 
   // Seeded once, when the due list first arrives. `null` rather than `[]` so an
   // empty deck and a not-yet-loaded deck are different states.
+  //
+  // The instant is the server's `now`, not the device's clock. The server has
+  // already filtered to `due_at <= now`, so re-filtering with a device clock that
+  // runs behind would silently drop cards it just returned — and because the queue
+  // is seeded once, they would stay missing for the whole session.
   useEffect(() => {
     if (queue === null && due.data !== undefined) {
-      setQueue(dueCards(due.data.cards, new Date()))
+      const now = new Date(due.data.now)
+      setSeedNow(now)
+      setQueue(dueCards(due.data.cards, now))
     }
   }, [due.data, queue])
 
-  // Focus the card region after a grade advances the queue. Doing it in an effect
-  // rather than in the mutation callback means the node exists when focus lands.
+  // Focus the region the session moved to: the card after a grade, or the end
+  // state after the last one. Without the second case focus would fall to the
+  // body when the card unmounts, and the next Tab would restart at the top of the
+  // document.
   useEffect(() => {
     if (advanceFocus.current) {
       advanceFocus.current = false
-      cardRef.current?.focus()
+      ;(cardRef.current ?? endRef.current)?.focus()
     }
   }, [index])
 
@@ -96,17 +105,19 @@ export function StudyScreen() {
   const dueError = asApiError(due.error)
   const reviewError = asApiError(review.error)
   const finished = queue !== null && card === null
-  const nextDueAt = nextDue(deck.data?.cards ?? [], new Date())
+  // The same instant the queue was filtered with, so the end state's "next due"
+  // cannot disagree with the list it is describing.
+  const nextDueAt = nextDue(deck.data?.cards ?? [], seedNow ?? new Date())
 
   function grade(rating: Rating) {
     if (card === null || review.isPending) return
-    // A retry of a request that reached the server keeps its id, so the server's
-    // `applied: false` path makes it a no-op. Only a request that never left
-    // (a network failure) gets a fresh id.
-    const id =
-      failed !== null && failed.rating === rating && failed.reuseId
-        ? failed.id
-        : crypto.randomUUID()
+    // One id per card *showing*, not per grade. A failed review may have reached
+    // the server, and the only safe assumption is that it did: reusing the id makes
+    // the retry idempotent (the server answers `applied: false` for an id it has
+    // already seen), while a fresh id after a failure that did land would grade the
+    // card twice for one showing. `failed` is cleared on success, so the next card
+    // starts with a new id.
+    const id = failed !== null ? failed.id : crypto.randomUUID()
     review.mutate(
       { cardId: card.id, input: { rating, id, reviewedAt: new Date().toISOString() } },
       {
@@ -117,9 +128,8 @@ export function StudyScreen() {
           setRevealed(false)
           setSourceOpen(false)
         },
-        onError: (error) => {
-          const apiError = asApiError(error)
-          setFailed({ rating, id, reuseId: apiError?.code !== 'network' })
+        onError: () => {
+          setFailed({ rating, id })
         },
       },
     )
@@ -312,21 +322,30 @@ export function StudyScreen() {
       )}
 
       {deckError === null && dueError === null && finished && (
-        <EmptyState
-          title="Nothing due in this deck"
-          reason={
-            nextDueAt === null
-              ? 'Every card in this deck has been scheduled. Come back after the next one is due.'
-              : `Every card here is scheduled. The next one comes due ${nextDueAt}.`
-          }
-          action={
-            workspaceId.length > 0 ? (
-              <Link to={`/workspaces/${workspaceId}`} className="btn btn-secondary">
-                Back to the workspace
-              </Link>
-            ) : undefined
-          }
-        />
+        // Focusable, because the card region held focus a moment ago: when the
+        // last card unmounts this is where the session's focus has to land, or it
+        // falls to the body and the next Tab restarts at the top of the document.
+        <div
+          ref={endRef}
+          tabIndex={-1}
+          className="focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-accent"
+        >
+          <EmptyState
+            title="Nothing due in this deck"
+            reason={
+              nextDueAt === null
+                ? 'Every card in this deck has been scheduled. Come back after the next one is due.'
+                : `Every card here is scheduled. The next one comes due ${nextDueAt}.`
+            }
+            action={
+              workspaceId.length > 0 ? (
+                <Link to={`/workspaces/${workspaceId}`} className="btn btn-secondary">
+                  Back to the workspace
+                </Link>
+              ) : undefined
+            }
+          />
+        </div>
       )}
     </div>
   )
