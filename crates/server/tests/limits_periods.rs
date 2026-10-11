@@ -22,7 +22,36 @@ use stvdy_server::testing::TestState;
 use uuid::Uuid;
 
 mod common;
-use common::signed_up;
+use common::{json as request, multipart, post_json, signed_up};
+
+/// The signup password `common::signed_up` uses, so a test can sign the same account in
+/// again and land on the *same* device row (`resolve_device` matches on name and platform).
+const PASSWORD: &str = "correct horse battery";
+
+/// A token for an account that already exists, on the device named `Laptop` (macos).
+///
+/// The device matters: a device over the plan's `devices_max` is read-only and refuses every
+/// spend, so a test that signed in on a fresh device would be testing that refusal rather
+/// than the row it means to write.
+async fn sign_in(app: &axum::Router, email: &str) -> String {
+    let (status, body) = request(
+        app,
+        "POST",
+        "/auth/login",
+        "",
+        json!({
+            "email": email,
+            "password": PASSWORD,
+            "device": { "name": "Laptop", "platform": "macos" }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    body["access_token"]
+        .as_str()
+        .expect("an access token")
+        .to_string()
+}
 
 /// 2026-10-31T18:00:00Z, the instant the plan's counter test turns on.
 ///
@@ -474,4 +503,593 @@ async fn the_scheduler_enqueues_one_grant_per_user_per_local_month(pool: PgPool)
         .await
         .unwrap();
     assert_eq!(after, 4, "two accounts, two kinds, no duplicates");
+}
+/// A claim-shaped caller for a specific device, as the extractor would build it.
+///
+/// Built by hand because the subject here is what the decision does with the device it is
+/// handed; the extractor is the auth suite's subject.
+fn caller_for(
+    user_id: Uuid,
+    device_id: Uuid,
+    timezone: &str,
+) -> stvdy_server::auth::extract::AuthUser {
+    stvdy_server::auth::extract::AuthUser {
+        user_id,
+        device_id,
+        session_id: Uuid::now_v7(),
+        email: "caller@example.test".to_string(),
+        email_verified: true,
+        plan_id: "free".to_string(),
+        timezone: timezone.to_string(),
+        is_admin: false,
+        student_verified: false,
+        platform: "macos".to_string(),
+        subscription_status: stvdy_core::entitlements::SubStatus::None,
+    }
+}
+
+/// Seeds a live subscription for the account, so the effective plan is the stored one.
+async fn subscribe(harness: &TestState, user_id: Uuid, plan: &str, ends_in_days: i64) {
+    sqlx::query(
+        "insert into subscriptions
+           (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+         values ($1, $2, 'active', 'monthly',
+                 now() - make_interval(days => 30),
+                 now() + make_interval(days => $3))",
+    )
+    .bind(user_id)
+    .bind(plan)
+    .bind(ends_in_days as i32)
+    .execute(&harness.state.pool)
+    .await
+    .expect("seeding a subscription");
+}
+
+/// Inserts `count` live devices for the account, all created at `at` plus a second each so
+/// the ranking is deterministic, and returns their ids oldest-first.
+async fn seed_devices(
+    harness: &TestState,
+    user_id: Uuid,
+    count: i64,
+    at: DateTime<Utc>,
+) -> Vec<Uuid> {
+    let mut ids = Vec::new();
+    for index in 0..count {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "insert into devices (id, user_id, name, platform, created_at)
+             values ($1, $2, $3, 'macos', $4)",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(format!("Device {index}"))
+        .bind(at + Duration::seconds(index))
+        .execute(&harness.state.pool)
+        .await
+        .expect("seeding a device");
+        ids.push(id);
+    }
+    ids
+}
+
+/// Inserts `count` live sources in `workspace_id`, created at `at` plus a second each.
+async fn seed_sources(
+    harness: &TestState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+    count: i64,
+    bytes: i64,
+    at: DateTime<Utc>,
+) {
+    for index in 0..count {
+        sqlx::query(
+            "insert into sources
+               (user_id, workspace_id, kind, title, file_key, file_size, mime, status, created_at)
+             values ($1, $2, 'text', $3, $4, $5, 'text/plain', 'ready', $6)",
+        )
+        .bind(user_id)
+        .bind(workspace_id)
+        .bind(format!("Source {index}"))
+        .bind(format!("users/{user_id}/sources/{index}.txt"))
+        .bind(bytes)
+        .bind(at + Duration::seconds(index))
+        .execute(&harness.state.pool)
+        .await
+        .expect("seeding a source");
+    }
+}
+
+/// The downgrade's shape: a power account with more rows than free allows.
+///
+/// Returns the caller's workspace (the oldest, so it stays writable), the read-only
+/// workspace and source, and the ids of the devices.
+struct Downgrade {
+    user_id: Uuid,
+    device_id: Uuid,
+    writable_workspace: Uuid,
+    read_only_workspace: Uuid,
+    read_only_source: Uuid,
+    over_limit_devices: Vec<Uuid>,
+}
+
+/// Builds the account: three workspaces, thirty sources, six devices on power, then the
+/// subscription expires and the flags are recomputed against free's limits (2 / 20 / 2).
+async fn downgraded_account(harness: &TestState, email: &str) -> Downgrade {
+    let app = router(harness);
+    signed_up(&app, harness, email).await;
+    let user_id = user_id(harness, email).await;
+
+    // The signed-up device is the oldest, so the caller keeps a writable device and the
+    // refusals below are about the row being written, not about the caller's own device.
+    let signed_up_device: Uuid = sqlx::query_scalar("select id from devices where user_id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .expect("the signup device");
+    sqlx::query("update devices set created_at = now() - interval '100 days' where id = $1")
+        .bind(signed_up_device)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let at = instant("2026-09-01T00:00:00Z");
+    let extra_devices = seed_devices(harness, user_id, 5, at).await;
+    let mut devices = vec![signed_up_device];
+    devices.extend(extra_devices);
+
+    sqlx::query("update users set plan_id = 'power' where id = $1")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    subscribe(harness, user_id, "power", 10).await;
+
+    // Three workspaces, oldest first; the newest is the one the downgrade flags.
+    let mut workspaces = Vec::new();
+    for index in 0..3 {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "insert into workspaces (id, user_id, name, created_at)
+             values ($1, $2, $3, $4)",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(format!("Workspace {index}"))
+        .bind(at + Duration::seconds(index))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+        workspaces.push(id);
+    }
+
+    // Thirty sources in the newest workspace, so ten of them are over free's twenty.
+    seed_sources(harness, user_id, workspaces[2], 30, 1024, at).await;
+    let read_only_source: Uuid = sqlx::query_scalar(
+        "select id from sources where user_id = $1 order by created_at desc limit 1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // Nothing is flagged while power is active, and the effective plan is power because the
+    // subscription is live (A146).
+    let before = stvdy_server::entitlements::recompute_read_only(
+        &harness.state.pool,
+        &harness.state.config.plans,
+        user_id,
+    )
+    .await
+    .expect("the recompute runs");
+    assert_eq!(before, Default::default(), "power is over no limit");
+
+    // The subscription expires: the same event the rollover job handles, applied directly
+    // so this suite tests the downgrade rather than the clock.
+    sqlx::query("update subscriptions set status = 'expired' where user_id = $1")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    Downgrade {
+        user_id,
+        device_id: signed_up_device,
+        writable_workspace: workspaces[0],
+        read_only_workspace: workspaces[2],
+        read_only_source,
+        over_limit_devices: devices[2..].to_vec(),
+    }
+}
+
+/// **The downgrade test.** A power account with 3 workspaces, 30 sources and 6 devices whose
+/// subscription expires keeps every row and every byte: 3 workspaces, 30 sources, 6 devices,
+/// all readable, all exportable. What changes is that the over-limit rows are `read_only` and
+/// a new one is refused.
+///
+/// The alternative — deleting or hiding the over-limit data — is what the spec forbids
+/// ("never delete user data") and what makes a downgrade a data-loss event.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_downgrade_keeps_the_data_and_flags_the_over_limit_rows(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let downgrade = downgraded_account(&harness, "downgrade@example.test").await;
+
+    let report = stvdy_server::entitlements::recompute_read_only(
+        &harness.state.pool,
+        &harness.state.config.plans,
+        downgrade.user_id,
+    )
+    .await
+    .expect("the recompute runs");
+
+    // Free allows 2 workspaces, 20 sources and 2 devices, so 1 / 10 / 4 rows are over.
+    assert_eq!(report.workspaces, 1);
+    assert_eq!(report.sources, 10);
+    assert_eq!(report.devices, 4);
+
+    // Every row is still there, and every byte: nothing was deleted or hidden.
+    let counts: (i64, i64, i64) = (
+        sqlx::query_scalar("select count(*)::bigint from workspaces where user_id = $1")
+            .bind(downgrade.user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap(),
+        sqlx::query_scalar("select count(*)::bigint from sources where user_id = $1")
+            .bind(downgrade.user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap(),
+        sqlx::query_scalar("select count(*)::bigint from devices where user_id = $1")
+            .bind(downgrade.user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        counts,
+        (3, 30, 6),
+        "a downgrade must keep every row: 3 workspaces, 30 sources, 6 devices"
+    );
+
+    // The oldest stay writable and the newest are flagged.
+    let workspaces: Vec<(String, bool)> = sqlx::query_as(
+        "select name, read_only from workspaces where user_id = $1 order by created_at",
+    )
+    .bind(downgrade.user_id)
+    .fetch_all(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        workspaces,
+        vec![
+            ("Workspace 0".to_string(), false),
+            ("Workspace 1".to_string(), false),
+            ("Workspace 2".to_string(), true),
+        ]
+    );
+
+    // And a new one is refused: the write path consults the flag, it is not a UI affordance.
+    let app = router(&harness);
+    let token = sign_in(&app, "downgrade@example.test").await;
+    let (content_type, body) = multipart(&[("kind", "text", None), ("text", "notes", None)]);
+    let (status, body) = post_json(
+        &app,
+        "POST",
+        &format!("/workspaces/{}/sources", downgrade.read_only_workspace),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "an upload into a read-only workspace must be refused: {body}"
+    );
+    assert_eq!(body["code"], "limit_reached");
+    assert_eq!(
+        body["limit"], 2,
+        "the refusal carries the workspaces limit, not the sources one: {body}"
+    );
+    assert_eq!(body["min_plan"], "pro");
+    let sources_after: i64 =
+        sqlx::query_scalar("select count(*)::bigint from sources where user_id = $1")
+            .bind(downgrade.user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(sources_after, 30, "a refused upload writes nothing");
+
+    // The workspace that is *not* over the limit is still writable: the flag is per row, not
+    // per account, which is what makes "delete the newest one" a remedy rather than a
+    // punishment. The upload itself is refused by `sources_total` (30 of 20), so what this
+    // asserts is that the refusal is the sources one and not the read-only one.
+    let (content_type, body) = multipart(&[("kind", "text", None), ("text", "notes", None)]);
+    let (status, body) = post_json(
+        &app,
+        "POST",
+        &format!("/workspaces/{}/sources", downgrade.writable_workspace),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "{body}"
+    );
+    assert_eq!(body["code"], "limit_reached");
+    assert_eq!(
+        body["limit"], 20,
+        "a writable workspace refuses on the sources count, not on the workspace's flag: {body}"
+    );
+}
+
+/// Reading an over-limit workspace, source and device still works; writing to one does not.
+///
+/// The spec's word is "viewable, exportable": a downgrade that made the data unreadable
+/// would be indistinguishable from a delete.
+#[sqlx::test(migrations = "../../migrations")]
+async fn over_limit_rows_stay_readable(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let downgrade = downgraded_account(&harness, "readable@example.test").await;
+    stvdy_server::entitlements::recompute_read_only(
+        &harness.state.pool,
+        &harness.state.config.plans,
+        downgrade.user_id,
+    )
+    .await
+    .expect("the recompute runs");
+
+    let app = router(&harness);
+    let token = sign_in(&app, "readable@example.test").await;
+
+    // Reads of the over-limit rows: the list, the row itself, and the sources inside it.
+    for path in [
+        "/workspaces".to_string(),
+        format!("/workspaces/{}", downgrade.read_only_workspace),
+        format!("/workspaces/{}/sources", downgrade.read_only_workspace),
+        "/devices".to_string(),
+        format!("/sources/{}/status", downgrade.read_only_source),
+    ] {
+        let (status, body) = request(&app, "GET", &path, &token, serde_json::Value::Null).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "GET {path} must stay readable: {body}"
+        );
+    }
+
+    // Writes to the read-only rows are refused: the workspace's own rename, and the device's.
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/workspaces/{}", downgrade.read_only_workspace),
+        &token,
+        json!({ "name": "renamed" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "{body}"
+    );
+    assert_eq!(body["code"], "limit_reached");
+
+    let flagged_device = downgrade.over_limit_devices[0];
+    let (status, body) = request(
+        &app,
+        "PATCH",
+        &format!("/devices/{flagged_device}"),
+        &token,
+        json!({ "name": "renamed" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "{body}"
+    );
+    assert_eq!(body["code"], "limit_reached");
+    assert_eq!(
+        body["limit"],
+        harness.state.config.plans.get(PlanId::Free).devices_max as i64,
+        "the refusal carries the device limit: {body}"
+    );
+
+    // The device's *own* refusal: it may read, but it may not spend, and the code says the
+    // remedy is to sign another device out rather than to buy (A143).
+    let caller = caller_for(downgrade.user_id, flagged_device, "Asia/Jakarta");
+    let refused =
+        stvdy_server::entitlements::require(&harness.state, &caller, Feature::ChatMessage)
+            .await
+            .expect_err("a read-only device may not spend");
+    assert_eq!(refused.code(), "feature_locked");
+    assert_eq!(refused.status(), axum::http::StatusCode::FORBIDDEN);
+    match &refused {
+        stvdy_server::error::AppError::Entitlement { min_plan, .. } => {
+            assert_eq!(*min_plan, None, "there is no plan to sell this device")
+        }
+        other => panic!("expected a feature_locked refusal, got {other:?}"),
+    }
+
+    // The caller's own (oldest, writable) device is unaffected: the refusal is about the
+    // device the request came from, not about the account.
+    let caller = caller_for(downgrade.user_id, downgrade.device_id, "Asia/Jakarta");
+    stvdy_server::entitlements::require(&harness.state, &caller, Feature::ChatMessage)
+        .await
+        .expect("the writable device still spends");
+
+    // And the remedy works: revoking the flagged device is allowed, and it frees the slot.
+    let (status, _) = request(
+        &app,
+        "DELETE",
+        &format!("/devices/{flagged_device}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NO_CONTENT);
+}
+
+/// `devices_max` counts live devices only, so revoking one is the remedy the refusal
+/// suggests — and a device over the new limit is flagged rather than logged out.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_extra_devices_are_flagged_not_revoked(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let downgrade = downgraded_account(&harness, "devices@example.test").await;
+    stvdy_server::entitlements::recompute_read_only(
+        &harness.state.pool,
+        &harness.state.config.plans,
+        downgrade.user_id,
+    )
+    .await
+    .expect("the recompute runs");
+
+    // Flagged, not revoked: the session survives, which is what "read-only" has to mean if
+    // the remedy is for the *user* to choose which device to sign out.
+    let live: Vec<(bool, bool)> = sqlx::query_as(
+        "select read_only, revoked_at is not null from devices
+          where user_id = $1 order by created_at",
+    )
+    .bind(downgrade.user_id)
+    .fetch_all(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live.len(), 6, "no device was deleted");
+    assert!(
+        live.iter().all(|(_, revoked)| !revoked),
+        "a downgrade must not sign a device out"
+    );
+    assert_eq!(
+        live.iter().filter(|(read_only, _)| *read_only).count(),
+        4,
+        "free allows two live devices, so the other four are flagged"
+    );
+
+    // Revoking one is the remedy: the live count drops and the recompute flags one fewer.
+    sqlx::query("update devices set revoked_at = now() where id = $1")
+        .bind(downgrade.over_limit_devices[0])
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    let report = stvdy_server::entitlements::recompute_read_only(
+        &harness.state.pool,
+        &harness.state.config.plans,
+        downgrade.user_id,
+    )
+    .await
+    .expect("the recompute runs");
+    assert_eq!(
+        report.devices, 3,
+        "a revoked device frees its slot, so one fewer row is over the limit"
+    );
+
+    // And a revoked device is not flagged: it is signed out, and the flag on it would be a
+    // statement about a device that can no longer make a request.
+    let revoked_flagged: bool = sqlx::query_scalar("select read_only from devices where id = $1")
+        .bind(downgrade.over_limit_devices[0])
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert!(!revoked_flagged);
+}
+
+/// Storage is `sum(file_size)` over live sources, and the check is existing + new (A157).
+///
+/// One number for both: the sum the snapshot reports is the sum the upload decision adds to,
+/// so a user cannot be shown one figure and refused against another.
+#[sqlx::test(migrations = "../../migrations")]
+async fn storage_is_summed_over_live_sources_before_the_upload(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = router(&harness);
+    signed_up(&app, &harness, "storage@example.test").await;
+    let user_id = user_id(&harness, "storage@example.test").await;
+
+    let workspace: Uuid = sqlx::query_scalar(
+        "insert into workspaces (user_id, name) values ($1, 'storage') returning id",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // Ten sources of 19 MiB — under the free plan's 20 MB per-file ceiling — plus one
+    // tombstoned source that must not count.
+    seed_sources(
+        &harness,
+        user_id,
+        workspace,
+        10,
+        19 * 1024 * 1024,
+        instant("2026-09-01T00:00:00Z"),
+    )
+    .await;
+    sqlx::query(
+        "insert into sources
+           (user_id, workspace_id, kind, title, file_key, file_size, mime, status, deleted_at)
+         values ($1, $2, 'text', 'deleted', 'k', 1048576, 'text/plain', 'ready', now())",
+    )
+    .bind(user_id)
+    .bind(workspace)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let summed = stvdy_server::entitlements::storage_bytes(&harness.state.pool, user_id)
+        .await
+        .expect("storage is readable");
+    assert_eq!(
+        summed,
+        10 * 19 * 1024 * 1024,
+        "storage is the originals of live sources only"
+    );
+
+    let snapshot = stvdy_server::entitlements::snapshot_for(&harness.state, user_id)
+        .await
+        .expect("the snapshot is readable");
+    assert_eq!(
+        snapshot.storage_bytes, summed,
+        "the snapshot and the storage helper are the same number"
+    );
+
+    // The upload check is existing + new, and the quota is a ceiling: a file that fits
+    // exactly is admitted, one byte more is refused with the numbers.
+    let quota = i64::from(harness.state.config.plans.get(PlanId::Free).storage_mb) * 1024 * 1024;
+    let caller = caller_for(user_id, Uuid::now_v7(), "Asia/Jakarta");
+    stvdy_server::entitlements::require(
+        &harness.state,
+        &caller,
+        Feature::UploadSource {
+            size_bytes: quota - summed,
+        },
+    )
+    .await
+    .expect("a file that fits the quota exactly is admitted");
+
+    let refused = stvdy_server::entitlements::require(
+        &harness.state,
+        &caller,
+        Feature::UploadSource {
+            size_bytes: quota - summed + 1,
+        },
+    )
+    .await
+    .expect_err("one byte over the quota is refused");
+    assert_eq!(refused.code(), "limit_reached");
+    match &refused {
+        stvdy_server::error::AppError::Entitlement { limit, used, .. } => {
+            assert_eq!(*limit, Some(quota), "the quota is the limit it names");
+            assert_eq!(
+                *used,
+                Some(quota + 1),
+                "used is existing + new, the number the upload would leave behind"
+            );
+        }
+        other => panic!("expected a limit_reached refusal, got {other:?}"),
+    }
 }

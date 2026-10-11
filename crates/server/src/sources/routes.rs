@@ -241,7 +241,18 @@ pub async fn create(
     Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    owned_workspace(&state, user.user_id, workspace_id).await?;
+    // One statement decides both that the workspace is the caller's and that the plan has
+    // not put it over the workspace limit: a foreign row cannot be read-only *for this
+    // caller*, and the 404 that hides its existence is the same 404 this route always gave.
+    // The limit numbers come from the entitlements layer, which is the only place allowed to
+    // read a plan limit (the sweep test asserts that).
+    crate::entitlements::require_writable_row(
+        &state,
+        &user,
+        crate::entitlements::ReadOnlyRow::Workspace,
+        workspace_id,
+    )
+    .await?;
 
     let mut kind: Option<String> = None;
     let mut title: Option<String> = None;

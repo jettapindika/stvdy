@@ -115,6 +115,10 @@ pub struct RenameRequest {
 }
 
 /// `PATCH /devices/:id`
+///
+/// A device the plan has put over `devices_max` is refused here and in every spend: it may
+/// read, and it must be revocable (that is the remedy), but renaming it is a write to a
+/// row the plan has made read-only.
 pub async fn rename(
     State(state): State<AppState>,
     user: AuthUser,
@@ -132,6 +136,14 @@ pub async fn rename(
             "device name must be {MAX_NAME_CHARS} characters or fewer"
         )));
     }
+
+    crate::entitlements::require_writable_row(
+        &state,
+        &user,
+        crate::entitlements::ReadOnlyRow::Device,
+        device_id,
+    )
+    .await?;
 
     let row = sqlx::query_as::<_, DeviceRow>(
         "update devices set name = $3

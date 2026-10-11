@@ -168,6 +168,10 @@ pub struct UpdateRequest {
 }
 
 /// `PATCH /workspaces/:id`
+///
+/// A workspace the plan has put over the workspace limit is refused: read-only means the
+/// row keeps every byte and stays readable and exportable, not that it keeps accepting
+/// writes. Deleting it is still allowed — that is the remedy the refusal names.
 pub async fn update(
     State(state): State<AppState>,
     user: AuthUser,
@@ -175,6 +179,14 @@ pub async fn update(
     Json(body): Json<UpdateRequest>,
 ) -> AppResult<Json<WorkspaceResponse>> {
     let name = validate_name(&body.name)?;
+
+    crate::entitlements::require_writable_row(
+        &state,
+        &user,
+        crate::entitlements::ReadOnlyRow::Workspace,
+        workspace_id,
+    )
+    .await?;
 
     let result = sqlx::query(
         "update workspaces set name = $3, updated_at = now()
