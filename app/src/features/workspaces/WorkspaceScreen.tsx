@@ -14,8 +14,9 @@ import {
 } from '@/api/queries/sources'
 import { useWorkspace } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
-import { ApiErrorNotice, EmptyState, SkeletonRows, NotBuiltYet } from '@/components/ui/States'
+import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { ChatScreen } from '@/features/chat/ChatScreen'
+import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
 
 /**
  * The workspace view: Sources, Chat, and Studio.
@@ -38,10 +39,9 @@ import { ChatScreen } from '@/features/chat/ChatScreen'
  * viewport, so panels scroll internally without an outer page scroll.
  *
  * Sources is the panel Phase 1 built, so it is the one that opens. Chat is the
- * panel Phase 2 built. Studio says which phase brings it instead of showing a
- * mock: an empty panel that looks like a working studio is the most expensive
- * kind of lie in this product, because the whole point of it is that what it
- * produces is grounded in the student's own material.
+ * panel Phase 2 built. Studio is the flashcard panel Phase 4 built: it generates
+ * a deck from the sources the student picks, and every card it produces is linked
+ * to the passage it came from.
  */
 
 type Panel = 'sources' | 'chat' | 'studio'
@@ -158,13 +158,7 @@ export function WorkspaceScreen() {
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {panel.id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
                   {panel.id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
-                  {panel.id === 'studio' && (
-                    <NotBuiltYet
-                      level={2}
-                      title="Studio"
-                      what="a flashcard deck, a quiz, a report, or a print-ready cheatsheet, generated from the sources you select"
-                    />
-                  )}
+                  {panel.id === 'studio' && <FlashcardsPanel workspaceId={workspaceId} />}
                 </div>
               </section>
             ))}

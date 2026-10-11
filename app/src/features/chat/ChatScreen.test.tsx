@@ -465,7 +465,7 @@ describe('the chat panel inside the workspace screen', () => {
     const panel = screen.getByRole('tabpanel', { name: 'Chat' })
     expect(await within(panel).findByLabelText('Ask about this workspace')).toBeInTheDocument()
     expect(within(panel).queryByText(/Not built yet/)).toBeNull()
-    // Studio still says which phase brings it.
-    expect(screen.getByRole('tabpanel', { name: 'Studio' })).toHaveTextContent('Not built yet')
+    // Studio is the flashcard panel Phase 4 built, not a placeholder.
+    expect(screen.getByRole('tabpanel', { name: 'Studio' })).toHaveTextContent('Generate deck')
   })
 })

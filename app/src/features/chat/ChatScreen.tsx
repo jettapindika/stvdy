@@ -5,6 +5,7 @@ import { useSources } from '@/api/queries/sources'
 import { asApiError } from '@/api/errors'
 import type { ChatCitation } from '@/api/sse'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
+import { SourcePicker } from '@/features/workspaces/SourcePicker'
 import { MessageList } from './MessageList'
 import { useChatStream } from './useChatStream'
 
@@ -163,73 +164,6 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
         </div>
       </form>
     </div>
-  )
-}
-
-/**
- * Which sources an answer may draw on.
- *
- * "None selected" means the whole workspace rather than no material, and the
- * hint says so: an empty selection that silently answered nothing would look
- * exactly like a workspace with nothing in it.
- *
- * Each row is a 44px label wrapping its own checkbox, so the whole row is the
- * target at phone width and the label is what the screen reader reads.
- */
-function SourcePicker({
-  workspaceId,
-  sources,
-  selected,
-  onChange,
-  disabled,
-}: {
-  workspaceId: string
-  sources: { id: string; title: string }[]
-  selected: string[]
-  onChange: (next: string[]) => void
-  disabled: boolean
-}) {
-  const id = useId()
-
-  if (sources.length === 0) {
-    return (
-      <p className="text-xs text-ink-muted">
-        No indexed sources yet. Upload one in the Sources panel and this box will use it.
-      </p>
-    )
-  }
-
-  return (
-    <fieldset aria-describedby={id} className="flex flex-col gap-1" disabled={disabled}>
-      <legend className="label">Answer from</legend>
-      <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
-        {sources.map((source) => (
-          <label
-            key={source.id}
-            className="flex min-h-11 items-center gap-2 rounded-field border border-rule px-3 py-2 text-sm has-[:focus-visible]:border-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
-          >
-            <input
-              type="checkbox"
-              name={`source-${workspaceId}`}
-              checked={selected.includes(source.id)}
-              onChange={(event) => {
-                onChange(
-                  event.target.checked
-                    ? [...selected, source.id]
-                    : selected.filter((value) => value !== source.id),
-                )
-              }}
-            />
-            <span className="min-w-0 flex-1 break-words">{source.title}</span>
-          </label>
-        ))}
-      </div>
-      <span id={id} className="text-xs text-ink-muted">
-        {selected.length === 0
-          ? 'Nothing selected, so the answer uses every ready source in this workspace.'
-          : `${String(selected.length)} of ${String(sources.length)} sources selected.`}
-      </span>
-    </fieldset>
   )
 }
 
