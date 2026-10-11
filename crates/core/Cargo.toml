@@ -15,9 +15,12 @@ chrono.workspace = true
 chrono-tz.workspace = true
 uuid.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
+unicode-segmentation.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true
