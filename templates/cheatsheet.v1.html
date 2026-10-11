@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<!--
+  Cheatsheet print template — v1
+  ==========================================================================
+  One reusable template for every cheatsheet. Placeholders in {{braces}} are
+  filled by the server renderer (crates/core/src/render/cheatsheet.rs) from the
+  structured JSON produced by prompts/cheatsheet.v1.md.
+
+  The renderer emits the component markup below; the model never writes HTML.
+
+  PAGE NUMBERS AND THE RUNNING HEADER
+  -----------------------------------
+  The CSS @page margin boxes below place the running header and the page footer.
+  Verified in this repo: Chrome (headless, --print-to-pdf) DOES honour them, and
+  also honours `@page :first { ... content: none }`, so the cover has no header
+  or footer. Prince and WeasyPrint support the same syntax.
+
+  The server can additionally set them through the Chrome DevTools Protocol
+  (`print_to_pdf` with headerTemplate/footerTemplate), which is useful because
+  CDP templates can differ per job (e.g. a different exam name). When CDP values
+  are supplied they must match @page so the two paths produce identical output:
+
+    headerTemplate  -> "Cheatsheet UTS Jaringan Komputer"
+    footerTemplate  -> "Halaman <pageNumber> dari <totalPages>"
+    marginTop/Bottom-> 18mm   (matches @page margin; reserves the footer band)
+    marginLeft/Right-> 16mm
+    preferCSSPageSize -> true  (A4 comes from @page below)
+    printBackground   -> true  (required, or every coloured box prints white)
+    generateDocumentOutline -> true  (real PDF bookmarks from h1/h2)
+    generateTaggedPDF -> true  (accessibility; a tagged PDF is produced)
+
+  Because CDP header/footer templates cannot see page CSS counters, the @page
+  path is the primary one and CDP is the fallback.
+
+  ASSETS
+  ------
+  KaTeX and the Google Fonts are the only external dependencies, as specified.
+  For hermetic server-side rendering the renderer rewrites ASSET_BASE (below) to
+  a local mount, so a PDF never depends on a CDN being reachable. If KaTeX fails
+  to load for any reason, formulas fall back to the literal text between the
+  delimiters — which is why every formula is also written to be readable as
+  plain text.
+-->
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{doc_title}}</title>
+
+<!-- KaTeX. ASSET_BASE is rewritten to a local mount by the server renderer, which
+     vendors katex + the woff2 fonts into the image. The CDN URLs are the
+     browser-print fallback; a PDF export must not depend on a third-party CDN at
+     render time, because a slow or blocked CDN leaves every formula as literal
+     $...$ text in the PDF — a silent, plausible-looking failure, and a cheatsheet
+     is mostly math.
+
+     No `integrity` attribute on purpose: these are placeholder-free CDN URLs and
+     a hand-written SRI hash would be a guess. A wrong hash does not degrade, it
+     BLOCKS the script. If SRI is wanted, copy the real published hashes from the
+     jsdelivr package page — never write one by hand. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css">
+<!-- `defer` so these execute after parsing, in order, before the `load` event
+     the render script below waits for. A non-deferred inline script in <head>
+     would run before <body> exists and throw on document.body. -->
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/contrib/auto-render.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+/* ==========================================================================
+   1. Page setup
+   ========================================================================== */
+@page {
+  size: A4;
+  margin: 18mm 16mm;
+
+  /* Declarative header/footer. Supported by Prince and WeasyPrint.
+     Chrome ignores these — the server supplies them via CDP instead. */
+  @top-center {
+    content: "Cheatsheet UTS Jaringan Komputer";
+    font-family: "Inter", "Segoe UI", Arial, sans-serif;
+    font-size: 8pt;
+    color: #6b7280;
+    padding-bottom: 3mm;
+  }
+  @bottom-center {
+    content: "Halaman " counter(page) " dari " counter(pages);
+    font-family: "Inter", "Segoe UI", Arial, sans-serif;
+    font-size: 8pt;
+    color: #6b7280;
+    padding-top: 3mm;
+  }
+}
+/* No header/footer on the cover page. */
+@page :first {
+  @top-center { content: none; }
+  @bottom-center { content: none; }
+}
+
+/* ==========================================================================
+   2. Base typography
+   ========================================================================== */
+:root {
+  --ink: #1f2937;
+  --ink-soft: #4b5563;
+  --muted: #6b7280;
+  --rule: #d1d5db;
+  --accent: #2563eb;
+  --accent-dark: #1e3a8a;
+  --accent-soft: #eff6ff;
+  --surface: #f9fafb;
+  --font-body: "Inter", "Segoe UI", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+html {
+  /* Without this, every coloured box prints as white. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 10.5pt;
+  line-height: 1.55;
+  color: var(--ink);
+  background: #fff;
+}
+
+p { margin: 0 0 6pt; }
+ul, ol { margin: 0 0 6pt; padding-left: 16pt; }
+li { margin-bottom: 2pt; }
+strong { font-weight: 600; }
+a { color: var(--accent); text-decoration: none; }
+code, kbd, samp { font-family: var(--font-mono); font-size: 9.5pt; }
+
+/* Anything that must not be split across pages.
+   This list is per-class and enforced by hand, so a new standalone box class
+   must be added here or it will split. `.qa` wraps a question together with its
+   answer: `.soal` and `.jawaban` are separate elements, so `break-inside: avoid`
+   on each of them cannot stop a break landing BETWEEN them — a student would
+   flip the page to find the answer. The renderer emits one `.qa` per question
+   block, and this rule is what keeps the pair together. */
+table, .box, figure, pre, .qa, .gap-note, .toc li, svg {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Headings must not be orphaned at the bottom of a page. */
+h1, h2, h3, h4 {
+  break-after: avoid;
+  page-break-after: avoid;
+  break-inside: avoid;
+}
+
+/* ==========================================================================
+   3. Heading hierarchy  (never skip a level)
+   ========================================================================== */
+
+/* h1 = chapter. Starts a new page, thick dark blue rule, "BAB n" label. */
+h1 {
+  font-size: 17pt;
+  font-weight: 700;
+  color: var(--accent-dark);
+  margin: 0 0 10pt;
+  padding-bottom: 5pt;
+  border-bottom: 3pt solid var(--accent-dark);
+  line-height: 1.25;
+}
+h1 .chapter-label {
+  display: block;
+  font-size: 8.5pt;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2pt;
+}
+
+/* h2 = section. Thin rule. */
+h2 {
+  font-size: 13pt;
+  font-weight: 600;
+  color: var(--accent-dark);
+  margin: 14pt 0 6pt;
+  padding-bottom: 3pt;
+  border-bottom: 1pt solid var(--rule);
+}
+
+/* h3 = small topic. Accent colour, no rule. */
+h3 {
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 11pt 0 4pt;
+}
+
+/* h4 exists for the rare fourth level; same size as body, bold. */
+h4 {
+  font-size: 10.5pt;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 9pt 0 3pt;
+}
+
+/* Chapter page break: chapters start on a fresh page, but the first chapter
+   after the table of contents must not add a blank page, so the TOC does not
+   force a break of its own. */
+.chapter { break-before: page; page-break-before: always; }
+
+/* ==========================================================================
+   4. Cover page
+   ========================================================================== */
+.cover {
+  break-after: page;
+  page-break-after: always;
+  min-height: 240mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  border: 2pt solid var(--accent-dark);
+  padding: 20mm 14mm;
+  box-sizing: border-box;
+}
+.cover__eyebrow {
+  font-size: 9.5pt;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8mm;
+}
+.cover__title {
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--accent-dark);
+  margin: 0 0 4mm;
+}
+.cover__subtitle {
+  font-size: 12.5pt;
+  color: var(--ink-soft);
+  margin: 0 0 14mm;
+}
+.cover__meta {
+  margin: 0 auto;
+  border-collapse: collapse;
+  font-size: 10pt;
+  text-align: left;
+}
+.cover__meta th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2pt 10pt 2pt 0;
+  white-space: nowrap;
+}
+.cover__meta td { padding: 2pt 0; }
+.cover__foot {
+  margin-top: 16mm;
+  font-size: 8.5pt;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   5. Table of contents
+   ========================================================================== */
+.toc { margin-top: 4mm; }
+.toc__title {
+  font-size: 15pt;
+  font-weight: 700;
+  color: var(--accent-dark);
+  margin: 0 0 8pt;
+  padding-bottom: 4pt;
+  border-bottom: 2pt solid var(--accent-dark);
+}
+.toc ol { list-style: none; padding-left: 0; margin: 0; }
+.toc li { margin: 0 0 2pt; }
+.toc a { display: flex; align-items: baseline; gap: 6pt; color: var(--ink); }
+.toc a::after {
+  content: "";
+  flex: 1 1 auto;
+  border-bottom: 1pt dotted var(--rule);
+  transform: translateY(-3pt);
+}
+.toc__num { font-weight: 600; color: var(--accent); min-width: 16pt; }
+.toc .toc--l2 { padding-left: 14pt; font-size: 9.5pt; color: var(--ink-soft); }
+
+/* ==========================================================================
+   6. Content components
+   ========================================================================== */
+.box {
+  border-radius: 3pt;
+  padding: 7pt 9pt;
+  margin: 7pt 0;
+}
+.box__title {
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+/* Definition of a core concept. */
+.konsep {
+  background: var(--surface);
+  border: 1pt solid #e5e7eb;
+  border-left: 3pt solid #9ca3af;
+}
+.konsep .box__title { color: var(--ink-soft); }
+.konsep__term { font-weight: 600; color: var(--ink); }
+
+/* 📦 Perumpamaan — a real-world analogy. */
+.analogi {
+  background: #eff6ff;
+  border: 1pt solid #bfdbfe;
+  border-left: 4pt solid #2563eb;
+}
+.analogi .box__title { color: #1d4ed8; }
+
+/* Formula, centred, with the variable legend underneath. */
+.rumus {
+  background: #fefce8;
+  border: 1pt solid #fde68a;
+  border-left: 4pt solid #facc15;
+  text-align: center;
+}
+.rumus .box__title { color: #a16207; text-align: left; }
+.rumus__body {
+  font-size: 14pt;
+  margin: 4pt 0 6pt;
+}
+.rumus__caption {
+  font-size: 9pt;
+  color: var(--ink-soft);
+  margin-bottom: 5pt;
+  text-align: left;
+}
+.rumus__legend {
+  margin: 0 auto;
+  border-collapse: collapse;
+  font-size: 9pt;
+  text-align: left;
+  width: auto;
+  max-width: 100%;
+}
+.rumus__legend th {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: none;
+  border-bottom: 1pt solid #fde68a;
+  padding: 2pt 8pt 2pt 0;
+}
+.rumus__legend td {
+  border: none;
+  padding: 2pt 8pt 2pt 0;
+  background: transparent;
+}
+.rumus__legend .sym { font-family: var(--font-mono); font-weight: 600; }
+
+/* ⚠️ Jebakan — a mistake students make. */
+.jebakan {
+  background: #fef2f2;
+  border: 1pt solid #fecaca;
+  border-left: 4pt solid #ef4444;
+}
+.jebakan .box__title { color: #b91c1c; }
+
+/* 🎯 Kata Kunci Hafalan — the short list to have automatic. */
+.hafalan {
+  background: #f0fdf4;
+  border: 1pt solid #bbf7d0;
+  border-left: 4pt solid #22c55e;
+}
+.hafalan .box__title { color: #15803d; }
+.hafalan ul { margin-bottom: 0; }
+
+/* ⚡ Rumus Cepat — a shortcut that trades accuracy for speed. */
+.trik {
+  background: #faf5ff;
+  border: 1pt solid #e9d5ff;
+  border-left: 4pt solid #a855f7;
+}
+.trik .box__title { color: #7e22ce; }
+.trik__note { font-size: 9pt; color: var(--ink-soft); margin-top: 3pt; }
+
+/* SOAL — an exam-style question with a likelihood badge.
+   Always emitted inside `.qa`, which owns the break-avoidance for the
+   question+answer pair. Do NOT add break-after: avoid here: it fights the
+   wrapper, and when the answer then does not fit Chrome resolves the conflict
+   by splitting the answer box, which is worse than a clean page break. */
+.soal {
+  border: 1pt solid var(--rule);
+  border-radius: 3pt;
+  margin: 9pt 0;
+  overflow: hidden;
+}
+.soal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8pt;
+  background: #1f2937;
+  color: #fff;
+  padding: 4pt 9pt;
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.soal__prompt { padding: 7pt 9pt; }
+.soal__prompt > :last-child { margin-bottom: 0; }
+
+.badge {
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1.5pt 6pt;
+  border-radius: 9pt;
+  white-space: nowrap;
+}
+.badge--high   { background: #dc2626; color: #fff; }
+.badge--medium { background: #f59e0b; color: #422006; }
+.badge--low    { background: #e5e7eb; color: #374151; }
+
+/* JAWABAN — worked steps, final answer highlighted. */
+.jawaban {
+  border: 1pt solid var(--rule);
+  border-top: none;
+  border-radius: 0 0 3pt 3pt;
+  padding: 7pt 9pt;
+  margin: -9pt 0 9pt;
+  background: #fff;
+  /* Break-avoidance is owned by the enclosing `.qa` wrapper. */
+}
+.jawaban__title {
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 4pt;
+}
+.jawaban ol { padding-left: 15pt; margin-bottom: 6pt; }
+.jawaban ol > li { margin-bottom: 3pt; }
+.final {
+  background: #dcfce7;
+  border: 1pt solid #86efac;
+  border-radius: 3pt;
+  padding: 4pt 8pt;
+  font-weight: 700;
+  color: #14532d;
+}
+.final__label {
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #15803d;
+  margin-right: 4pt;
+}
+
+/* ==========================================================================
+   7. Tables
+   ========================================================================== */
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 7pt 0;
+  font-size: 9.5pt;
+  /* Never let a wide table escape the page. */
+  table-layout: fixed;
+}
+table.data caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 9pt;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding-bottom: 3pt;
+}
+table.data th {
+  background: #1f2937;
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+  padding: 4pt 6pt;
+  border: 1pt solid #374151;
+  vertical-align: top;
+}
+table.data td {
+  padding: 4pt 6pt;
+  border: 1pt solid #e5e7eb;
+  vertical-align: top;
+  /* Long unbroken strings (hashes, addresses) must wrap, not overflow. */
+  overflow-wrap: anywhere;
+}
+table.data tbody tr:nth-child(even) { background: #f8fafc; }
+/* Wide tables (5+ columns): shrink the font, keep the padding readable. */
+table.data--wide { font-size: 9pt; }
+table.data--wide th, table.data--wide td { padding: 3pt 4pt; }
+table.data--mono td { font-family: var(--font-mono); font-size: 9pt; }
+
+/* ==========================================================================
+   8. Diagrams
+   ========================================================================== */
+figure {
+  margin: 7pt 0;
+  text-align: center;
+}
+/* An SVG with a viewBox but no width/height defaults to width:100% (the SVG
+   spec's default for the width attribute), so `width: auto` does NOT fall back
+   to the intrinsic size and max-height alone will not constrain it. Cap the
+   WIDTH instead: with height:auto the viewBox aspect ratio is preserved, so a
+   260x90 viewBox at a 120mm cap renders 120mm x 41mm instead of filling the
+   page. The renderer should also emit explicit width/height attributes on
+   model-generated SVGs; this CSS is the safety net for when it does not. */
+figure svg {
+  display: block;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 120mm;
+  height: auto;
+}
+figure figcaption {
+  font-size: 8.5pt;
+  color: var(--muted);
+  margin-top: 3pt;
+}
+pre.diagram {
+  font-family: var(--font-mono);
+  font-size: 8.5pt;
+  line-height: 1.35;
+  background: var(--surface);
+  border: 1pt solid #e5e7eb;
+  border-radius: 3pt;
+  padding: 7pt 9pt;
+  margin: 7pt 0;
+  overflow: visible;
+  white-space: pre;
+  /* 60ch is the width that fits A4 minus margins at 8.5pt mono. */
+  max-width: 60ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ==========================================================================
+   9. Math
+   ========================================================================== */
+.katex { font-size: 1.05em; }
+.katex-display { margin: 6pt 0; }
+/* If KaTeX never loads, the raw $...$ delimiters stay visible and readable. */
+
+/* ==========================================================================
+   10. Utilities
+   ========================================================================== */
+.gap-note {
+  background: #fff7ed;
+  border: 1pt dashed #fdba74;
+  border-radius: 3pt;
+  padding: 5pt 8pt;
+  font-size: 9.5pt;
+  color: #9a3412;
+  margin: 6pt 0;
+}
+.src { font-size: 8pt; color: var(--muted); }
+</style>
+</head>
+
+<body>
+
+<!-- =========================================================================
+     COVER
+     ========================================================================= -->
+<section class="cover">
+  <p class="cover__eyebrow">{{cover_eyebrow}}</p>
+  <h1 class="cover__title" style="border:none; padding:0; break-after:auto;">{{doc_title}}</h1>
+  <p class="cover__subtitle">{{doc_subtitle}}</p>
+
+  <table class="cover__meta">
+    <tr><th>Mata kuliah</th><td>{{course}}</td></tr>
+    <tr><th>Ujian</th><td>{{exam}}</td></tr>
+    <tr><th>Tanggal ujian</th><td>{{exam_date}}</td></tr>
+    <tr><th>Disusun dari</th><td>{{source_count}} sumber</td></tr>
+    <tr><th>Dibuat</th><td>{{generated_at}}</td></tr>
+  </table>
+
+  <p class="cover__foot">
+    Cheatsheet ini disusun dari materi yang kamu unggah. Setiap klaim dapat ditelusuri
+    ke sumbernya; periksa kembali bagian yang ditandai belum tercakup.
+  </p>
+</section>
+
+<!-- =========================================================================
+     TABLE OF CONTENTS
+     The server generates this from the chapter/section titles, so it always
+     matches the document. Anchors link to each h1 and h2.
+     ========================================================================= -->
+<nav class="toc">
+  <h2 class="toc__title" style="border:none;">Daftar Isi</h2>
+  <ol>
+    <li>
+      <a href="#ch1"><span class="toc__num">1</span><span>Pengantar Jaringan &amp; Model Lapisan</span></a>
+      <ol>
+        <li class="toc--l2"><a href="#ch1-1"><span class="toc__num">1.1</span><span>Model OSI dan TCP/IP</span></a></li>
+      </ol>
+    </li>
+    <li>
+      <a href="#ch2"><span class="toc__num">2</span><span>Lapisan Transport</span></a>
+      <ol>
+        <li class="toc--l2"><a href="#ch2-1"><span class="toc__num">2.1</span><span>TCP vs UDP</span></a></li>
+      </ol>
+    </li>
+  </ol>
+</nav>
+
+<!-- =========================================================================
+     CHAPTER 1
+     One example of each component. Replace the sample content; keep the
+     markup and classes exactly as they are.
+     ========================================================================= -->
+<section class="chapter">
+  <h1 id="ch1"><span class="chapter-label">BAB 1</span>Pengantar Jaringan &amp; Model Lapisan</h1>
+
+  <h2 id="ch1-1">1.1 Model OSI dan TCP/IP</h2>
+
+  <h3>Konsep dasar</h3>
+
+  <div class="box konsep">
+    <p class="box__title">Konsep</p>
+    <p><span class="konsep__term">Enkapsulasi</span> adalah proses menambahkan header
+    (dan kadang trailer) pada data saat turun dari lapisan atas ke lapisan bawah.
+    Setiap lapisan hanya membaca header miliknya sendiri. <span class="src">[2]</span></p>
+  </div>
+
+  <p>Model OSI membagi komunikasi menjadi tujuh lapisan, sedangkan TCP/IP
+  menyederhanakannya menjadi empat. Pemetaan keduanya sering keluar di soal
+  <span class="src">[1]</span>.</p>
+
+  <div class="box analogi">
+    <p class="box__title">📦 Perumpamaan</p>
+    <p>Enkapsulasi seperti mengirim barang: kamu masukkan buku ke kotak (data),
+    kotak ke kardus (segmen), kardus ke palet (paket), lalu palet ke kontainer
+    (frame). Kurir hanya membuka kontainer, bukan buku di dalamnya.</p>
+  </div>
+
+  <div class="box rumus">
+    <p class="box__title">Rumus</p>
+    <p class="rumus__caption">Throughput efektif dengan overhead header:</p>
+    <div class="rumus__body">$$\eta = \frac{L}{L + H} \times 100\%$$</div>
+    <table class="rumus__legend">
+      <tr><th>Simbol</th><th>Arti</th><th>Satuan</th></tr>
+      <tr><td class="sym">L</td><td>Ukuran payload</td><td>byte</td></tr>
+      <tr><td class="sym">H</td><td>Total overhead header</td><td>byte</td></tr>
+      <tr><td class="sym">&eta;</td><td>Efisiensi pengiriman</td><td>%</td></tr>
+    </table>
+  </div>
+
+  <div class="box trik">
+    <p class="box__title">⚡ Rumus Cepat</p>
+    <p>$H_{total} \approx 20 + 20 + 14 = 54$ byte untuk TCP/IPv4 tanpa opsi.</p>
+    <p class="trik__note">Valid hanya jika tidak ada opsi TCP/IP dan tidak ada VLAN tag.</p>
+  </div>
+
+  <div class="box hafalan">
+    <p class="box__title">🎯 Kata Kunci Hafalan</p>
+    <ul>
+      <li>OSI: Physical, Data Link, Network, Transport, Session, Presentation, Application.</li>
+      <li>TCP/IP: Network Access, Internet, Transport, Application.</li>
+      <li>Header IPv4 minimum 20 byte; TCP minimum 20 byte; Ethernet 14 byte.</li>
+    </ul>
+  </div>
+
+  <div class="box jebakan">
+    <p class="box__title">⚠️ Jebakan</p>
+    <p>Lapisan Transport pada TCP/IP dipetakan ke <strong>dua</strong> lapisan OSI
+    (Transport dan Session), bukan satu. Soal sering meminta pemetaan yang tepat.</p>
+  </div>
+
+  <table class="data">
+    <caption>Perbandingan ringkas model lapisan</caption>
+    <thead>
+      <tr><th>OSI</th><th>TCP/IP</th><th>PDU</th><th>Contoh protokol</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Application / Presentation / Session</td><td>Application</td><td>Data</td><td>HTTP, DNS, SMTP</td></tr>
+      <tr><td>Transport</td><td>Transport</td><td>Segment</td><td>TCP, UDP</td></tr>
+      <tr><td>Network</td><td>Internet</td><td>Packet</td><td>IP, ICMP</td></tr>
+      <tr><td>Data Link</td><td>Network Access</td><td>Frame</td><td>Ethernet, ARP</td></tr>
+      <tr><td>Physical</td><td>Network Access</td><td>Bit</td><td>&mdash;</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Diagram lapisan</h3>
+
+  <figure>
+    <pre class="diagram">   Application   +---------------------------+
+                 |  HTTP   |  DNS  |  SMTP   |
+                 +---------------------------+
+                               |
+   Transport     +---------------------------+
+                 |    TCP         |   UDP    |
+                 +---------------------------+
+                               |
+   Internet      +---------------------------+
+                 |            IP             |
+                 +---------------------------+
+                               |
+   Network       +---------------------------+
+   Access        |   Ethernet  |   Wi-Fi     |
+                 +---------------------------+</pre>
+    <figcaption>Gambar 1.1 — Susunan lapisan TCP/IP dan protokol utamanya.</figcaption>
+  </figure>
+
+  <!--
+    SVG diagrams: every id inside an inline SVG is document-global, so two
+    diagrams that both define id="a" collide and the SECOND one silently reuses
+    the FIRST one's marker (wrong arrow colour or shape). The renderer therefore
+    prefixes every id and url(#...) reference with the block index, e.g.
+    "d3-arrow". Never emit a bare, generic id like "a", "arrow" or "grad".
+  -->
+  <figure>
+    <svg viewBox="0 0 260 90" role="img" aria-label="Diagram three-way handshake">
+      <g font-family="JetBrains Mono, monospace" font-size="9" fill="#1f2937">
+        <text x="18" y="14">Client</text>
+        <text x="196" y="14">Server</text>
+        <line x1="40" y1="20" x2="40" y2="86" stroke="#9ca3af" stroke-width="0.8"/>
+        <line x1="218" y1="20" x2="218" y2="86" stroke="#9ca3af" stroke-width="0.8"/>
+        <line x1="40" y1="32" x2="214" y2="32" stroke="#2563eb" stroke-width="1.2" marker-end="url(#d2-arrow)"/>
+        <text x="96" y="29">SYN</text>
+        <line x1="218" y1="50" x2="44" y2="50" stroke="#22c55e" stroke-width="1.2" marker-end="url(#d2-arrow)"/>
+        <text x="96" y="47">SYN + ACK</text>
+        <line x1="40" y1="68" x2="214" y2="68" stroke="#2563eb" stroke-width="1.2" marker-end="url(#d2-arrow)"/>
+        <text x="112" y="65">ACK</text>
+      </g>
+      <defs>
+        <marker id="d2-arrow" viewBox="0 0 10 10" refX="8" refY="5"
+                markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>Gambar 1.2 — Three-way handshake TCP.</figcaption>
+  </figure>
+
+  <div class="gap-note">
+    Bagian ini belum tercakup di sumbermu: pembahasan lengkap TCP congestion control
+    (slow start, AIMD) belum ada di materi yang diunggah.
+  </div>
+</section>
+
+<!-- =========================================================================
+     CHAPTER 2
+     ========================================================================= -->
+<section class="chapter">
+  <h1 id="ch2"><span class="chapter-label">BAB 2</span>Lapisan Transport</h1>
+
+  <h2 id="ch2-1">2.1 TCP vs UDP</h2>
+
+  <p>TCP menyediakan pengiriman andal berurutan, UDP tidak. Pilihan bergantung pada
+  apakah aplikasi mentoleransi kehilangan data demi latensi rendah <span class="src">[3]</span>.</p>
+
+  <h3>Contoh soal</h3>
+
+  <!--
+    A question and its answer are ONE wrapper: <div class="qa">. They must never
+    be emitted as siblings — `break-inside: avoid` on each element cannot stop a
+    page break landing between them, so the student would flip the page to find
+    the answer. `.qa` is in the break-inside list at the top of this stylesheet.
+    This mirrors the JSON contract: prompts/cheatsheet.v1.md models a question as
+    a single block with prompt + answer.steps + answer.final.
+  -->
+  <div class="qa">
+    <div class="soal">
+      <div class="soal__header">
+        <span>Soal</span>
+        <span class="badge badge--high">Tinggi</span>
+      </div>
+      <div class="soal__prompt">
+        <p>Sebuah aplikasi mengirim 1.000 byte payload di atas TCP/IPv4 tanpa opsi.
+        Berapa efisiensi pengirimannya?</p>
+      </div>
+    </div>
+
+    <div class="jawaban">
+      <p class="jawaban__title">Jawaban</p>
+      <ol>
+        <li>Hitung overhead: Ethernet 14 + IP 20 + TCP 20 = <strong>54 byte</strong>.</li>
+        <li>Substitusi ke rumus: $\eta = 1000 / (1000 + 54)$.</li>
+        <li>$\eta = 1000 / 1054 \approx 0{,}9488$.</li>
+        <li>Ubah ke persen: $0{,}9488 \times 100\% \approx 94{,}88\%$.</li>
+      </ol>
+      <p class="final"><span class="final__label">Jawaban akhir</span>&eta; &asymp; 94,88%</p>
+    </div>
+  </div>
+
+  <h3>Soal tingkat sedang</h3>
+
+  <div class="qa">
+    <div class="soal">
+      <div class="soal__header">
+        <span>Soal</span>
+        <span class="badge badge--medium">Sedang</span>
+      </div>
+      <div class="soal__prompt">
+        <p>Mengapa UDP lebih cocok untuk streaming video dibanding TCP?</p>
+      </div>
+    </div>
+
+    <div class="jawaban">
+      <p class="jawaban__title">Jawaban</p>
+      <ol>
+        <li>TCP mengirim ulang segmen yang hilang, sehingga menambah latensi.</li>
+        <li>Pada video, frame yang terlambat sudah tidak berguna.</li>
+        <li>UDP tidak melakukan retransmisi, jadi latensi tetap rendah.</li>
+      </ol>
+      <p class="final"><span class="final__label">Jawaban akhir</span>UDP dipilih karena
+      retransmisi TCP menambah latensi tanpa manfaat bagi frame yang sudah lewat.</p>
+    </div>
+  </div>
+
+  <h3>Soal tingkat rendah</h3>
+
+  <div class="qa">
+    <div class="soal">
+      <div class="soal__header">
+        <span>Soal</span>
+        <span class="badge badge--low">Rendah</span>
+      </div>
+      <div class="soal__prompt">
+        <p>Sebutkan nomor protokol IP untuk TCP dan UDP.</p>
+      </div>
+    </div>
+
+    <div class="jawaban">
+      <p class="jawaban__title">Jawaban</p>
+      <ol>
+        <li>Lihat field Protocol pada header IPv4.</li>
+        <li>TCP = 6, UDP = 17.</li>
+      </ol>
+      <p class="final"><span class="final__label">Jawaban akhir</span>TCP = 6, UDP = 17.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================================
+     KaTeX auto-render.
+     Placed at the END of <body> and gated on `load`, because the renderer needs
+     two things that are not true earlier: <body> must exist (a <head> inline
+     script throws on document.body), and the deferred KaTeX scripts must have
+     executed. `load` fires after both.
+
+     Delimiters per spec: $...$ inline, $$...$$ display.
+     ========================================================================= -->
+<script>
+  (function () {
+    window.KATEX_OPTIONS = {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '\\[', right: '\\]', display: true }
+      ],
+      throwOnError: false,
+      errorColor: '#b91c1c',
+      // `pre` is excluded so ASCII diagrams are never reinterpreted as math.
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option']
+    };
+
+    // Sentinel the server renderer waits for. Without the gate, print_to_pdf can
+    // run before KaTeX finishes and silently emit raw $...$ text in the PDF — a
+    // plausible-looking failure, and a cheatsheet is mostly math. The renderer
+    // polls for data-math-ready === "1" and FAILS THE JOB on any other value
+    // rather than shipping a document full of LaTeX source.
+    function mark(status) {
+      document.documentElement.dataset.mathReady = status;
+    }
+
+    function render() {
+      try {
+        if (typeof window.renderMathInElement !== 'function') {
+          mark('unavailable'); // KaTeX never loaded.
+          return;
+        }
+        window.renderMathInElement(document.body, window.KATEX_OPTIONS);
+        var rendered = document.querySelectorAll('.katex').length;
+        var delimiters = (document.body.innerText.match(/\$\$?/g) || []).length;
+        // Either formulas rendered, or there were none to render.
+        mark(rendered > 0 || delimiters === 0 ? '1' : 'incomplete');
+      } catch (error) {
+        mark('error');
+      }
+    }
+
+    if (document.readyState === 'complete') render();
+    else window.addEventListener('load', render);
+  })();
+</script>
+
+</body>
+</html>

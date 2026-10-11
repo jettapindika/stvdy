@@ -1,0 +1,24 @@
+# Rust
+/target
+**/target
+
+# Node / frontend
+/app/node_modules
+/app/dist
+/app/coverage
+
+# Native shell: `gen` is deliberately NOT ignored. Tauri's CLI writes its own
+# .gitignore containing `*` inside gen/<project>/.tauri/, which implies the
+# surrounding generated project tree is meant to be tracked — and it is where
+# the Phase 14 native work lives (iOS Share Extension target, Info.plist
+# BGTaskSchedulerPermittedIdentifiers + UIBackgroundModes, App Group
+# entitlements). Ignoring it would silently drop hand-written native files.
+
+# Local env and scratch
+.env
+.env.local
+var/
+.fastembed_cache/
+
+# macOS
+.DS_Store

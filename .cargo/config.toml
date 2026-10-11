@@ -1,0 +1,4 @@
+[env]
+# CI sets SQLX_OFFLINE=true for the lint/build jobs, where no database is
+# available and queries compile against the committed .sqlx cache.
+SQLX_OFFLINE = "false"

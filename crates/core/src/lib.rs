@@ -1,0 +1,8 @@
+//! Pure domain logic: no web, no database, no IO.
+//!
+//! Everything here must be a pure function of its inputs so it can be unit
+//! tested against a fixed clock — chunking, retrieval, citation resolution,
+//! SM-2 replay, the planner, the entitlements engine, the prompt composer and
+//! the document renderer.
+
+pub mod error;
