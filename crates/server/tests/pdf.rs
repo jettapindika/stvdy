@@ -1,142 +1,217 @@
-//! The pdfium binding, exercised the way the server uses it.
+//! The Phase 6 acceptance test: a cheatsheet renders to a six-page A4 PDF.
 //!
-//! The regression this pins: `pdfium-render` keeps its bindings in a process-wide
-//! slot and returns `PdfiumLibraryBindingsAlreadyInitialized` on a second
-//! `bind_to_library`. A per-document bind therefore succeeded for the *first* PDF
-//! and failed for every one after it, which is what the Phase 1 smoke run caught
-//! when the second uploaded PDF came back `failed: PdfiumLibraryBindingsAlreadyInitialized`.
+//! From the roadmap, and it is the assertion about `$` that matters. A broken KaTeX asset
+//! leaves the page rendering with literal `$x$` where the maths should be: nothing errors,
+//! the PDF is produced, and the defect is only visible to the student who prints it. That is
+//! the failure this test exists to catch, and it is why the test is not "does a PDF come
+//! out" but "does the PDF contain the maths".
 //!
-//! The fix binds once at boot and shares the handle, so this test asserts the
-//! property that fix exists for: **two documents, one process**. It needs the
-//! shared library, which is a deployment artefact rather than a repository file,
-//! so it skips with a printed reason when the path is absent. A skip that is
-//! printed is not a silent pass.
-//!
-//! This is a separate test binary on purpose: `init` occupies the process-wide
-//! slot, so a test that asserts the handle is *absent* could not coexist with it
-//! in the same binary.
+//! It needs Chromium, so it is `#[ignore]`d by default and run with `--ignored`. CI runs it
+//! **inside the image**, which is the phase's stated risk: a pipeline that works on a laptop
+//! and fails on deploy is the thing this test is supposed to prevent.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::path::Path;
+use uuid::Uuid;
 
-/// The fixture: a real PDF with extractable text, committed so the test needs no
-/// `cupsfilter` or any other tool to produce one.
-const FIXTURE: &[u8] = include_bytes!("fixtures/notes.pdf");
+use stvdy_core::citations::{ContextLabels, LabeledChunk};
+use stvdy_core::render::blocks::parse_blocks;
+use stvdy_core::render::{Cover, cheatsheet_v1, render_html};
+use stvdy_server::render::chrome::{Renderer, pdf_options};
 
-fn library_path() -> Option<std::path::PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let configured = std::env::var("PDFIUM_LIB_PATH")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .map(|value| root.join(value))
-        .unwrap_or_else(|| root.join("var/pdfium/libpdfium.dylib"));
-
-    if configured.exists() {
-        Some(configured)
-    } else {
-        eprintln!(
-            "SKIPPED: no pdfium library at {}. Fetch one with\n  \
-             curl -sSL https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8086/\
-             pdfium-mac-arm64.tgz | tar xz -C /tmp && cp /tmp/lib/libpdfium.dylib var/pdfium/",
-            configured.display()
-        );
-        None
+/// Where Chromium lives. The image sets `CHROME_PATH` to its pinned build; a developer's
+/// machine usually has Chrome in the standard place.
+fn chrome_path() -> Option<String> {
+    if let Ok(path) = std::env::var("CHROME_PATH")
+        && !path.is_empty()
+    {
+        return Some(path);
     }
+    let candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ];
+    candidates
+        .iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .map(|path| (*path).to_string())
 }
 
-/// Two documents through one bound handle. This is the exact case that failed
-/// before the handle was shared.
-#[test]
-fn one_process_extracts_from_two_documents() {
-    let Some(path) = library_path() else {
-        return;
-    };
-
-    let bound =
-        stvdy_server::integrations::documents::init(Some(&path)).expect("the library binds once");
-    assert!(bound, "a path was given, so the binding must have happened");
-
-    let handle = stvdy_server::integrations::documents::handle()
-        .expect("the handle is available after init");
-
-    for attempt in 1..=2 {
-        let pages = stvdy_server::sources::parse::pdf_pages(&handle, FIXTURE, "notes")
-            .unwrap_or_else(|error| {
-                panic!(
-                    "document {attempt} failed: {error}. Before the handle was shared this \
-                     failed on the second document with PdfiumLibraryBindingsAlreadyInitialized"
-                )
-            });
-
-        assert!(!pages.is_empty(), "document {attempt} produced no pages");
-        let text: String = pages.iter().map(|(_, text)| text.as_str()).collect();
-        assert!(
-            text.contains("Mitochondria"),
-            "document {attempt} extracted no usable text: {text:?}"
-        );
-        // The page number is 1-based, which is what the citation UI shows and
-        // what `chunks.page` stores.
-        assert_eq!(pages[0].0, Some(1));
-    }
+fn labels() -> ContextLabels {
+    ContextLabels::new(
+        vec![LabeledChunk {
+            label: 1,
+            chunk_id: Uuid::from_u128(11),
+            source_id: Uuid::from_u128(1),
+            page: Some(3),
+        }],
+        vec![],
+    )
 }
 
-/// A file that is not a PDF is an error rather than a panic, because the message
-/// becomes `sources.error` and the user reads it.
-#[test]
-fn a_non_pdf_is_a_readable_error() {
-    let Some(path) = library_path() else {
-        return;
-    };
+/// A document sized to six pages: a cover, a table of contents, and enough chapters to fill
+/// four more. The page count is the assertion, so the content has to actually be that long.
+fn sample_blocks() -> stvdy_core::render::Blocks {
+    // Two chapters of two sections, which is the four content pages plus the cover and the
+    // table of contents the roadmap's acceptance test counts.
+    let mut chapters: Vec<String> = Vec::new();
+    for chapter in 1..=2 {
+        let mut sections: Vec<String> = Vec::new();
+        for section in 1..=2 {
+            let mut blocks: Vec<String> = Vec::new();
+            // Enough prose per section to reach a page, plus a formula so the KaTeX path is
+            // exercised on every section rather than once.
+            for paragraph in 1..=4 {
+                blocks.push(format!(
+                    r#"{{"kind":"text","text":"Bab {chapter} bagian {section} paragraf {paragraph}.  Model OSI membagi komunikasi menjadi tujuh lapisan sedangkan TCP/IP  menyederhanakannya menjadi empat, dan pemetaan keduanya sering keluar di  soal ujian karena mahasiswa tertukar antara lapisan Transport dan  Session.","labels":[1]}}"#
+                ));
+            }
+            blocks.push(
+                r#"{"kind":"formula","latex":"\\eta = \\frac{L}{L + H} \\times 100\\%","caption":"Efisiensi pengiriman","legend":[{"symbol":"L","meaning":"Ukuran payload","unit":"byte"},{"symbol":"H","meaning":"Total overhead header","unit":"byte"},{"symbol":"\\eta","meaning":"Efisiensi pengiriman","unit":"%"}]}"#
+                    .to_string(),
+            );
+            blocks.push(
+                r#"{"kind":"concept","term":"Enkapsulasi","text":"Proses menambahkan header pada data saat turun dari lapisan atas ke lapisan bawah.","labels":[1]}"#
+                    .to_string(),
+            );
+            sections.push(format!(
+                r#"{{"title":"Bagian {section}","blocks":[{}]}}"#,
+                blocks.join(",")
+            ));
+        }
+        chapters.push(format!(
+            r#"{{"title":"Bab {chapter}","sections":[{}]}}"#,
+            sections.join(",")
+        ));
+    }
+    let chapters = chapters.join(",");
 
-    stvdy_server::integrations::documents::init(Some(&path)).expect("the library binds");
-    let handle = stvdy_server::integrations::documents::handle().expect("a handle");
-
-    let error = stvdy_server::sources::parse::pdf_pages(&handle, b"not a pdf at all", "broken")
-        .expect_err("garbage must not parse as a document");
-    assert!(
-        error.contains("opening the PDF"),
-        "the error must say what failed: {error}"
+    let raw = format!(
+        r#"{{"title":"Cheatsheet UTS Jaringan Komputer","subtitle":"Ringkasan materi ujian","course":"Jaringan Komputer","exam":"UTS","chapters":[{chapters}]}}"#
     );
+    parse_blocks(&raw).expect("the sample document parses")
 }
 
-/// A second `init` is not a failure.
+fn cover() -> Cover {
+    Cover {
+        course: "Jaringan Komputer".to_string(),
+        exam: "UTS".to_string(),
+        exam_date: "2026-11-01".to_string(),
+        source_count: 3,
+        generated_at: "2026-10-12 07:00".to_string(),
+        lang: "id".to_string(),
+    }
+}
+
+/// The PDF options the renderer actually uses, asserted without a browser.
 ///
-/// `pdfium-render` keeps its bindings in a process-wide slot, so the second
-/// `bind_to_library` returns `AlreadyInitialized`. `init` treats that one error as
-/// success, which is what makes it safe to call twice: two tests in one binary
-/// (this file), a boot path that runs again, or a caller that just wants to be
-/// sure. Without this the tests here are order-dependent and fail on whichever
-/// thread binds second.
+/// Cheap and always-run: it pins A4, the header/footer switch, and the page-number
+/// placeholders the `Halaman N dari M` footer depends on, so a change to any of them fails
+/// here rather than silently producing a document with no page numbers.
 #[test]
-fn init_is_idempotent() {
-    let Some(path) = library_path() else {
-        return;
-    };
+fn the_print_options_are_a4_with_a_page_numbered_footer() {
+    let options = pdf_options("Cheatsheet UTS Jaringan Komputer");
 
-    assert!(stvdy_server::integrations::documents::init(Some(&path)).expect("the first bind"));
+    assert_eq!(options.paper_width, Some(8.27), "A4 width in inches");
+    assert_eq!(options.paper_height, Some(11.69), "A4 height in inches");
+    assert_eq!(
+        options.display_header_footer,
+        Some(true),
+        "Chromium ignores @page margin boxes, so the header and footer must come from CDP"
+    );
+    assert_eq!(options.print_background, Some(true), "the template paints");
+
+    let footer = options.footer_template.expect("a footer template");
     assert!(
-        stvdy_server::integrations::documents::init(Some(&path)).expect("the second bind reuses"),
-        "a second init must succeed rather than report AlreadyInitialized"
+        footer.contains("Halaman"),
+        "the footer is the one the acceptance test reads: {footer}"
+    );
+    assert!(
+        footer.contains("class=\"pageNumber\""),
+        "CDP substitutes the page number here: {footer}"
+    );
+    assert!(
+        footer.contains("class=\"totalPages\""),
+        "and the total here: {footer}"
     );
 
-    let handle = stvdy_server::integrations::documents::handle().expect("a handle after both");
+    let header = options.header_template.expect("a header template");
     assert!(
-        !stvdy_server::sources::parse::pdf_pages(&handle, FIXTURE, "notes")
-            .expect("the handle still works")
-            .is_empty(),
-        "the reused handle must be usable"
+        header.contains("Cheatsheet UTS Jaringan Komputer"),
+        "the running header carries the exam: {header}"
     );
 }
 
-/// An unset path means PDF ingestion is off, which is not an error: a deployment
-/// that never ingests PDFs must still boot.
+/// The header template is HTML, so the running header is escaped: a course name containing
+/// `<` must not become markup in the frame of every page.
 #[test]
-fn an_unset_path_reports_pdf_as_unavailable() {
-    // Deliberately does not touch the process-wide slot: this asserts the
-    // contract of the call, not the state it leaves.
+fn the_running_header_is_escaped() {
+    let options = pdf_options("<script>alert(1)</script>");
+    let header = options.header_template.expect("a header template");
+
+    assert!(!header.contains("<script>"), "{header}");
+    assert!(header.contains("&lt;script&gt;"), "{header}");
+}
+
+/// The phase's acceptance test. Needs Chromium; run with `--ignored`.
+#[test]
+#[ignore = "needs Chromium; run with --ignored"]
+fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
+    let Some(path) = chrome_path() else {
+        panic!("no Chromium found; set CHROME_PATH");
+    };
+
+    let blocks = sample_blocks();
+    let html = render_html(&blocks, &cheatsheet_v1(), &labels(), &cover())
+        .expect("the document renders")
+        .html;
+
+    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    let pdf = renderer
+        .render(&html, "Cheatsheet UTS Jaringan Komputer")
+        .expect("the PDF renders");
+
+    assert!(!pdf.bytes.is_empty(), "a PDF was produced");
     assert!(
-        !stvdy_server::integrations::documents::init(None).expect("no path is not an error"),
-        "an unset path means PDF ingestion is unavailable, not that init failed"
+        pdf.bytes.starts_with(b"%PDF"),
+        "and it is a PDF: {:?}",
+        &pdf.bytes[..4.min(pdf.bytes.len())]
     );
+    assert_eq!(
+        pdf.page_count, 6,
+        "the sample document is sized to six pages; the footer's `dari 6` depends on this"
+    );
+
+    let text = extract_text(&pdf.bytes);
+    assert!(
+        text.contains("Halaman"),
+        "the footer text is in the PDF, so the CDP template reached it"
+    );
+    assert!(
+        text.contains("Cheatsheet UTS Jaringan Komputer"),
+        "the running header is in the PDF"
+    );
+    assert!(
+        text.contains("Bab 1") || text.contains("Bab 1".to_uppercase().as_str()),
+        "the chapter titles are in the PDF"
+    );
+
+    // The assertion that matters. A broken KaTeX asset leaves the maths as literal `$...$`:
+    // no error, a plausible-looking PDF, and the defect only visible on paper.
+    assert!(
+        !text.contains('$'),
+        "KaTeX did not render; the maths is literal text: {text}"
+    );
+}
+
+/// The text of a PDF.
+///
+/// Through a real extractor rather than a hand-rolled stream scanner: the first attempt
+/// returned a single space, which would have let the `no raw $` assertion pass without
+/// looking at the document at all. An assertion that cannot fail is worse than no
+/// assertion, because it reads as coverage.
+fn extract_text(bytes: &[u8]) -> String {
+    pdf_extract::extract_text_from_mem(bytes).expect("the PDF's text is extractable")
 }

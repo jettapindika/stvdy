@@ -10,6 +10,7 @@ publish.workspace = true
 stvdy-core.workspace = true
 stvdy-sync.workspace = true
 anyhow.workspace = true
+headless_chrome.workspace = true
 dotenvy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -58,6 +59,7 @@ oauth2.workspace = true
 readability = "0.3.0"
 
 [dev-dependencies]
+pdf-extract.workspace = true
 tokio = { workspace = true, features = ["full"] }
 http-body-util = "0.1.3"
 

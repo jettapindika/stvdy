@@ -14,6 +14,7 @@ pub mod jobs;
 pub mod limits;
 pub mod quizzes;
 pub mod ratelimit;
+pub mod render;
 pub mod routes;
 pub mod sources;
 pub mod state;

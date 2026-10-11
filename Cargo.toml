@@ -26,6 +26,16 @@ serde_json = "1.0.152"
 toml = "1.1.8"
 dotenvy = "0.15.7"
 
+# --- document rendering (Phase 6) ---
+# Pinned: the PDF pipeline's output is part of what a student prints, so a minor
+# upgrade must be a deliberate change with the acceptance test re-run, not something a
+# `cargo update` pulls in. Chromium itself is pinned separately, in the image.
+headless_chrome = "1.0.22"
+# The acceptance test reads the rendered PDF's text back. A hand-rolled extractor was
+# returning nothing, which would have made the `no raw $` assertion pass vacuously: the
+# one assertion the test exists for. A real extractor is the only honest option.
+pdf-extract = "0.12.1"
+
 # --- errors / logging ---
 thiserror = "2.0.21"
 anyhow = "1.0.104"
