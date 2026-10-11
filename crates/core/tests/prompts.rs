@@ -314,3 +314,184 @@ fn the_label_map_resolves_a_citation_from_the_composed_prompt() {
         }]
     );
 }
+
+/// The task-composition contract, asserted for every module that exists.
+///
+/// The roadmap's rule is that a task prompt must never lose its grounding or its
+/// injection defences, and that an unfilled variable must never reach a model.
+/// Both are checked here rather than trusted to the composer's implementation.
+mod task_composition {
+    use std::collections::BTreeMap;
+    use stvdy_core::prompts::{
+        ChatVars, ModuleId, PromptChunk, PromptError, compose_task, module_variables, trim_base,
+    };
+    use uuid::Uuid;
+
+    fn base() -> ChatVars {
+        ChatVars {
+            assistant_name: "Stvdy".to_string(),
+            app_name: "Stvdy".to_string(),
+            now: "2026-10-11T09:00:00+07:00".to_string(),
+            timezone: "Asia/Jakarta".to_string(),
+            platform: "web".to_string(),
+            plan_name: "Free".to_string(),
+            study_mode: "off".to_string(),
+            study_hours_summary: "19:00-22:00".to_string(),
+            use_web: "off".to_string(),
+            allow_upgrade_hint: false,
+            user_name: "Jetta".to_string(),
+            workspace_name: "Jaringan Komputer".to_string(),
+        }
+    }
+
+    fn chunk(label: u32) -> PromptChunk {
+        PromptChunk {
+            label,
+            chunk_id: Uuid::from_u128(u128::from(label)),
+            source_id: Uuid::from_u128(99),
+            source_title: "Modul 3".to_string(),
+            page: Some(4),
+            content: "TCP memakai three-way handshake untuk membuka koneksi.".to_string(),
+        }
+    }
+
+    /// Every `{{name}}` in a template, in first-appearance order.
+    fn variables_in(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = text;
+        while let Some(open) = rest.find("{{") {
+            let after = &rest[open + 2..];
+            let Some(close) = after.find("}}") else { break };
+            let name = after[..close].to_string();
+            if !found.contains(&name) {
+                found.push(name);
+            }
+            rest = &after[close + 2..];
+        }
+        found
+    }
+
+    #[test]
+    fn every_module_declares_exactly_the_variables_its_file_uses() {
+        for module in ModuleId::ALL {
+            let declared: Vec<&str> = module_variables(module)
+                .iter()
+                .map(|(name, _)| *name)
+                .collect();
+            let mut used = variables_in(module.text());
+            // The module is rendered together with the JSON contract, so a
+            // variable used only there is still the module's to declare.
+            for name in variables_in(stvdy_core::prompts::json_contract()) {
+                if !used.contains(&name) {
+                    used.push(name);
+                }
+            }
+            for name in &used {
+                assert!(
+                    declared.contains(&name.as_str()),
+                    "{} uses {{{{{name}}}}} but does not declare it",
+                    module.version()
+                );
+            }
+            for name in &declared {
+                assert!(
+                    used.iter().any(|u| u == name),
+                    "{} declares {{{{{name}}}}} but its files never use it",
+                    module.version()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_derived_variable_is_never_declared_as_caller_supplied_in_a_module() {
+        for module in ModuleId::ALL {
+            for (name, kind) in module_variables(module) {
+                assert!(
+                    !matches!(kind, stvdy_core::prompts::VarKind::Derived),
+                    "{} declares {name} as derived; derived variables belong to the base",
+                    module.version()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_trimmed_base_keeps_grounding_and_security_and_drops_the_prose_sections() {
+        let trimmed = trim_base(ModuleId::FlashcardsV1).unwrap();
+        assert!(trimmed.contains("<grounding_and_citations>"), "{trimmed}");
+        assert!(
+            trimmed.contains("<security_untrusted_content>"),
+            "{trimmed}"
+        );
+        assert!(trimmed.contains("<user_context_data>"), "{trimmed}");
+        for dropped in ["<teaching_style>", "<tools_and_actions>", "<planning_help>"] {
+            assert!(!trimmed.contains(dropped), "{dropped} survived the trim");
+        }
+    }
+
+    #[test]
+    fn trimming_away_a_required_section_is_an_error() {
+        // The guard rail, exercised directly: an allowlist without grounding must
+        // fail rather than produce a task prompt that invites uncited invention.
+        let error =
+            stvdy_core::prompts::trim_base_with(stvdy_core::prompts::base_v1(), &["context"])
+                .unwrap_err();
+        assert!(matches!(error, PromptError::MissingSection(_)), "{error:?}");
+    }
+
+    #[test]
+    fn compose_task_fills_the_module_variables_and_leaves_no_marker() {
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert("count", "10".to_string());
+        let composed =
+            compose_task(ModuleId::FlashcardsV1, &base(), &module_vars, &[chunk(1)]).unwrap();
+        assert!(!composed.text.contains("{{"), "{}", composed.text);
+        assert!(
+            composed.text.contains("10 cards requested"),
+            "{}",
+            composed.text
+        );
+        assert_eq!(composed.prompt_version, "flashcards.v1");
+        // The label map is what turns the model's `label` into a real chunk id.
+        assert_eq!(
+            composed.labels.chunk(1).unwrap().chunk_id,
+            Uuid::from_u128(1)
+        );
+    }
+
+    #[test]
+    fn an_undeclared_module_variable_is_refused() {
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert("count", "10".to_string());
+        module_vars.insert("typo", "10".to_string());
+        let error =
+            compose_task(ModuleId::FlashcardsV1, &base(), &module_vars, &[chunk(1)]).unwrap_err();
+        assert!(matches!(error, PromptError::UndeclaredVariable(name) if name == "typo"));
+    }
+
+    #[test]
+    fn a_missing_required_module_variable_is_an_error_not_an_empty_string() {
+        let module_vars = BTreeMap::new();
+        let error =
+            compose_task(ModuleId::FlashcardsV1, &base(), &module_vars, &[chunk(1)]).unwrap_err();
+        assert!(matches!(error, PromptError::MissingVariable(name) if name == "count"));
+    }
+
+    /// The default is what makes Indonesian work without a language setting: the
+    /// cards come out in the material's language.
+    #[test]
+    fn output_language_defaults_to_the_material_language() {
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert("count", "3".to_string());
+        let composed =
+            compose_task(ModuleId::FlashcardsV1, &base(), &module_vars, &[chunk(1)]).unwrap();
+        assert!(
+            composed
+                .text
+                .contains("the same language as the source material"),
+            "{}",
+            composed.text
+        );
+    }
+}

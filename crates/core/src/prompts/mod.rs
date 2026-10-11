@@ -8,6 +8,8 @@
 
 pub mod registry;
 
+pub use registry::ModuleId;
+
 use std::collections::BTreeMap;
 
 use uuid::Uuid;
@@ -57,7 +59,12 @@ pub fn base_variables() -> &'static [(&'static str, VarKind)] {
 
 /// The declared kind of a variable, or `None` if the name is not declared.
 pub fn base_variable_kind(name: &str) -> Option<VarKind> {
-    base_variables()
+    variable_kind(base_variables(), name)
+}
+
+/// The declared kind of a variable in `table`.
+fn variable_kind(table: &[(&'static str, VarKind)], name: &str) -> Option<VarKind> {
+    table
         .iter()
         .find(|(declared, _)| *declared == name)
         .map(|(_, kind)| *kind)
@@ -120,6 +127,10 @@ pub enum PromptError {
     MissingVariable(String),
     #[error("prompt variable {{{0}}} is derived and must not be supplied")]
     DerivedSupplied(String),
+    #[error("prompt module uses {{{0}}} without declaring it")]
+    UndeclaredVariable(String),
+    #[error("the trimmed base prompt lost <{0}>, which every task prompt must keep")]
+    MissingSection(String),
     #[error("{0}")]
     Invalid(String),
 }
@@ -146,7 +157,18 @@ pub fn compose_chat(
         ));
     }
 
-    let labels = ContextLabels::new(
+    let labels = labels_of(chunks, web);
+
+    Ok(Composed {
+        text,
+        labels,
+        prompt_version: registry::BASE_V1_VERSION.to_string(),
+    })
+}
+
+/// The per-request `label -> chunk` map, built the same way for chat and for tasks.
+fn labels_of(chunks: &[PromptChunk], web: &[PromptWebHit]) -> ContextLabels {
+    ContextLabels::new(
         chunks
             .iter()
             .map(|chunk| LabeledChunk {
@@ -163,13 +185,7 @@ pub fn compose_chat(
                 title: hit.title.clone(),
             })
             .collect(),
-    );
-
-    Ok(Composed {
-        text,
-        labels,
-        prompt_version: registry::BASE_V1_VERSION.to_string(),
-    })
+    )
 }
 
 /// Flattens [`ChatVars`] into the name -> value map the renderer reads.
@@ -198,13 +214,157 @@ fn values_of(vars: &ChatVars) -> BTreeMap<&'static str, String> {
     values
 }
 
+/// The base prompt text, for the contract tests and for `trim_base`.
+pub fn base_v1() -> &'static str {
+    registry::BASE_V1
+}
+
+/// The JSON contract text, so a test can assert the module's declared variables
+/// cover it too.
+pub fn json_contract() -> &'static str {
+    registry::JSON_CONTRACT_V1
+}
+
+/// A module's declared variables.
+pub fn module_variables(module: ModuleId) -> &'static [(&'static str, VarKind)] {
+    module.variables()
+}
+
+/// The base prompt with every section not in `module`'s allowlist removed.
+///
+/// Public because the contract test asserts the guard rail directly: trimming away
+/// `<grounding_and_citations>` or `<security_untrusted_content>` must fail, not
+/// produce a task prompt that invites uncited invention.
+pub fn trim_base(module: ModuleId) -> Result<String, PromptError> {
+    trim_base_with(registry::BASE_V1, module.base_sections())
+}
+
+/// [`trim_base`] against an explicit allowlist.
+pub fn trim_base_with(template: &str, keep: &[&str]) -> Result<String, PromptError> {
+    let mut output = String::with_capacity(template.len());
+    let mut dropping = false;
+
+    for line in template.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = opening_section(trimmed) {
+            dropping = !keep.contains(&name);
+            if !dropping {
+                output.push_str(line);
+                output.push('\n');
+            }
+            continue;
+        }
+        if closing_section(trimmed).is_some() {
+            if !dropping {
+                output.push_str(line);
+                output.push('\n');
+            }
+            dropping = false;
+            continue;
+        }
+        if !dropping {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+
+    // The guard rail `prompts/README.md` states: a task prompt must never be
+    // composed without its grounding and untrusted-content rules.
+    for required in ["grounding_and_citations", "security_untrusted_content"] {
+        if !output.contains(&format!("<{required}>")) {
+            return Err(PromptError::MissingSection(required.to_string()));
+        }
+    }
+
+    Ok(output.trim_end().to_string())
+}
+
+/// `<name>` on its own line, with no attributes and no closing slash.
+fn opening_section(line: &str) -> Option<&str> {
+    let inner = line.strip_prefix('<')?.strip_suffix('>')?;
+    if inner.is_empty() || inner.starts_with('/') || inner.contains(['<', ' ', '\t']) {
+        return None;
+    }
+    Some(inner)
+}
+
+fn closing_section(line: &str) -> Option<&str> {
+    let inner = line.strip_prefix("</")?.strip_suffix('>')?;
+    if inner.is_empty() || inner.contains(['<', ' ', '\t']) {
+        return None;
+    }
+    Some(inner)
+}
+
+/// Renders a strict-JSON task prompt: the trimmed base, the shared JSON contract,
+/// the module, then the labelled sources.
+///
+/// The order is fixed by `prompts/README.md`: the contract must come before the
+/// module so the module's own schema is the last thing the model reads, and the
+/// sources must come last so the data block is never followed by instructions.
+pub fn compose_task(
+    module: ModuleId,
+    base: &ChatVars,
+    module_vars: &BTreeMap<&'static str, String>,
+    chunks: &[PromptChunk],
+) -> Result<Composed, PromptError> {
+    let table = module.variables();
+
+    // An undeclared name is refused here rather than left in the text: `render_with`
+    // would leave `{{typo}}` intact and the no-`{{` assertion below would report it
+    // as an unfilled variable, which reads as a caller mistake when it is a
+    // declaration mistake.
+    let mut values = values_of(base);
+    for (name, value) in module_vars {
+        if !table.iter().any(|(declared, _)| declared == name) {
+            return Err(PromptError::UndeclaredVariable((*name).to_string()));
+        }
+        values.insert(name, value.clone());
+    }
+
+    let trimmed = trim_base(module)?;
+    let mut text = render_with(&trimmed, &values, base_variables())?;
+    text.push_str("\n\n");
+    text.push_str(&render_with(registry::JSON_CONTRACT_V1, &values, table)?);
+    text.push_str("\n\n");
+    text.push_str(&render_with(module.text(), &values, table)?);
+    text.push_str("\n\n");
+    text.push_str(&render_sources(chunks));
+
+    if text.contains("{{") {
+        return Err(PromptError::Invalid(
+            "composed task prompt still contains an unfilled {{variable}}".to_string(),
+        ));
+    }
+
+    Ok(Composed {
+        text,
+        labels: labels_of(chunks, &[]),
+        prompt_version: module.version().to_string(),
+    })
+}
+
 /// Fills a template's variables. Derived variables are computed here, never
 /// read from `values`; a caller that supplies one is refused outright so a
 /// contradictory pair (permissive instruction with `allow_upgrade_hint: false`)
 /// cannot be constructed.
 fn render(template: &str, values: &BTreeMap<&'static str, String>) -> Result<String, PromptError> {
+    render_with(template, values, base_variables())
+}
+
+/// Fills a template's variables from an explicit declaration table.
+///
+/// `render` uses the base's table; a task module passes its own plus the base's, so
+/// `{{count}}` resolves for the module and `{{now}}` still resolves for the trimmed
+/// base. Derived variables are computed, never read, and a caller that supplies one
+/// is refused outright.
+fn render_with(
+    template: &str,
+    values: &BTreeMap<&'static str, String>,
+    table: &[(&'static str, VarKind)],
+) -> Result<String, PromptError> {
     for name in values.keys() {
-        if matches!(base_variable_kind(name), Some(VarKind::Derived)) {
+        if matches!(variable_kind(table, name), Some(VarKind::Derived)) {
             return Err(PromptError::DerivedSupplied((*name).to_string()));
         }
     }
@@ -224,7 +384,7 @@ fn render(template: &str, values: &BTreeMap<&'static str, String>) -> Result<Str
         let name = &after_open[..close];
         rest = &after_open[close + 2..];
 
-        match base_variable_kind(name) {
+        match variable_kind(table, name) {
             Some(VarKind::Derived) => output.push_str(&derived_value(name, values)?),
             Some(VarKind::Caller) => {
                 let value = values
