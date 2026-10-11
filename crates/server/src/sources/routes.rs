@@ -16,6 +16,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
+use stvdy_core::entitlements::Feature;
+
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::integrations::storage as storage_integration;
@@ -241,7 +243,6 @@ pub async fn create(
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     owned_workspace(&state, user.user_id, workspace_id).await?;
 
-    let plan = user.plan();
     let mut kind: Option<String> = None;
     let mut title: Option<String> = None;
     let mut file: Option<(String, String, Vec<u8>)> = None;
@@ -339,13 +340,16 @@ pub async fn create(
     };
 
     let size = body.len() as i64;
-    crate::limits::enforce_max_file_mb(&state.config.plans, plan, size)?;
-    // The count check comes before the storage sum and before any byte is
-    // stored: `sources_total` is a separate axis from `storage_mb`, and a text
-    // source is a few KB, so without this one account could create unbounded
-    // sources while staying far under the storage cap.
-    enforce_source_count(&state, user.user_id, plan).await?;
-    enforce_storage(&state, user.user_id, plan, size).await?;
+    // One decision for three axes: `max_file_mb` (a ceiling, so a 20 MB file fits a
+    // 20 MB plan), `sources_total` (a count, so the check is `used < max`), and
+    // `storage_mb` (a running total, so the check is `existing + new <= quota`). The
+    // engine checks them in that order and refuses with the same 422 body the Phase 1
+    // shim produced, so no client sees a different shape.
+    //
+    // `sources_total` is a separate axis from storage on purpose: a text source is a few
+    // KB, so without it one account could create unbounded sources while staying far
+    // under the storage cap.
+    crate::entitlements::require(&state, &user, Feature::UploadSource { size_bytes: size }).await?;
 
     let source_id = Uuid::now_v7();
     let key = object_key(user.user_id, source_id, &kind);
@@ -397,53 +401,6 @@ pub async fn create(
         StatusCode::CREATED,
         Json(serde_json::json!({ "source": SourceView::from(row) })),
     ))
-}
-
-/// `sources_total` across the whole account, not per workspace: the plan matrix
-/// states one total, so a user with two workspaces gets the same cap as one.
-async fn enforce_source_count(
-    state: &AppState,
-    user_id: Uuid,
-    plan: stvdy_core::config::PlanId,
-) -> AppResult<()> {
-    let used: i64 = sqlx::query_scalar(
-        "select count(*) from sources where user_id = $1 and deleted_at is null",
-    )
-    .bind(user_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting sources: {error}")))?;
-
-    crate::limits::enforce_count(
-        &state.config.plans,
-        plan,
-        state.config.plans.get(plan).sources_total,
-        used,
-        "sources",
-    )
-}
-
-/// Storage is a running total over live sources, which is why this is a sum
-/// rather than a counter column: a counter can drift, and the drift is invisible
-/// until a user is locked out of their own quota.
-async fn enforce_storage(
-    state: &AppState,
-    user_id: Uuid,
-    plan: stvdy_core::config::PlanId,
-    add_bytes: i64,
-) -> AppResult<()> {
-    let used: i64 = sqlx::query_scalar(
-        // The cast is required: `sum(bigint)` is `numeric` in Postgres, and
-        // sqlx will not decode `numeric` into `i64`.
-        "select coalesce(sum(file_size), 0)::bigint from sources
-          where user_id = $1 and deleted_at is null",
-    )
-    .bind(user_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("summing storage: {error}")))?;
-
-    crate::limits::enforce_storage_mb(&state.config.plans, plan, used, add_bytes)
 }
 
 /// The object key. Prefixed by user so a key can never be guessed into another

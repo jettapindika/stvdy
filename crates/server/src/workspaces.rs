@@ -16,6 +16,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use stvdy_core::entitlements::Feature;
+
 use crate::auth::extract::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -100,6 +102,10 @@ pub struct CreateRequest {
 }
 
 /// `POST /workspaces`
+///
+/// `AuthUser`, not `VerifiedUser`: creating a workspace spends nothing and costs no
+/// provider call, so A43 — which gates *spending* — does not apply. The sweep table
+/// records that decision per route rather than applying it globally.
 pub async fn create(
     State(state): State<AppState>,
     user: AuthUser,
@@ -107,17 +113,7 @@ pub async fn create(
 ) -> AppResult<(StatusCode, Json<WorkspaceResponse>)> {
     let name = validate_name(&body.name)?;
 
-    let used: i64 = sqlx::query_scalar(
-        "select count(*) from workspaces where user_id = $1 and deleted_at is null",
-    )
-    .bind(user.user_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting workspaces: {error}")))?;
-
-    let plan = user.plan();
-    let limit = state.config.plans.get(plan).workspaces;
-    crate::limits::enforce_count(&state.config.plans, plan, limit, used, "workspaces")?;
+    crate::entitlements::require(&state, &user, Feature::CreateWorkspace).await?;
 
     // `on conflict do nothing` turns a duplicate client id into an empty result
     // rather than a 500, and does it without a check-then-insert race.

@@ -28,6 +28,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use stvdy_core::config::ExportFormat;
+use stvdy_core::entitlements::Feature;
 use stvdy_core::generation::report::{ReportOutline, parse_outline};
 use stvdy_core::prompts::PromptChunk;
 
@@ -35,7 +36,7 @@ use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::reports::generate::{self, OutlineRequest};
 use crate::state::AppState;
-use crate::{credits, jobs, limits, util, workspaces};
+use crate::{credits, jobs, workspaces};
 
 /// The action name in `usage_events` for the outline call, so a cost report can separate
 /// the two report steps from each other and from every other generator.
@@ -198,87 +199,71 @@ pub async fn create_outline(
         ));
     }
 
-    let plan = user.plan();
-    let month_start = util::local_month_start(&user.timezone, state.clock.as_ref());
     let cost = state.config.plans.credits.report_outline;
 
-    // The count, the charge and the reserving row commit together. The lock is the same key
-    // `credits::spend_in` takes below, so report creation is serialised per account; it is
-    // transaction-scoped and re-entrant, so the spend does not block on this same lock.
+    // The count, the charge and the reserving row commit together, because the limit
+    // depends on the count. `reserve_in` is that sequence — the per-user advisory lock,
+    // the matrix decision against a snapshot read under the lock, the charge, then this
+    // closure's row — defined once in `crate::entitlements` and shared with the deck and
+    // quiz reservations rather than copied a third time.
+    //
+    // The feature is `Report`: it counts `reports_per_month` and prices `report_outline`.
+    // The section calls are priced separately (`report_section`) and do not consume the
+    // monthly allowance, which is why only this route carries the counted feature.
     let mut tx = state
         .pool
         .begin()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a report: {error}")))?;
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(user.user_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the report lock: {error}")))?;
 
-    // This month's reports, including the ones still generating. The second term is what
-    // makes the cap hold, and a `failed` report is excluded because its reservation was
-    // refunded and it must not keep consuming the allowance.
-    let used: i64 = sqlx::query_scalar(
-        "select count(*)::bigint from reports
-          where user_id = $1 and deleted_at is null and created_at >= $2
-            and status in ('draft', 'generating', 'ready')",
-    )
-    .bind(user.user_id)
-    .bind(month_start)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("counting this month's reports: {error}"))
-    })?;
+    // Bound before the closure so `async move` captures references rather than the values
+    // the handler still needs below (the outline request, the job payload).
+    let user_id = user.user_id;
+    let topic_ref = topic.as_str();
+    let source_ids_ref = source_ids.as_slice();
+    let style_ref = style.as_str();
+    let length_ref = length.as_str();
 
-    // One request creates exactly one report, so the request reserves one report.
-    limits::enforce_batch(
-        &state.config.plans,
-        plan,
-        state.config.plans.get(plan).reports_per_month,
-        used,
-        1,
-        "reports",
-    )?;
-
-    // Neither daily cap applies: the matrix caps reports per **month** and has no per-day
-    // report allowance, so the two slots the chat path uses are both empty here.
-    let spent = credits::spend_in(
+    let (spent, (report_id, created_at, updated_at)) = crate::entitlements::reserve_in(
         &mut tx,
         &state,
-        user.user_id,
-        plan,
+        &user,
+        Some(Feature::Report),
         OUTLINE_ACTION,
         cost,
-        [None, None],
+        |conn, usage_event_id| {
+            Box::pin(async move {
+                // The report row *is* the reservation the decision's count read, so it is
+                // written in the same transaction as the charge: a failure here rolls the
+                // charge back with it, so there is no charge without a report and nothing
+                // to compensate for by hand. The title starts as the topic and is replaced
+                // by the model's title once the outline parses, because the student's own
+                // words are a better placeholder than an empty string.
+                let row: (Uuid, Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+                    "insert into reports
+                        (user_id, workspace_id, title, status, source_ids, style, length,
+                         credits_spent, usage_event_id)
+                     values ($1, $2, $3, 'generating', $4, $5, $6, $7, $8)
+                     returning id, created_at, updated_at",
+                )
+                .bind(user_id)
+                .bind(workspace_id)
+                .bind(topic_ref)
+                .bind(source_ids_ref)
+                .bind(style_ref)
+                .bind(length_ref)
+                .bind(cost as i32)
+                .bind(usage_event_id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|error| {
+                    AppError::Internal(anyhow::anyhow!("creating the report: {error}"))
+                })?;
+                Ok(row)
+            })
+        },
     )
     .await?;
-
-    // The report row *is* the reservation the count above reads, so it is written in the
-    // same transaction as the charge: a failure here rolls the charge back with it, so there
-    // is no charge without a report and nothing to compensate for by hand. The title starts
-    // as the topic and is replaced by the model's title once the outline parses, because the
-    // student's own words are a better placeholder than an empty string.
-    let (report_id, created_at, updated_at): (Uuid, Option<DateTime<Utc>>, DateTime<Utc>) =
-        sqlx::query_as(
-            "insert into reports
-                (user_id, workspace_id, title, status, source_ids, style, length,
-                 credits_spent, usage_event_id)
-             values ($1, $2, $3, 'generating', $4, $5, $6, $7, $8)
-             returning id, created_at, updated_at",
-        )
-        .bind(user.user_id)
-        .bind(workspace_id)
-        .bind(&topic)
-        .bind(&source_ids)
-        .bind(&style)
-        .bind(&length)
-        .bind(cost as i32)
-        .bind(spent.usage_event_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("creating the report: {error}")))?;
 
     tx.commit()
         .await
@@ -541,53 +526,67 @@ pub async fn generate_section(
         ));
     }
 
-    let plan = user.plan();
     let cost = state.config.plans.credits.report_section;
 
     // The charge and the status flip commit together, so a report can never be `generating`
-    // without a charge or charged without being in flight. `usage_event_id` is replaced with
-    // this spend's row: the job attaches the provider's tokens and cost to the section call
-    // that is running, not to the outline call that created the report.
+    // without a charge or charged without being in flight.
+    //
+    // The feature is `None`: a section costs credits and consumes **no** monthly allowance
+    // (`reports_per_month` is spent once, by the outline), and the contract's `Feature`
+    // enum has no variant for "a section of an existing report". `reserve_in` still takes
+    // the lock and still charges; the ledger is the whole gate here.
     let mut tx = state
         .pool
         .begin()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a section: {error}")))?;
 
-    let spent = credits::spend_in(
+    let (_, ()) = crate::entitlements::reserve_in(
         &mut tx,
         &state,
-        user.user_id,
-        plan,
+        &user,
+        None,
         SECTION_ACTION,
         cost,
-        [None, None],
+        |conn, usage_event_id| {
+            // Bound outside the `async move` so the closure copies a `Uuid` rather than
+            // moving the caller's `VerifiedUser`, which the job enqueue below still needs.
+            let user_id = user.user_id;
+            Box::pin(async move {
+                // `usage_event_id` is replaced with this spend's row: the job attaches the
+                // provider's tokens and cost to the section call that is running, not to
+                // the outline call that created the report.
+                let claimed = sqlx::query(
+                    "update reports
+                        set status = 'generating', generating_index = $2, error = null,
+                            credits_spent = $3, usage_event_id = $4, updated_at = now()
+                      where id = $1 and user_id = $5 and deleted_at is null
+                        and status in ('draft', 'ready', 'failed')",
+                )
+                .bind(report_id)
+                .bind(body.index as i32)
+                .bind(cost as i32)
+                .bind(usage_event_id)
+                .bind(user_id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|error| {
+                    AppError::Internal(anyhow::anyhow!("claiming the section: {error}"))
+                })?;
+
+                if claimed.rows_affected() == 0 {
+                    // Another device started a section between the read above and this
+                    // write. The charge is dropped with the transaction, so the loser pays
+                    // nothing.
+                    return Err(AppError::Conflict(
+                        "this report already has a section in flight".to_string(),
+                    ));
+                }
+                Ok(())
+            })
+        },
     )
     .await?;
-
-    let claimed = sqlx::query(
-        "update reports
-            set status = 'generating', generating_index = $2, error = null,
-                credits_spent = $3, usage_event_id = $4, updated_at = now()
-          where id = $1 and user_id = $5 and deleted_at is null
-            and status in ('draft', 'ready', 'failed')",
-    )
-    .bind(report_id)
-    .bind(body.index as i32)
-    .bind(cost as i32)
-    .bind(spent.usage_event_id)
-    .bind(user.user_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("claiming the section: {error}")))?;
-
-    if claimed.rows_affected() == 0 {
-        // Another device started a section between the read above and this write. The
-        // charge is dropped with the transaction, so the loser pays nothing.
-        return Err(AppError::Conflict(
-            "this report already has a section in flight".to_string(),
-        ));
-    }
 
     tx.commit()
         .await
@@ -651,7 +650,11 @@ pub async fn export_report(
         }
     };
 
-    limits::enforce_export_format(&state.config.plans, user.plan(), format)?;
+    // The format is a plan feature, not a quantity: the refusal is 403
+    // `plan_required` with `min_plan` when a higher plan has it and this client may be
+    // told so, and 403 `feature_locked` on a store-policy device where no purchase call to
+    // action is allowed (A143). Both are decided from the device row, never the body.
+    crate::entitlements::require(&state, &user, Feature::ExportFormat(format)).await?;
 
     let ReportJson { title, body_md, .. } = owned_report(&state, user.user_id, report_id).await?;
     let Some(body_md) = body_md else {

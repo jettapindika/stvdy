@@ -31,12 +31,13 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use stvdy_core::config::ExportFormat;
+use stvdy_core::entitlements::Feature;
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::jobs::handlers::cheatsheet as cheatsheet_job;
 use crate::state::AppState;
-use crate::{credits, jobs, limits, workspaces};
+use crate::{jobs, workspaces};
 
 /// The action name in `usage_events` and the ledger.
 ///
@@ -182,58 +183,68 @@ pub async fn create_cheatsheet(
         ));
     }
 
-    let plan = user.plan();
     let cost = state.config.plans.credits.report_section;
 
-    // The charge and the reserving row commit together. The lock is the same key
-    // `credits::spend_in` takes below, so creation is serialised per account; it is
-    // transaction-scoped and re-entrant, so the spend does not block on this same lock.
+    // The charge and the reserving row commit together. `reserve_in` is that sequence —
+    // the per-user advisory lock, the matrix decision against a snapshot read under the
+    // lock, the charge, then this closure's row — defined once in `crate::entitlements`
+    // and shared with the deck, quiz and report reservations.
+    //
+    // The feature is `None`: the matrix has no monthly cheatsheet allowance, so there is
+    // nothing to count. The cost is the `report_section` price because a cheatsheet is one
+    // generation call of the same size, and a separate price for it would be a second
+    // number to keep in step with the first.
     let mut tx =
         state.pool.begin().await.map_err(|error| {
             AppError::Internal(anyhow::anyhow!("beginning a cheatsheet: {error}"))
         })?;
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(user.user_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| {
-            AppError::Internal(anyhow::anyhow!("taking the cheatsheet lock: {error}"))
-        })?;
 
-    let spent = credits::spend_in(
+    // Bound before the closure so `async move` captures references rather than the values
+    // the handler still needs below (the document's JSON body, the job payload).
+    let user_id = user.user_id;
+    let scope_ref = scope.as_str();
+    let depth_ref = body.depth.as_str();
+    let source_ids_ref = source_ids.as_slice();
+    let exam_date = body.exam_date;
+
+    let (_, (cheatsheet_id, created_at, updated_at)) = crate::entitlements::reserve_in(
         &mut tx,
         &state,
-        user.user_id,
-        plan,
+        &user,
+        None,
         GENERATE_ACTION,
         cost,
-        [None, None],
+        |conn, usage_event_id| {
+            Box::pin(async move {
+                // The row *is* the reservation, so it is written in the same transaction as
+                // the charge: a failure here rolls the charge back with it, so there is no
+                // charge without a document and nothing to compensate for by hand.
+                let row: (Uuid, Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+                    "insert into cheatsheets
+                        (user_id, workspace_id, title, scope, exam_date, depth, source_ids,
+                         status, credits_spent, usage_event_id)
+                     values ($1, $2, $3, $4, $5, $6, $7, 'generating', $8, $9)
+                     returning id, created_at, updated_at",
+                )
+                .bind(user_id)
+                .bind(workspace_id)
+                .bind(scope_ref)
+                .bind(scope_ref)
+                .bind(exam_date)
+                .bind(depth_ref)
+                .bind(source_ids_ref)
+                .bind(cost as i32)
+                .bind(usage_event_id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|error| {
+                    AppError::Internal(anyhow::anyhow!("creating the cheatsheet: {error}"))
+                })?;
+                Ok(row)
+            })
+        },
     )
     .await?;
-
-    // The row *is* the reservation, so it is written in the same transaction as the charge: a
-    // failure here rolls the charge back with it, so there is no charge without a document
-    // and nothing to compensate for by hand.
-    let (cheatsheet_id, created_at, updated_at): (Uuid, Option<DateTime<Utc>>, DateTime<Utc>) =
-        sqlx::query_as(
-            "insert into cheatsheets
-                (user_id, workspace_id, title, scope, exam_date, depth, source_ids, status,
-                 credits_spent, usage_event_id)
-             values ($1, $2, $3, $4, $5, $6, $7, 'generating', $8, $9)
-             returning id, created_at, updated_at",
-        )
-        .bind(user.user_id)
-        .bind(workspace_id)
-        .bind(&scope)
-        .bind(&scope)
-        .bind(body.exam_date)
-        .bind(&body.depth)
-        .bind(&source_ids)
-        .bind(cost as i32)
-        .bind(spent.usage_event_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("creating the cheatsheet: {error}")))?;
 
     tx.commit().await.map_err(|error| {
         AppError::Internal(anyhow::anyhow!("committing the cheatsheet: {error}"))
@@ -380,7 +391,7 @@ pub async fn cheatsheet_pdf(
     user: AuthUser,
     Path(cheatsheet_id): Path<Uuid>,
 ) -> AppResult<Response> {
-    limits::enforce_export_format(&state.config.plans, user.plan(), ExportFormat::Pdf)?;
+    crate::entitlements::require(&state, &user, Feature::ExportFormat(ExportFormat::Pdf)).await?;
 
     let cheatsheet = owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
     let key: Option<String> = sqlx::query_scalar(

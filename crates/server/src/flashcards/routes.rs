@@ -18,12 +18,13 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
+use stvdy_core::entitlements::Feature;
 use stvdy_core::sm2::{CardState, Rating, Review, replay};
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use crate::{credits, jobs, limits, util, workspaces};
+use crate::{jobs, workspaces};
 
 /// The action name in `usage_events` and the ledger, so a cost report can separate
 /// generation from chat.
@@ -149,96 +150,76 @@ pub async fn create_deck(
         ));
     }
 
-    let plan = user.plan();
-    let month_start = util::local_month_start(&user.timezone, state.clock.as_ref());
-
-    // The count, the charge and the deck row commit together, because the limit
-    // depends on the count: in separate transactions a second request reads a count
-    // the first has not committed yet, and two concurrent requests both pass on the
-    // last slot. The advisory lock is the same key `credits::spend_in` takes below,
-    // so this serialises deck creation per account; it is transaction-scoped and
-    // re-entrant, so the spend does not block on this same lock.
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a deck: {error}")))?;
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(user.user_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the deck lock: {error}")))?;
-
-    // The cards already written this month **plus** the cards in-flight decks have
-    // reserved. The second term is what makes the cap hold under concurrency: a deck
-    // that is still generating has no card rows yet, so without it a burst of
-    // requests would each read zero used and every one of them would be allowed,
-    // handing out many times the monthly allowance. A `failed` deck is excluded --
-    // its reservation was refunded, so it must not keep consuming the allowance.
-    let used: i64 = sqlx::query_scalar(
-        "select (select count(*)::bigint from flashcards
-                  where user_id = $1 and deleted_at is null and created_at >= $2)
-              + (select coalesce(sum(requested_count), 0)::bigint from decks
-                  where user_id = $1 and deleted_at is null
-                    and status = 'generating' and created_at >= $2)",
-    )
-    .bind(user.user_id)
-    .bind(month_start)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting this month's cards: {error}")))?;
-
-    limits::enforce_batch(
-        &state.config.plans,
-        plan,
-        state.config.plans.get(plan).flashcards_per_month,
-        used,
-        i64::from(body.count),
-        "flashcards",
-    )?;
-
     // The cost is per ten cards, from the config: `flashcard_batch_10 = 4` is a
     // batch price, and asking for 21 cards is three batches.
     // `i64::div_ceil` is still unstable, and `count` is positive here, so this is
     // an exact ceiling division.
     let batches = (i64::from(body.count) + CARDS_PER_BATCH - 1) / CARDS_PER_BATCH;
     let cost = batches * state.config.plans.credits.flashcard_batch_10;
+
+    // The count, the charge and the deck row commit together, because the limit depends
+    // on the count: in separate transactions a second request reads a count the first has
+    // not committed yet, and two concurrent requests both pass on the last slot.
+    // `reserve_in` is that sequence — the per-user advisory lock, the matrix decision
+    // against a snapshot read under the lock, the charge, then this closure's row — so
+    // the three routes that reserve something share one implementation instead of three
+    // copies that can drift.
+    //
     // Neither daily cap applies to generation: the plan matrix caps flashcards per
-    // **month** (`flashcards_per_month`, enforced above with `enforce_batch`) and has
-    // no per-day card allowance, so the two slots the chat path uses are both empty
-    // here. Passing the chat cap would silently cap decks at `chat_msgs_per_day`.
-    let spent = credits::spend_in(
+    // **month** (`flashcards_per_month`, the feature below) and has no per-day card
+    // allowance, so the two slots the chat path uses are both empty inside `reserve_in`.
+    // Passing the chat cap would silently cap decks at `chat_msgs_per_day`.
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a deck: {error}")))?;
+
+    // Bound before the closure so `async move` captures references rather than the values
+    // the handler still needs below (the deck's JSON body, the job payload).
+    let user_id = user.user_id;
+    let title_ref = title.as_str();
+    let source_ids_ref = source_ids.as_slice();
+
+    let (_, (deck_id, created_at)) = crate::entitlements::reserve_in(
         &mut tx,
         &state,
-        user.user_id,
-        plan,
+        &user,
+        Some(Feature::FlashcardBatch { n: body.count }),
         GENERATE_ACTION,
         cost,
-        [None, None],
+        |conn, usage_event_id| {
+            Box::pin(async move {
+                let row: (Uuid, DateTime<Utc>) = sqlx::query_as(
+                    "insert into decks
+                        (user_id, workspace_id, title, source_ids, status, requested_count,
+                         credits_spent, usage_event_id)
+                     values ($1, $2, $3, $4, 'generating', $5, $6, $7)
+                     returning id, created_at",
+                )
+                .bind(user_id)
+                .bind(workspace_id)
+                .bind(title_ref)
+                .bind(source_ids_ref)
+                .bind(body.count as i32)
+                .bind(cost as i32)
+                // The id of the charge this transaction just wrote, passed through the
+                // closure: looking up "the newest usage row for this user" instead would
+                // attribute the provider's cost to whichever request finished last.
+                .bind(usage_event_id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|error| {
+                    // A failed insert needs no refund by hand: the charge, the reservation
+                    // and the row are all in this transaction, so rolling back unspends
+                    // the credit.
+                    AppError::Internal(anyhow::anyhow!("creating the deck: {error}"))
+                })?;
+                Ok(row)
+            })
+        },
     )
     .await?;
-
-    let (deck_id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
-        "insert into decks
-            (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent, usage_event_id)
-         values ($1, $2, $3, $4, 'generating', $5, $6, $7)
-         returning id, created_at",
-    )
-    .bind(user.user_id)
-    .bind(workspace_id)
-    .bind(&title)
-    .bind(&source_ids)
-    .bind(body.count as i32)
-    .bind(cost as i32)
-    .bind(spent.usage_event_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| {
-        // A failed insert needs no refund by hand: the charge, the reservation and
-        // the row are all in this transaction, so rolling back unspends the credit.
-        // (The earlier shape spent in its own transaction and had to compensate.)
-        AppError::Internal(anyhow::anyhow!("creating the deck: {error}"))
-    })?;
 
     tx.commit()
         .await

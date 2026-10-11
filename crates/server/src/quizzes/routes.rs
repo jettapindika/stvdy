@@ -20,12 +20,13 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
+use stvdy_core::entitlements::Feature;
 use stvdy_core::quiz::{AnswerRecord, QuizSummary, grade_mcq, summarize};
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use crate::{credits, jobs, limits, util, workspaces};
+use crate::{jobs, workspaces};
 
 /// The action name in `usage_events` and the ledger, so a cost report can separate quiz
 /// generation from deck generation and from chat.
@@ -195,95 +196,75 @@ pub async fn create_quiz(
         ));
     }
 
-    let plan = user.plan();
-    let month_start = util::local_month_start(&user.timezone, state.clock.as_ref());
-
-    // The count, the charge and the reserving row commit together, because the limit
-    // depends on the count: in separate transactions a second request reads a count the
-    // first has not committed yet, and two concurrent requests both pass on the last
-    // slot. The lock is the same key `credits::spend_in` takes below, so this serialises
-    // quiz creation per account; it is transaction-scoped and re-entrant, so the spend
-    // does not block on this same lock.
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a quiz: {error}")))?;
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(user.user_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the quiz lock: {error}")))?;
-
-    // This month's quizzes **plus** the ones still generating. The second term is what
-    // makes the cap hold: a quiz that is still generating has no `quiz_questions` rows,
-    // so a count that ignored it would read zero and the cap could be exceeded by asking
-    // twice in a row. A `failed` quiz is excluded, because its reservation was refunded
-    // and it must not keep consuming the allowance.
-    let used: i64 = sqlx::query_scalar(
-        "select count(*)::bigint from quizzes
-          where user_id = $1 and deleted_at is null and created_at >= $2
-            and status in ('ready', 'generating')",
-    )
-    .bind(user.user_id)
-    .bind(month_start)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("counting this month's quizzes: {error}"))
-    })?;
-
-    // One request creates exactly one quiz, so the request reserves one quiz.
-    limits::enforce_batch(
-        &state.config.plans,
-        plan,
-        state.config.plans.get(plan).quizzes_per_month,
-        used,
-        1,
-        "quizzes",
-    )?;
-
     // The cost is per ten questions, from the config: `quiz_10 = 6` is a batch price, and
     // asking for 21 questions is three batches. `i64::div_ceil` is still unstable, and
     // `count` is positive here, so this is an exact ceiling division.
     let batches = (i64::from(body.count) + QUESTIONS_PER_BATCH - 1) / QUESTIONS_PER_BATCH;
     let cost = batches * state.config.plans.credits.quiz_10;
+
+    // The count, the charge and the reserving row commit together, because the limit
+    // depends on the count: in separate transactions a second request reads a count the
+    // first has not committed yet, and two concurrent requests both pass on the last slot.
+    // `reserve_in` is that sequence — the per-user advisory lock, the matrix decision
+    // against a snapshot read under the lock, the charge, then this closure's row.
+    //
     // Neither daily cap applies to generation: the plan matrix caps quizzes per **month**
-    // (`quizzes_per_month`, enforced above) and has no per-day quiz allowance, so the two
-    // slots the chat path uses are both empty here.
-    let spent = credits::spend_in(
+    // (`quizzes_per_month`, the feature below) and has no per-day quiz allowance, so the
+    // two slots the chat path uses are both empty inside `reserve_in`.
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a quiz: {error}")))?;
+
+    // Bound before the closure so `async move` captures references rather than the values
+    // the handler still needs below (the quiz's JSON body, the job payload).
+    let user_id = user.user_id;
+    let title_ref = title.as_str();
+    let source_ids_ref = source_ids.as_slice();
+    let difficulty_ref = body.difficulty.as_str();
+    let types_ref = body.types.as_str();
+
+    let (_, (quiz_id, created_at)) = crate::entitlements::reserve_in(
         &mut tx,
         &state,
-        user.user_id,
-        plan,
+        &user,
+        // One quiz per request whatever it holds (A94); `n` only prices it.
+        Some(Feature::CreateQuiz { n: body.count }),
         GENERATE_ACTION,
         cost,
-        [None, None],
+        |conn, usage_event_id| {
+            Box::pin(async move {
+                // The quiz row *is* the reservation the decision's count read, so it is
+                // written in the same transaction as the charge. A failure here rolls the
+                // charge back with it, so there is no charge without a quiz and nothing to
+                // compensate for by hand.
+                let row: (Uuid, DateTime<Utc>) = sqlx::query_as(
+                    "insert into quizzes
+                        (user_id, workspace_id, title, difficulty, status, source_ids,
+                         requested_count, question_types, credits_spent, usage_event_id)
+                     values ($1, $2, $3, $4, 'generating', $5, $6, $7, $8, $9)
+                     returning id, created_at",
+                )
+                .bind(user_id)
+                .bind(workspace_id)
+                .bind(title_ref)
+                .bind(difficulty_ref)
+                .bind(source_ids_ref)
+                .bind(body.count as i32)
+                .bind(types_ref)
+                .bind(cost as i32)
+                .bind(usage_event_id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|error| {
+                    AppError::Internal(anyhow::anyhow!("creating the quiz: {error}"))
+                })?;
+                Ok(row)
+            })
+        },
     )
     .await?;
-
-    // The quiz row *is* the reservation the count above reads, so it is written in the
-    // same transaction as the charge. A failure here rolls the charge back with it, so
-    // there is no charge without a quiz and nothing to compensate for by hand.
-    let (quiz_id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
-        "insert into quizzes
-            (user_id, workspace_id, title, difficulty, status, source_ids, requested_count,
-             question_types, credits_spent, usage_event_id)
-         values ($1, $2, $3, $4, 'generating', $5, $6, $7, $8, $9)
-         returning id, created_at",
-    )
-    .bind(user.user_id)
-    .bind(workspace_id)
-    .bind(&title)
-    .bind(&body.difficulty)
-    .bind(&source_ids)
-    .bind(body.count as i32)
-    .bind(&body.types)
-    .bind(cost as i32)
-    .bind(spent.usage_event_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("creating the quiz: {error}")))?;
 
     tx.commit()
         .await
