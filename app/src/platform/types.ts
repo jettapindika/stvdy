@@ -27,11 +27,22 @@ export interface FilesApi {
   read(path: string): Promise<Uint8Array>
 }
 
+/**
+ * A classified incoming URL, as the shell delivers it. The SPA never sees a raw
+ * URL string: `auth_callback` carries the OAuth `code`/`state` to exchange,
+ * `calendar` carries a calendar-return's query parameters, and `ignored` says a
+ * URL was not actionable (with a coarse reason safe to log).
+ */
+export type DeepLinkIntent =
+  | { action: 'auth_callback'; payload: { code: string; state: string } }
+  | { action: 'calendar'; payload: { params: Record<string, string> } }
+  | { action: 'ignored'; payload: { reason: string } }
+
 export interface DeepLinksApi {
-  /** The URL the app was launched with, if any. */
-  current(): Promise<string | null>
+  /** The classified URL the app was launched with, if any. */
+  current(): Promise<DeepLinkIntent | null>
   /** Subscribes to incoming links; resolves to an unsubscribe function. */
-  onOpen(handler: (url: string) => void): Promise<() => void>
+  onOpen(handler: (intent: DeepLinkIntent) => void): Promise<() => void>
 }
 
 export interface Platform {

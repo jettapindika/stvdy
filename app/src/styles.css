@@ -40,6 +40,13 @@
   --success: #0e9080;
   --success-text: #0c7f71;
   --success-soft: #e4f4f1;
+  /* Text that sits on `--success-soft` rather than on the ground. The body-text
+     teal is 4.56:1 on paper but only 4.31:1 on the tint, which fails AA at
+     chip and note sizes; this is the same hue taken far enough down to clear it
+     (6.05:1 here). DESIGN.md's rule about measuring the rendered DOM rather than
+     the token values is what caught this: the token was correct on the ground it
+     was recorded for and wrong on the one it was being used on. */
+  --success-on-soft: #0a6a5e;
   /* functional */
   --danger: #b3261e;
   --danger-soft: #fdeceb;
@@ -65,6 +72,10 @@
     --success: #3fbfae;
     --success-text: #3fbfae;
     --success-soft: #12251f;
+    /* Same as `--success-text` here, because on this ground the body teal is
+       already 7.08:1. The token exists in both themes so a component can name
+       the pairing it needs rather than branching on the theme. */
+    --success-on-soft: #3fbfae;
     --danger: #f2b8b5;
     --danger-soft: #2a1a19;
     /* Inverted, not recoloured: a light fill with dark text keeps the same
@@ -89,6 +100,7 @@
   --color-success: var(--success);
   --color-success-text: var(--success-text);
   --color-success-soft: var(--success-soft);
+  --color-success-on-soft: var(--success-on-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-action: var(--action);
@@ -218,6 +230,13 @@
     line-height: 1.2;
     /* 44px minimum touch target (R-03). */
     min-height: 2.75rem;
+    /* A flex item defaults to `min-width: auto`, so it refuses to shrink below
+       its content. In a row of buttons that is an overflow the page cannot
+       scroll away from: at 200% text scale the three workspace panel tabs were
+       510px wide on a 390px phone. `min-width: 0` lets the label wrap inside the
+       button instead, and `min-height` grows to fit it. Long labels are the
+       layout test case (DESIGN.md), not an edge case. */
+    min-width: 0;
     cursor: pointer;
     transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease,
       opacity 140ms ease;
@@ -455,7 +474,45 @@
   .note-success {
     background-color: var(--success-soft);
     border-color: color-mix(in oklab, var(--success) 30%, transparent);
-    color: var(--success-text);
+    /* On the tint, not on the ground: `--success-text` measures 4.31:1 there,
+       which fails AA for body text. */
+    color: var(--success-on-soft);
+  }
+
+  /* --- Status chips ------------------------------------------------------- */
+
+  /* A chip is a pill carrying a state: the design reserves the pill for
+     "action or count", and a state belongs to that family rather than to the
+     8px rectangle that means "field". The tone repeats what the chip's word
+     already says, so the state is never carried by colour alone and reads
+     correctly in monochrome. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.1rem 0.6rem;
+    border-radius: var(--radius-pill);
+    background-color: var(--surface-sunk);
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    /* No `nowrap`: the label has to survive 200% text scale and a long label in
+       another language, and a pill that overflows its row clips the state it is
+       there to report. */
+    text-align: left;
+  }
+  .chip-working {
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+  }
+  .chip-ready {
+    background-color: var(--success-soft);
+    color: var(--success-on-soft);
+  }
+  .chip-failed {
+    background-color: var(--danger-soft);
+    color: var(--danger);
   }
 }
 

@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { impactFeedback, notificationFeedback } from '@tauri-apps/plugin-haptics'
 import {
   isPermissionGranted,
@@ -44,16 +43,6 @@ export function mobilePlatform(kind: PlatformKind): Platform {
             schedule: { at: at.toISOString(), allowWhileIdle: true },
           },
         })
-      },
-    },
-
-    deepLinks: {
-      async current() {
-        const urls = await invoke<string[] | null>('plugin:deep-link|get_current')
-        return urls?.[0] ?? null
-      },
-      async onOpen(handler) {
-        return onOpenUrl((urls) => urls.forEach(handler))
       },
     },
 

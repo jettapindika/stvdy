@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
+import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import {
@@ -10,7 +10,7 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
 
-import type { Platform, PlatformKind } from './types'
+import type { DeepLinkIntent, Platform, PlatformKind } from './types'
 import { webPlatform } from './web'
 
 /**
@@ -65,12 +65,18 @@ export function desktopPlatform(kind: PlatformKind): Platform {
     },
 
     deepLinks: {
+      // The shell classifies the URL and hands over `{action, payload}`; the
+      // SPA never parses a raw URL. `deep_link_current` is the cold-start pull
+      // (macOS/iOS deliver the launch URL there), the event covers a running
+      // instance.
       async current() {
-        const urls = await invoke<string[] | null>('plugin:deep-link|get_current')
-        return urls?.[0] ?? null
+        const intents = await invoke<DeepLinkIntent[]>('deep_link_current')
+        return intents[0] ?? null
       },
       async onOpen(handler) {
-        return onOpenUrl((urls) => urls.forEach(handler))
+        return listen<DeepLinkIntent[]>('stvdy://deep-link-intent', (event) => {
+          event.payload.forEach((intent) => handler(intent))
+        })
       },
     },
 

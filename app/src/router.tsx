@@ -2,6 +2,9 @@ import { createBrowserRouter } from 'react-router'
 
 import { App } from './App'
 import { NotBuiltYet } from './components/ui/States'
+import { SignInScreen } from './features/auth/SignInScreen'
+import { SignUpScreen } from './features/auth/SignUpScreen'
+import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
@@ -14,8 +17,21 @@ import { WorkspaceScreen } from './features/workspaces/WorkspaceScreen'
  * are not built yet say so plainly and name what will be there, rather than
  * pretending to work: a nav item that leads to a broken or empty promise is the
  * defect R-24 describes.
+ *
+ * The three auth routes sit outside the `App` element on purpose. `App` is the
+ * signed-in shell, and it redirects to `/signin` when there is no session; a
+ * sign-in screen behind that gate could never be reached. They also carry no
+ * sidebar or tab bar, because none of their destinations work before there is an
+ * account to own the data.
+ *
+ * `/verify` is public for the same reason: the emailed link is opened on whatever
+ * device is to hand, which is usually not the one that signed up, and often a
+ * browser with no session at all.
  */
 export const router = createBrowserRouter([
+  { path: '/signin', element: <SignInScreen /> },
+  { path: '/signup', element: <SignUpScreen /> },
+  { path: '/verify', element: <VerifyEmailScreen /> },
   {
     path: '/',
     element: <App />,

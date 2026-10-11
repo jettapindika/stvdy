@@ -1,5 +1,7 @@
 import { NavLink } from 'react-router'
 
+import { Wordmark } from '@/components/ui/BrandIllustration'
+
 /**
  * Primary navigation, shared by the sidebar and the phone tab bar.
  *
@@ -26,28 +28,7 @@ export function Sidebar() {
       aria-label="Main"
       className="hidden w-60 shrink-0 flex-col gap-1 border-r border-rule bg-card px-3 py-4 pt-safe-top md:flex"
     >
-      <div className="mb-4 flex items-center gap-2 px-2">
-        {/* The wordmark, as in the design: a small book mark plus the name. No
-            invented logo: the mark is the book from the design's own
-            illustration, which is a user-provided asset. */}
-        <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none">
-          <path
-            d="M12 6C9.8 4.4 6.8 4 4.5 4.7v12.6c2.3-.7 5.3-.3 7.5 1.3"
-            stroke="var(--accent)"
-            strokeWidth="1.9"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 6c2.2-1.6 5.2-2 7.5-1.3v12.6c-2.3-.7-5.3-.3-7.5 1.3"
-            stroke="var(--accent)"
-            strokeWidth="1.9"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span className="text-base font-semibold tracking-tight">Stvdy</span>
-      </div>
+      <Wordmark className="mb-4 px-2" />
 
       {NAV_ITEMS.map((item) => (
         <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-item">

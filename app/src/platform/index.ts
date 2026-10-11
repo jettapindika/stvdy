@@ -2,6 +2,7 @@ import type { Platform, Runtime } from './types'
 import { webPlatform } from './web'
 
 export type {
+  DeepLinkIntent,
   DeepLinksApi,
   FilesApi,
   NotificationsApi,
