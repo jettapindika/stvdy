@@ -110,6 +110,18 @@ struct QuestionJson {
     explanation: String,
     key_points: Option<Vec<String>>,
     chunk_id: Option<Uuid>,
+    /// What the student already answered, or null. This is what makes the quiz
+    /// resumable; the SPA seeds its session from it.
+    attempt: Option<AttemptJson>,
+}
+
+#[derive(Debug, Serialize)]
+struct AttemptJson {
+    id: Uuid,
+    user_answer: String,
+    /// Null means answered but not yet judged, which is not the same as wrong.
+    correct: Option<bool>,
+    answered_at: DateTime<Utc>,
 }
 
 /// `POST /workspaces/:id/quizzes`. 201 with the quiz in status `generating`.
@@ -374,13 +386,31 @@ pub async fn get_quiz(
     Path(quiz_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let quiz = owned_quiz(&state, user.user_id, quiz_id).await?;
+    // The student's latest attempt per question comes back with the questions. Without
+    // it a reload, or a second device, restarts at question 1 with every answer lost
+    // while the attempts sit in the database: an attempt is one of the kinds a client
+    // may write offline, so "what did I already answer" has to be readable.
+    //
+    // A graded attempt supersedes an ungraded one for the same question, and the order
+    // is total (grade, then `answered_at`, then id) because two attempts can share an
+    // instant: the same rule `quiz_results` uses, so the two views cannot disagree.
     let rows = sqlx::query(
-        "select id, quiz_id, kind, prompt, options, answer, explanation, key_points, chunk_id
-           from quiz_questions
-          where quiz_id = $1 and deleted_at is null
-          order by idx, id",
+        "select q.id, q.quiz_id, q.kind, q.prompt, q.options, q.answer, q.explanation,
+                q.key_points, q.chunk_id,
+                a.id as attempt_id, a.user_answer, a.correct, a.answered_at
+           from quiz_questions q
+           left join lateral (
+                select id, user_answer, correct, answered_at
+                  from quiz_attempts
+                 where question_id = q.id and user_id = $2 and deleted_at is null
+                 order by (correct is not null) desc, answered_at desc, id desc
+                 limit 1
+           ) a on true
+          where q.quiz_id = $1 and q.deleted_at is null
+          order by q.idx, q.id",
     )
     .bind(quiz_id)
+    .bind(user.user_id)
     .fetch_all(&state.pool)
     .await
     .map_err(|error| {
@@ -395,6 +425,10 @@ pub async fn get_quiz(
     ))
 }
 
+/// An attempt further in the future than this is refused: a device with a wrong clock
+/// would otherwise pin itself to the top of every "latest attempt" read.
+const FUTURE_ATTEMPT_TOLERANCE_SECS: i64 = 24 * 60 * 60;
+
 #[derive(Debug, Deserialize)]
 pub struct AttemptBody {
     /// Client-generated, so a retry after a lost response cannot apply twice.
@@ -402,6 +436,13 @@ pub struct AttemptBody {
     pub id: Option<Uuid>,
     pub question_id: Uuid,
     pub user_answer: String,
+    /// The device's clock. Absent means the server's, which is what an online attempt
+    /// uses. An attempt is one of the five kinds a client may write offline, so the
+    /// moment the student answered is the client's to report: stamping an offline
+    /// answer with the server's sync time would put it in the wrong place in the
+    /// student's history, and would make two attempts land in the same instant.
+    #[serde(default)]
+    pub answered_at: Option<DateTime<Utc>>,
     /// Only read for a short answer. An MCQ is graded by the server, so a client that
     /// claims `correct: true` for a wrong option cannot raise its own score.
     #[serde(default)]
@@ -452,6 +493,17 @@ pub async fn record_attempt(
         body.correct
     };
 
+    let now = state.clock.now();
+    let answered_at = body.answered_at.unwrap_or(now);
+    // The same bound a review uses, and for the same reason: a device with a wrong
+    // clock would otherwise stamp an answer years ahead and pin it to the top of every
+    // "latest attempt" read.
+    if answered_at > now + chrono::Duration::seconds(FUTURE_ATTEMPT_TOLERANCE_SECS) {
+        return Err(AppError::Validation(
+            "the attempt's timestamp is in the future; check the device clock".to_string(),
+        ));
+    }
+
     let attempt_id = body.id.unwrap_or_else(Uuid::new_v4);
     let applied = sqlx::query(
         "insert into quiz_attempts
@@ -465,7 +517,7 @@ pub async fn record_attempt(
     .bind(body.question_id)
     .bind(&submitted)
     .bind(correct)
-    .bind(state.clock.now())
+    .bind(answered_at)
     .bind(user.device_id)
     .execute(&state.pool)
     .await
@@ -479,6 +531,7 @@ pub async fn record_attempt(
             "id": attempt_id,
             "question_id": body.question_id,
             "correct": correct,
+            "answered_at": answered_at,
         }
     })))
 }
@@ -642,5 +695,15 @@ fn question_from_row(row: &sqlx::postgres::PgRow) -> QuestionJson {
         explanation: row.get("explanation"),
         key_points: key_points.and_then(|value| serde_json::from_value(value).ok()),
         chunk_id: row.get("chunk_id"),
+        // `Option` from the left join: a question nobody has answered has no attempt,
+        // which is a different state from an attempt with a null verdict.
+        attempt: row
+            .get::<Option<Uuid>, _>("attempt_id")
+            .map(|id| AttemptJson {
+                id,
+                user_answer: row.get("user_answer"),
+                correct: row.get("correct"),
+                answered_at: row.get("answered_at"),
+            }),
     }
 }

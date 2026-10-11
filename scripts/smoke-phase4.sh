@@ -225,13 +225,15 @@ if [ -n "$PSQL" ]; then
   # explicit one: a run against a scratch database (whose migration set matches
   # this branch) would otherwise be answered from the shared dev database and
   # report a missing row that is present.
-  EXPLICIT_DATABASE_URL="${DATABASE_URL:-}"
-  set -a
-  # shellcheck source=/dev/null
-  . ./.env
-  set +a
-  if [ -n "$EXPLICIT_DATABASE_URL" ]; then
-    DATABASE_URL="$EXPLICIT_DATABASE_URL"
+  #
+  # Read the one key rather than sourcing the file. Sourcing executes it, and a line as
+  # ordinary as `LLM_BASE_URL= https://host` (a space after `=`) makes bash run the URL
+  # as a command: under `set -e` that aborts the run, which is how this script failed
+  # the first time it was exercised end to end. This block needs one value, so it reads
+  # one value.
+  if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
+    DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | tail -1 | cut -d= -f2-)"
+    export DATABASE_URL
   fi
   ROW=$("$PSQL" "$DATABASE_URL" -tAc "select action || '|' || coalesce(prompt_version, '') || '|' || case when provider_cost_usd is null then 'no-cost' else 'cost' end || '|' || case when credits_spent > 0 then 'still-charged' else 'consumed' end from usage_events ue join decks d on d.usage_event_id = ue.id where ue.user_id = (select id from users where email = '$EMAIL') and ue.action = 'generate_flashcards' order by ue.created_at desc limit 1")
   [ -n "$ROW" ] || fail "the generation left no usage row for generate_flashcards"

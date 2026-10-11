@@ -6,6 +6,10 @@
 /app/node_modules
 /app/dist
 /app/coverage
+# Vitest's own cache, written when a reporter flag is passed (`--reporter=json`
+# creates `app/.vitest/json/output.json`). The rule above covers only the
+# `node_modules/.vite/vitest` directory the default invocation uses.
+/app/.vitest
 # Vitest resolves its cache directory against the *current* directory, and the
 # documented invocation (`npm --prefix app test`, `justfile`) runs from the repo
 # root, so it creates `/node_modules/.vite/vitest` here. Untracked cache, ignored

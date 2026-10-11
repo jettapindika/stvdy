@@ -697,3 +697,217 @@ async fn a_quiz_with_no_difficulty_still_reads(pool: PgPool) {
     assert_eq!(body["quiz"]["status"], "ready", "{body}");
     assert_eq!(body["quiz"]["id"], quiz_id, "{body}");
 }
+
+/// The quiz is resumable: `GET /quizzes/:id` returns the student's attempt per question.
+///
+/// Without it a reload, or the second device the whole product is premised on, restarts
+/// at question 1 with every answer lost while the rows sit in the database. An attempt
+/// is one of the kinds a client may write offline, so "what did I already answer" has to
+/// be readable from the same call that fetches the questions.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_quiz_reports_what_the_student_already_answered(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![reply(1)])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "resume@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (quiz_id, question_ids) =
+        generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
+
+    // Nothing answered yet: the field is null rather than absent, so the client can tell
+    // "not answered" from "no such field".
+    let (_, quiz) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert!(quiz["questions"][0]["attempt"].is_null(), "{quiz}");
+
+    answered(
+        &app,
+        &token,
+        &quiz_id,
+        &question_ids[0],
+        "Membuka koneksi TCP.",
+        None,
+    )
+    .await;
+
+    let (_, quiz) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        quiz["questions"][0]["attempt"]["user_answer"], "Membuka koneksi TCP.",
+        "the answered question must carry its attempt back: {quiz}"
+    );
+    assert_eq!(quiz["questions"][0]["attempt"]["correct"], true);
+    assert!(
+        quiz["questions"][1]["attempt"].is_null(),
+        "the unanswered question must stay unanswered: {quiz}"
+    );
+
+    // A graded attempt supersedes an ungraded one for the same question, so a resumed
+    // short answer shows the student's own verdict rather than the blank they left.
+    answered(
+        &app,
+        &token,
+        &quiz_id,
+        &question_ids[1],
+        "Karena tidak ada handshake.",
+        None,
+    )
+    .await;
+    answered(
+        &app,
+        &token,
+        &quiz_id,
+        &question_ids[1],
+        "Karena tidak ada handshake.",
+        Some(true),
+    )
+    .await;
+
+    let (_, quiz) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        quiz["questions"][1]["attempt"]["correct"], true,
+        "the marked attempt must win over the unmarked one, whatever order they share: {quiz}"
+    );
+}
+
+/// An attempt carries the device's clock, so an offline answer lands where the student
+/// answered it rather than where the sync happened, and "the latest attempt" is decided
+/// by that timestamp rather than by two rows sharing the server's instant.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_attempt_is_stamped_with_the_device_clock_when_it_gives_one(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![reply(1)])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "clock@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (quiz_id, question_ids) =
+        generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
+
+    let earlier = "2026-01-01T00:00:00Z";
+    let later = "2026-01-02T00:00:00Z";
+
+    // Sent later-first, which is what a device whose clock ran ahead produces.
+    let mut body = serde_json::json!({
+        "question_id": question_ids[0],
+        "user_answer": "Membuka koneksi TCP.",
+        "answered_at": later,
+    });
+    let (status, response) = json(
+        &app,
+        "POST",
+        &format!("/quizzes/{quiz_id}/attempts"),
+        &token,
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["attempt"]["answered_at"], later);
+
+    // The earlier one arrives second and must become "the latest" only if it really is
+    // later, which it is not: the stored answer stays the one stamped `later`.
+    body["answered_at"] = serde_json::json!(earlier);
+    let (status, _) = json(
+        &app,
+        "POST",
+        &format!("/quizzes/{quiz_id}/attempts"),
+        &token,
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, quiz) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        quiz["questions"][0]["attempt"]["answered_at"], later,
+        "the attempt the student made last is the one reported: {quiz}"
+    );
+
+    // A timestamp far in the future is refused, or a device with a wrong clock would pin
+    // itself to the top of every read.
+    let (status, response) = json(
+        &app,
+        "POST",
+        &format!("/quizzes/{quiz_id}/attempts"),
+        &token,
+        serde_json::json!({
+            "question_id": question_ids[0],
+            "user_answer": "Membuka koneksi TCP.",
+            "answered_at": "2099-01-01T00:00:00Z",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert_eq!(response["code"], "validation", "{response}");
+}
+
+/// A retry is told *what* was wrong, not just that something was.
+///
+/// The quiz contract validates far more than the deck's does (the kind, exactly four
+/// options, an answer among them, key points on a short answer), and every one of those
+/// messages names the question's index. A fixed correction would leave that index in the
+/// logs and tell the model nothing, so the single retry would not converge.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_retry_tells_the_model_what_was_wrong(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    // The first reply is valid JSON with an MCQ that has three options, so it parses as
+    // JSON and fails the schema; the second is well formed.
+    let broken = r#"{"questions":[{"kind":"mcq","prompt":"p","options":["a","b","c"],"answer":"a","explanation":"e","label":1,"key_points":null}]}"#;
+    let llm = Arc::new(ScriptedLlm::new(vec![broken.to_string(), reply(1)]));
+    let requests = llm.clone();
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "retry@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (status, body) = quiz_created(&app, &workspace_id, &token, &source_id, 10).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    drain_jobs(&harness).await;
+
+    let sent = requests.requests();
+    assert_eq!(sent.len(), 2, "the reply must have been retried once");
+    let correction = &sent[1]
+        .messages
+        .last()
+        .expect("a correction message")
+        .content;
+    assert!(
+        correction.contains("exactly 4 options"),
+        "the correction must name the violation: {correction}"
+    );
+    assert!(
+        correction.contains("question 0"),
+        "the correction must name the question, which is why the index is in the message: {correction}"
+    );
+}

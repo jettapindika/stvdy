@@ -57,6 +57,30 @@ export function QuizScreen() {
   const questions = quiz.data?.questions ?? []
   const question: QuizQuestion | undefined = questions[index]
 
+  // Resume from what is already stored. An attempt lives server-side, so without this a
+  // reload, or the second device the whole product is premised on, would restart at
+  // question 1 with every answer lost while the rows sat in the database. The seed runs
+  // once per quiz and only moves the pointer forward, so a session in progress is never
+  // yanked backwards by a background refetch.
+  const seeded = useRef<string | null>(null)
+  useEffect(() => {
+    if (quiz.data === undefined || seeded.current === quizId) return
+    seeded.current = quizId
+
+    const answered = questions.filter((entry) => entry.attempt !== null)
+    if (answered.length === 0) return
+
+    // The first question without an attempt is where the student left off; a quiz that
+    // is fully answered opens on its results.
+    const next = questions.findIndex((entry) => entry.attempt === null)
+    if (next === -1) {
+      setIndex(questions.length - 1)
+      setPhase('results')
+      return
+    }
+    setIndex(next)
+  }, [quiz.data, quizId, questions])
+
   // Focus moves to the question on advance, because the whole point of a keyboard
   // shortcut is that the student never has to go looking for the next control.
   useEffect(() => {
@@ -122,15 +146,29 @@ export function QuizScreen() {
     )
   }
 
-  const answered = phase === 'revealed'
   const total = questions.length
+  // The question on screen counts as answered when the student just submitted it *or*
+  // when a stored attempt says they answered it earlier. Without the second half, a
+  // resumed question would show its answer as if it were still open.
+  const stored = question?.attempt ?? null
+  const answered = phase === 'revealed' || stored !== null
+  const verdict = phase === 'revealed' ? graded : (stored?.correct ?? null)
+  const priorAnswer = phase === 'revealed' ? null : (stored?.user_answer ?? null)
 
   function submit() {
     if (question === undefined) return
     const answer = question.kind === 'mcq' ? (choice ?? '') : written.trim()
     if (answer.length === 0) return
     record.mutate(
-      { questionId: question.id, userAnswer: answer },
+      {
+        questionId: question.id,
+        userAnswer: answer,
+        // The device's clock, as a review sends `reviewedAt`: an attempt is one of the
+        // kinds a client may write offline, so the moment the student answered is this
+        // device's to report. Without it the server stamps its own sync time, and two
+        // attempts made at different moments can land on the same instant.
+        answeredAt: new Date().toISOString(),
+      },
       {
         onSuccess: (response) => {
           setGraded(response.attempt.correct)
@@ -143,7 +181,12 @@ export function QuizScreen() {
   function mark(correct: boolean) {
     if (question === undefined) return
     record.mutate(
-      { questionId: question.id, userAnswer: written.trim(), correct },
+      {
+        questionId: question.id,
+        userAnswer: written.trim(),
+        correct,
+        answeredAt: new Date().toISOString(),
+      },
       { onSuccess: () => void results.refetch() },
     )
     advance()
@@ -190,7 +233,11 @@ export function QuizScreen() {
               <legend className="label">{t('quiz.chooseOne')}</legend>
               {question.options.map((option, position) => (
                 <label
-                  key={option}
+                  // Keyed by position, not by text: `validate()` requires four
+                  // non-empty options and an answer among them, not four *distinct*
+                  // ones, so a model that repeats a distractor would produce duplicate
+                  // React keys and a mis-render.
+                  key={position}
                   className={`flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-card border border-border px-3 py-2 ${
                     choice === option ? 'border-primary' : ''
                   } ${answered ? 'cursor-default' : ''}`}
@@ -200,7 +247,7 @@ export function QuizScreen() {
                     name="quiz-option"
                     className="h-4 w-4 shrink-0"
                     value={option}
-                    checked={choice === option}
+                    checked={choice === option || priorAnswer === option}
                     disabled={answered}
                     onChange={() => {
                       setChoice(option)
@@ -223,7 +270,7 @@ export function QuizScreen() {
               <textarea
                 id="quiz-answer"
                 className="field min-h-24"
-                value={written}
+                value={phase === 'revealed' ? written : (priorAnswer ?? written)}
                 readOnly={answered}
                 onChange={(event) => {
                   setWritten(event.target.value)
@@ -250,8 +297,11 @@ export function QuizScreen() {
               {/* The verdict is a word, not only a tone: "Correct" and "Not correct"
                   are readable in monochrome and to a screen reader. */}
               {question.kind === 'mcq' && (
-                <p className={graded === true ? 'note note-ready' : 'note note-danger'} role="status">
-                  {graded === true
+                <p
+                  className={verdict === true ? 'note note-ready' : 'note note-danger'}
+                  role="status"
+                >
+                  {verdict === true
                     ? t('quiz.correct')
                     : t('quiz.notCorrectWithAnswer', { answer: question.answer })}
                 </p>

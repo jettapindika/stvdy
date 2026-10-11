@@ -237,14 +237,22 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
         })}
       </div>
 
-      <div
-        id={`studio-panel-${section}`}
-        role="tabpanel"
-        aria-labelledby={`studio-tab-${section}`}
-      >
-        {section === 'flashcards' && <FlashcardsPanel workspaceId={workspaceId} />}
-        {section === 'quiz' && <QuizPanel workspaceId={workspaceId} />}
-      </div>
+      {/* Both panels are rendered and the inactive one is hidden, the pattern the outer
+          strip already uses: each tab's `aria-controls` has to resolve to an element that
+          exists, and only the active tabpanel is in the accessibility tree. Rendering only
+          the active one leaves the inactive tab pointing at nothing. */}
+      {sections.map((entry) => (
+        <div
+          key={entry.id}
+          id={`studio-panel-${entry.id}`}
+          role="tabpanel"
+          aria-labelledby={`studio-tab-${entry.id}`}
+          hidden={entry.id !== section}
+        >
+          {entry.id === 'flashcards' && <FlashcardsPanel workspaceId={workspaceId} />}
+          {entry.id === 'quiz' && <QuizPanel workspaceId={workspaceId} />}
+        </div>
+      ))}
     </div>
   )
 }
