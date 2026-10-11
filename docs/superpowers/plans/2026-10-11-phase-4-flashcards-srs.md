@@ -324,8 +324,13 @@ fn the_arrival_order_of_reviews_does_not_change_the_state() {
     backwards.reverse();
     assert_eq!(replay(created, &forwards), replay(created, &backwards));
 
-    // And replaying is pure: the same input twice is the same output twice.
-    assert_eq!(replay(created, &forwards), replay(created, &forwards));
+    // And the state is the one the rules produce, written out rather than compared
+    // with another call: `replay(x) == replay(x)` can only fail if `replay` grows a
+    // clock or a random source, so it pins nothing about the schedule.
+    let state = replay(created, &forwards);
+    assert_eq!(state.interval_days, 1);
+    assert_eq!(state.due_at, at("2026-10-14T09:00:00Z"));
+    assert!((ease_of(state) - 1.8).abs() < 1e-6, "{}", ease_of(state));
 }
 
 /// Two reviews that share a timestamp are ordered by id, so a device that
