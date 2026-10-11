@@ -10,10 +10,21 @@
 
   PAGE NUMBERS AND THE RUNNING HEADER
   -----------------------------------
-  The CSS @page margin boxes below place the running header and the page footer.
-  Verified in this repo: Chrome (headless, --print-to-pdf) DOES honour them, and
-  also honours `@page :first { ... content: none }`, so the cover has no header
-  or footer. Prince and WeasyPrint support the same syntax.
+  The CSS @page margin boxes below (`@top-center`, `@bottom-center`) are the
+  declarative form of the running header and the page footer. **Chromium does not
+  implement them**: it has never supported CSS Paged Media margin boxes, so in
+  Chrome they produce no header and no footer at all, and the `@page :first`
+  suppression below is inert there.
+
+  The server therefore supplies both through the Chrome DevTools Protocol
+  (`Page.printToPDF` with `displayHeaderFooter: true` plus `headerTemplate` and
+  `footerTemplate`), which is the primary path. Two consequences to keep in mind:
+
+  - CDP applies its templates to **every** page, including the first, so the cover
+    carries the running header and the `Halaman N dari M` footer. That is why the
+    page count the footer reports includes the cover.
+  - Prince and WeasyPrint do honour the @page boxes, so the declarative rules stay
+    for them: a future renderer that is not Chromium needs no template change.
 
   The server can additionally set them through the Chrome DevTools Protocol
   (`print_to_pdf` with headerTemplate/footerTemplate), which is useful because
@@ -78,8 +89,10 @@
   size: A4;
   margin: 18mm 16mm;
 
-  /* Declarative header/footer. Supported by Prince and WeasyPrint.
-     Chrome ignores these. The server supplies them via CDP instead. */
+  /* Declarative header/footer, honoured by Prince and WeasyPrint and ignored by
+     Chromium, which has no Paged Media margin boxes. In the Chrome path the server
+     supplies both through CDP's headerTemplate/footerTemplate instead; see the
+     header comment. */
   @top-center {
     content: "Cheatsheet UTS Jaringan Komputer";
     font-family: "Inter", "Segoe UI", Arial, sans-serif;
@@ -95,7 +108,9 @@
     padding-top: 3mm;
   }
 }
-/* No header/footer on the cover page. */
+/* No header/footer on the cover page. Inert in Chromium (no Paged Media margin
+   boxes, and CDP's templates apply to every page including the cover); kept for the
+   renderers that do honour it. */
 @page :first {
   @top-center { content: none; }
   @bottom-center { content: none; }
