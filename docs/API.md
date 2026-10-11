@@ -595,17 +595,185 @@ Another account's quiz is 404.
 
 ## Reports (Phase 6)
 
-`POST /workspaces/:id/reports/outline`, `POST /reports/:id/generate`,
-`PATCH /reports/:id`, `GET /reports/:id/export?format=`.
+Auth, and the email must be verified: a report generation spends credits, and A43
+keeps every spending action behind a confirmed address. A report is generated in
+**two steps**, and they are charged separately.
+
+`ReportView`:
+
+```json
+{ "id": "uuid", "workspace_id": "uuid", "title": "Laporan Jaringan Komputer",
+  "status": "draft", "error": null,
+  "outline": { "title": "…", "sections": [
+    { "heading": "Pendahuluan", "purpose": "…", "labels": [1], "gaps": false } ] },
+  "body_md": "## Pendahuluan\n\n…", "sections": [
+    { "heading": "Pendahuluan", "body_md": "…", "generating": false, "error": null } ],
+  "created_at": "2026-10-12T07:00:00Z", "updated_at": "2026-10-12T07:00:00Z" }
+```
+
+`status` is `draft` (an outline exists, not every section is written),
+`generating` (a section is in flight), `ready` (every section has text) or
+`failed`. The client polls while it is `generating`, which is why that value is
+never left behind: a section that finishes sets `draft` or `ready`, and a
+permanent failure sets `failed`.
+
+`outline` is the editable plan and is `null` only for a row written before this
+phase. It is passed through as stored rather than re-derived, so a field the
+student edited cannot be lost on the way out. `gaps: true` means the section's
+topic is **not** supported by the sources — the spec's "Not covered in your
+sources" flag, and the reason the field is required output rather than
+decoration.
+
+`sections` is one entry per outline section, in outline order, and is what the
+screen renders: `body_md` is `null` until that section has been written (a
+different state from written-and-empty, which is why it is nullable rather than
+`""`), `generating` is true only for the section a job is writing, and `error`
+carries a failed section's reason on that section rather than on the report.
+`body_md` is the whole document: each written section under its heading, in
+outline order.
+
+- `POST /workspaces/:id/reports/outline` body
+  `{ "topic", "style", "length", "source_ids": [uuid] }` → **201**
+  `{ "report": "...ReportView" }` in status `draft`.
+
+  Synchronous: one model call, then the outline is stored for the student to edit.
+  There is deliberately no `generate_report_outline` job — the roadmap's job table
+  is a fixed list and has no outline kind, and a call this short whose result is
+  edited before anything else happens is the opposite of the long cancellable work
+  the queue exists for.
+
+  Costs `report_outline` (**3** credits). Charged once, at the start, inside the
+  same transaction that writes the reserving row: a report that is still generating
+  has no sections at all, so a cap counted from the sections would read zero and be
+  exceeded by asking twice. 400 `validation` for an empty topic, an empty `style`
+  or `length`, or more than 20 sources; 400 when a source is not this workspace's
+  or has not finished indexing; 422 `limit_reached` with `min_plan`, `limit` and
+  `used` when the plan's `reports_per_month` is reached; 402
+  `insufficient_credits`; 502 `provider_error` when the model cannot produce an
+  outline, in which case **the charge is refunded** and the report is left
+  `failed`. 404 for another account's workspace.
+- `GET /workspaces/:id/reports` → 200 `{ "reports": [ "...ReportView" ] }`, most
+  recently updated first, tombstones excluded. Not in the spec's route list; added
+  because without it a report is unreachable after a reload.
+- `GET /reports/:id` → 200 `{ "report": "...ReportView" }`. 404 for another
+  account's report (never 403: whether an id exists is not information this route
+  leaks).
+- `PATCH /reports/:id` body `{ "outline": { "title", "sections": [ … ] } }` → 200
+  `{ "report": "...ReportView" }`. Replaces the outline wholesale rather than
+  patching field by field: it is editable, so an edit the generator could not have
+  produced is still valid input as long as it parses, and a field-level patch would
+  need a second shape to describe a rename, a reorder and a delete.
+
+  **Every section must carry `heading`, `purpose`, `labels` and `gaps`.** The body
+  is validated by the same core contract the model's reply goes through, so an
+  outline that drops `labels` — the chunk labels a section's claims cite — is 400
+  `validation` rather than stored with a default. The SPA round-trips all four
+  fields.
+
+  The section texts follow their headings, and only when a heading is unambiguous:
+  a reorder keeps each section's text, while a rename, a duplicate heading or a
+  deletion leaves that section unwritten. The replaced `body_md` is written to
+  `report_revisions` before it is overwritten, so the losing side of a two-device
+  edit is recoverable (the roadmap's conflict rule). No charge. 400 `validation`
+  for an outline that does not match the contract; 404 for another account's
+  report.
+- `POST /reports/:id/generate` body `{ "index": 0 }` → **202**
+  `{ "report": "...ReportView" }` with that section in flight. The work is a
+  `generate_report_section` job; poll `GET /reports/:id`.
+
+  Costs `report_section` (**6** credits) **per section**, so a student can fix one
+  section without paying for the whole report again. Regenerating an index replaces
+  that section's text and nothing else. 400 `validation` for an index outside the
+  outline; 409 `conflict` when the report already has a section in flight, which is
+  what stops two devices rewriting `body_md` from rows they read before the other
+  wrote; 402 `insufficient_credits`. A generation that fails for good refunds the
+  charge exactly once and marks the report `failed` with a readable `error`.
+- `GET /reports/:id/export?format=md|pdf` → the document as bytes, with
+  `content-disposition: attachment`. `md` is `text/markdown; charset=utf-8` and is
+  `body_md` verbatim; `pdf` is `application/pdf`, printed through the server's
+  Chromium with the report's title as the running header and a `Halaman N dari M`
+  footer, and is available only where a renderer is configured (502
+  `provider_error` otherwise).
+
+  Both check the plan's `export_formats` **before** anything is produced and answer
+  **403 `plan_required`** with `min_plan` when the format is not included — free
+  gets `[md]`, pro and power get `pdf`. 400 `validation` for an unknown format
+  (a different remedy from an upgrade, so the two are not collapsed); 409
+  `conflict` when no section has been written yet.
 
 ## Cheatsheets (Phase 6)
 
-`POST /workspaces/:id/cheatsheets` (body: scope, exam_date, depth, source_ids),
-`GET /cheatsheets/:id`, `GET /cheatsheets/:id/html`, `GET /cheatsheets/:id/pdf`,
-`POST /cheatsheets/:id/re-render`.
+Auth, verified email, and credits. A cheatsheet is one strict-JSON generation
+rendered through a fixed print template: the model writes **content**, the server
+owns every tag, and the typed blocks are stored so the document can be re-rendered
+later for free.
 
-`re-render` regenerates HTML and PDF from the stored JSON blocks without calling
-the model, so a template fix can reach documents users already have.
+`CheatsheetView`:
+
+```json
+{ "id": "uuid", "workspace_id": "uuid", "title": "UTS Jaringan Komputer",
+  "scope": "UTS Jaringan Komputer", "exam_date": "2026-11-01", "depth": "normal",
+  "source_ids": ["uuid"], "status": "ready", "error": null,
+  "template_version": "cheatsheet.v1", "page_count": 6,
+  "created_at": "2026-10-12T07:00:00Z", "updated_at": "2026-10-12T07:00:00Z" }
+```
+
+`status` is `generating` while the model is writing, `ready` once the blocks and
+the HTML are stored, and `failed` when the generation gave up. **A cheatsheet whose
+PDF failed is still `ready`**: the blocks are the document, and a print is
+retryable and free, so a browser problem must not discard a generation the student
+paid for. The print's failure is reported in `error`, and `page_count` stays `null`
+until a print exists — it is read back from the renderer rather than estimated,
+because the footer's `Halaman N dari M` is printed from that same number.
+`template_version` names which `templates/cheatsheet.*.html` produced the HTML, so
+an old document is visible.
+
+The internal object keys (`blocks_key`, `html_key`, `pdf_key`) are **not** part of
+the payload: a client has no use for a storage key, and exposing one would invite a
+direct-storage contract this API does not offer.
+
+- `POST /workspaces/:id/cheatsheets` body
+  `{ "scope", "exam_date"?, "depth", "source_ids": [uuid] }` → **201**
+  `{ "cheatsheet": "...CheatsheetView" }` in status `generating`. `depth` is
+  `brief`, `normal` or `thorough`; `exam_date` is `YYYY-MM-DD` or absent.
+
+  Costs `report_section` (**6** credits) — the matrix has no `cheatsheet` key, and
+  the roadmap says the report's section price is what a cheatsheet costs rather
+  than a price invented here. Charged inside the same transaction that writes the
+  reserving row, exactly as a quiz is. There is **no monthly cap**: the matrix has
+  no cheatsheet allowance, and counting a cheatsheet against `reports_per_month`
+  would invent a policy `config/plans.toml` does not state (A119). 400
+  `validation` for an empty scope, an unknown depth, an empty or oversized
+  `source_ids`, an exam date more than ten years out, or a source that is not this
+  workspace's and finished indexing; 402 `insufficient_credits`; 404 for another
+  account's workspace.
+- `GET /workspaces/:id/cheatsheets` → 200 `{ "cheatsheets": [ "...CheatsheetView" ] }`,
+  newest first. Not in the spec's route list; added for the same reason the quiz
+  list was.
+- `GET /cheatsheets/:id` → 200 `{ "cheatsheet": "...CheatsheetView" }`. 404 for
+  another account's row.
+- `GET /cheatsheets/:id/html` → **200 `text/html; charset=utf-8`**, the document
+  itself and not a JSON envelope. The preview frame consumes it as `srcdoc`, and
+  the free plan's remedy for a withheld PDF is to print this document from a
+  browser — neither works through an envelope. Served with `cache-control:
+  private, no-store` and a `content-security-policy` that allows no script, because
+  the document contains text a model wrote. Not plan-gated: the HTML is the
+  document the credits bought. 409 `conflict` before the generation has rendered
+  it; 404 for another account's row.
+- `GET /cheatsheets/:id/pdf` → **200 `application/pdf`**, plan-gated on
+  `export_formats` exactly like the report export (403 `plan_required` with
+  `min_plan`). 409 `conflict` when the document is ready but its print does not
+  exist yet — the cheatsheet is there, and the remedy is a re-render, which is not
+  what a 404 says. The plan check runs before the resource is read, which leaks
+  nothing: a non-owner on a plan without `pdf` gets the same 403 an owner would.
+- `POST /cheatsheets/:id/re-render` → 200 `{ "cheatsheet": "...CheatsheetView" }`.
+  Reads the stored blocks, re-runs the **pure** renderer with the current template,
+  updates `html_key` and `template_version`, and re-queues the print. It never
+  calls the model and **costs nothing**: no charge, no ledger row, no usage event.
+  That is the whole reason the blocks are persisted — a template fix reaches a
+  document the student may already have printed, and re-generating through the
+  model would cost credits *and* produce different content. 409 `conflict` when the
+  row has no stored blocks; 404 for another account's row.
 
 ## Tasks (Phase 9)
 

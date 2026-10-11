@@ -621,6 +621,98 @@ Constants: `MAX_REQUESTED_QUESTIONS = 50`, `MAX_SOURCES = 20`,
 `GENERATION_CHUNK_LIMIT = 40` chunks shared with the deck generator
 (`chunks::select_for_generation`, round-robin across the selected sources, A99).
 
+## Documents: content, layout, and the one step that needs a browser (Phase 6)
+
+Phase 6 adds two documents and one pipeline, and the pipeline's shape is the
+phase's whole design: **content versus layout**.
+
+```
+model  ──typed blocks──▶  pure renderer  ──HTML──▶  Chromium  ──PDF
+        (crates/core)     (crates/core)              (crates/server)
+```
+
+### The renderer is a pure function
+
+`crates/core/src/render/` turns `(blocks, template_version, cover)` into HTML with
+no clock, no network, no randomness and no model. Three consequences, and each is a
+decision rather than a side effect:
+
+- **Re-rendering is free and byte-identical.** `POST /cheatsheets/:id/re-render`
+  reads the stored blocks, re-runs the renderer with the *current* template and
+  writes new HTML. It never calls the model, so it costs nothing and produces the
+  same content: re-generating through the model would cost credits *and* give a
+  student different content for a document they may already have printed. The cover
+  is the one place this could break, so its `generated_at` is the row's
+  `created_at` rather than a clock reading (A127).
+- **It is unit-testable without Chromium.** Escaping, the SVG allowlist, the id
+  prefixing and determinism are all tested in `crates/core/tests/render.rs`, on a
+  laptop, in milliseconds.
+- **The model writes data, never markup.** Every field is escaped before any tag is
+  written; a `<script>` in a source document is displayed literally. A model that
+  returns an element outside the SVG allowlist drops the whole block and the drop is
+  recorded, rather than stripping the offending part and rendering a diagram the
+  model did not draw.
+
+### Chromium is the last step, and it is optional
+
+`crates/server/src/render/chrome.rs` holds the phase's one native dependency: a
+pooled `headless_chrome` browser, one process reused across renders, reached only
+for the print. It is reached through `AppState.renderer: Option<Arc<Renderer>>`, and
+`None` is a **supported state** (A130): without a browser the cheatsheet pipeline
+still stores the blocks and the HTML and the cheatsheet is `ready`, the PDF route
+answers 409 `conflict` until a print exists, and `render_cheatsheet_pdf` fails
+permanently with a readable reason instead of retrying five times for a browser no
+retry will install. A failed print never touches the generation's `status` or its
+charge: the blocks are the document, and the print is retryable and free.
+
+Two things about the print are easy to get wrong and are pinned in code:
+
+- **The header and the footer come from CDP, not from the template.** Chromium has
+  never implemented CSS Paged Media margin boxes, so the template's `@top-center`
+  and `@bottom-center` rules produce nothing in Chrome. `displayHeaderFooter` plus
+  `headerTemplate`/`footerTemplate` is the only path that works, and CDP applies its
+  templates to *every* page including the cover — which is why the footer's `M`
+  counts the cover. `page_count` is read back from the produced document rather than
+  assumed, because that same number is what the footer prints.
+- **The renderer waits for the template's `data-math-ready` sentinel.** A KaTeX that
+  failed to load renders `$x$` as literal text with no error anywhere: the page
+  looks plausible, the PDF is produced, and the defect is only visible on paper. The
+  renderer polls the attribute the template sets and fails the render on any value
+  other than `"1"`, with a bounded deadline so a template that never sets it fails
+  the job instead of hanging the worker (A128).
+
+### The report's two steps are not symmetric
+
+A report is an editable outline and then per-section generation, and the two are
+deliberately different shapes:
+
+- **The outline is synchronous in its route.** One short completion whose result the
+  student edits before anything else happens, and the roadmap's job table is a fixed
+  list with no outline kind. Adding one would put this phase out of step with a table
+  later phases read.
+- **A section is a job** (`generate_report_section`). It is per-index, retryable, and
+  a report can be long enough to outlive a request. The payload names the index, the
+  row records it in `generating_index`, and the claim is
+  `where status = 'generating' and generating_index = $2` — so two devices cannot
+  both write `body_md` from rows they read before the other wrote.
+
+`sections_md` is index-aligned with the outline, and `body_md` is re-derived from the
+whole array rather than appended to. That is what keeps the document and the
+per-section view from disagreeing, and what makes a reorder re-emit the document in
+the new order. An outline edit carries a section's text across by heading, and only
+when the heading is unambiguous (A122): a rename or a duplicate heading leaves that
+section unwritten, because printing one section's prose under another's heading is a
+lie the page cannot correct.
+
+### The reservation pattern is the same one Phase 5 landed
+
+Both new generators charge inside the transaction that writes their reserving row,
+under the same per-user advisory lock, and both count the month from rows that
+include the ones still generating. A report that is still generating has no section
+text at all, so a cap counted from the sections would read zero and be exceeded by
+asking twice in a row. The refund path is the same one too, with `RefundTarget`
+gaining a `Report` and a `Cheatsheet` arm (A131).
+
 ## Build environment note: the server's release binary is blocked here
 
 **What ships to users builds fine.** `tauri build --no-bundle` and the full
