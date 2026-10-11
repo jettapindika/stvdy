@@ -1350,3 +1350,186 @@ async fn the_deck_cost_descriptor_matches_the_config(pool: PgPool) {
         "the existing shape stays valid for a client that ignores cost: {body}"
     );
 }
+
+/// The monthly cap counts the cards a deck has *requested*, not only the ones that
+/// have already been written.
+///
+/// Free allows 30 a month. The deck's cards do not exist yet at request time: the
+/// job writes them later. Counting only `flashcards` rows therefore reads zero while
+/// a deck is still generating, so a second request sees a full allowance and the cap
+/// can be exceeded simply by asking twice in a row. The whole point of
+/// `enforce_batch` is to refuse a batch that does not fit, which it cannot do if the
+/// first batch is invisible to it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deck_still_generating_counts_against_the_monthly_limit(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "reserve@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    // The whole allowance in one deck. The job is deliberately not drained, so no
+    // card row exists yet and the request is still in flight.
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 30).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // One more card does not fit, whether or not the first deck has finished.
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a deck still generating must count against the month: {body}"
+    );
+    assert_eq!(body["code"], "limit_reached", "{body}");
+    assert_eq!(body["limit"], 30, "{body}");
+}
+
+/// A deck built from several sources must draw on **all** of them.
+///
+/// `load_chunks` used to take its bounded window in `(source_id, idx)` order, which
+/// spends the whole budget on whichever source sorts first. A deck from a 500-chunk
+/// textbook and a one-page summary therefore carried the textbook alone: the student
+/// selected two sources and silently got cards from one. The chunks are now taken
+/// round-robin, so the second chunk in the prompt comes from a different source than
+/// the first.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deck_draws_on_every_selected_source(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Q?", "A.", 1)]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "spread@example.test").await;
+
+    let (status, workspace) = json(
+        &app,
+        "POST",
+        "/workspaces",
+        &token,
+        serde_json::json!({ "name": "Two sources" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{workspace}");
+    let workspace_id = workspace["workspace"]["id"].as_str().unwrap().to_string();
+    let user_id: Uuid =
+        sqlx::query_scalar("select id from users where email = 'spread@example.test'")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+
+    // The sources and their chunks are inserted directly: ingestion is Phase 1's
+    // subject, and this test needs a source with more chunks than another, which a
+    // pasted paragraph cannot produce.
+    let mut source_ids = Vec::new();
+    for (title, texts) in [
+        (
+            "Big textbook",
+            vec!["ALPHA one", "ALPHA two", "ALPHA three"],
+        ),
+        ("One-page summary", vec!["BETA only"]),
+    ] {
+        let source_id: Uuid = sqlx::query_scalar(
+            "insert into sources (user_id, workspace_id, kind, title, status)
+             values ($1, $2, 'text', $3, 'ready') returning id",
+        )
+        .bind(user_id)
+        .bind(Uuid::parse_str(&workspace_id).unwrap())
+        .bind(title)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+        for (index, text) in texts.iter().enumerate() {
+            sqlx::query(
+                "insert into chunks (source_id, page, idx, content, content_hash, embedder)
+                 values ($1, null, $2, $3, $4, 'test')",
+            )
+            .bind(source_id)
+            .bind(index as i32)
+            .bind(text)
+            .bind(format!("{source_id}-{index}"))
+            .execute(&harness.state.pool)
+            .await
+            .unwrap();
+        }
+        source_ids.push(source_id);
+    }
+
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/decks"),
+        &token,
+        serde_json::json!({
+            "title": "Both",
+            "source_ids": source_ids,
+            "count": 1,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    drain_jobs(&harness).await;
+
+    // The prompt is where the spread is observable: the first two entries of the
+    // `<sources>` block must come from different sources. Under the old ordering the
+    // second was "ALPHA two".
+    let requests = llm.requests();
+    assert_eq!(requests.len(), 1, "one generation, one call");
+    let prompt = &requests[0].messages[0].content;
+    let first = prompt
+        .find("ALPHA one")
+        .expect("the first source's first chunk");
+    let second = prompt
+        .find("ALPHA two")
+        .expect("the first source's second chunk");
+    let other = prompt.find("BETA only").expect("the second source's chunk");
+    assert!(
+        other < second,
+        "the second source must contribute before the first source's second chunk: \
+         alpha1={first} beta={other} alpha2={second}"
+    );
+}
+
+/// The same source twice is one source, not an invalid request.
+///
+/// The readiness check compares `count(*)` (rows) with `source_ids.len()` (the
+/// request), so a repeat made them disagree and the request was refused with "every
+/// source must be one of this workspace's" -- which was false: the source was fine,
+/// the array had a duplicate.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_repeated_source_id_is_deduplicated_rather_than_refused(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Q?", "A.", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "dup@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/decks"),
+        &token,
+        serde_json::json!({
+            "title": "Repeated",
+            "source_ids": [source_id, source_id],
+            "count": 1,
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a duplicate id is not an invalid source: {body}"
+    );
+    // And the stored deck does not carry the repeat into every later read.
+    assert_eq!(
+        body["deck"]["source_ids"].as_array().unwrap().len(),
+        1,
+        "{body}"
+    );
+}

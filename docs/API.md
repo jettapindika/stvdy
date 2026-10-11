@@ -381,6 +381,9 @@ included.
   so the quote can never overcharge (A84).
 - 422 `limit_reached` when the request would cross the plan's
   `flashcards_per_month`, counted over the user's **local calendar month** (A85).
+  The count includes the cards that decks still generating have requested, so a
+  burst of concurrent requests cannot each pass on the last slot; the check, the
+  charge and the deck row are one transaction for the same reason.
   The body carries `limit` and `used`.
 - 403 `email_not_verified`.
 

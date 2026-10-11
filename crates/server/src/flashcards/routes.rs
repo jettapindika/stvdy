@@ -114,6 +114,19 @@ pub async fn create_deck(
         )));
     }
 
+    // Deduplicated before it is validated or stored, because `count(*)` counts rows
+    // and `len()` counts the request: a client that sent the same source twice would
+    // otherwise be refused with "every source must be one of this workspace's", which
+    // is false -- the source is fine, the array had a repeat. First-seen order is
+    // kept so the stored `source_ids` reads the way the client sent it.
+    let mut source_ids: Vec<Uuid> = Vec::with_capacity(body.source_ids.len());
+    for id in &body.source_ids {
+        if !source_ids.contains(id) {
+            source_ids.push(*id);
+        }
+    }
+    let source_ids = source_ids;
+
     workspaces::owned_name(&state, user.user_id, workspace_id).await?;
 
     // Every source must be this user's, in this workspace, and finished ingesting:
@@ -124,13 +137,13 @@ pub async fn create_deck(
           where id = any($1) and workspace_id = $2 and user_id = $3
             and status = 'ready' and deleted_at is null",
     )
-    .bind(&body.source_ids)
+    .bind(&source_ids)
     .bind(workspace_id)
     .bind(user.user_id)
     .fetch_one(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("checking the deck's sources: {error}")))?;
-    if ready != body.source_ids.len() as i64 {
+    if ready != source_ids.len() as i64 {
         return Err(AppError::Validation(
             "every source must be one of this workspace's, and finished indexing".to_string(),
         ));
@@ -138,13 +151,40 @@ pub async fn create_deck(
 
     let plan = user.plan();
     let month_start = util::local_month_start(&user.timezone, state.clock.as_ref());
+
+    // The count, the charge and the deck row commit together, because the limit
+    // depends on the count: in separate transactions a second request reads a count
+    // the first has not committed yet, and two concurrent requests both pass on the
+    // last slot. The advisory lock is the same key `credits::spend_in` takes below,
+    // so this serialises deck creation per account; it is transaction-scoped and
+    // re-entrant, so the spend does not block on this same lock.
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a deck: {error}")))?;
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(user.user_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the deck lock: {error}")))?;
+
+    // The cards already written this month **plus** the cards in-flight decks have
+    // reserved. The second term is what makes the cap hold under concurrency: a deck
+    // that is still generating has no card rows yet, so without it a burst of
+    // requests would each read zero used and every one of them would be allowed,
+    // handing out many times the monthly allowance. A `failed` deck is excluded --
+    // its reservation was refunded, so it must not keep consuming the allowance.
     let used: i64 = sqlx::query_scalar(
-        "select count(*)::bigint from flashcards
-          where user_id = $1 and deleted_at is null and created_at >= $2",
+        "select (select count(*)::bigint from flashcards
+                  where user_id = $1 and deleted_at is null and created_at >= $2)
+              + (select coalesce(sum(requested_count), 0)::bigint from decks
+                  where user_id = $1 and deleted_at is null
+                    and status = 'generating' and created_at >= $2)",
     )
     .bind(user.user_id)
     .bind(month_start)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("counting this month's cards: {error}")))?;
 
@@ -167,7 +207,8 @@ pub async fn create_deck(
     // **month** (`flashcards_per_month`, enforced above with `enforce_batch`) and has
     // no per-day card allowance, so the two slots the chat path uses are both empty
     // here. Passing the chat cap would silently cap decks at `chat_msgs_per_day`.
-    let spent = credits::spend(
+    let spent = credits::spend_in(
+        &mut tx,
         &state,
         user.user_id,
         plan,
@@ -177,7 +218,7 @@ pub async fn create_deck(
     )
     .await?;
 
-    let (deck_id, created_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
+    let (deck_id, created_at): (Uuid, DateTime<Utc>) = sqlx::query_as(
         "insert into decks
             (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent, usage_event_id)
          values ($1, $2, $3, $4, 'generating', $5, $6, $7)
@@ -186,34 +227,22 @@ pub async fn create_deck(
     .bind(user.user_id)
     .bind(workspace_id)
     .bind(&title)
-    .bind(&body.source_ids)
+    .bind(&source_ids)
     .bind(body.count as i32)
     .bind(cost as i32)
     .bind(spent.usage_event_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
-    {
-        Ok(row) => row,
-        Err(error) => {
-            // The credit is already spent and there is no deck to fail, so the
-            // charge must come back here rather than in a job that will never run.
-            // `ref_id` names the usage event, which is the row that was charged.
-            if let Err(refund_error) = credits::refund(
-                &state.pool,
-                user.user_id,
-                cost,
-                spent.usage_event_id,
-                "refund",
-            )
-            .await
-            {
-                tracing::error!(%refund_error, "could not refund a deck that was never created");
-            }
-            return Err(AppError::Internal(anyhow::anyhow!(
-                "creating the deck: {error}"
-            )));
-        }
-    };
+    .map_err(|error| {
+        // A failed insert needs no refund by hand: the charge, the reservation and
+        // the row are all in this transaction, so rolling back unspends the credit.
+        // (The earlier shape spent in its own transaction and had to compensate.)
+        AppError::Internal(anyhow::anyhow!("creating the deck: {error}"))
+    })?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing the deck: {error}")))?;
 
     // The job is enqueued after the spend and after the row exists, so a failure
     // here leaves a deck the user can see failing rather than a charge with no
@@ -248,7 +277,7 @@ pub async fn create_deck(
         id: deck_id,
         workspace_id,
         title,
-        source_ids: body.source_ids,
+        source_ids: source_ids.clone(),
         status: "generating".to_string(),
         error: None,
         requested_count: body.count as i32,

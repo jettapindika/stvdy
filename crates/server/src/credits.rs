@@ -123,24 +123,51 @@ pub async fn spend(
     credits: i64,
     daily_caps: [Option<DailyCap>; 2],
 ) -> AppResult<Spent> {
-    let pool = &state.pool;
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a spend: {error}")))?;
+    let spent = spend_in(&mut tx, state, user_id, plan, action, credits, daily_caps).await?;
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a spend: {error}")))?;
+    Ok(spent)
+}
+
+/// [`spend`] against an existing connection, so a caller that must make the charge
+/// atomic with a check the charge depends on can.
+///
+/// `create_deck` is that caller. The monthly card limit is counted from the cards
+/// already written **plus** the cards in-flight decks have requested, and that count
+/// only means anything if the charge and the deck row that reserves the cards commit
+/// together: in two transactions a second request reads a count the first has not
+/// committed yet, which is how a monthly cap is exceeded by asking twice.
+///
+/// The advisory lock is still taken here, on the caller's connection. It is
+/// transaction-scoped and re-entrant, so a caller that already holds it (as
+/// `create_deck` does, before it counts) is not blocked by its own lock.
+pub async fn spend_in(
+    conn: &mut sqlx::PgConnection,
+    state: &AppState,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+    action: &str,
+    credits: i64,
+    daily_caps: [Option<DailyCap>; 2],
+) -> AppResult<Spent> {
     if credits < 0 {
         return Err(AppError::Internal(anyhow::anyhow!(
             "a spend must not be negative (action {action}, credits {credits})"
         )));
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a spend: {error}")))?;
-
     // `pg_advisory_xact_lock` takes a bigint; `hashtext` gives a stable int4 from
     // the user id, which is the same key the sync triggers use for their own
     // ordering lock, so the two cannot interleave in a surprising order.
     sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
         .bind(user_id.to_string())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the spend lock: {error}")))?;
 
@@ -154,7 +181,7 @@ pub async fn spend(
         .bind(cap.action)
         .bind(cap.since)
         .bind(cap.uncached_only)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("counting usage: {error}")))?;
 
@@ -169,7 +196,7 @@ pub async fn spend(
         )
         .bind(user_id)
         .bind(bucket)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("reading a bucket: {error}")))?;
         available += sum;
@@ -208,7 +235,7 @@ pub async fn spend(
         )
         .bind(user_id)
         .bind(bucket)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("reading a bucket: {error}")))?;
 
@@ -225,7 +252,7 @@ pub async fn spend(
         .bind(-take)
         .bind(bucket)
         .bind(format!("usage:{action}"))
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("writing the ledger: {error}")))?;
 
@@ -239,13 +266,9 @@ pub async fn spend(
     .bind(user_id)
     .bind(action)
     .bind(i32::try_from(credits).unwrap_or(i32::MAX))
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("writing a usage event: {error}")))?;
-
-    tx.commit()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a spend: {error}")))?;
 
     Ok(Spent {
         usage_event_id,

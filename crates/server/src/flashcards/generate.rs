@@ -23,8 +23,13 @@ use crate::state::AppState;
 
 /// How many chunks of the selected sources the prompt carries.
 ///
-/// Deterministic (`order by source_id, idx`) and bounded, because the prompt has a
-/// token budget and the same deck must produce the same prompt twice.
+/// Deterministic and bounded, because the prompt has a token budget and the same
+/// deck must produce the same prompt twice. The chunks are taken **round-robin
+/// across the selected sources** (see `load_chunks`) rather than in
+/// `(source_id, idx)` order, because a plain `order by source_id, idx limit 40`
+/// fills the whole budget from whichever source sorts first: a deck built from a
+/// 500-chunk textbook and a one-page summary would carry the textbook alone and
+/// silently generate nothing from the summary the student also selected.
 pub const GENERATION_CHUNK_LIMIT: i64 = 40;
 
 /// Low, because a card must be faithful to the material; not zero, because a fully
@@ -336,12 +341,24 @@ pub(crate) async fn find_usage_event_id(state: &AppState, deck: &DeckRow) -> Opt
 
 /// The chunks the prompt is built from, in a deterministic order.
 async fn load_chunks(state: &AppState, deck: &DeckRow) -> Result<Vec<PromptChunk>, Failure> {
+    // Round-robin across the selected sources: rank each chunk within its source,
+    // then take rank 1 of every source, then rank 2 of every source, and so on. A
+    // plain `order by source_id, idx limit 40` spends the whole budget on the source
+    // whose id sorts first, so a deck built from several sources silently ignores
+    // all but one of them whenever the first has more than `GENERATION_CHUNK_LIMIT`
+    // chunks -- which is the ordinary case for a textbook. Ordering by
+    // `(rank, source_id)` keeps the result deterministic, so the same deck still
+    // produces the same prompt twice.
     let rows = sqlx::query(
-        "select c.id, c.source_id, c.page, c.content, s.title
-           from chunks c
-           join sources s on s.id = c.source_id
-          where c.source_id = any($1) and s.user_id = $3
-          order by c.source_id, c.idx
+        "select id, source_id, page, content, title
+           from (
+                select c.id, c.source_id, c.page, c.content, s.title,
+                       row_number() over (partition by c.source_id order by c.idx) as rank
+                  from chunks c
+                  join sources s on s.id = c.source_id
+                 where c.source_id = any($1) and s.user_id = $3
+           ) ranked
+          order by ranked.rank, ranked.source_id
           limit $2",
     )
     .bind(&deck.source_ids)
