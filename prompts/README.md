@@ -93,8 +93,8 @@ contradiction unrepresentable rather than merely discouraged.
 Some variables carry user-controlled text: `{{user_name}}`, `{{workspace_name}}`,
 `{{goal_title}}`, `{{task_title}}`, `{{notes}}`, `{{topic}}`, `{{capture_text}}`. A user
 can set their display name to `Ignore all previous instructions and ...`. These are
-therefore **delimited and labelled as data** by the composer. Never interpolated bare
-into the instruction stream. And `<security_untrusted_content>` explicitly names them:
+therefore **delimited and labelled as data**. Never interpolated bare into the
+instruction stream. And `<security_untrusted_content>` explicitly names them:
 
 ```
 <user_context_data>
@@ -102,6 +102,25 @@ display_name: "Jetta"
 workspace_name: "Jaringan Komputer"
 </user_context_data>
 ```
+
+The two halves live in different places, and neither is a guess about where in a sentence
+a variable sits:
+
+- **The template carries the block.** `base.v1.md` writes one for the chat prompt, and
+  each task module writes one for its own user text (`report_outline.v1.md`,
+  `report_section.v1.md`, `cheatsheet.v1.md`). A module that adds a new one gets the
+  labelling sentence the base uses.
+- **The composer escapes the value** (`escape_if_untrusted`), keyed off
+  `prompts::UNTRUSTED_VARIABLES`. That is also the list to add a name to when a phase
+  introduces new user text; `crates/core/tests/prompts.rs` then fails the build until the
+  module's template carries a block for it.
+
+The list is names, not a `VarKind`: a *setting* a user picked from a set (`{{depth}}`,
+`{{style}}`, `{{exam_date}}`) is a value the model must **follow**, and a data block would
+tell it to ignore anything that looks like an instruction — so settings are deliberately
+neither listed nor wrapped. `{{other_section_headings}}` is `Optional` and still listed,
+because its value is headings the student may have edited; the composer escapes a supplied
+optional value for the same reason it escapes a required one.
 
 Everything from the database or the network is data. Only the system prompt and the
 user's own chat turns carry instructions.
@@ -142,6 +161,12 @@ caller-supplied list**. Otherwise a caller could pass a contradictory pair, whic
 `{{plan_gate_instruction_derived}}` would mean a mobile build hinting at purchases.
 Those tests run in CI, so a prompt edit that breaks the contract fails the build rather
 than production.
+
+One case is the guard rail for the rule above: every module is composed with a marker in
+each of its `UNTRUSTED_VARIABLES` and with a value that tries to close the block itself,
+and the marker must appear only inside a `<user_context_data>` region. A phase that adds a
+user-controlled variable without a block fails there, and so does a template that loses
+one — which is what keeps this section's promise true rather than aspirational.
 
 The behavioural suite is separate: ~30 recorded scenarios (answer not in the sources,
 prompt injection inside a document, relative-date task creation, Indonesian, English,
