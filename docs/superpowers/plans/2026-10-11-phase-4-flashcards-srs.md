@@ -1607,6 +1607,44 @@ async fn a_generation_that_fails_for_good_refunds_the_credits(pool: PgPool) {
     assert_eq!(after, before, "the 4 credits must come back exactly once");
 }
 
+/// A failed generation leaves an honest `usage_events` row: the action happened, the
+/// provider was called, and the prompt version is recorded. A row that vanishes when
+/// the job fails would hide a real cost from the margin report (A41).
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_generation_still_records_its_usage_row(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        "not json".to_string(),
+        "still not json".to_string(),
+    ]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "usage@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (_, body) = deck_created(&app, &workspace_id, &token, &source_id, 10).await;
+    let _deck_id = body["deck"]["id"].as_str().unwrap();
+    drain_jobs(&harness).await;
+
+    let (action, prompt_version): (String, Option<String>) = sqlx::query_as(
+        "select action, prompt_version from usage_events
+          where user_id = (select id from users where email = 'usage@example.test')
+            and action = 'generate_flashcards'
+          order by created_at desc limit 1",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(action, "generate_flashcards");
+    assert_eq!(
+        prompt_version.as_deref(),
+        Some("flashcards.v1"),
+        "a model call must be attributable to a prompt version"
+    );
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_card_whose_label_was_not_sent_is_stored_without_a_chunk(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -2516,7 +2554,8 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
     };
 
     // Idempotent: a retried job whose first attempt already wrote the cards must
-    // not write a second deck's worth. The status is the marker.
+    // not write a second deck's worth, and a deck the enqueue path already failed
+    // must not be resurrected into `ready`. The status is the marker.
     if deck.status != "generating" {
         return Ok(());
     }
@@ -2632,11 +2671,11 @@ async fn insert_cards(state: &AppState, deck: &DeckRow, generation: Generation) 
         // Attached after the cards exist, because the token counts and the cost only
         // exist once the provider has answered, and the row was created before that
         // so the credit is spent whether or not the model replies.
-        if let Err(error) = crate::credits::record_provider_usage(
+        if let Err(error) = crate::credits::record_usage(
             &state.pool,
-            usage_event_id,
-            generation.in_tokens,
-            generation.out_tokens,
+            Some(usage_event_id),
+            Some(generation.in_tokens),
+            Some(generation.out_tokens),
             generation.provider_cost_usd,
             &generation.prompt_version,
         )
@@ -2659,6 +2698,54 @@ async fn insert_cards(state: &AppState, deck: &DeckRow, generation: Generation) 
     Ok(())
 }
 ```
+
+`crates/server/src/credits.rs` — rename `record_provider_usage` to `record_usage` and
+generalise it. Its current shape forces the caller to supply the provider's token
+counts, which a job that failed before calling the model cannot know; and a
+`usage_events` row created by `spend` must be findable again by
+`(action, created_at)` when there is no id to hand:
+
+```rust
+/// The `usage_events` row a spend just created, for a caller that has to look it up
+/// later (a job, which has no access to the route's `Spent`).
+///
+/// `(user_id, action, created_at)` is unique in practice: `spend` writes exactly one
+/// row per action per transaction, and the `created_at` is the spend's. The caller
+/// that already has a `usage_event_id` passes it instead.
+pub async fn latest_usage_event(
+    pool: &PgPool,
+    user_id: Uuid,
+    action: &str,
+    since: DateTime<Utc>,
+) -> AppResult<Option<Uuid>> { ... }
+
+/// Attaches token counts, the provider's cost and the prompt version to a usage row.
+///
+/// `usage_event_id: Option<Uuid>` because the generation job has no id: the row was
+/// written by `spend`, and the job finds it with `latest_usage_event`. A `None` id is
+/// a no-op rather than an error: a usage row that cannot be found is a reporting gap,
+/// not a reason to fail a job whose cards are already stored and paid for.
+///
+/// `prompt_version` is mandatory: every model call must be attributable to a prompt
+/// version, or a quality regression cannot be traced (the roadmap's rule).
+///
+/// `in_tokens`/`out_tokens` are `Option<u32>`: a failed generation records no tokens
+/// rather than a zero, because zero would read as "the model returned nothing" in a
+/// cost report.
+pub async fn record_usage(
+    pool: &PgPool,
+    usage_event_id: Option<Uuid>,
+    in_tokens: Option<u32>,
+    out_tokens: Option<u32>,
+    provider_cost_usd: Option<f64>,
+    prompt_version: &str,
+) -> AppResult<()> { ... }
+```
+
+Update the chat route's call site to the new signature, passing
+`Some(usage_event_id)`, the token counts as `Some(..)` from the stream's `Usage`
+event, and `&prompt_version` — the chat path must keep recording what it records
+today.
 
 Then wire it up: `crates/server/src/jobs/handlers/mod.rs` gains `pub mod generate;`,
 `worker.rs::dispatch` gains
