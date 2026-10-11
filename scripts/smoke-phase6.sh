@@ -274,15 +274,26 @@ elif [ "$PDF_STATUS" != "200" ]; then
   fail "GET /cheatsheets/:id/pdf answered $PDF_STATUS: $(cat "$TMP/sheet-pdf-refused.json")"
 fi
 
+# The print is its own job, and the cheatsheet is `ready` before it runs: polling on the
+# status alone would fetch the PDF while the print is still in flight and report the 409 as
+# a missing renderer. So this waits for the artifact the route actually serves — the page
+# count is set by the same statement that writes `pdf_key`.
+for _ in $(seq 1 120); do
+  curl -fsS "$BASE/cheatsheets/$SHEET" -H "authorization: Bearer $ACCESS" > "$TMP/sheet-final.json"
+  PAGES=$(field '["cheatsheet"]["page_count"]' < "$TMP/sheet-final.json")
+  [ "$PAGES" != "None" ] && break
+  sleep 1
+done
+PAGES=$(field '["cheatsheet"]["page_count"]' < "$TMP/sheet-final.json")
+[ "$PAGES" != "None" ] \
+  || fail "the print never produced a PDF (error: $(field '["cheatsheet"]["error"]' < "$TMP/sheet-final.json")). Is the server running with CHROME_PATH=$CHROME_PATH, and does it have a Chromium renderer?"
+
 curl -fsS "$BASE/cheatsheets/$SHEET/pdf" -H "authorization: Bearer $ACCESS" -o "$TMP/sheet.pdf" \
-  || fail "the PDF could not be downloaded. Is the server running with CHROME_PATH=$CHROME_PATH, and does it have a Chromium renderer?"
+  || fail "the PDF could not be downloaded even though page_count is set: $(cat "$TMP/sheet-final.json")"
 [ "$(head -c 4 "$TMP/sheet.pdf")" = "%PDF" ] || fail "the download is not a PDF"
 
 # The page count is the renderer's, read back and reported — never a number this pipeline
 # guessed, because the footer's `Halaman N dari M` is printed from it (decision 10).
-curl -fsS "$BASE/cheatsheets/$SHEET" -H "authorization: Bearer $ACCESS" > "$TMP/sheet-final.json"
-PAGES=$(field '["cheatsheet"]["page_count"]' < "$TMP/sheet-final.json")
-[ "$PAGES" != "None" ] || fail "a printed cheatsheet must report its page count"
 printf 'PDF: %s bytes, %s page(s)\n' "$(wc -c < "$TMP/sheet.pdf" | tr -d ' ')" "$PAGES"
 
 say "the PDF's own text: the footer, the header, and no raw LaTeX"

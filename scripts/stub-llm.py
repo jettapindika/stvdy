@@ -13,9 +13,12 @@ Two modes:
     token arrive and then the connection die mid-stream.
 
 A run that needs *different* answers per request (Phase 6's report outline, then a
-report section, then a cheatsheet) passes --answers-file with a JSON array. The
-answers are served in order and the last one repeats, so the count of calls the
-server makes is not something the stub has to be told in advance.
+report section, then a cheatsheet) passes --answers-file with a JSON array of
+`{"contains": "<a string the prompt carries>", "answer": "<the reply>"}`. The first
+entry whose marker appears in the prompt is served; an entry without a marker is the
+fallback. Matching on the prompt rather than on the request's position is what makes
+the file reusable: a positional list answers correctly once and every later run of the
+same script gets the answers shifted by one.
 """
 
 import argparse
@@ -43,12 +46,31 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # noqa: ARG002
         """Quiet: the smoke script reports what matters, not the HTTP access log."""
 
-    def current_answer(self):
-        """The answer for this request: the next one in the list, or the fixed one."""
+    def current_answer(self, prompt):
+        """The answer for this request.
+
+        With `--answers-file`, each entry is `{"contains": "...", "answer": "..."}` and the
+        first entry whose `contains` appears in the prompt wins; an entry with no `contains`
+        is the fallback. Matching on the *prompt* rather than on the request's position is
+        deliberate: a positional list only answers correctly once, so a second run of the
+        same smoke script — which is the normal case, and the only way to debug a failure —
+        would get the answers shifted by one and report a parse error that looks like a
+        server bug. `contains` is a string the module's own prompt text carries, so it is
+        stable across a re-run and across a change to the script's order of calls.
+        """
         if Handler.answers is None:
             return Handler.answer
-        index = min(Handler.served, len(Handler.answers) - 1)
-        return Handler.answers[index]
+        fallback = Handler.answer
+        for entry in Handler.answers:
+            if isinstance(entry, str):
+                fallback = entry
+                continue
+            marker = entry.get("contains")
+            if marker is None:
+                fallback = entry.get("answer", fallback)
+            elif marker in prompt:
+                return entry.get("answer", fallback)
+        return fallback
 
     def do_POST(self):
         length = int(self.headers.get("content-length", "0"))
@@ -70,12 +92,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(401, "no bearer")
             return
 
+        prompt = body.get("messages", [{}])[0].get("content", "")
+        answer = self.current_answer(prompt)
         Handler.served += 1
 
         if not body.get("stream"):
             payload = json.dumps(
                 {
-                    "choices": [{"message": {"content": self.current_answer()}}],
+                    "choices": [{"message": {"content": answer}}],
                     "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.00042},
                 }
             ).encode()
@@ -95,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         # Word by word, so the client has to concatenate rather than receive one
         # token: a server that buffered the whole answer would still pass a
         # single-token test.
-        words = self.current_answer().split(" ")
+        words = answer.split(" ")
         for index, word in enumerate(words):
             text = word if index == 0 else " " + word
             frame = {"choices": [{"delta": {"content": text}}]}
@@ -125,7 +149,7 @@ def main():
     parser.add_argument(
         "--answers-file",
         default="",
-        help="a JSON array of answers to serve in order; the last one repeats",
+        help='a JSON array of {"contains": "...", "answer": "..."}; first match wins',
     )
     parser.add_argument("--broken", action="store_true")
     parser.add_argument("--log", default="", help="append every request body as JSONL")
