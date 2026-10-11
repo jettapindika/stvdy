@@ -3493,11 +3493,19 @@ export function StudyScreen() {
 
 Behaviour, exactly:
 - Reveal: a `Show answer` button and the `Space` key. The back, and the citation chip,
-  appear only after reveal. The chip is `<Citation citation={{ type: 'chunk', label: 1,
-  chunk_id: card.chunk_id, source_id: '', page: null }} onOpen={...} />` — check
-  `app/src/components/ui/Citation.tsx` for the exact `ChunkCitation` field list before
-  writing it, and pass only fields that type accepts. The `label` is a display number
-  here, not a prompt label: nothing is being cited back to a model.
+  appear only after reveal.
+- The chip's prop type is **`CitationSource`**, verified in
+  `app/src/components/ui/Citation.tsx:18-20`:
+  `{ type: 'chunk'; label: number; sourceTitle: string; page: number | null }` — there
+  is no `chunk_id` or `source_id` field. The card carries only `chunk_id`, so the chip
+  needs the chunk's title and page, which `useChunk(card.chunk_id)` already returns
+  (`Chunk` has `source_id`, `page`, `idx`, `content` — but no title). So either render
+  the chip as plain text from what the card has, or fetch the chunk and use the source
+  list (`useSources`) for the title. Simplest correct option, and the one to take:
+  a `chunk_id !== null` card renders a `Show source` button that opens the existing
+  `CitationPanel` pattern from `ChatScreen` with the chunk from `useChunk`, and the
+  `label` is a display number (the card's position in the queue, 1-based) — nothing is
+  being cited back to a model, so no label map is involved.
 - Grade: four buttons — `Again` `1`, `Hard` `2`, `Good` `3`, `Easy` `4`. Each posts
   `{ id: crypto.randomUUID(), rating, reviewed_at: new Date().toISOString() }`.
 - On success: `setIndex(index + 1)`, `setRevealed(false)`, focus `cardRef.current`.
