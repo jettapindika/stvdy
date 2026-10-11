@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { useChunk, useMessages } from '@/api/queries/chat'
 import { useSources } from '@/api/queries/sources'
 import { asApiError } from '@/api/errors'
-import type { ChatCitation } from '@/api/sse'
+import type { ChunkCitation } from '@/api/sse'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
 import { MessageList } from './MessageList'
@@ -19,8 +19,10 @@ import { useChatStream } from './useChatStream'
  *   turns and `GET /messages` reads them back, so the list on screen is the
  *   list on the student's other device. Only the answer that is still streaming
  *   is local, because it has no row yet.
- * - **It does not pretend web search exists.** The toggle says which phase
- *   brings it instead of being a switch that changes nothing.
+ * - **It does not promise results it cannot cite.** The web toggle asks the
+ *   server to search outside the workspace as well; when that search finds
+ *   nothing the answer is still written from the workspace's own material, which
+ *   is what the copy beside the toggle says.
  *
  * The composer keeps its focus while an answer streams, and the message list is
  * the live region that announces it. Both are requirements rather than
@@ -35,7 +37,12 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
 
   const [draft, setDraft] = useState('')
   const [selected, setSelected] = useState<string[]>([])
-  const [openCitation, setOpenCitation] = useState<ChatCitation | null>(null)
+  const [openCitation, setOpenCitation] = useState<ChunkCitation | null>(null)
+  // Keyed by workspace so switching workspaces cannot carry one workspace's
+  // answer into another's: a web search costs a credit and reaches the open
+  // internet, and the choice to make it is per question, not per session.
+  const [webByWorkspace, setWebByWorkspace] = useState<Record<string, boolean>>({})
+  const useWeb = webByWorkspace[workspaceId] === true
 
   const listError = asApiError(messages.error)
   const readySources = (sources.data ?? []).filter((source) => source.status === 'ready')
@@ -45,7 +52,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
   function submit() {
     const message = draft.trim()
     if (message.length === 0 || streaming) return
-    stream.send({ message, sourceIds: selected, useWeb: false })
+    stream.send({ message, sourceIds: selected, useWeb })
     setDraft('')
   }
 
@@ -84,8 +91,8 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             onRetry={stream.retry}
             emptyReason={
               readySources.length === 0
-                ? 'Ask once a source has finished indexing. A question is answered from this workspace\u2019s material and cites the page each claim came from.'
-                : 'Ask about anything in this workspace\u2019s material. The answer cites the page each claim came from.'
+                ? `Ask once a source has finished indexing. A question is answered from this workspace\u2019s material and cites the page each claim came from.${useWeb ? ' Web results are searched for as well.' : ''}`
+                : `Ask about anything in this workspace\u2019s material. The answer cites the page each claim came from.${useWeb ? ' Web results are cited with links to where they came from.' : ''}`
             }
           />
         )}
@@ -153,13 +160,27 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             </button>
           )}
 
+          {/* A checkbox is its own on/off state: the box is filled when checked
+              and the label is the accessible name, so the state is announced as
+              "checked" by a screen reader and read as a tick by a sighted user
+              without either depending on the accent colour. The row is a 44px
+              label wrapping the box, so the whole row is the target on a phone
+              and the box itself is a normal tab stop with the shared focus ring. */}
           <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
-            <input type="checkbox" checked={false} readOnly disabled aria-describedby="chat-web-hint" />
+            <input
+              type="checkbox"
+              checked={useWeb}
+              aria-describedby="chat-web-hint"
+              onChange={(event) => {
+                const next = event.target.checked
+                setWebByWorkspace((current) => ({ ...current, [workspaceId]: next }))
+              }}
+            />
             Search the web too
           </label>
           <span id="chat-web-hint" className="text-xs text-ink-muted">
-            Not in this build yet: outside results arrive in Phase 3. Answers today come from this
-            workspace only.
+            Also searches outside this workspace and cites what it finds, with links. Answers stay
+            grounded in your sources, and a search that finds nothing still answers from them.
           </span>
         </div>
       </form>
@@ -181,7 +202,7 @@ function CitationPanel({
   sourceTitle,
   onClose,
 }: {
-  citation: ChatCitation
+  citation: ChunkCitation
   sourceTitle: string
   onClose: () => void
 }) {

@@ -1,8 +1,9 @@
 import { Fragment, type ReactNode } from 'react'
 
 import type { Message } from '@/api/queries/chat'
-import type { ChatCitation } from '@/api/sse'
+import type { ChatCitation, ChunkCitation } from '@/api/sse'
 import { ApiErrorNotice } from '@/components/ui/States'
+import { WebCitationMark } from '@/components/ui/Citation'
 import { CitationChip } from './CitationChip'
 import type { ChatTurn } from './useChatStream'
 
@@ -25,12 +26,21 @@ import type { ChatTurn } from './useChatStream'
  * field they are typing in the moment their first answer arrives.
  */
 
-/** The inline markup the answers actually use. Nothing else is interpreted. */
-const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[\d+\])/g
-const MARKER = /^\[(\d+)\]$/
+/**
+ * The inline markup the answers actually use. Nothing else is interpreted.
+ *
+ * Both label families are recognised, and recognised *exactly* as the server
+ * parses them: `[1]`..`[999]` for chunks and `[W1]`..`[W99]` for web results, no
+ * leading zero. The strictness is load-bearing rather than tidiness. The wire
+ * carries no labels, so the mapping below is positional, and a marker this regex
+ * counted that the server did not would shift every citation after it onto the
+ * wrong claim. `[0]`, `[01]` and `[1000]` are therefore text, not markers.
+ */
+const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\])/g
+const MARKER = /^\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\]$/
 
 /**
- * The chunk behind each `[n]` in an answer, by first appearance.
+ * The citation behind each marker in an answer, by first appearance.
  *
  * The wire contract never sends a label: the server resolves `[1]` to a chunk,
  * drops the label, and stores only the resolved citation. But `resolve` returns
@@ -39,6 +49,12 @@ const MARKER = /^\[(\d+)\]$/
  * here, and it is the reason a claim can be pointed at individually instead of
  * only cited at the end of the paragraph.
  *
+ * Chunk and web labels are scanned in one pass, because the server resolves them
+ * in one pass: an answer that cites a web result before a page sends the web
+ * citation first, and a client that scanned only `[n]` would hand that web
+ * citation to the page's marker. Case is folded to the server's own reading, so
+ * `[w1]` and `[W1]` are one label rather than two.
+ *
  * A marker with no citation left for it is left as text rather than guessed at:
  * the server strips unknown labels, so this only happens if it failed to, and a
  * chip on the wrong chunk is a false claim about the student's own material.
@@ -46,8 +62,8 @@ const MARKER = /^\[(\d+)\]$/
 export function markersFor(text: string, citations: ChatCitation[]): Map<string, ChatCitation> {
   const found = new Map<string, ChatCitation>()
   let next = 0
-  for (const match of text.matchAll(/\[\d+\]/g)) {
-    const marker = match[0]
+  for (const match of text.matchAll(/\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\]/g)) {
+    const marker = match[0].toUpperCase()
     if (found.has(marker)) continue
     const citation = citations[next]
     if (citation === undefined) continue
@@ -61,7 +77,7 @@ function inlineNodes(
   text: string,
   markers: Map<string, ChatCitation>,
   sourceTitle: (sourceId: string) => string,
-  onOpenCitation: (citation: ChatCitation) => void,
+  onOpenCitation: (citation: ChunkCitation) => void,
   keyPrefix: string,
 ): ReactNode[] {
   return text.split(INLINE).map((part, index) => {
@@ -78,8 +94,14 @@ function inlineNodes(
       return <em key={key}>{part.slice(1, -1)}</em>
     }
     if (MARKER.test(part)) {
-      const citation = markers.get(part)
+      const citation = markers.get(part.toUpperCase())
+      // A marker whose citation is the other kind is left as text. The server
+      // resolves each label against its own family, so this only happens when the
+      // two scans disagree, and a web citation rendered as a page (or the
+      // reverse) would misattribute the claim rather than merely look wrong.
       if (citation === undefined) return <Fragment key={key}>{part}</Fragment>
+      if (citation.type === 'web') return <WebCitationMark key={key} citation={citation} />
+      if (part.toUpperCase().startsWith('[W')) return <Fragment key={key}>{part}</Fragment>
       return (
         <CitationChip
           key={key}
@@ -110,7 +132,7 @@ function AnswerText({
   text: string
   citations: ChatCitation[]
   sourceTitle: (sourceId: string) => string
-  onOpenCitation: (citation: ChatCitation) => void
+  onOpenCitation: (citation: ChunkCitation) => void
 }) {
   const markers = markersFor(text, citations)
   const blocks = text.split(/\n{2,}/)
@@ -196,7 +218,7 @@ export function MessageList({
   /** The answer currently arriving, or the one that failed. */
   turn: ChatTurn | null
   sourceTitle: (sourceId: string) => string
-  onOpenCitation: (citation: ChatCitation) => void
+  onOpenCitation: (citation: ChunkCitation) => void
   onRetry: () => void
   /** Why the thread is empty, when it is. */
   emptyReason: string

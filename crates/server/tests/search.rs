@@ -1,0 +1,777 @@
+//! Phase 3 Task 3: the tiers and the composite.
+//!
+//! The real tiers are all unreachable from this machine (no SearXNG container and
+//! no paid keys), so the walk is tested against doubles that implement the same
+//! frozen `SearchProvider` trait, and the one tier whose wire format can be
+//! reproduced locally (SearXNG's JSON) is tested against a stub HTTP server.
+//!
+//! Test code may unwrap and panic; `#[sqlx::test]` is a macro harness, so the
+//! relaxations in clippy.toml are not guaranteed to apply.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use secrecy::SecretString;
+use sqlx::PgPool;
+use sqlx::types::Json;
+use stvdy_core::search::normalize::dedupe_key;
+use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
+use stvdy_server::config::{SearchConfig, SearchTier};
+use stvdy_server::integrations::search::CompositeSearch;
+use stvdy_server::integrations::search::searxng::SearxngSearch;
+use stvdy_server::testing::TestState;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+/// A tier that returns scripted hits and counts how many times it was asked. The
+/// count is the assertion in most of these tests: it is what distinguishes "the
+/// walk stopped" and "the cache answered" from "it happened to work".
+struct StubTier {
+    name: &'static str,
+    hits: Vec<SearchHit>,
+    calls: AtomicUsize,
+}
+
+impl StubTier {
+    fn new(name: &'static str, hits: Vec<SearchHit>) -> Self {
+        Self {
+            name,
+            hits,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl SearchProvider for StubTier {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn search(&self, _q: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.hits.clone())
+    }
+}
+
+/// A tier that fails the way a stopped SearXNG or a rate-limited API does.
+struct FailingTier {
+    name: &'static str,
+    calls: AtomicUsize,
+}
+
+impl FailingTier {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl SearchProvider for FailingTier {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn search(&self, _q: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(SearchError::Unavailable(format!("{} is down", self.name)))
+    }
+}
+
+fn hit(title: &str, url: &str, source_kind: SourceKind, provider: &str) -> SearchHit {
+    SearchHit::new(
+        title,
+        url,
+        format!("snippet for {title}"),
+        source_kind,
+        provider,
+    )
+}
+
+fn composite(pool: &PgPool, tiers: Vec<Arc<dyn SearchProvider>>) -> CompositeSearch {
+    CompositeSearch::with_tiers(tiers, pool.clone(), Duration::from_secs(3600))
+}
+
+fn search_config(
+    tier: SearchTier,
+    searxng_url: Option<&str>,
+    exa_key: bool,
+    tavily_key: bool,
+) -> SearchConfig {
+    SearchConfig {
+        tier,
+        searxng_url: searxng_url.map(str::to_string),
+        exa_api_key: exa_key.then(|| SecretString::from("test-exa-key".to_string())),
+        tavily_api_key: tavily_key.then(|| SecretString::from("test-tavily-key".to_string())),
+        cache_ttl: Duration::from_secs(3600),
+        max_results: 8,
+    }
+}
+
+/// The row count of the two tables the cache tests assert on. Literal SQL because
+/// sqlx 0.9 refuses a runtime-built string, and a table name cannot be bound.
+async fn cache_rows(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from search_cache")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn user_rows(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from users")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn insert_user(pool: &PgPool, email: &str) -> uuid::Uuid {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query("insert into users (id, email, password_hash) values ($1, $2, 'x')")
+        .bind(id)
+        .bind(email)
+        .execute(pool)
+        .await
+        .unwrap();
+    id
+}
+
+/// A one-endpoint HTTP server speaking just enough of the protocol for a tier to
+/// read one JSON response, so the SearXNG mapping can be exercised against the
+/// wire without the real service.
+async fn serve_json(body: String) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut buffer = [0u8; 2048];
+            let _ = socket.read(&mut buffer).await;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        }
+    });
+    (format!("http://{address}"), handle)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_tier_with_results_stops_the_walk(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let first = Arc::new(StubTier::new(
+        "first",
+        vec![hit(
+            "First",
+            "https://example.org/1",
+            SourceKind::Academic,
+            "first",
+        )],
+    ));
+    let second = Arc::new(StubTier::new(
+        "second",
+        vec![hit(
+            "Second",
+            "https://example.org/2",
+            SourceKind::Web,
+            "second",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![first.clone(), second.clone()]);
+
+    let outcome = search.search("a query", 8).await;
+
+    assert_eq!(first.calls(), 1);
+    assert_eq!(
+        second.calls(),
+        0,
+        "the second tier must never be called once the first answers"
+    );
+    assert_eq!(outcome.answered_by.as_deref(), Some("first"));
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].title, "First");
+    assert!(!outcome.cache_hit);
+    assert!(outcome.unresponsive.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_erroring_tier_is_recorded_and_the_next_one_is_tried(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let broken = Arc::new(FailingTier::new("broken"));
+    let good = Arc::new(StubTier::new(
+        "good",
+        vec![hit(
+            "Good",
+            "https://example.org/g",
+            SourceKind::Web,
+            "good",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![broken.clone(), good.clone()]);
+
+    let outcome = search.search("a query", 8).await;
+
+    assert_eq!(broken.calls(), 1);
+    assert_eq!(good.calls(), 1);
+    assert_eq!(outcome.unresponsive, vec!["broken".to_string()]);
+    assert_eq!(outcome.answered_by.as_deref(), Some("good"));
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].title, "Good");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn every_tier_failing_is_an_empty_outcome_and_not_an_error(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let broken = Arc::new(FailingTier::new("broken"));
+    // A tier that answers successfully with nothing is as unresponsive as one that
+    // errors, and must be recorded the same way.
+    let empty = Arc::new(StubTier::new("empty", Vec::new()));
+    let search = composite(&harness.state.pool, vec![broken.clone(), empty.clone()]);
+
+    let outcome = search.search("a query", 8).await;
+
+    assert!(outcome.hits.is_empty());
+    assert_eq!(
+        outcome.unresponsive,
+        vec!["broken".to_string(), "empty".to_string()],
+        "every tier must be named so the admin report can see the free path degrade"
+    );
+    assert!(outcome.answered_by.is_none());
+    assert!(!outcome.cache_hit);
+    assert_eq!(broken.calls(), 1);
+    assert_eq!(empty.calls(), 1);
+    assert_eq!(
+        cache_rows(&harness.state.pool).await,
+        0,
+        "an empty result set must not be cached"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_same_query_twice_calls_the_tier_once(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let tier = Arc::new(StubTier::new(
+        "only",
+        vec![hit(
+            "Cached",
+            "https://example.org/c",
+            SourceKind::Web,
+            "only",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![tier.clone()]);
+
+    let first = search.search("cache me", 8).await;
+    let second = search.search("cache me", 8).await;
+    // A different spelling of the same question: the key is built from the
+    // normalised query, so this must be the same row.
+    let third = search.search("  CACHE   me ", 8).await;
+
+    assert_eq!(
+        tier.calls(),
+        1,
+        "the A40 acceptance criterion: a repeated query is a cache hit"
+    );
+    assert!(!first.cache_hit);
+    assert!(second.cache_hit);
+    assert!(third.cache_hit);
+    assert_eq!(second.answered_by.as_deref(), Some("only"));
+    assert_eq!(second.hits.len(), 1);
+    assert_eq!(second.hits[0].title, "Cached");
+    assert_eq!(cache_rows(&harness.state.pool).await, 1);
+
+    let key: String = sqlx::query_scalar("select key from search_cache")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(key, dedupe_key("cache me", "only", 8));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_expired_cache_row_is_not_served(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let tier = Arc::new(StubTier::new(
+        "only",
+        vec![hit(
+            "Fresh",
+            "https://example.org/f",
+            SourceKind::Web,
+            "only",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![tier.clone()]);
+
+    let key = dedupe_key("stale query", "only", 8);
+    let stale = vec![hit(
+        "Stale",
+        "https://example.org/s",
+        SourceKind::Web,
+        "only",
+    )];
+    sqlx::query(
+        "insert into search_cache (key, provider, results, expires_at)
+         values ($1, $2, $3, now() - interval '1 hour')",
+    )
+    .bind(key.as_str())
+    .bind("only")
+    .bind(Json(serde_json::to_value(&stale).unwrap()))
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let outcome = search.search("stale query", 8).await;
+
+    assert_eq!(
+        tier.calls(),
+        1,
+        "an expired row must not satisfy the request"
+    );
+    assert!(!outcome.cache_hit);
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].title, "Fresh");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_cache_is_global_and_not_per_user(pool: PgPool) {
+    let harness = TestState::new(pool);
+    // Two accounts, because the property under test is that the second one's
+    // identical query is served from the first one's row (A40). A search carries
+    // no user at all, so the only way the cache could be per-user is a column.
+    insert_user(&harness.state.pool, "alice@example.test").await;
+    insert_user(&harness.state.pool, "bob@example.test").await;
+
+    let tier = Arc::new(StubTier::new(
+        "only",
+        vec![hit(
+            "Shared",
+            "https://example.org/s",
+            SourceKind::Web,
+            "only",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![tier.clone()]);
+
+    let first = search.search("shared question", 8).await;
+    let second = search.search("shared question", 8).await;
+
+    assert_eq!(tier.calls(), 1);
+    assert!(!first.cache_hit);
+    assert!(second.cache_hit);
+    assert_eq!(cache_rows(&harness.state.pool).await, 1);
+    assert_eq!(user_rows(&harness.state.pool).await, 2);
+
+    let scoped_columns: i64 = sqlx::query_scalar(
+        "select count(*) from information_schema.columns
+         where table_name = 'search_cache'
+           and column_name in ('user_id', 'workspace_id', 'device_id')",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        scoped_columns, 0,
+        "A40: the cache is global, so it carries no user scope"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_composite_ranks_what_it_returns(pool: PgPool) {
+    let harness = TestState::new(pool);
+    // A web tier that also surfaced a scholarly link, which is what SearXNG does
+    // in practice, and in the tier's own order the web page comes first.
+    let tier = Arc::new(StubTier::new(
+        "web",
+        vec![
+            hit(
+                "A blog post",
+                "https://blog.example.org/a",
+                SourceKind::Web,
+                "web",
+            ),
+            hit(
+                "A paper",
+                "https://example.org/paper",
+                SourceKind::Academic,
+                "web",
+            ),
+        ],
+    ));
+    let search = composite(&harness.state.pool, vec![tier]);
+
+    let outcome = search.search("ranking", 8).await;
+
+    assert_eq!(outcome.hits.len(), 2);
+    assert_eq!(
+        outcome.hits[0].source_kind,
+        SourceKind::Academic,
+        "rank() must put an academic hit above a web one"
+    );
+    assert_eq!(outcome.hits[0].title, "A paper");
+    assert_eq!(outcome.hits[1].title, "A blog post");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn searxng_maps_results_and_surfaces_its_unresponsive_engines(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let body = r#"{
+      "query": "a query",
+      "results": [
+        {
+          "url": "https://example.org/a",
+          "title": "A result",
+          "content": "A snippet.",
+          "publishedDate": null,
+          "score": 0.7,
+          "engine": "brave"
+        }
+      ],
+      "unresponsive_engines": [["duckduckgo", "Suspended: too many requests"]]
+    }"#
+    .to_string();
+    let (base_url, server) = serve_json(body).await;
+
+    let tier = Arc::new(SearxngSearch::new(&base_url).unwrap());
+    let search = composite(&harness.state.pool, vec![tier.clone()]).with_searxng(tier.clone());
+
+    let outcome = search.search("a query", 8).await;
+    server.abort();
+
+    assert_eq!(outcome.answered_by.as_deref(), Some("searxng"));
+    assert_eq!(outcome.hits.len(), 1);
+    assert_eq!(outcome.hits[0].title, "A result");
+    assert_eq!(outcome.hits[0].url, "https://example.org/a");
+    assert_eq!(outcome.hits[0].source_kind, SourceKind::Web);
+    assert_eq!(outcome.hits[0].provider, "searxng");
+    assert_eq!(
+        outcome.unresponsive_engines,
+        vec!["duckduckgo: Suspended: too many requests".to_string()],
+        "the engine list must reach the outcome, not be dropped"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_empty_searxng_answer_is_ok_and_still_reports_the_engines(pool: PgPool) {
+    let harness = TestState::new(pool);
+    let body = r#"{
+      "results": [],
+      "unresponsive_engines": [["startpage", "timeout"], ["mojeek", "timeout"]]
+    }"#
+    .to_string();
+    let (base_url, server) = serve_json(body).await;
+
+    let tier = Arc::new(SearxngSearch::new(&base_url).unwrap());
+    let fallback = Arc::new(StubTier::new(
+        "fallback",
+        vec![hit(
+            "Fallback",
+            "https://example.org/f",
+            SourceKind::Web,
+            "fallback",
+        )],
+    ));
+    let search = composite(&harness.state.pool, vec![tier.clone(), fallback.clone()])
+        .with_searxng(tier.clone());
+
+    let outcome = search.search("a query", 8).await;
+    server.abort();
+
+    assert_eq!(outcome.answered_by.as_deref(), Some("fallback"));
+    assert_eq!(outcome.unresponsive, vec!["searxng".to_string()]);
+    assert_eq!(
+        outcome.unresponsive_engines,
+        vec![
+            "startpage: timeout".to_string(),
+            "mojeek: timeout".to_string()
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_pinned_tier_constructs_only_that_tier(pool: PgPool) {
+    let harness = TestState::new(pool);
+    // `SEARCH_PROVIDER=exa` must build one tier and nothing else, so a deployment
+    // that asked for one thing cannot quietly answer from another (decision 6).
+    let exa = CompositeSearch::new(
+        &search_config(SearchTier::Exa, None, true, false),
+        harness.state.pool.clone(),
+    )
+    .expect("a pinned exa tier with a key");
+    assert_eq!(exa.tier_names(), vec!["exa"]);
+
+    let tavily = CompositeSearch::new(
+        &search_config(SearchTier::Tavily, None, false, true),
+        harness.state.pool.clone(),
+    )
+    .expect("a pinned tavily tier with a key");
+    assert_eq!(tavily.tier_names(), vec!["tavily"]);
+
+    let academic = CompositeSearch::new(
+        &search_config(SearchTier::Academic, None, false, false),
+        harness.state.pool.clone(),
+    )
+    .expect("the academic tier is keyless");
+    assert_eq!(
+        academic.tier_names(),
+        vec!["openalex", "crossref", "arxiv", "doaj", "eric", "pubmed"],
+        "the academic tier is six APIs in A3's order"
+    );
+
+    let searxng = CompositeSearch::new(
+        &search_config(
+            SearchTier::Searxng,
+            Some("http://127.0.0.1:8088"),
+            false,
+            false,
+        ),
+        harness.state.pool.clone(),
+    )
+    .expect("a pinned searxng tier with a url");
+    assert_eq!(searxng.tier_names(), vec!["searxng"]);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_pinned_tier_that_is_unconfigured_is_none(pool: PgPool) {
+    let harness = TestState::new(pool);
+    // A deployment that asked for a tier it has no key for is broken, and the
+    // composite says so rather than booting into a tier that cannot answer.
+    assert!(
+        CompositeSearch::new(
+            &search_config(SearchTier::Exa, None, false, false),
+            harness.state.pool.clone()
+        )
+        .is_none()
+    );
+    assert!(
+        CompositeSearch::new(
+            &search_config(SearchTier::Tavily, None, false, false),
+            harness.state.pool.clone()
+        )
+        .is_none()
+    );
+    assert!(
+        CompositeSearch::new(
+            &search_config(SearchTier::Searxng, None, false, false),
+            harness.state.pool.clone()
+        )
+        .is_none()
+    );
+
+    // The composite is the opposite case: no keys and no URL is the normal
+    // deployment, and it still walks the academic tier.
+    let composite = CompositeSearch::new(
+        &search_config(SearchTier::Composite, None, false, false),
+        harness.state.pool.clone(),
+    )
+    .expect("the composite needs no keys");
+    assert_eq!(composite.tier_names().len(), 6);
+}
+
+#[tokio::test]
+async fn an_unreachable_searxng_is_unavailable() {
+    // A port with nothing listening on it: the shape a stopped container produces.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+
+    let tier = SearxngSearch::new(&format!("http://{address}")).unwrap();
+    let error = tier.search("a query", 8).await.unwrap_err();
+
+    assert!(
+        matches!(error, SearchError::Unavailable(_)),
+        "a stopped SearXNG must be Unavailable, got {error:?}"
+    );
+}
+
+/// A repeat query must be answered from the cache even when a *different* tier
+/// answered the first time.
+///
+/// This is the case a per-tier read inside one loop gets wrong, and it is not
+/// hypothetical: a free academic API returns empty under load without erroring, so
+/// two identical consecutive queries can be answered by two different tiers. Reading
+/// only the tier currently being tried then misses the entry the first answer wrote,
+/// calls the network again, and bills a second search for a question already
+/// answered.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_repeat_query_hits_the_cache_even_when_another_tier_answered(pool: PgPool) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
+    use stvdy_server::integrations::search::composite::CompositeSearch;
+
+    /// Answers empty the first time it is asked, then answers. That is exactly what
+    /// an overloaded free API looks like from here.
+    struct FlakyFirst {
+        calls: Arc<AtomicUsize>,
+        answer_from: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl SearchProvider for FlakyFirst {
+        fn name(&self) -> &'static str {
+            "first"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call < self.answer_from {
+                return Ok(Vec::new());
+            }
+            let mut hit = SearchHit::new(
+                "First tier hit",
+                "https://a.example/1",
+                "s",
+                SourceKind::Academic,
+                "first",
+            );
+            hit.doi = Some("10.1000/first".to_string());
+            Ok(vec![hit])
+        }
+    }
+
+    /// Always answers, and is the tier that answers first time round.
+    struct Steady;
+    #[async_trait::async_trait]
+    impl SearchProvider for Steady {
+        fn name(&self) -> &'static str {
+            "second"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let mut hit = SearchHit::new(
+                "Second tier hit",
+                "https://b.example/2",
+                "s",
+                SourceKind::Academic,
+                "second",
+            );
+            hit.doi = Some("10.1000/second".to_string());
+            Ok(vec![hit])
+        }
+    }
+
+    let first_calls = Arc::new(AtomicUsize::new(0));
+    let composite = CompositeSearch::with_tiers(
+        vec![
+            Arc::new(FlakyFirst {
+                calls: first_calls.clone(),
+                answer_from: 1,
+            }),
+            Arc::new(Steady),
+        ],
+        pool,
+        std::time::Duration::from_secs(3600),
+    );
+
+    // First query: the first tier is empty, so the second answers and is cached.
+    let first = composite.search("a repeated question", 8).await;
+    assert_eq!(first.answered_by.as_deref(), Some("second"));
+    assert!(!first.cache_hit);
+    assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+
+    // Second, identical query: the second tier's cached answer must be found even
+    // though the first tier is what the walk looks at first. Without the
+    // cache-first pass the first tier is called again, answers this time, and the
+    // user is billed a second search.
+    let second = composite.search("a repeated question", 8).await;
+    assert!(
+        second.cache_hit,
+        "an identical query must be served from the cache, whichever tier answered it"
+    );
+    assert_eq!(second.answered_by.as_deref(), Some("second"));
+    assert_eq!(
+        first_calls.load(Ordering::SeqCst),
+        1,
+        "no tier may be called again for an identical query"
+    );
+    assert_eq!(second.hits[0].doi.as_deref(), Some("10.1000/second"));
+}
+
+/// A tier returning an unusable URL has those hits dropped before ranking and
+/// before caching.
+///
+/// Asserted here rather than only on the pure guard, because the placement is the
+/// point: dropping after the cache write would leave an unusable URL stored and
+/// served to every later request for that query.
+#[sqlx::test(migrations = "../../migrations")]
+async fn hits_with_unusable_urls_are_dropped_before_the_cache(pool: PgPool) {
+    use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
+    use stvdy_server::integrations::search::composite::CompositeSearch;
+
+    struct Mixed;
+    #[async_trait::async_trait]
+    impl SearchProvider for Mixed {
+        fn name(&self) -> &'static str {
+            "mixed"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let good = SearchHit::new(
+                "A real paper",
+                "https://arxiv.org/abs/1706.03762",
+                "s",
+                SourceKind::Academic,
+                "mixed",
+            );
+            // The two that matter: the cloud metadata endpoint, and a service on the
+            // user's own machine.
+            let metadata = SearchHit::new(
+                "Metadata",
+                "http://169.254.169.254/latest/meta-data/",
+                "s",
+                SourceKind::Web,
+                "mixed",
+            );
+            let loopback = SearchHit::new(
+                "Local",
+                "http://127.0.0.1:8099/workspaces",
+                "s",
+                SourceKind::Web,
+                "mixed",
+            );
+            Ok(vec![good, metadata, loopback])
+        }
+    }
+
+    let composite = CompositeSearch::with_tiers(
+        vec![Arc::new(Mixed)],
+        pool.clone(),
+        std::time::Duration::from_secs(3600),
+    );
+
+    let outcome = composite.search("anything", 8).await;
+    assert_eq!(
+        outcome.hits.len(),
+        1,
+        "only the citable hit may survive: {:?}",
+        outcome
+            .hits
+            .iter()
+            .map(|hit| hit.url.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(outcome.hits[0].url, "https://arxiv.org/abs/1706.03762");
+
+    // And the cache holds only the citable one, so a later request cannot be served
+    // an unusable URL from it.
+    let cached: serde_json::Value = sqlx::query_scalar("select results from search_cache limit 1")
+        .fetch_one(&pool)
+        .await
+        .expect("the outcome was cached");
+    let urls: Vec<String> = cached
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|hit| hit["url"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(urls, vec!["https://arxiv.org/abs/1706.03762".to_string()]);
+}

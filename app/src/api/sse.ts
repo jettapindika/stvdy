@@ -34,13 +34,38 @@ import { getAccessToken } from '../lib/tokens'
  * stream is not read further.
  */
 
-/** One resolved citation, exactly as the server's `citations` event carries it. */
-export interface ChatCitation {
+/**
+ * One resolved citation, exactly as the server's `citations` event carries it.
+ *
+ * Two shapes share the array. A chunk citation names a passage in the student's
+ * own material and is opened in a panel; a web citation names a page outside it
+ * and carries no chunk, source or page, because there is no chunk behind it: its
+ * destination is the URL. One answer can cite both kinds, so every consumer of
+ * this list handles a mixed array rather than assuming the first element's shape.
+ */
+export interface ChunkCitation {
   type: 'chunk'
   chunk_id: string
   source_id: string
   page: number | null
 }
+
+export interface WebCitation {
+  type: 'web'
+  url: string
+  title: string
+  /**
+   * The DOI where the tier provided one. An academic hit is identified by its
+   * DOI rather than by whichever host served it, so it is shown when present.
+   *
+   * Optional rather than nullable-only: the server sends `null`, but a citation
+   * built by hand (a fixture, an older server) may omit the key entirely, and a
+   * required field would turn that into a render-time crash.
+   */
+  doi?: string | null
+}
+
+export type ChatCitation = ChunkCitation | WebCitation
 
 export interface ChatUsage {
   credits_spent: number
@@ -92,6 +117,11 @@ function errorFromEnvelope(data: string): ApiError {
  * answer, which mirrors the server's own rule for labels it cannot resolve: a
  * citation the user cannot open must not be shown, and one bad row must not cost
  * the user the answer it came with.
+ *
+ * Both shapes are validated the same way, against what the chip needs to render:
+ * a chunk needs an id to open and a source to name, a web citation needs a title
+ * to show and a URL to open. Anything short of that is dropped, so a malformed
+ * row cannot reach a screen as a chip that claims less than it shows.
  */
 function citationsFrom(data: string): ChatCitation[] | null {
   let body: unknown
@@ -106,6 +136,12 @@ function citationsFrom(data: string): ChatCitation[] | null {
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue
     const candidate = item as Record<string, unknown>
+    if (candidate.type === 'web') {
+      if (typeof candidate.url !== 'string' || candidate.url.length === 0) continue
+      if (typeof candidate.title !== 'string' || candidate.title.length === 0) continue
+      kept.push({ type: 'web', url: candidate.url, title: candidate.title })
+      continue
+    }
     if (candidate.type !== 'chunk') continue
     if (typeof candidate.chunk_id !== 'string' || candidate.chunk_id.length === 0) continue
     if (typeof candidate.source_id !== 'string' || candidate.source_id.length === 0) continue
@@ -220,7 +256,15 @@ export interface ChatStreamInput {
   message: string
   /** Narrows retrieval to these sources. Omitted means the whole workspace. */
   sourceIds?: string[]
-  useWeb?: boolean
+  /**
+   * Whether this turn may also search outside the workspace.
+   *
+   * Required rather than optional, and always sent: the client always knows the
+   * answer (the toggle is either on or off), and a body that sometimes omits the
+   * field makes "the toggle was off" and "the client is too old to have one"
+   * indistinguishable on the wire.
+   */
+  useWeb: boolean
   signal?: AbortSignal
 }
 
@@ -234,9 +278,8 @@ async function readJsonBody(response: Response): Promise<unknown> {
 }
 
 function post(input: ChatStreamInput): Promise<Response> {
-  const body: Record<string, unknown> = { message: input.message }
+  const body: Record<string, unknown> = { message: input.message, use_web: input.useWeb }
   if (input.sourceIds !== undefined && input.sourceIds.length > 0) body.source_ids = input.sourceIds
-  if (input.useWeb === true) body.use_web = true
 
   const token = getAccessToken()
   return fetch(`${API_BASE_URL}/workspaces/${input.workspaceId}/chat`, {

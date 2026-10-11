@@ -38,6 +38,9 @@ fn labels_with_web() -> ContextLabels {
             label: 1,
             url: "https://example.test/tcp".to_string(),
             title: "TCP overview".to_string(),
+            // A DOI travels with the citation, because an academic hit is
+            // identified by its DOI rather than by whichever host served it.
+            doi: Some("10.17487/RFC0793".to_string()),
         }],
     )
 }
@@ -146,6 +149,7 @@ fn web_labels_resolve_and_are_case_insensitive() {
         vec![Citation::Web {
             url: "https://example.test/tcp".to_string(),
             title: "TCP overview".to_string(),
+            doi: Some("10.17487/RFC0793".to_string()),
         }]
     );
 

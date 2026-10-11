@@ -92,6 +92,22 @@ smoke-phase2:
 smoke-phase4:
     BASE=http://localhost:8099 bash scripts/smoke-phase4.sh
 
+# --- Phase 3 smoke: web search against the real academic tier ---
+#
+# The academic tier is keyless and reachable from this machine, so the run gets
+# real DOIs. The SearXNG tier is exercised against a stub, because the real
+# service needs Docker and A3 measured that a laptop's engine list is a different
+# sample from the production host's.
+# The model stub must answer with a [W1] citation, or the run has nothing to check:
+#   python3 scripts/stub-llm.py --port 8100 --log /tmp/stub3.jsonl \
+#     --answer "Transformers replaced recurrence, and the paper carries a DOI [W1]."
+smoke-server-phase3:
+    SEARCH_PROVIDER=academic LLM_BASE_URL=http://127.0.0.1:8100/v1 \
+      LLM_API_KEY=stub LLM_MODEL=stub BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase3:
+    BASE=http://localhost:8099 STUB_LLM_LOG=/tmp/stub3.jsonl bash scripts/smoke-phase3.sh
+
 # The Tauri CLI resolves `src-tauri` as a subfolder of the working directory, so
 # these must run from the repo root. The CLI binary is the one npm installed.
 tauri:

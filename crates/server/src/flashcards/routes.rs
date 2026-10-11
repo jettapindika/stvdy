@@ -163,7 +163,19 @@ pub async fn create_deck(
     // an exact ceiling division.
     let batches = (i64::from(body.count) + CARDS_PER_BATCH - 1) / CARDS_PER_BATCH;
     let cost = batches * state.config.plans.credits.flashcard_batch_10;
-    let spent = credits::spend(&state, user.user_id, plan, GENERATE_ACTION, cost, None).await?;
+    // Neither daily cap applies to generation: the plan matrix caps flashcards per
+    // **month** (`flashcards_per_month`, enforced above with `enforce_batch`) and has
+    // no per-day card allowance, so the two slots the chat path uses are both empty
+    // here. Passing the chat cap would silently cap decks at `chat_msgs_per_day`.
+    let spent = credits::spend(
+        &state,
+        user.user_id,
+        plan,
+        GENERATE_ACTION,
+        cost,
+        [None, None],
+    )
+    .await?;
 
     let (deck_id, created_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         "insert into decks
@@ -253,7 +265,7 @@ pub async fn create_deck(
 /// `GET /workspaces/:id/decks`, newest first, tombstones excluded.
 ///
 /// Added beyond the spec's route list: without it a deck is unreachable after a
-/// page reload, which makes the phase's own exit gate untestable by hand (A75).
+/// page reload, which makes the phase's own exit gate untestable by hand (A81).
 pub async fn list_decks(
     State(state): State<AppState>,
     user: AuthUser,

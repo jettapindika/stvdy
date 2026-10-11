@@ -290,10 +290,18 @@ Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
 "study_mode"?: bool}`. `source_ids` narrows retrieval to the selected sources; an
 absent or empty list searches the whole workspace.
 
-`use_web` is **refused** with 400 `validation` until Phase 3 implements the search
-arm. Accepting it would make three things untrue at once: the prompt would tell the
-model web search is on with no web context, the stored turn would assert
-`used_web: true`, and the model would claim to have searched.
+`use_web` runs a web search and puts the results in the prompt as a separate
+`<web_results>` block, labelled `[W1]`, `[W2]`. A tier that fails is recorded and
+the walk continues: a query no tier answered is not an error, and the turn answers
+from the workspace's own sources. A cache hit is not charged; a search that called a
+provider costs `web_search` credits on top of the message.
+
+`used_web` on the stored turn means the turn **used** web context, not that the
+toggle was on: a toggle-on turn where every tier returned nothing stores false.
+
+A web citation is `{"type":"web","url":"...","title":"...","doi":"..."|null}`.
+`doi` is present only when the tier provided one (the academic tier does), and it
+is the stable identifier: the same paper is often reachable at two hosts.
 
 Order of operations, which is the contract rather than an implementation detail:
 verified email, owned workspace, `use_web` refusal, provider configured, daily
@@ -370,9 +378,9 @@ included.
   `ceil(count / 10) × flashcard_batch_10`, i.e. **4 credits per 10 requested
   cards** (21 cards is three batches). It is quoted from the *requested* count; a
   request larger than the generator will produce is refused rather than truncated,
-  so the quote can never overcharge (A78).
+  so the quote can never overcharge (A84).
 - 422 `limit_reached` when the request would cross the plan's
-  `flashcards_per_month`, counted over the user's **local calendar month** (A79).
+  `flashcards_per_month`, counted over the user's **local calendar month** (A85).
   The body carries `limit` and `used`.
 - 403 `email_not_verified`.
 
@@ -388,7 +396,7 @@ descriptor the studio panel renders — `per_batch` is the plan matrix's
 `max_cards` the request cap `POST /workspaces/:id/decks` enforces — so the client
 never quotes a hardcoded price or limit. A client that ignores `cost` still reads
 `decks` unchanged. **This route is a deliberate addition beyond the spec's route
-list** (A75): without it a deck is unreachable after a page reload, which makes
+list** (A81): without it a deck is unreachable after a page reload, which makes
 the phase's own exit gate untestable by hand.
 
 ### `GET /decks/:id`
@@ -396,7 +404,7 @@ the phase's own exit gate untestable by hand.
 Auth. 200 `{"deck": Deck, "cards": [Flashcard]}`, cards ordered `(created_at,
 id)`. Another account's deck is 404. `Deck.status` is `generating | ready |
 failed`; a `failed` deck carries a readable `error` and its credits are refunded
-(A81).
+(A87).
 
 ### `GET /decks/:id/due?limit=N`
 
@@ -413,7 +421,7 @@ response cannot apply twice; `reviewed_at` defaults to the server's clock.
 200 `{"applied": bool, "card": {"id", "ease", "interval_days", "due_at"}}`.
 `applied: false` means the review id had already been applied, so the call is
 idempotent. The card's state is the replay of its whole review history, so two
-devices converge on one schedule rather than on whichever wrote last (A76).
+devices converge on one schedule rather than on whichever wrote last (A82).
 
 - 400 `validation` for an unknown rating or a `reviewed_at` more than 24 hours in
   the future: a device with a wrong clock would otherwise pin a card out of the

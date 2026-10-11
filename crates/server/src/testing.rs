@@ -55,6 +55,16 @@ pub fn config() -> AppConfig {
             ("GOOGLE_LOGIN_CLIENT_ID", ""),
             ("GOOGLE_LOGIN_CLIENT_SECRET", ""),
             ("GOOGLE_LOGIN_REDIRECT_URI", ""),
+            // Search: pinned here rather than inherited, because `from_env_at`
+            // falls back to the process environment for any key not in this list.
+            // A developer whose `.env` pins `SEARCH_PROVIDER=tavily` with no key
+            // would otherwise make every suite in this crate fail at boot with a
+            // configuration error that has nothing to do with the test.
+            ("SEARCH_PROVIDER", "composite"),
+            ("SEARXNG_URL", ""),
+            ("EXA_API_KEY", ""),
+            ("SEARCH_API_KEY", ""),
+            ("SEARCH_CACHE_TTL_HOURS", "24"),
         ],
     )
     .expect("the test config must load")
@@ -78,6 +88,7 @@ pub fn state(pool: PgPool) -> AppState {
         mailer: Arc::new(RecordingMailer::default()),
         clock: Arc::new(FixedClock::at(chrono::Utc::now())),
         llm: None,
+        search: None,
         jobs: Queue::new(),
     }
 }
@@ -116,6 +127,7 @@ impl TestState {
                 mailer: mailer.clone(),
                 clock: clock.clone(),
                 llm: None,
+                search: None,
                 jobs: Queue::new(),
             },
             storage,
@@ -147,6 +159,16 @@ impl TestState {
     /// assertion run on the path that ships.
     pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
         self.state.embedder = embedder;
+        self
+    }
+
+    /// The same state with a search composite, so the web suite runs without a
+    /// network.
+    pub fn with_search(
+        mut self,
+        search: Arc<crate::integrations::search::composite::CompositeSearch>,
+    ) -> Self {
+        self.state.search = Some(search);
         self
     }
 

@@ -91,7 +91,7 @@ export function StyleguideScreen() {
               { type: 'chunk', label: 2, sourceTitle: 'Source title', page: 4 },
               { type: 'chunk', label: 3, sourceTitle: 'Another source', page: null },
             ]} />
-            . An outside result is marked separately <CitationList citations={[{ type: 'web', label: 'W1', url: 'https://example.com', title: 'Web result' }]} />.
+            . An outside result is marked separately <CitationList citations={[{ type: 'web', url: 'https://example.com/paper', title: 'Web result' }]} />.
           </p>
           <p className="text-sm">
             The interactive form is shown above as a web citation, which has a real

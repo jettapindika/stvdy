@@ -5,8 +5,10 @@
 pub mod clock;
 pub mod documents;
 pub mod embedder;
+pub mod fetch;
 pub mod llm;
 pub mod mailer;
+pub mod search;
 pub mod storage;
 
 use std::sync::Arc;
@@ -28,6 +30,9 @@ pub struct Providers {
     s3: Option<Arc<storage::S3Storage>>,
     /// `None` when `LLM_BASE_URL` is unset.
     pub llm: Option<Arc<dyn stvdy_core::traits::llm::LlmProvider>>,
+    /// `None` only when the pinned tier is unconfigured. The composite needs no
+    /// keys, so a default deployment has one.
+    pub search: Option<Arc<search::CompositeSearch>>,
 }
 
 impl Providers {
@@ -98,6 +103,15 @@ impl Providers {
             }
         };
 
+        // Built here rather than lazily so a misconfigured `SEARCH_PROVIDER` or a
+        // missing key for a pinned tier is a startup failure, not a first-query
+        // surprise. `None` means the pinned tier is unconfigured, which the config
+        // loader already refuses, so in practice this is present.
+        let search = search::CompositeSearch::new(&cfg.search, pool.clone()).map(Arc::new);
+        if let Some(composite) = &search {
+            tracing::info!(tiers = ?composite.tier_names(), "search composite ready");
+        }
+
         Ok(Self {
             storage,
             embedder,
@@ -105,6 +119,7 @@ impl Providers {
             clock: Arc::new(clock::SystemClock),
             s3,
             llm,
+            search,
         })
     }
 }

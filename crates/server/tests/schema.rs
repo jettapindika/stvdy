@@ -54,6 +54,9 @@ const NON_SYNC_TABLES: &[&str] = &[
     "push_tokens",
     "plans",
     "users",
+    // A40: a provider result set is a server-side cost control with no client
+    // entity, so it must never reach a device through the change log.
+    "search_cache",
 ];
 
 async fn insert_user(pool: &PgPool) -> Uuid {
@@ -282,6 +285,9 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         "cheatsheets",
         "email_verification_tokens",
         "login_tickets",
+        // Phase 3. A server-side cost control with no client-visible entity, so
+        // it is deliberately not a `+sync` table (A40).
+        "search_cache",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES

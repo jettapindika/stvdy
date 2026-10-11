@@ -12,5 +12,6 @@ pub mod error;
 pub mod generation;
 pub mod prompts;
 pub mod retrieval;
+pub mod search;
 pub mod sm2;
 pub mod traits;

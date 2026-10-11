@@ -111,6 +111,9 @@ pub struct PromptWebHit {
     pub url: String,
     pub title: String,
     pub snippet: String,
+    /// Rendered into the prompt when present, so the model can cite a work by its
+    /// DOI, and carried into the label map so the citation resolves with it.
+    pub doi: Option<String>,
 }
 
 /// The composed prompt and everything needed to interpret the model's reply.
@@ -175,6 +178,7 @@ fn labels_of(chunks: &[PromptChunk], web: &[PromptWebHit]) -> ContextLabels {
                 label: hit.label,
                 url: hit.url.clone(),
                 title: hit.title.clone(),
+                doi: hit.doi.clone(),
             })
             .collect(),
     )
@@ -474,6 +478,13 @@ fn render_web(web: &[PromptWebHit]) -> String {
             block.push_str(&hit.title);
             block.push_str("\" ");
             block.push_str(&hit.url);
+            // The DOI when the tier provided one. Rendered so the model can cite a
+            // work by its stable identifier: the phase gate is "URLs and DOIs", and
+            // a DOI the model never sees is one it cannot cite.
+            if let Some(doi) = &hit.doi {
+                block.push_str(" doi:");
+                block.push_str(doi);
+            }
             block.push('\n');
             block.push_str(&hit.snippet);
             block.push_str("\n\n");

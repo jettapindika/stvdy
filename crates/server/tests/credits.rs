@@ -45,9 +45,11 @@ async fn a_reached_cap_refuses_the_spend_and_writes_nothing(pool: PgPool) {
     // A cap of zero is already reached, which keeps the test independent of the
     // plan's configured number.
     let cap = DailyCap {
+        action: "chat_message",
         limit: Limit::Max(0),
         since: chrono::Utc::now() - chrono::Duration::hours(1),
         label: "chat messages today",
+        uncached_only: false,
     };
 
     let result = credits::spend(
@@ -56,7 +58,7 @@ async fn a_reached_cap_refuses_the_spend_and_writes_nothing(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         1,
-        Some(cap),
+        [Some(cap), None],
     )
     .await;
 
@@ -96,9 +98,11 @@ async fn a_cap_with_room_lets_the_spend_through(pool: PgPool) {
         .unwrap();
 
     let cap = DailyCap {
+        action: "chat_message",
         limit: Limit::Max(3),
         since: chrono::Utc::now() - chrono::Duration::hours(1),
         label: "chat messages today",
+        uncached_only: false,
     };
 
     let first = credits::spend(
@@ -107,7 +111,7 @@ async fn a_cap_with_room_lets_the_spend_through(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         1,
-        Some(cap),
+        [Some(cap), None],
     )
     .await
     .expect("the first spend fits");
@@ -162,7 +166,7 @@ async fn a_provider_cost_lands_on_its_own_usage_row(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         1,
-        None,
+        [None, None],
     )
     .await
     .expect("the first spend");
@@ -172,7 +176,7 @@ async fn a_provider_cost_lands_on_its_own_usage_row(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         1,
-        None,
+        [None, None],
     )
     .await
     .expect("the second spend");
@@ -260,7 +264,7 @@ async fn the_monthly_bucket_is_spent_before_the_purchased_one(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         3,
-        None,
+        [None, None],
     )
     .await
     .expect("the purchased bucket covers it");
@@ -291,7 +295,7 @@ async fn the_monthly_bucket_is_spent_before_the_purchased_one(pool: PgPool) {
         PlanId::Free,
         "chat_message",
         2,
-        None,
+        [None, None],
     )
     .await
     .expect("the monthly bucket covers it");
@@ -356,7 +360,15 @@ async fn the_spend_takes_the_lock_before_reading_the_ledger(pool: PgPool) {
 
     let state = harness.state.clone();
     let spending = tokio::spawn(async move {
-        credits::spend(&state, user_id, PlanId::Free, "chat_message", 1, None).await
+        credits::spend(
+            &state,
+            user_id,
+            PlanId::Free,
+            "chat_message",
+            1,
+            [None, None],
+        )
+        .await
     });
 
     // While the lock is held the spend must not complete, and it must not have

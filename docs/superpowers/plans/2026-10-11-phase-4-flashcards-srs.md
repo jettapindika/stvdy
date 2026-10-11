@@ -2140,7 +2140,7 @@ pub async fn create_deck(
 /// `GET /workspaces/:id/decks`, newest first, tombstones excluded.
 ///
 /// Added beyond the spec's route list: without it a deck is unreachable after a
-/// page reload, which makes the phase's own exit gate untestable by hand (A75).
+/// page reload, which makes the phase's own exit gate untestable by hand (A81).
 pub async fn list_decks(
     State(state): State<AppState>,
     user: AuthUser,
@@ -3580,7 +3580,7 @@ response shapes, the four status codes that matter (201 with `status: "generatin
 402 `insufficient_credits`, 422 `limit_reached`, 404 for another account's deck), the
 cost rule (4 credits per 10 requested cards), and a note that
 `GET /workspaces/:id/decks` is an addition beyond the spec's route list, with the
-reason (A75).
+reason (A81).
 
 - [ ] **Step 2: `docs/ARCHITECTURE.md`**
 
@@ -3594,20 +3594,20 @@ the kind of thing a later refactor breaks silently:
 
 - [ ] **Step 3: `docs/ASSUMPTIONS.md`**
 
-The next free number is **A75** (`docs/ASSUMPTIONS.md` ends at A74). Add one row per
+Phase 3 lands first and owns A75-A80, so this phase's rows are A81-A89. Add one row per
 decision, in the table's existing `| id | decision | detail | why |` shape:
-- A75: `GET /workspaces/:id/decks` is a deliberate addition to the spec's route list.
-- A76: the grade→quality map and the interval/ease formula are the algorithm's
+- A81: `GET /workspaces/:id/decks` is a deliberate addition to the spec's route list.
+- A82: the grade→quality map and the interval/ease formula are the algorithm's
   contract, not a tuning knob (name the exact values).
-- A77: `{{output_language}}` defaults to the material's language.
-- A78: `MAX_REQUESTED_CARDS = 50`, `MAX_SOURCES = 20`, `MAX_CARDS_PER_REPLY = 60`,
+- A83: `{{output_language}}` defaults to the material's language.
+- A84: `MAX_REQUESTED_CARDS = 50`, `MAX_SOURCES = 20`, `MAX_CARDS_PER_REPLY = 60`,
   and why the credit cost is quoted from the requested count.
-- A79: `limits::enforce_batch` and the local-month window for `flashcards_per_month`.
-- A80: client-side SM-2 *replay* is deferred to Phase 8 (client-side *due* computation
+- A85: `limits::enforce_batch` and the local-month window for `flashcards_per_month`.
+- A86: client-side SM-2 *replay* is deferred to Phase 8 (client-side *due* computation
   is not).
-- A81: the generation refund, including the zeroing guard that makes it once-only.
-- A82: the migration-numbering rule when Phase 3's `0020_search_cache.sql` lands first.
-- A83: `plan_id` parsing moved to `PlanId::parse`, so one implementation reads a plan
+- A87: the generation refund, including the zeroing guard that makes it once-only.
+- A88: the migration-numbering rule when Phase 3's `0020_search_cache.sql` lands first.
+- A89: `plan_id` parsing moved to `PlanId::parse`, so one implementation reads a plan
   string.
 
 - [ ] **Step 4: Roadmap gate 5 — accessibility, on the study screen**
