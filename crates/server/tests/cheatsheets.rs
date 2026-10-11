@@ -439,10 +439,6 @@ async fn a_generation_that_fails_for_good_refunds_the_credits(pool: PgPool) {
             .contains("JSON"),
         "the error must say what happened: {sheet}"
     );
-    assert!(
-        sheet["cheatsheet"]["blocks_key"].is_null() || true,
-        "the payload carries no internal keys"
-    );
     // A failed generation stores nothing: the artifacts are only written once the reply is
     // renderable, so there is no half-document to clean up.
     let keys: (Option<String>, Option<String>, Option<String>) =
