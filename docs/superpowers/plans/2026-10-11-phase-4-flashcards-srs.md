@@ -3320,11 +3320,19 @@ Behaviour, exactly:
   grades `Again` (left) or `Good` (right); vertical movement past 20px is ignored so
   scrolling wins.
 
-Add the route in `app/src/router.tsx`, inside the `App` children:
+Add the route in `app/src/router.tsx`, inside the `App` children (after
+`{ path: 'workspaces/:workspaceId', ... }`), and add the import beside the others:
 
 ```tsx
-{ path: 'study/:deckId', element: <StudyScreen /> },
+import { StudyScreen } from './features/study/StudyScreen'
+// ...
+          { path: 'study/:deckId', element: <StudyScreen /> },
 ```
+
+Note: `WorkspaceScreen`'s three-panel grid stays `lg:`-only, so the `study` route
+renders outside it, full-width, on every form factor. That is deliberate: the study
+screen is one card, and a card squeezed into the third panel of a desktop grid would
+be worse than a dedicated screen.
 
 - [ ] **Step 8: Wire the Studio panel in**
 
