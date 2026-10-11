@@ -16,11 +16,14 @@ use axum::http::StatusCode;
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::PgPool;
 use stvdy_core::config::{ExportFormat, PlanId};
-use stvdy_core::entitlements::{EntitlementError, Feature, SubStatus};
+use stvdy_core::entitlements::{
+    Credits, EntitlementError, Feature, PlanFacts, SubStatus, UsageSnapshot,
+};
 use stvdy_core::traits::testing::FixedClock;
 use stvdy_server::auth::extract::AuthUser;
 use stvdy_server::error::AppError;
 use stvdy_server::testing::TestState;
+use stvdy_sync::proto::{Entity, Mutation, MutationResult, Op};
 use uuid::Uuid;
 
 mod common;
@@ -567,4 +570,314 @@ async fn signup_on(app: &axum::Router, harness: &TestState, email: &str, platfor
         .as_str()
         .expect("an access token")
         .to_string()
+}
+
+// --- Task 9: the usage view, and the two boundaries later phases inherit ---------------
+
+/// A free caller's snapshot, built by hand: the push and checkout boundaries are pure, so
+/// they are asserted without a database.
+fn free_snapshot() -> UsageSnapshot {
+    UsageSnapshot {
+        plan: PlanId::Free,
+        subscription_status: SubStatus::None,
+        credits: Credits::default(),
+        storage_bytes: 0,
+        workspaces: 0,
+        sources: 0,
+        devices: 1,
+        chat_msgs_today: 0,
+        web_searches_today: 0,
+        flashcards_this_month: 0,
+        quizzes_this_month: 0,
+        reports_this_month: 0,
+        syllabus_imports: 0,
+    }
+}
+
+fn upsert(entity: Entity, payload: serde_json::Value) -> Mutation {
+    Mutation {
+        mutation_id: Uuid::now_v7(),
+        entity,
+        op: Op::Upsert,
+        id: Uuid::now_v7(),
+        payload: Some(payload),
+        client_ts: Utc::now(),
+    }
+}
+
+fn rejection_code(result: Result<(), MutationResult>) -> String {
+    match result {
+        Err(MutationResult::Rejected { code, .. }) => code,
+        other => panic!("expected a rejection, got {other:?}"),
+    }
+}
+
+/// `GET /usage` is the only source of the numbers the UI shows (A159), and every number in
+/// it is computed: no placeholder, no `0` standing in for "unknown".
+///
+/// The assertions are against the database, not against the view: the credit buckets are
+/// the ledger's sums, the limit counts are the rows that exist, and the storage figure is
+/// the sum the upload path itself reads.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_usage_view_reports_only_computed_numbers(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "view@example.test").await;
+    let user_id = user_id_of(&harness, "view@example.test").await;
+
+    let (status, body) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["plan"], "free");
+    assert_eq!(body["name"], "Free");
+    assert_eq!(body["subscription"]["status"], "none");
+    assert!(body["subscription"]["period_end"].is_null());
+
+    // The buckets are the ledger's own sums, not literals.
+    let monthly: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = $1 and bucket = 'monthly'",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    let purchased: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = $1 and bucket = 'purchased'",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(body["credits"]["monthly"], monthly);
+    assert_eq!(body["credits"]["purchased"], purchased);
+    assert_eq!(body["credits"]["total"], monthly + purchased);
+    assert!(monthly > 0, "signup grants the first month's allowance");
+
+    // The device the account signed up with is the count, and the plan's limit is the
+    // config's value.
+    assert_eq!(body["limits"]["devices_max"]["used"], 1);
+    assert_eq!(
+        body["limits"]["devices_max"]["limit"],
+        harness.state.config.plans.get(PlanId::Free).devices_max
+    );
+
+    // A count that is not zero is the count: the view cannot pass by reporting zeroes.
+    for index in 0..2 {
+        let (status, created) = json(
+            &app,
+            "POST",
+            "/workspaces",
+            &token,
+            serde_json::json!({ "name": format!("Workspace {index}") }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+    }
+    let (status, body) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let workspaces: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from workspaces where user_id = $1 and deleted_at is null",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(body["limits"]["workspaces"]["used"], workspaces);
+    assert_eq!(body["limits"]["workspaces"]["used"], 2);
+    assert_eq!(body["limits"]["workspaces"]["limit"], 2);
+
+    // Storage is the byte sum the upload path checks, reported in bytes rather than a
+    // rounded megabyte count.
+    let storage: i64 = sqlx::query_scalar(
+        "select coalesce(sum(file_size), 0)::bigint from sources
+          where user_id = $1 and deleted_at is null",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(body["storage_bytes"], storage);
+
+    // An unlimited plan reports `null` for the limit rather than a sentinel. Pro allows
+    // unlimited workspaces.
+    sqlx::query(
+        "insert into subscriptions
+            (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+         values ($1, 'pro', 'active', 'monthly', now(), now() + interval '30 days')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+    sqlx::query("update users set plan_id = 'pro' where id = $1")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["plan"], "pro");
+    assert!(
+        body["limits"]["workspaces"]["limit"].is_null(),
+        "an unlimited plan reports null, not a sentinel: {body}"
+    );
+}
+
+/// The cost the client renders is the cost the server charges, from one function
+/// (roadmap gate 7(d)).
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_usage_costs_are_the_costs_the_routes_charge(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "costs@example.test").await;
+
+    let (status, body) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // One function builds the block, so the view's table is `credits::costs` verbatim.
+    assert_eq!(
+        body["costs"],
+        stvdy_server::credits::costs(&harness.state.config.plans)
+    );
+
+    // And the number the view quotes is the number the chat route charges: both read
+    // `plans.credits.chat_message`, so a retuned config moves them together.
+    let charged = stvdy_server::credits::chat_message_cost(&harness.state);
+    assert_eq!(body["costs"]["chat_message"], charged);
+    assert_eq!(
+        body["costs"]["web_search"],
+        stvdy_server::credits::search_cost(&harness.state)
+    );
+}
+
+/// The USD ceiling figures are not in the user-facing view (A159); the pause is.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_usage_view_does_not_leak_unit_economics(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "economics@example.test").await;
+
+    let (status, body) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The pause is reported, and it is the only thing the view says about the ceiling.
+    let provider_cost = body["provider_cost"]
+        .as_object()
+        .expect("provider_cost is an object");
+    let keys: std::collections::BTreeSet<&str> = provider_cost.keys().map(String::as_str).collect();
+    assert_eq!(
+        keys,
+        std::collections::BTreeSet::from(["paused", "resets_at"]),
+        "the view names the pause and the reset instant, never the dollars: {body}"
+    );
+    assert!(body["provider_cost"]["paused"].is_boolean());
+    assert!(body["provider_cost"]["resets_at"].is_string());
+
+    // Nothing in the payload is denominated in dollars. The ceiling's figures are
+    // admin-only, and a user reading "0.50" would be reading our unit economics.
+    let text = body.to_string().to_lowercase();
+    assert!(
+        !text.contains("usd"),
+        "no dollar figure reaches the user-facing view: {body}"
+    );
+}
+
+/// Phase 8 inherits this exact decision: a `Message` push is `read_only_entity` (A150).
+///
+/// The allowlist is the first guard, and the whole offline-write scope is asserted from
+/// both directions so the test cannot pass by refusing everything: every server-owned
+/// entity is refused, and every pushable one is accepted.
+#[test]
+fn the_push_decision_rejects_what_the_allowlist_rejects() {
+    let plans = stvdy_server::testing::plans();
+    let facts = PlanFacts {
+        upgrade_offerable: true,
+    };
+    let snapshot = free_snapshot();
+
+    for entity in [
+        Entity::Message,
+        Entity::Source,
+        Entity::Workspace,
+        Entity::Deck,
+        Entity::Flashcard,
+        Entity::Quiz,
+        Entity::QuizQuestion,
+        Entity::Report,
+        Entity::Cheatsheet,
+        Entity::Goal,
+        Entity::PendingAction,
+    ] {
+        assert!(!entity.is_client_writable(), "{entity:?}");
+        let result = stvdy_server::sync::push::decide(
+            &plans,
+            &facts,
+            &snapshot,
+            false,
+            &upsert(entity, serde_json::json!({ "status": "ready" })),
+        );
+        assert_eq!(
+            rejection_code(result),
+            "read_only_entity",
+            "a push of {entity:?} must be refused"
+        );
+    }
+
+    // The other direction: the six offline-write entities are accepted, so the refusals
+    // above are the allowlist and not a decision that refuses everything.
+    for entity in [
+        Entity::Task,
+        Entity::Event,
+        Entity::FlashcardReview,
+        Entity::QuizAttempt,
+        Entity::StudySession,
+        Entity::UserSettings,
+    ] {
+        assert!(entity.is_client_writable(), "{entity:?}");
+        stvdy_server::sync::push::decide(
+            &plans,
+            &facts,
+            &snapshot,
+            false,
+            &upsert(entity, serde_json::json!({ "title": "Read chapter 4" })),
+        )
+        .expect("a pushable entity must be accepted");
+    }
+}
+
+/// Phase 13 inherits this: `ios` and `android` are refused, and a body that claims
+/// `platform: "web"` changes nothing (A144/A151).
+///
+/// The route-level half — an `ios` device whose request body says `platform: "web"` still
+/// gets `feature_locked` — is driven through a real route in `tests/tamper.rs`; this
+/// asserts the policy function itself and the fact the route relies on, that the platform
+/// a decision sees is the device row's field and not a request field.
+#[test]
+fn checkout_is_refused_for_a_mobile_platform_and_a_body_cannot_claim_otherwise() {
+    let policy = stvdy_server::testing::config().billing_policy;
+
+    for mobile in ["ios", "android"] {
+        let error = stvdy_server::billing::checkout_allowed(&policy, mobile)
+            .expect_err("a mobile platform must not be sold to");
+        assert_eq!(error.status(), StatusCode::FORBIDDEN);
+        assert_eq!(error.code(), "feature_locked");
+    }
+
+    for desktop in ["web", "macos", "windows"] {
+        assert!(
+            stvdy_server::billing::checkout_allowed(&policy, desktop).is_ok(),
+            "{desktop}"
+        );
+    }
+
+    // An `ios` device's `AuthUser` offers no upgrade, whatever a body claims: the field is
+    // filled from `devices.platform` by the extractor (A144).
+    let ios = caller(Uuid::now_v7(), "free", "UTC", "ios");
+    assert!(!ios.upgrade_offerable(&policy));
+    let desktop = caller(Uuid::now_v7(), "free", "UTC", "macos");
+    assert!(desktop.upgrade_offerable(&policy));
 }

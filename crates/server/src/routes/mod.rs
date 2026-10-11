@@ -29,6 +29,7 @@ use crate::quizzes;
 use crate::reports;
 use crate::sources;
 use crate::state::AppState;
+use crate::usage;
 use crate::workspaces;
 
 /// Origins the native shell presents. These are NOT `http://localhost`: Tauri
@@ -123,6 +124,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(quizzes::routes())
         .merge(reports::routes())
         .merge(cheatsheets::routes())
+        .merge(usage::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )));

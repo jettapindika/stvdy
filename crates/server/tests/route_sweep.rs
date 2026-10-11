@@ -199,6 +199,11 @@ fn read_only_rows() -> Vec<Row> {
             "/cheatsheets/{id}/re-render",
             "re-rendering is a pure function of stored blocks and charges nothing",
         ),
+        ro(
+            "GET",
+            "/usage",
+            "reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159)",
+        ),
     ]
 }
 
@@ -1103,6 +1108,10 @@ fn no_file_outside_the_entitlements_layer_reads_a_plan_limit() {
         ("/entitlements.rs", "the snapshot and the limits view"),
         ("/limits.rs", "the credit spend's in-transaction cap check"),
         ("/credits.rs", "the cost table and the daily caps"),
+        (
+            "/usage.rs",
+            "the plan/usage view: the limits the screen renders (A159)",
+        ),
         (
             "/sources/routes.rs",
             "the HTTP body limit, not an entitlement",
