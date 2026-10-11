@@ -2742,10 +2742,11 @@ pub async fn record_usage(
 ) -> AppResult<()> { ... }
 ```
 
-Update the chat route's call site to the new signature, passing
-`Some(usage_event_id)`, the token counts as `Some(..)` from the stream's `Usage`
-event, and `&prompt_version` — the chat path must keep recording what it records
-today.
+Update the chat route's call site (`crates/server/src/chat/routes.rs:253-262`, inside
+`if let Some(reported) = &usage`) to the new signature: `Some(usage_event_id)`,
+`Some(reported.in_tokens)`, `Some(reported.out_tokens)`, `reported.provider_cost_usd`,
+`&prompt_version_for_stream`. The chat path must record exactly what it records today;
+`crates/server/tests/chat.rs` covers it.
 
 Then wire it up: `crates/server/src/jobs/handlers/mod.rs` gains `pub mod generate;`,
 `worker.rs::dispatch` gains
