@@ -342,14 +342,14 @@ pub async fn chat(
                 "assistant",
                 &cleaned,
                 &resolved,
-                body.use_web,
+                used_web,
             )
             .await
             {
                 Ok(message_id) => {
                     yield Ok(sse::citations(&resolved));
                     yield Ok(sse::usage(total_cost, remaining));
-                    yield Ok(sse::done(message_id, body.use_web));
+                    yield Ok(sse::done(message_id, used_web));
                 }
                 Err(error) => {
                     tracing::error!(%error, "persisting the assistant message failed");

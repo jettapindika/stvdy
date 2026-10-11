@@ -480,6 +480,23 @@
     font-family: var(--font-mono);
     font-size: 0.85em;
   }
+  /* The DOI, when the tier gave one. Monospace like the host so an identifier
+     reads as one, and hidden below the phone breakpoint where the chip is
+     already carrying a title and a host. */
+  .cite-web .cite-doi {
+    max-width: 14rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    color: var(--muted);
+  }
+  @media (max-width: 767px) {
+    .cite-web .cite-doi {
+      display: none;
+    }
+  }
 
   /* --- Labels and state --------------------------------------------------- */
 

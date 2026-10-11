@@ -333,6 +333,11 @@ impl SearchProvider for Arxiv {
 
 /// arXiv answers an Atom feed. Only `<entry>` blocks are read, because the feed's
 /// own `<title>` and `<id>` would otherwise become a hit.
+///
+/// arXiv reports a bad query as an *entry* (`<id>https://arxiv.org/api/errors`
+/// with the message in `<summary>`), verified against the API on 2026-10-11, so
+/// that entry is skipped: without this a query arXiv rejects becomes a cited
+/// source titled "Error".
 pub fn parse_arxiv(feed: &str) -> Vec<SearchHit> {
     let mut hits = Vec::new();
     let mut rest = feed;
@@ -341,7 +346,9 @@ pub fn parse_arxiv(feed: &str) -> Vec<SearchHit> {
         let Some(end) = after.find("</entry>") else {
             break;
         };
-        if let Some(hit) = arxiv_hit(&after[..end]) {
+        let entry = &after[..end];
+        let is_error = element_text(entry, "id").is_some_and(|id| id.ends_with("/api/errors"));
+        if !is_error && let Some(hit) = arxiv_hit(entry) {
             hits.push(hit);
         }
         rest = &after[end + "</entry>".len()..];
@@ -524,18 +531,50 @@ impl SearchProvider for Eric {
 
     async fn search(&self, q: &str, max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
         let rows = page_size(max_results);
+        // A query ERIC cannot parse is not sent at all: there is nothing to search
+        // for, and the composite will move to the next tier.
+        let Some(query) = eric_query(q) else {
+            return Ok(Vec::new());
+        };
         // No `fields`: the parameter is only useful for narrowing a large record,
         // and a name it does not accept is an error rather than a smaller payload.
         let response = self
             .client
             .get("https://api.ies.ed.gov/eric/")
-            .query(&[("search", q), ("format", "json"), ("rows", rows.as_str())])
+            .query(&[
+                ("search", query.as_str()),
+                ("format", "json"),
+                ("rows", rows.as_str()),
+            ])
             .send()
             .await
             .map_err(|error| SearchError::Provider(format!("eric: {error}")))?;
         let value = json_body(response, "eric").await?;
         Ok(parse_eric(&value))
     }
+}
+
+/// ERIC's `search` is a field-qualified query language, and it **ignores** an
+/// unquoted multi-word phrase rather than rejecting it: `searttention is all
+/// you need` answers with the whole corpus (1,270,377 records, verified against
+/// the API on 2026-10-11) while `search="attention" AND "need"` answers with
+/// 11,267. Passing the raw query through would fill the prompt with unrelated
+/// records presented as hits, so every term is quoted and joined with `AND`.
+///
+/// Quoting is also what makes it safe: a bare `:` is a syntax error to ERIC
+/// (verified the same way), and a user query can contain anything. Punctuation
+/// therefore splits a token into words rather than being deleted from it, so
+/// `title:"attention"` becomes `title` and `attention` rather than the invented
+/// token `titleattention`, which would silently lose the word the user wrote.
+/// `None` when nothing searchable survives, which is the only case where calling
+/// the API would be pointless.
+fn eric_query(q: &str) -> Option<String> {
+    let terms: Vec<String> = q
+        .split(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '\'')
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{term}\""))
+        .collect();
+    (!terms.is_empty()).then(|| terms.join(" AND "))
 }
 
 /// ERIC wraps its documents in `response.docs` and publishes only a publication
@@ -686,15 +725,18 @@ fn pubmed_hit(doc: &serde_json::Value) -> Option<SearchHit> {
     Some(hit)
 }
 
-/// `articleids` is the documented place for the DOI. `elocationid` carries it as
-/// `doi: 10.xxxx` on the records that predate that field.
+/// `articleids` is the documented place for the DOI. The live `esummary` response
+/// sends each entry as `{"idtype": "doi", "value": "10.xxxx"}` (verified against
+/// the API on 2026-10-11) while the API's own documentation and its XML form use
+/// `idval`, so both are read rather than one guessed at. `elocationid` carries the
+/// DOI as `doi: 10.xxxx` on the records that predate the field.
 fn pubmed_doi(doc: &serde_json::Value) -> Option<String> {
     doc.get("articleids")
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
         .find(|identifier| identifier.get("idtype").and_then(|v| v.as_str()) == Some("doi"))
-        .and_then(|identifier| identifier.get("idval"))
+        .and_then(|identifier| identifier.get("value").or_else(|| identifier.get("idval")))
         .and_then(|v| v.as_str())
         .map(doi_bare)
         .or_else(|| {
@@ -916,6 +958,31 @@ mod tests {
     }
 
     #[test]
+    fn an_eric_query_becomes_quoted_anded_terms() {
+        // The shape the API honours: an unquoted phrase is ignored outright, so
+        // the raw query must never be sent.
+        assert_eq!(
+            eric_query("attention is all you need").as_deref(),
+            Some("\"attention\" AND \"is\" AND \"all\" AND \"you\" AND \"need\"")
+        );
+        assert_eq!(eric_query("attention").as_deref(), Some("\"attention\""));
+        // Punctuation splits rather than being deleted, so a `:` cannot turn a
+        // question into ERIC's field syntax (which is a hard error), a quote cannot
+        // unbalance the quoting, and no word the user wrote is lost.
+        assert_eq!(
+            eric_query("title:\"attention\" (need)").as_deref(),
+            Some("\"title\" AND \"attention\" AND \"need\"")
+        );
+        // A hyphen is part of a word, so a compound stays one term.
+        assert_eq!(
+            eric_query("state-of-the-art").as_deref(),
+            Some("\"state-of-the-art\"")
+        );
+        assert_eq!(eric_query("   ").as_deref(), None);
+        assert_eq!(eric_query("!!! ???").as_deref(), None);
+    }
+
+    #[test]
     fn eric_has_no_doi_and_falls_back_to_its_own_record_page() {
         let body = serde_json::json!({
             "response": {
@@ -982,6 +1049,83 @@ mod tests {
         // for, so the year is the most that can be said.
         assert_eq!(hits[1].published_at, None);
         assert!(academic(&hits));
+    }
+
+    #[test]
+    fn pubmed_reads_the_doi_from_the_shape_the_live_api_sends() {
+        // Copied from a real `esummary` response for pmid 38189543 on 2026-10-11:
+        // the entries carry `value`, not the documented `idval`, and the DOI is
+        // the whole reason this tier is worth querying.
+        let body = serde_json::json!({
+            "header": { "type": "esummary", "version": "0.3" },
+            "result": {
+                "uids": ["38189543"],
+                "38189543": {
+                    "uid": "38189543",
+                    "title": "Attention is all you need: utilizing attention in AI-enabled drug discovery.",
+                    "source": "Brief Bioinform",
+                    "pubdate": "2023 Nov 22",
+                    "sortpubdate": "2023/11/22 00:00",
+                    "elocationid": "doi: 10.1093/bib/bbad467",
+                    "articleids": [
+                        { "idtype": "pubmed", "idtypen": 1, "value": "38189543" },
+                        { "idtype": "pmc", "idtypen": 8, "value": "PMC10772984" },
+                        { "idtype": "doi", "idtypen": 3, "value": "10.1093/bib/bbad467" },
+                        { "idtype": "pii", "idtypen": 4, "value": "7512647" }
+                    ]
+                }
+            }
+        });
+
+        let hits = parse_pubmed(&body);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].doi.as_deref(), Some("10.1093/bib/bbad467"));
+        assert_eq!(
+            hits[0].published_at,
+            Some(Utc.with_ymd_and_hms(2023, 11, 22, 0, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn pubmed_still_reads_the_documented_idval_spelling() {
+        let body = serde_json::json!({
+            "result": {
+                "uids": ["1"],
+                "1": {
+                    "uid": "1",
+                    "title": "Old shape",
+                    "articleids": [{ "idtype": "doi", "idval": "10.1/old" }]
+                }
+            }
+        });
+
+        assert_eq!(parse_pubmed(&body)[0].doi.as_deref(), Some("10.1/old"));
+    }
+
+    #[test]
+    fn an_arxiv_error_feed_yields_no_hits() {
+        // The real response for a query arXiv rejects, copied on 2026-10-11: it is
+        // a well-formed feed with one entry, so nothing but the id tells it apart
+        // from a result.
+        let feed = r#"<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/</id>
+  <title>arXiv Search Results</title>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <entry>
+    <id>https://arxiv.org/api/errors</id>
+    <title>Error</title>
+    <updated>2026-10-11T12:17:28Z</updated>
+    <link href="https://arxiv.org/api/errors" rel="alternate" type="text/html"/>
+    <summary>Either a search_query or id_list must be specified for the classic API.</summary>
+    <author><name>arXiv api core</name></author>
+  </entry>
+</feed>"#;
+
+        assert!(
+            parse_arxiv(feed).is_empty(),
+            "an API error must not become a citable source"
+        );
     }
 
     #[test]

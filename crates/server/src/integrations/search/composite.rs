@@ -140,15 +140,28 @@ impl CompositeSearch {
             searxng.clear_unresponsive_engines();
         }
 
+        // The cache is consulted for EVERY tier before any tier is called.
+        //
+        // Reading and writing per tier inside one loop looks equivalent and is not:
+        // which tier answers is not stable, because a free API returns empty under
+        // load without erroring. A repeat of the same query could then miss the
+        // entry the previous answer wrote (cached under `crossref`, while
+        // `openalex` is tried first and answers this time), call the network again,
+        // and bill the user a second search for a question already answered. Found
+        // by the smoke run, whose query was answered by two different tiers on two
+        // consecutive identical calls.
         for tier in &self.tiers {
             let key = dedupe_key(q, tier.name(), max_results);
             if let Some(hits) = self.read_cache(&key).await {
                 outcome.hits = hits;
                 outcome.answered_by = Some(tier.name().to_string());
                 outcome.cache_hit = true;
-                break;
+                return self.finish(outcome);
             }
+        }
 
+        for tier in &self.tiers {
+            let key = dedupe_key(q, tier.name(), max_results);
             match tier.search(q, max_results).await {
                 Ok(hits) if !hits.is_empty() => {
                     let hits = rank(hits);
@@ -165,6 +178,12 @@ impl CompositeSearch {
             }
         }
 
+        self.finish(outcome)
+    }
+
+    /// Attaches the SearXNG engine report, which is per-instance state rather than
+    /// per-search, and returns the outcome.
+    fn finish(&self, mut outcome: SearchOutcome) -> SearchOutcome {
         if let Some(searxng) = &self.searxng {
             outcome.unresponsive_engines = searxng.unresponsive_engines();
         }

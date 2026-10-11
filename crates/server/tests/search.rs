@@ -595,3 +595,104 @@ async fn an_unreachable_searxng_is_unavailable() {
         "a stopped SearXNG must be Unavailable, got {error:?}"
     );
 }
+
+/// A repeat query must be answered from the cache even when a *different* tier
+/// answered the first time.
+///
+/// This is the case a per-tier read inside one loop gets wrong, and it is not
+/// hypothetical: a free academic API returns empty under load without erroring, so
+/// two identical consecutive queries can be answered by two different tiers. Reading
+/// only the tier currently being tried then misses the entry the first answer wrote,
+/// calls the network again, and bills a second search for a question already
+/// answered.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_repeat_query_hits_the_cache_even_when_another_tier_answered(pool: PgPool) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
+    use stvdy_server::integrations::search::composite::CompositeSearch;
+
+    /// Answers empty the first time it is asked, then answers. That is exactly what
+    /// an overloaded free API looks like from here.
+    struct FlakyFirst {
+        calls: Arc<AtomicUsize>,
+        answer_from: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl SearchProvider for FlakyFirst {
+        fn name(&self) -> &'static str {
+            "first"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call < self.answer_from {
+                return Ok(Vec::new());
+            }
+            let mut hit = SearchHit::new(
+                "First tier hit",
+                "https://a.example/1",
+                "s",
+                SourceKind::Academic,
+                "first",
+            );
+            hit.doi = Some("10.1000/first".to_string());
+            Ok(vec![hit])
+        }
+    }
+
+    /// Always answers, and is the tier that answers first time round.
+    struct Steady;
+    #[async_trait::async_trait]
+    impl SearchProvider for Steady {
+        fn name(&self) -> &'static str {
+            "second"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let mut hit = SearchHit::new(
+                "Second tier hit",
+                "https://b.example/2",
+                "s",
+                SourceKind::Academic,
+                "second",
+            );
+            hit.doi = Some("10.1000/second".to_string());
+            Ok(vec![hit])
+        }
+    }
+
+    let first_calls = Arc::new(AtomicUsize::new(0));
+    let composite = CompositeSearch::with_tiers(
+        vec![
+            Arc::new(FlakyFirst {
+                calls: first_calls.clone(),
+                answer_from: 1,
+            }),
+            Arc::new(Steady),
+        ],
+        pool,
+        std::time::Duration::from_secs(3600),
+    );
+
+    // First query: the first tier is empty, so the second answers and is cached.
+    let first = composite.search("a repeated question", 8).await;
+    assert_eq!(first.answered_by.as_deref(), Some("second"));
+    assert!(!first.cache_hit);
+    assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+
+    // Second, identical query: the second tier's cached answer must be found even
+    // though the first tier is what the walk looks at first. Without the
+    // cache-first pass the first tier is called again, answers this time, and the
+    // user is billed a second search.
+    let second = composite.search("a repeated question", 8).await;
+    assert!(
+        second.cache_hit,
+        "an identical query must be served from the cache, whichever tier answered it"
+    );
+    assert_eq!(second.answered_by.as_deref(), Some("second"));
+    assert_eq!(
+        first_calls.load(Ordering::SeqCst),
+        1,
+        "no tier may be called again for an identical query"
+    );
+    assert_eq!(second.hits[0].doi.as_deref(), Some("10.1000/second"));
+}

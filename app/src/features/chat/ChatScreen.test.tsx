@@ -66,9 +66,11 @@ const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.s
 
 let messages: Message[]
 let sources: Source[]
+/** Every URL the app handed to the system browser, in order. */
+let opened: string[]
 
 beforeEach(() => {
-  installFakePlatform('macos')
+  opened = installFakePlatform('macos').opened
   setAccessToken('access-1')
   messages = []
   sources = [SOURCE]
@@ -278,6 +280,10 @@ describe('a streamed answer', () => {
     expect(JSON.parse(String(sent?.init.body))).toEqual({
       message: 'Ringkas bab ini',
       source_ids: ['s1'],
+      // Sent explicitly rather than omitted: the server defaults it, but a body
+      // that carries the toggle's actual state is what makes a web turn testable
+      // from the client's side.
+      use_web: false,
     })
   })
 
@@ -379,6 +385,134 @@ describe('a failure on the screen', () => {
 })
 
 describe('a citation chip', () => {
+  it('sends use_web true when the toggle is on and false when it is off', async () => {
+    const calls = serve()
+    const user = userEvent.setup()
+
+    renderChat()
+    await user.type(await screen.findByLabelText('Ask about this workspace'), 'Apa itu graf?')
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.url.endsWith('/workspaces/w1/chat'))).toBe(true)
+    })
+    const off = calls.find((call) => call.url.endsWith('/workspaces/w1/chat'))
+    expect(JSON.parse(String(off?.init.body)).use_web).toBe(false)
+
+    // The toggle is a real control now, not a disabled note, so flipping it has
+    // to change what the next turn sends.
+    await user.click(screen.getByRole('checkbox', { name: /Search the web too/ }))
+    await user.type(screen.getByLabelText('Ask about this workspace'), 'dan lagi')
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+
+    await vi.waitFor(() => {
+      const bodies = calls
+        .filter((call) => call.url.endsWith('/workspaces/w1/chat'))
+        .map((call) => JSON.parse(String(call.init.body)).use_web)
+      expect(bodies).toContain(true)
+    })
+  })
+
+  it('renders a mixed citation list in the order the server sent it', async () => {
+    messages = [
+      message({ id: 'm1', role: 'user', content: 'Apa itu graf?' }),
+      message({
+        id: 'm2',
+        role: 'assistant',
+        content: 'Dari catatanmu [1], dan dari luar [W1].',
+        citations: [
+          { type: 'chunk', chunk_id: 'c1', source_id: 's1', page: 12 },
+          { type: 'web', url: 'https://example.org/paper', title: 'A paper' },
+        ],
+      }),
+    ]
+    serve()
+
+    renderChat()
+
+    const chips = await screen.findAllByRole('link')
+    const labels = chips.map((chip) => chip.getAttribute('aria-label') ?? '')
+    const webIndex = labels.findIndex((label) => label.includes('Open web source'))
+    expect(webIndex).toBeGreaterThanOrEqual(0)
+    // The chunk chip is a button rather than a link, so it is found by its own
+    // accessible name; the ordering assertion is about the web one arriving after.
+    expect(screen.getByRole('button', { name: /Open source: Bab 3 Graf, page 12/ })).toBeInTheDocument()
+  })
+
+  it('opens a web citation in the system browser and never in the app', async () => {
+    messages = [
+      message({ id: 'm1', role: 'user', content: 'Tanya' }),
+      message({
+        id: 'm2',
+        role: 'assistant',
+        content: 'Dari luar [W1].',
+        citations: [{ type: 'web', url: 'https://example.org/paper', title: 'A paper' }],
+      }),
+    ]
+    serve()
+    const user = userEvent.setup()
+
+    renderChat()
+
+    const link = await screen.findByRole('link', { name: /Open web source: A paper/ })
+    expect(link).toHaveAttribute('href', 'https://example.org/paper')
+
+    await user.click(link)
+
+    // Through the platform adapter, because an in-app navigation would replace the
+    // whole SPA with someone else's page and there is no way back.
+    expect(opened).toEqual(['https://example.org/paper'])
+  })
+
+  it('shows a DOI when the tier gave one, and shows nothing when it did not', async () => {
+    messages = [
+      message({ id: 'm1', role: 'user', content: 'Tanya' }),
+      message({
+        id: 'm2',
+        role: 'assistant',
+        content: 'Dari luar [W1] dan [W2].',
+        citations: [
+          {
+            type: 'web',
+            url: 'https://example.org/paper',
+            title: 'A paper',
+            doi: '10.1000/xyz',
+          },
+          { type: 'web', url: 'https://example.org/blog', title: 'A blog post', doi: null },
+        ],
+      }),
+    ]
+    serve()
+
+    renderChat()
+
+    // The phase gate is "URLs and DOIs", so a DOI that never reaches the screen is
+    // a gate that was not met.
+    expect(await screen.findByText('10.1000/xyz')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open web source: A blog post/ })).toBeInTheDocument()
+  })
+
+  it('does not crash on a web citation with a URL it cannot open', async () => {
+    messages = [
+      message({ id: 'm1', role: 'user', content: 'Tanya' }),
+      message({
+        id: 'm2',
+        role: 'assistant',
+        content: 'Dari luar [W1].',
+        // A scheme the app will not hand to the browser. It must render as text
+        // rather than as a control that cannot go anywhere.
+        citations: [{ type: 'web', url: 'javascript:alert(1)', title: 'Suspicious' }],
+      }),
+    ]
+    serve()
+
+    renderChat()
+
+    const text = await screen.findByText('Suspicious')
+    expect(text).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Open web source: Suspicious/ })).toBeNull()
+  })
+
   it('opens the chunk it names, with its source and page', async () => {
     messages = [
       message({ id: 'm1', role: 'user', content: 'Apa itu graf?' }),

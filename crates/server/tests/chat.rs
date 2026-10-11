@@ -1052,54 +1052,13 @@ async fn an_unconfigured_provider_refuses_before_spending(pool: PgPool) {
     assert_eq!(messages, 0, "and must not leave a turn with no answer");
 }
 
-/// `use_web` is refused until Phase 3 rather than accepted and ignored: accepting
-/// it would tell the model it has web context, store `used_web: true`, and let the
-/// model claim to have searched, none of which happened.
-#[sqlx::test(migrations = "../../migrations")]
-async fn use_web_is_refused_until_the_search_arm_exists(pool: PgPool) {
-    let harness = TestState::new(pool);
-    harness.seed_plans().await.unwrap();
-    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
-    let token = signed_up(&app, &harness, "web@example.test").await;
-    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
-
-    let llm = Arc::new(ScriptedLlm::new(vec!["unused".to_string()]));
-    let harness = harness.with_llm(llm.clone());
-    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
-
-    let (status, rejected) = json(
-        &app,
-        "POST",
-        &format!("/workspaces/{workspace_id}/chat"),
-        &token,
-        serde_json::json!({ "message": "look this up", "use_web": true }),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
-    assert_eq!(rejected["code"], "validation");
-    assert!(llm.requests().is_empty(), "the model must not be called");
-
-    let ledger: i64 =
-        sqlx::query_scalar("select coalesce(sum(delta), 0)::bigint from credit_ledger")
-            .fetch_one(&harness.state.pool)
-            .await
-            .unwrap();
-    let allowance = harness
-        .state
-        .config
-        .plans
-        .get(stvdy_core::config::PlanId::Free)
-        .credits_per_month;
-    assert_eq!(ledger, allowance, "a refused request must not spend");
-
-    let messages: i64 = sqlx::query_scalar("select count(*) from messages")
-        .fetch_one(&harness.state.pool)
-        .await
-        .unwrap();
-    assert_eq!(messages, 0, "and must not store a turn claiming web use");
-}
-
+/// `use_web` is accepted now, and a turn that requested web context but got none is
+/// recorded honestly.
+///
+/// This replaces the Phase 2 test that asserted the refusal. Two things it pins
+/// that a naive implementation gets wrong: a search tier being unavailable must not
+/// fail the turn (the user's own sources are still there), and `used_web` must
+/// describe what the turn actually used rather than what it asked for, or the stored
 /// An empty answer must still terminate the stream. Without a terminator a client
 /// waits for a `done` that never arrives, because `done` is the end of the turn.
 #[sqlx::test(migrations = "../../migrations")]
@@ -1140,4 +1099,97 @@ async fn an_empty_answer_still_terminates_the_stream(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(messages, vec!["user".to_string()]);
+}
+
+/// `use_web` is accepted now, and a turn that requested web context but got none is
+/// recorded honestly.
+///
+/// This replaces the Phase 2 test that asserted the refusal. Two things it pins
+/// that a naive implementation gets wrong: a search tier being unavailable must not
+/// fail the turn (the user's own sources are still there), and `used_web` must
+/// describe what the turn actually used rather than what it asked for, or the stored
+/// assistant row lies about where the answer came from.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_web_turn_without_a_search_provider_still_answers_from_the_sources(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "web@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // `TestState` has no search composite, which is the case under test.
+    assert!(harness.state.search.is_none());
+
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        "ATP is made in the mitochondria [1].".to_string(),
+    ]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "look this up", "use_web": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    // The turn answered from the workspace's own chunk, and it did not pretend to
+    // have searched.
+    let kinds: Vec<&str> = events.iter().map(SseEvent::kind).collect();
+    assert!(kinds.contains(&"done"), "the turn must complete: {kinds:?}");
+    assert!(!kinds.contains(&"error"), "{kinds:?}");
+
+    let used_web = events
+        .iter()
+        .find(|event| event.kind() == "done")
+        .map(|event| event.json()["used_web"].clone())
+        .expect("a done event");
+    assert_eq!(
+        used_web, false,
+        "no web context was retrieved, so the turn must not claim web use"
+    );
+
+    // The prompt says there were no web results, so the model has no reason to claim
+    // it searched.
+    let requests = llm.requests();
+    assert_eq!(requests.len(), 1);
+    let system = &requests[0].messages[0].content;
+    assert!(
+        system.contains("<web_results>"),
+        "the web block is rendered even when empty: {system}"
+    );
+    assert!(
+        system.contains("No web results were retrieved"),
+        "the model must be told there was nothing rather than left guessing"
+    );
+
+    // Only the chat charge, because no search ran.
+    let chat_cost = harness.state.config.plans.credits.chat_message;
+    let ledger: i64 =
+        sqlx::query_scalar("select coalesce(sum(delta), 0)::bigint from credit_ledger")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    let allowance = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .credits_per_month;
+    assert_eq!(
+        ledger,
+        allowance - chat_cost,
+        "a turn that retrieved nothing must not be charged for a search"
+    );
+
+    // And the stored turn agrees with the event.
+    let stored: bool = sqlx::query_scalar(
+        "select used_web from messages where role = 'assistant' order by created_at desc limit 1",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert!(!stored, "the stored row must not claim web use either");
 }

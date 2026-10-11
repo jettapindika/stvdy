@@ -54,6 +54,9 @@ const NON_SYNC_TABLES: &[&str] = &[
     "push_tokens",
     "plans",
     "users",
+    // A40: a provider result set is a server-side cost control with no client
+    // entity, so it must never reach a device through the change log.
+    "search_cache",
 ];
 
 async fn insert_user(pool: &PgPool) -> Uuid {

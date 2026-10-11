@@ -109,6 +109,7 @@ export function WebCitationMark({ citation }: { citation: WebCitation }) {
     >
       <span className="cite-title">{citation.title}</span>
       <span className="cite-host">{host}</span>
+      {citation.doi ? <span className="cite-doi">{citation.doi}</span> : null}
     </a>
   )
 }

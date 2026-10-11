@@ -54,6 +54,15 @@ export interface WebCitation {
   type: 'web'
   url: string
   title: string
+  /**
+   * The DOI where the tier provided one. An academic hit is identified by its
+   * DOI rather than by whichever host served it, so it is shown when present.
+   *
+   * Optional rather than nullable-only: the server sends `null`, but a citation
+   * built by hand (a fixture, an older server) may omit the key entirely, and a
+   * required field would turn that into a render-time crash.
+   */
+  doi?: string | null
 }
 
 export type ChatCitation = ChunkCitation | WebCitation

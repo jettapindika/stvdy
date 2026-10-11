@@ -328,6 +328,13 @@ fn render_web(web: &[PromptWebHit]) -> String {
             block.push_str(&hit.title);
             block.push_str("\" ");
             block.push_str(&hit.url);
+            // The DOI when the tier provided one. Rendered so the model can cite a
+            // work by its stable identifier: the phase gate is "URLs and DOIs", and
+            // a DOI the model never sees is one it cannot cite.
+            if let Some(doi) = &hit.doi {
+                block.push_str(" doi:");
+                block.push_str(doi);
+            }
             block.push('\n');
             block.push_str(&hit.snippet);
             block.push_str("\n\n");
