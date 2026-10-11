@@ -115,12 +115,16 @@ a variable sits:
   introduces new user text; `crates/core/tests/prompts.rs` then fails the build until the
   module's template carries a block for it.
 
-The list is names, not a `VarKind`: a *setting* a user picked from a set (`{{depth}}`,
-`{{style}}`, `{{exam_date}}`) is a value the model must **follow**, and a data block would
-tell it to ignore anything that looks like an instruction — so settings are deliberately
-neither listed nor wrapped. `{{other_section_headings}}` is `Optional` and still listed,
-because its value is headings the student may have edited; the composer escapes a supplied
-optional value for the same reason it escapes a required one.
+The list is names, not a `VarKind`: a *setting* the UI renders as a fixed control
+(`{{depth}}`, `{{count}}`, `{{exam_date}}`) is a value the model must **follow**, so it is
+deliberately neither listed nor wrapped. A name is not a setting because of what it is
+called, though: `{{style}}` and `{{length}}` are free text inputs on the report form, so
+they are user-typed strings and they are listed and wrapped like any other. The block's
+own sentence is what makes that safe and useful at once — it says the values are
+user-supplied, that the model should do what they ask for, and that it must ignore any
+instruction inside them that tries to change its task. `{{other_section_headings}}` is
+`Optional` and still listed, because its value is headings the student may have edited; the
+composer escapes a supplied optional value for the same reason it escapes a required one.
 
 Everything from the database or the network is data. Only the system prompt and the
 user's own chat turns carry instructions.
