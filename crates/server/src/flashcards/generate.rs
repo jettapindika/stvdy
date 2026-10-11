@@ -104,13 +104,18 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
     let composed = compose_task(ModuleId::FlashcardsV1, &base, &module_vars, &chunks)
         .map_err(|error| Failure::permanent(format!("composing the prompt: {error}")))?;
 
+    // Resolved once and reused: the row the spend created is the row every later
+    // write for this deck names, including the ones that record what a failed
+    // generation already cost.
+    let usage_row = find_usage_event_id(state, deck).await;
+
     // The prompt version is recorded before the model is called, so a generation
     // that fails afterwards still leaves a usage row attributable to a prompt
     // version (the roadmap's rule: every model call must be attributable). The
     // token counts and the provider's cost are attached on success, when they
     // exist; recording them as zero here would read as "the model returned
     // nothing" in the margin report (A41).
-    attach_prompt_version(state, deck, &composed.prompt_version).await;
+    attach_prompt_version(state, usage_row, &composed.prompt_version).await;
 
     let request = ChatRequest {
         model: String::new(),
@@ -129,13 +134,16 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
         .await
         .map_err(|error| Failure::transient(format!("calling the model: {error}")))?;
 
+    // The first call is billed whether or not its reply is usable, so its numbers
+    // are kept for the failure paths below.
+    let (first_in, first_out, first_cost) = (
+        first.usage.in_tokens,
+        first.usage.out_tokens,
+        first.usage.provider_cost_usd,
+    );
+
     let (cards, in_tokens, out_tokens, provider_cost_usd) = match parse_cards(&first.text) {
-        Ok(cards) => (
-            cards,
-            first.usage.in_tokens,
-            first.usage.out_tokens,
-            first.usage.provider_cost_usd,
-        ),
+        Ok(cards) => (cards, first_in, first_out, first_cost),
         Err(error) if is_retryable(&error) => {
             let mut retry = request.clone();
             retry.messages.push(ChatMsg {
@@ -146,21 +154,41 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
                 role: Role::User,
                 content: CORRECTION.to_string(),
             });
-            let second = provider
-                .complete(retry)
-                .await
-                .map_err(|error| Failure::transient(format!("retrying the model call: {error}")))?;
-            match parse_cards(&second.text) {
-                Ok(cards) => (
-                    cards,
-                    first.usage.in_tokens + second.usage.in_tokens,
-                    first.usage.out_tokens + second.usage.out_tokens,
-                    sum_costs(
-                        first.usage.provider_cost_usd,
-                        second.usage.provider_cost_usd,
-                    ),
-                ),
+            let second = match provider.complete(retry).await {
+                Ok(second) => second,
                 Err(error) => {
+                    // The first call was billed even though the retry never
+                    // happened, so record what was spent before returning. The job
+                    // will be retried, but this attempt's cost is real.
+                    record_failed_usage(
+                        state,
+                        usage_row,
+                        first_in,
+                        first_out,
+                        first_cost,
+                        &composed.prompt_version,
+                    )
+                    .await;
+                    return Err(Failure::transient(format!(
+                        "retrying the model call: {error}"
+                    )));
+                }
+            };
+            let both_in = first_in + second.usage.in_tokens;
+            let both_out = first_out + second.usage.out_tokens;
+            let both_cost = sum_costs(first_cost, second.usage.provider_cost_usd);
+            match parse_cards(&second.text) {
+                Ok(cards) => (cards, both_in, both_out, both_cost),
+                Err(error) => {
+                    record_failed_usage(
+                        state,
+                        usage_row,
+                        both_in,
+                        both_out,
+                        both_cost,
+                        &composed.prompt_version,
+                    )
+                    .await;
                     return Err(Failure::permanent(format!(
                         "the model did not return usable JSON after a retry: {error}"
                     )));
@@ -168,6 +196,15 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
             }
         }
         Err(error) => {
+            record_failed_usage(
+                state,
+                usage_row,
+                first_in,
+                first_out,
+                first_cost,
+                &composed.prompt_version,
+            )
+            .await;
             return Err(Failure::permanent(format!(
                 "the model's reply was unusable: {error}"
             )));
@@ -184,6 +221,17 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
     // second job attempt would call the model again and buy a second chance at the
     // same empty answer.
     if outcome.cards.is_empty() {
+        // The calls above were billed and the answer was empty, so the cost is
+        // recorded before giving up.
+        record_failed_usage(
+            state,
+            usage_row,
+            in_tokens,
+            out_tokens,
+            provider_cost_usd,
+            &composed.prompt_version,
+        )
+        .await;
         return Err(Failure::permanent(
             "the model returned no usable cards: every card had an empty front or back",
         ));
@@ -216,17 +264,45 @@ fn sum_costs(first: Option<f64>, second: Option<f64>) -> Option<f64> {
     }
 }
 
+/// Records what a failed generation already spent, before it gives up.
+///
+/// The calls were made and billed; a usage row that carries no cost would understate
+/// provider spend in the margin report (A41). Best-effort: a reporting gap must not
+/// change the job's outcome.
+async fn record_failed_usage(
+    state: &AppState,
+    usage_event_id: Option<Uuid>,
+    in_tokens: u32,
+    out_tokens: u32,
+    provider_cost_usd: Option<f64>,
+    prompt_version: &str,
+) {
+    if let Err(error) = credits::record_usage(
+        &state.pool,
+        usage_event_id,
+        Some(in_tokens),
+        Some(out_tokens),
+        provider_cost_usd,
+        prompt_version,
+    )
+    .await
+    {
+        tracing::error!(%error, "could not record a failed generation's usage");
+    }
+}
+
 /// Names the prompt version on the deck's usage row.
 ///
 /// Best-effort: the cards and the credit are unaffected by this write, so a
 /// failure here is a reporting gap and is logged rather than propagated.
-async fn attach_prompt_version(state: &AppState, deck: &DeckRow, prompt_version: &str) {
-    let Some(usage_event_id) = usage_event_id(state, deck).await else {
-        return;
-    };
+async fn attach_prompt_version(
+    state: &AppState,
+    usage_event_id: Option<Uuid>,
+    prompt_version: &str,
+) {
     if let Err(error) = credits::record_usage(
         &state.pool,
-        Some(usage_event_id),
+        usage_event_id,
         None,
         None,
         None,
@@ -234,7 +310,7 @@ async fn attach_prompt_version(state: &AppState, deck: &DeckRow, prompt_version:
     )
     .await
     {
-        tracing::error!(%error, %usage_event_id, "could not record the generation's prompt version");
+        tracing::error!(%error, "could not record the generation's prompt version");
     }
 }
 
@@ -243,7 +319,7 @@ async fn attach_prompt_version(state: &AppState, deck: &DeckRow, prompt_version:
 /// The deck normally carries the id. The lookup is the fallback the nullable column
 /// exists for: a row written without one still has to be attributable, and the
 /// spend commits immediately before the deck row, so a short lookback finds it.
-pub(crate) async fn usage_event_id(state: &AppState, deck: &DeckRow) -> Option<Uuid> {
+pub(crate) async fn find_usage_event_id(state: &AppState, deck: &DeckRow) -> Option<Uuid> {
     if let Some(id) = deck.usage_event_id {
         return Some(id);
     }

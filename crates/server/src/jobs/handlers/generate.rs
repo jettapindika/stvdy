@@ -5,6 +5,7 @@
 //! a transient failure on the last allowed attempt is final, and the worker's
 //! `mark_failed` is the only place that knows it, so the check is here.
 
+use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -35,7 +36,10 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
 
     match generate::generate(state, &deck).await {
         Ok(generation) => {
-            insert_cards(state, &deck, generation).await?;
+            // Read once, here, so every card of one deck shares one `due_at` and it
+            // comes from the injected clock rather than the database's.
+            let now = state.clock.now();
+            insert_cards(state, &deck, generation, now).await?;
             Ok(())
         }
         Err(failure) => {
@@ -156,6 +160,7 @@ async fn insert_cards(
     state: &AppState,
     deck: &DeckRow,
     generation: Generation,
+    now: DateTime<Utc>,
 ) -> Result<(), Failure> {
     let mut tx = state
         .pool
@@ -163,34 +168,50 @@ async fn insert_cards(
         .await
         .map_err(|error| Failure::transient(format!("beginning the insert: {error}")))?;
 
+    // The status flip is the claim: it is the only thing that decides whether this
+    // job writes cards, so two claims for one deck cannot both write. The predicate
+    // is what makes it a claim rather than an assignment.
+    let claimed: Option<Uuid> = sqlx::query_scalar(
+        "update decks set status = 'ready', error = null, updated_at = now()
+          where id = $1 and status = 'generating'
+         returning id",
+    )
+    .bind(deck.id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| Failure::transient(format!("claiming the deck: {error}")))?;
+
+    if claimed.is_none() {
+        // Someone else already finished or failed this deck. Nothing to write, and
+        // not an error: the work is done, just not by this attempt. Returning drops
+        // the transaction, which rolls it back, and that is the correct outcome
+        // since the claim was not ours.
+        return Ok(());
+    }
+
     for card in &generation.cards {
         sqlx::query(
             "insert into flashcards (user_id, deck_id, front, back, chunk_id, due_at)
-             values ($1, $2, $3, $4, $5, now())",
+             values ($1, $2, $3, $4, $5, $6)",
         )
         .bind(deck.user_id)
         .bind(deck.id)
         .bind(&card.front)
         .bind(&card.back)
         .bind(card.chunk_id)
+        // The injected clock, not the database's `now()`: a fresh card must be due
+        // at the instant the application thinks it is, and a test can pin it.
+        .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(|error| Failure::transient(format!("inserting a card: {error}")))?;
     }
 
-    sqlx::query(
-        "update decks set status = 'ready', error = null, updated_at = now() where id = $1",
-    )
-    .bind(deck.id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| Failure::transient(format!("marking the deck ready: {error}")))?;
-
     tx.commit()
         .await
         .map_err(|error| Failure::transient(format!("committing the deck: {error}")))?;
 
-    if let Some(usage_event_id) = generate::usage_event_id(state, deck).await {
+    if let Some(usage_event_id) = generate::find_usage_event_id(state, deck).await {
         // Attached after the cards exist, because the token counts and the cost only
         // exist once the provider has answered, and the row was created before that
         // so the credit is spent whether or not the model replies.

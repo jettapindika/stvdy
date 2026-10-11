@@ -157,7 +157,7 @@ pub async fn create_deck(
     let cost = batches * state.config.plans.credits.flashcard_batch_10;
     let spent = credits::spend(&state, user.user_id, plan, GENERATE_ACTION, cost, None).await?;
 
-    let deck_id: Uuid = sqlx::query_scalar(
+    let deck_id: Uuid = match sqlx::query_scalar(
         "insert into decks
             (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent, usage_event_id)
          values ($1, $2, $3, $4, 'generating', $5, $6, $7)
@@ -172,7 +172,28 @@ pub async fn create_deck(
     .bind(spent.usage_event_id)
     .fetch_one(&state.pool)
     .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("creating the deck: {error}")))?;
+    {
+        Ok(deck_id) => deck_id,
+        Err(error) => {
+            // The credit is already spent and there is no deck to fail, so the
+            // charge must come back here rather than in a job that will never run.
+            // `ref_id` names the usage event, which is the row that was charged.
+            if let Err(refund_error) = credits::refund(
+                &state.pool,
+                user.user_id,
+                cost,
+                spent.usage_event_id,
+                "refund",
+            )
+            .await
+            {
+                tracing::error!(%refund_error, "could not refund a deck that was never created");
+            }
+            return Err(AppError::Internal(anyhow::anyhow!(
+                "creating the deck: {error}"
+            )));
+        }
+    };
 
     // The job is enqueued after the spend and after the row exists, so a failure
     // here leaves a deck the user can see failing rather than a charge with no
