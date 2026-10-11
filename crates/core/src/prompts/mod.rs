@@ -57,6 +57,31 @@ pub fn base_variables() -> &'static [(&'static str, VarKind)] {
     ]
 }
 
+/// Every `{{variable}}` in `base.v2.md`, in first-appearance order.
+///
+/// v2 is v1 plus the `sources_only` grounding toggle, so this is v1's table with
+/// one entry appended rather than a second copy of the file's contract. The chat
+/// composer renders against this table; task modules keep composing on v1's
+/// trimmed base and declare against [`base_variables`].
+pub fn base_v2_variables() -> &'static [(&'static str, VarKind)] {
+    &[
+        ("assistant_name", VarKind::Caller),
+        ("app_name", VarKind::Caller),
+        ("now", VarKind::Caller),
+        ("timezone", VarKind::Caller),
+        ("platform", VarKind::Caller),
+        ("plan_name", VarKind::Caller),
+        ("study_mode", VarKind::Caller),
+        ("study_hours_summary", VarKind::Caller),
+        ("use_web", VarKind::Caller),
+        ("allow_upgrade_hint", VarKind::Caller),
+        ("user_name", VarKind::Caller),
+        ("workspace_name", VarKind::Caller),
+        ("plan_gate_instruction_derived", VarKind::Derived),
+        ("sources_only", VarKind::Caller),
+    ]
+}
+
 /// The declared kind of a variable, or `None` if the name is not declared.
 pub fn base_variable_kind(name: &str) -> Option<VarKind> {
     variable_kind(base_variables(), name)
@@ -82,6 +107,10 @@ pub struct ChatVars {
     pub study_mode: String,
     pub study_hours_summary: String,
     pub use_web: String,
+    /// The per-chat "Answer only from my sources" toggle, as `"on"`/`"off"`,
+    /// mirroring [`Self::use_web`]. The server fills it from the request, whose
+    /// absence means "on" because that is the UI default.
+    pub sources_only: String,
     pub allow_upgrade_hint: bool,
     /// User-controlled: wrapped as data, never interpolated bare.
     pub user_name: String,
@@ -146,7 +175,7 @@ pub fn compose_chat(
     web: &[PromptWebHit],
 ) -> Result<Composed, PromptError> {
     let values = values_of(vars);
-    let mut text = render(registry::BASE_V1, &values)?;
+    let mut text = render(registry::BASE_V2, &values)?;
     text.push_str("\n\n");
     text.push_str(&render_sources(chunks));
     text.push_str("\n\n");
@@ -157,7 +186,7 @@ pub fn compose_chat(
     Ok(Composed {
         text,
         labels,
-        prompt_version: registry::BASE_V1_VERSION.to_string(),
+        prompt_version: registry::BASE_V2_VERSION.to_string(),
     })
 }
 
@@ -196,6 +225,7 @@ fn values_of(vars: &ChatVars) -> BTreeMap<&'static str, String> {
     values.insert("study_mode", vars.study_mode.clone());
     values.insert("study_hours_summary", vars.study_hours_summary.clone());
     values.insert("use_web", vars.use_web.clone());
+    values.insert("sources_only", vars.sources_only.clone());
     values.insert(
         "allow_upgrade_hint",
         if vars.allow_upgrade_hint {
@@ -337,8 +367,11 @@ pub fn compose_task(
 /// read from `values`; a caller that supplies one is refused outright so a
 /// contradictory pair (permissive instruction with `allow_upgrade_hint: false`)
 /// cannot be constructed.
+///
+/// The table is `base.v2.md`'s: the chat composer renders v2, and a task module
+/// passes its own table to [`render_with`] instead.
 fn render(template: &str, values: &BTreeMap<&'static str, String>) -> Result<String, PromptError> {
-    render_with(template, values, base_variables())
+    render_with(template, values, base_v2_variables())
 }
 
 /// Fills a template's variables from an explicit declaration table.

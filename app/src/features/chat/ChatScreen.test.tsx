@@ -284,7 +284,47 @@ describe('a streamed answer', () => {
       // that carries the toggle's actual state is what makes a web turn testable
       // from the client's side.
       use_web: false,
+      // The grounding toggle defaults on, so a plain ask is grounded. Sent for
+      // the same reason as `use_web`: the two states must be distinguishable on
+      // the wire rather than both looking like an absent field.
+      sources_only: true,
     })
+  })
+
+  it('sends the grounding toggle off when the student turns it off', async () => {
+    const stream = manualStreamResponse()
+    const calls = serve({ kind: 'stream', stream })
+    const user = userEvent.setup()
+
+    renderChat()
+    await screen.findByText('No questions yet')
+
+    // On by default, so the first thing to assert is the default itself.
+    const toggle = screen.getByLabelText('Answer only from my sources')
+    expect(toggle).toBeChecked()
+
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+
+    await user.type(screen.getByLabelText('Ask about this workspace'), 'Jelaskan graf')
+    await user.click(screen.getByRole('button', { name: 'Ask' }))
+
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.url.endsWith('/workspaces/w1/chat'))).toBe(true)
+    })
+    const sent = calls.find((call) => call.url.endsWith('/workspaces/w1/chat'))
+    expect(JSON.parse(String(sent?.init.body))).toMatchObject({ sources_only: false })
+  })
+
+  it('shows the honesty line under the composer', async () => {
+    serve({ kind: 'stream', stream: manualStreamResponse() })
+
+    renderChat()
+    await screen.findByText('No questions yet')
+
+    // Part of the composer, not a tooltip: the spec requires it under every
+    // composer, and a warning nobody has to open is one most people never read.
+    expect(screen.getByText('AI can make mistakes. Check the citations.')).toBeInTheDocument()
   })
 
   it('offers Stop while streaming and Ask when idle', async () => {

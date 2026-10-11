@@ -99,6 +99,10 @@ pub async fn generate(state: &AppState, deck: &DeckRow) -> Result<Generation, Fa
         PlanId::parse(&user.plan_id),
         false,
         false,
+        // Task prompts compose on v1's trimmed base, which has no
+        // `{{sources_only}}`; a deck is always generated from the user's sources,
+        // so the value is `true` and is never read.
+        true,
         &deck.workspace_name,
     );
     let mut module_vars: BTreeMap<&'static str, String> = BTreeMap::new();

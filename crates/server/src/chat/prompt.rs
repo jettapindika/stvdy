@@ -1,7 +1,7 @@
-//! Prompt assembly for chat: gathers the values `base.v1.md` declares and hands
+//! Prompt assembly for chat: gathers the values `base.v2.md` declares and hands
 //! them to the core composer.
 //!
-//! Everything here is *plumbing*: the prompt text lives in `prompts/base.v1.md`
+//! Everything here is *plumbing*: the prompt text lives in `prompts/base.v2.md`
 //! and the composition rules live in `crates/core/src/prompts/`. A prompt string
 //! written in this file would be the thing the roadmap forbids, because it could
 //! not be versioned or reviewed as prose.
@@ -21,6 +21,10 @@ const APP_NAME: &str = "Stvdy";
 ///
 /// `now` comes from the injected `Clock`, never `Utc::now`, so a test can pin the
 /// date a relative phrase resolves against.
+// Each argument is an independent fact about the turn (who, which workspace,
+// what was retrieved, and the three toggles); bundling them would only hide
+// that. The codebase allows the same on `auth::routes::user_view`.
+#[allow(clippy::too_many_arguments)]
 pub fn compose(
     state: &AppState,
     user: &AuthUser,
@@ -28,6 +32,7 @@ pub fn compose(
     chunks: &[RetrievedChunk],
     web: &[PromptWebHit],
     use_web: bool,
+    sources_only: bool,
     study_mode: bool,
 ) -> AppResult<Composed> {
     let vars = base_vars(
@@ -37,6 +42,7 @@ pub fn compose(
         user.plan(),
         study_mode,
         use_web,
+        sources_only,
         workspace_name,
     );
 
@@ -70,6 +76,9 @@ pub fn compose(
 /// It takes the individual values rather than an `AuthUser` because the generation
 /// job has no `AuthUser`: it has a row. Fabricating one (with a device id and a
 /// session id it does not have) would be a lie in the type system.
+// Same as `compose`: every parameter is a distinct fact about the request, and
+// the generation jobs call this with the row they loaded.
+#[allow(clippy::too_many_arguments)]
 pub fn base_vars(
     state: &AppState,
     email: &str,
@@ -77,6 +86,7 @@ pub fn base_vars(
     plan: stvdy_core::config::PlanId,
     study_mode: bool,
     use_web: bool,
+    sources_only: bool,
     workspace_name: &str,
 ) -> ChatVars {
     let plan_config = state.config.plans.get(plan);
@@ -97,6 +107,7 @@ pub fn base_vars(
         study_mode: if study_mode { "on" } else { "off" }.to_string(),
         study_hours_summary: "not set".to_string(),
         use_web: if use_web { "on" } else { "off" }.to_string(),
+        sources_only: if sources_only { "on" } else { "off" }.to_string(),
         // The billing policy decides whether an upgrade hint is allowed at all,
         // and it is per platform. `web` is the permissive default here because
         // the request has not yet carried its platform; the Phase 3+ client sends
@@ -116,7 +127,7 @@ mod tests {
 
     #[test]
     fn the_prompt_is_never_built_from_a_string_literal_here() {
-        // The prompt lives in prompts/base.v1.md and is compiled in by the core
+        // The prompt lives in prompts/base.v2.md and is compiled in by the core
         // registry. A prompt sentence in this file would break the roadmap rule
         // ("prompts live in versioned modules, never inline") in the one place it
         // is easiest to break.

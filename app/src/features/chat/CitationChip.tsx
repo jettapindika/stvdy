@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import type { ChunkCitation } from '@/api/sse'
 
 /**
@@ -27,7 +29,11 @@ export function CitationChip({
   sourceTitle: string
   onOpen: (citation: ChunkCitation) => void
 }) {
-  const where = citation.page === null ? 'page unknown' : `page ${String(citation.page)}`
+  const { t } = useTranslation()
+  const where =
+    citation.page === null
+      ? t('citation.pageUnknown')
+      : t('citation.page', { page: citation.page })
   const label = `${sourceTitle}, ${where}`
 
   return (
@@ -38,7 +44,7 @@ export function CitationChip({
         onOpen(citation)
       }}
       title={label}
-      aria-label={`Open source: ${label}`}
+      aria-label={t('citation.open', { label })}
     >
       {/* Pasted text has no pages, so the source's name is the only thing that
           can distinguish one chunk from another. */}

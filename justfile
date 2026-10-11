@@ -56,6 +56,32 @@ server-supabase:
 web:
     npm --prefix app run dev
 
+# --- dev mail (B3) ---
+#
+# With SMTP_URL unset the server writes one .eml per message to MAIL_DIR instead
+# of sending it, so a verification link is a file rather than an inbox and the
+# signup screen's "check your inbox" has nowhere to arrive. This prints the
+# newest message; give it text to narrow to one addressed to that address:
+#
+#   just mail                      # the newest message
+#   just mail jettabackupacc1      # the newest one addressed to a matching address
+#
+# The filter matches the file's contents, not its name: the name is sanitized
+# (every non-alphanumeric character becomes `_`), so an address does not survive
+# in it intact.
+mail match="":
+    @files=$(ls -t var/mail/*.eml 2>/dev/null); \
+      if [ -z "$files" ]; then \
+        echo "var/mail is empty — sign up, or press 'Send a new link' in the app"; exit 1; \
+      fi; \
+      if [ -n "{{match}}" ]; then \
+        file=$(printf '%s\n' "$files" | xargs grep -l -- "{{match}}" 2>/dev/null | head -1); \
+      else \
+        file=$(printf '%s\n' "$files" | head -1); \
+      fi; \
+      if [ -z "$file" ]; then echo "no message matching {{match}}"; exit 1; fi; \
+      cat "$file"
+
 # --- Phase 2 smoke: the server, a stub model, and the end-to-end chat run ---
 #
 # The pairing that matters and is otherwise invisible: the SERVER must be started
@@ -136,6 +162,7 @@ check-rust:
 check-web:
     npm --prefix app test
     npm --prefix app run build
+    node scripts/check-no-cdn.mjs
 
 # src-tauri is excluded from the workspace (so `tauri_build::build()` never runs
 # during workspace clippy), which means the workspace commands skip it entirely.

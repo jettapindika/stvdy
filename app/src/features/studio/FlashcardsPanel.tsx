@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { asApiError } from '@/api/errors'
@@ -23,12 +24,6 @@ import { SourcePicker } from '@/features/workspaces/SourcePicker'
  * real limit, and the refusal comes from the server with the numbers in it.
  */
 
-const STATUS_LABEL: Record<DeckStatus, string> = {
-  generating: 'Generating',
-  ready: 'Ready',
-  failed: 'Failed',
-}
-
 const STATUS_CHIP: Record<DeckStatus, string> = {
   generating: 'chip chip-working',
   ready: 'chip chip-ready',
@@ -36,6 +31,7 @@ const STATUS_CHIP: Record<DeckStatus, string> = {
 }
 
 export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const sources = useSources(workspaceId)
   const decks = useDecks(workspaceId)
   const create = useCreateDeck(workspaceId)
@@ -71,10 +67,10 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
         }}
       >
         <Field
-          label="Deck name"
+          label={t('studio.deck.nameLabel')}
           name="deck-title"
           value={title}
-          hint="What this deck is for."
+          hint={t('studio.deck.nameHint')}
           onChange={(event) => {
             setTitle(event.target.value)
           }}
@@ -85,11 +81,11 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
           selected={selected}
           onChange={setSelected}
           disabled={create.isPending}
-          legend="Generate from"
-          emptyHint="No indexed sources yet. Add one in the Sources panel, then come back."
+          legend={t('studio.generateFrom')}
+          emptyHint={t('studio.noIndexedSources')}
         />
         <label className="label" htmlFor="deck-count">
-          How many cards
+          {t('studio.deck.countLabel')}
         </label>
         <input
           id="deck-count"
@@ -104,28 +100,24 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
           }}
         />
         {cost !== undefined && (
-          <p className="text-xs text-ink-muted">
-            Costs {cost.per_batch} credits per {cost.batch_size} cards. The deck appears here while
-            it is generated, usually within a minute.
+          <p className="text-xs text-muted">
+            {t('studio.deck.cost', { credits: cost.per_batch, count: cost.batch_size })}
           </p>
         )}
         <button type="submit" className="btn btn-primary self-start" disabled={!ready}>
-          {create.isPending ? 'Starting' : 'Generate deck'}
+          {create.isPending ? t('studio.starting') : t('studio.deck.generate')}
         </button>
-        {error !== null && <ApiErrorNotice error={error} noun="decks" />}
+        {error !== null && <ApiErrorNotice error={error} noun={t('errors.nouns.decks')} />}
       </form>
 
-      {decks.isPending && <SkeletonRows rows={2} label="Loading this workspace's decks" />}
+      {decks.isPending && <SkeletonRows rows={2} label={t('studio.deck.loading')} />}
 
       {decksList !== undefined && decksList.length === 0 && (
-        <EmptyState
-          title="No decks yet"
-          reason="Pick the sources above and generate one. Every card is linked to the passage it came from."
-        />
+        <EmptyState title={t('studio.deck.empty.title')} reason={t('studio.deck.empty.reason')} />
       )}
 
       {decksList !== undefined && decksList.length > 0 && (
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
           {decksList.map((deck) => (
             <DeckRow key={deck.id} deck={deck} />
           ))}
@@ -143,24 +135,30 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
  * monochrome and to a screen reader.
  */
 function DeckRow({ deck }: { deck: Deck }) {
+  const { t } = useTranslation()
+  // Resolved here rather than at module scope: a constant holding copy is
+  // evaluated before there is a language, so it could only ever ship one of them.
+  const statusLabel: Record<DeckStatus, string> = {
+    generating: t('studio.status.generating'),
+    ready: t('studio.status.ready'),
+    failed: t('studio.status.failed'),
+  }
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 flex-1 break-words font-medium">
-          {deck.title.length > 0 ? deck.title : 'Untitled deck'}
+          {deck.title.length > 0 ? deck.title : t('studio.deck.untitled')}
         </span>
-        <span className="meta">
-          {deck.card_count} {deck.card_count === 1 ? 'card' : 'cards'}
-        </span>
+        <span className="meta">{t('studio.deck.cards', { count: deck.card_count })}</span>
         <span className={STATUS_CHIP[deck.status]} role="status">
           {deck.status === 'generating' && (
             <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
           )}
-          {STATUS_LABEL[deck.status]}
+          {statusLabel[deck.status]}
         </span>
         {deck.status === 'ready' && (
           <Link to={`/study/${deck.id}`} className="btn btn-secondary">
-            Study
+            {t('nav.study')}
           </Link>
         )}
       </div>

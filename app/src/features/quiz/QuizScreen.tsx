@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
@@ -35,6 +36,7 @@ import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States
 type Phase = 'answering' | 'revealed' | 'results'
 
 export function QuizScreen() {
+  const { t } = useTranslation()
   const { quizId = '' } = useParams()
   const quiz = useQuiz(quizId)
   const results = useQuizResults(quizId)
@@ -79,17 +81,17 @@ export function QuizScreen() {
     }
   }, [phase, question])
 
-  if (quiz.isPending) return <LoadingState label="Loading this quiz" />
+  if (quiz.isPending) return <LoadingState label={t('quiz.loading')} />
 
   if (quizError !== null) {
     return (
       <div className="px-4 py-4">
         <ApiErrorNotice
           error={quizError}
-          noun="this quiz"
+          noun={t('errors.nouns.quiz')}
           action={
             <Link to="/workspaces" className="btn btn-secondary">
-              Back to workspaces
+              {t('quiz.backToWorkspaces')}
             </Link>
           }
         />
@@ -98,15 +100,15 @@ export function QuizScreen() {
   }
 
   if (quiz.data !== undefined && quiz.data.quiz.status === 'generating') {
-    return <LoadingState label="This quiz is still being generated" />
+    return <LoadingState label={t('quiz.generating')} />
   }
 
   if (quiz.data !== undefined && quiz.data.quiz.status === 'failed') {
     return (
       <div className="px-4 py-4">
         <EmptyState
-          title="This quiz could not be generated"
-          reason={quiz.data.quiz.error ?? 'The generation failed. Your credits were refunded.'}
+          title={t('quiz.generateFailed.title')}
+          reason={quiz.data.quiz.error ?? t('quiz.generateFailed.reason')}
         />
       </div>
     )
@@ -115,7 +117,7 @@ export function QuizScreen() {
   if (questions.length === 0) {
     return (
       <div className="px-4 py-4">
-        <EmptyState title="This quiz has no questions" reason="Generate it again from the Studio." />
+        <EmptyState title={t('quiz.empty.title')} reason={t('quiz.empty.reason')} />
       </div>
     )
   }
@@ -164,9 +166,11 @@ export function QuizScreen() {
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="min-w-0 flex-1 break-words">{quiz.data?.quiz.title ?? 'Quiz'}</h1>
+        <h1 className="min-w-0 flex-1 break-words">{quiz.data?.quiz.title ?? t('quiz.defaultTitle')}</h1>
         <span className="meta">
-          {phase === 'results' ? `${String(total)} questions` : `Question ${String(index + 1)} of ${String(total)}`}
+          {phase === 'results'
+            ? t('quiz.count', { count: total })
+            : t('quiz.questionProgress', { current: index + 1, total })}
         </span>
       </div>
 
@@ -183,12 +187,12 @@ export function QuizScreen() {
             // right edge. This is the same failure the `.btn` rule documents for
             // `min-width: auto`, and it is invisible at 100%.
             <fieldset className="flex min-w-0 flex-col gap-2">
-              <legend className="label">Choose one</legend>
+              <legend className="label">{t('quiz.chooseOne')}</legend>
               {question.options.map((option, position) => (
                 <label
                   key={option}
-                  className={`flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-card border border-rule px-3 py-2 ${
-                    choice === option ? 'border-accent' : ''
+                  className={`flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-card border border-border px-3 py-2 ${
+                    choice === option ? 'border-primary' : ''
                   } ${answered ? 'cursor-default' : ''}`}
                 >
                   <input
@@ -214,7 +218,7 @@ export function QuizScreen() {
           {question.kind === 'short' && (
             <>
               <label className="label" htmlFor="quiz-answer">
-                Your answer
+                {t('quiz.yourAnswer')}
               </label>
               <textarea
                 id="quiz-answer"
@@ -237,7 +241,7 @@ export function QuizScreen() {
               }
               onClick={submit}
             >
-              {record.isPending ? 'Checking' : 'Submit answer'}
+              {record.isPending ? t('quiz.checking') : t('quiz.submit')}
             </button>
           )}
 
@@ -247,20 +251,22 @@ export function QuizScreen() {
                   are readable in monochrome and to a screen reader. */}
               {question.kind === 'mcq' && (
                 <p className={graded === true ? 'note note-ready' : 'note note-danger'} role="status">
-                  {graded === true ? 'Correct' : `Not correct. The answer is: ${question.answer}`}
+                  {graded === true
+                    ? t('quiz.correct')
+                    : t('quiz.notCorrectWithAnswer', { answer: question.answer })}
                 </p>
               )}
 
               {question.kind === 'short' && (
                 <>
                   <p className="note" role="status">
-                    <span className="meta">A good answer</span>
+                    <span className="meta">{t('quiz.goodAnswer')}</span>
                     <br />
                     {question.answer}
                   </p>
                   {question.key_points !== null && question.key_points.length > 0 && (
                     <div className="flex flex-col gap-1">
-                      <p className="meta">Did you say</p>
+                      <p className="meta">{t('quiz.didYouSay')}</p>
                       <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
                         {question.key_points.map((point) => (
                           <li key={point}>{point}</li>
@@ -270,20 +276,20 @@ export function QuizScreen() {
                   )}
                   <div className="flex flex-wrap gap-2">
                     <button type="button" className="btn btn-primary" onClick={() => void mark(true)}>
-                      I got it
+                      {t('quiz.gotIt')}
                     </button>
                     <button
                       type="button"
                       className="btn btn-secondary"
                       onClick={() => void mark(false)}
                     >
-                      I missed it
+                      {t('quiz.missedIt')}
                     </button>
                   </div>
                 </>
               )}
 
-              <p className="whitespace-pre-wrap break-words text-sm text-ink-muted">
+              <p className="whitespace-pre-wrap break-words text-sm text-muted">
                 {question.explanation}
               </p>
 
@@ -291,19 +297,21 @@ export function QuizScreen() {
                 <SourcePassage
                   chunkId={question.chunk_id}
                   sources={sources.data ?? []}
-                  label="Where this question came from"
+                  label={t('quiz.sourceLabel')}
                 />
               )}
 
               {question.kind === 'mcq' && (
                 <button type="button" className="btn btn-secondary self-start" onClick={advance}>
-                  {index + 1 >= total ? 'See results' : 'Next question'}
+                  {index + 1 >= total ? t('quiz.seeResults') : t('quiz.nextQuestion')}
                 </button>
               )}
             </div>
           )}
 
-          {attemptError !== null && <ApiErrorNotice error={attemptError} noun="this answer" />}
+          {attemptError !== null && (
+            <ApiErrorNotice error={attemptError} noun={t('errors.nouns.answer')} />
+          )}
         </div>
       )}
 
@@ -321,11 +329,14 @@ export function QuizScreen() {
  * visible symptom of a label that never resolved, and hiding it would hide the bug.
  */
 function Results({ quizId }: { quizId: string }) {
+  const { t } = useTranslation()
   const results = useQuizResults(quizId)
   const error = asApiError(results.error)
 
-  if (results.isPending) return <LoadingState label="Loading your results" />
-  if (error !== null) return <ApiErrorNotice error={error} noun="your results" />
+  if (results.isPending) return <LoadingState label={t('quiz.results.loading')} />
+  if (error !== null) {
+    return <ApiErrorNotice error={error} noun={t('errors.nouns.results')} />
+  }
 
   const summary = results.data?.summary
   if (summary === undefined) return null
@@ -333,41 +344,51 @@ function Results({ quizId }: { quizId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="panel flex flex-col gap-2 px-3 py-3">
-        <h2 className="font-medium">Your score</h2>
+        <h2 className="font-medium">{t('quiz.results.score')}</h2>
         {summary.score === null ? (
-          <p className="text-sm text-ink-muted">
-            Nothing is marked yet. Answer a question and your score appears here.
-          </p>
+          <p className="text-sm text-muted">{t('quiz.results.nothingMarked')}</p>
         ) : (
           <p className="text-2xl font-medium">
             {Math.round(summary.score * 100)}%
             <span className="meta ml-2">
-              {summary.correct} of {summary.graded} correct
+              {t('quiz.results.correctOf', {
+                correct: summary.correct,
+                graded: summary.graded,
+              })}
             </span>
           </p>
         )}
-        <p className="text-sm text-ink-muted">
-          {summary.answered} of {summary.total} answered
-          {summary.answered > summary.graded &&
-            `, ${String(summary.answered - summary.graded)} waiting for you to mark`}
+        <p className="text-sm text-muted">
+          {summary.answered > summary.graded
+            ? t('quiz.results.answeredOfWaiting', {
+                answered: summary.answered,
+                total: summary.total,
+                waiting: summary.answered - summary.graded,
+              })
+            : t('quiz.results.answeredOf', {
+                answered: summary.answered,
+                total: summary.total,
+              })}
         </p>
       </div>
 
       {summary.topics.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h2 className="font-medium">Where to look again</h2>
-          <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+          <h2 className="font-medium">{t('quiz.results.topics')}</h2>
+          <ul className="flex flex-col divide-y divide-border border-y border-border">
             {summary.topics.map((topic) => (
               <li
                 key={`${topic.source_id ?? 'unlinked'}-${String(topic.page ?? 0)}`}
                 className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3"
               >
                 <span className="min-w-0 flex-1 break-words">
-                  {topic.source_title ?? 'Source unavailable'}
-                  {topic.page !== null && <span className="meta"> page {String(topic.page)}</span>}
+                  {topic.source_title ?? t('quiz.results.sourceUnavailable')}
+                  {topic.page !== null && (
+                    <span className="meta"> {t('citation.page', { page: topic.page })}</span>
+                  )}
                 </span>
                 <span className="meta">
-                  {topic.correct} of {topic.graded} correct
+                  {t('quiz.results.correctOf', { correct: topic.correct, graded: topic.graded })}
                 </span>
               </li>
             ))}
@@ -376,21 +397,21 @@ function Results({ quizId }: { quizId: string }) {
       )}
 
       <div className="flex flex-col gap-2">
-        <h2 className="font-medium">Every question</h2>
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        <h2 className="font-medium">{t('quiz.results.everyQuestion')}</h2>
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
           {(results.data?.questions ?? []).map((question) => (
             <li key={question.question_id} className="flex flex-col gap-1 py-3">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="min-w-0 flex-1 break-words">{question.prompt}</span>
                 <span className="meta">
                   {question.correct === true
-                    ? 'Correct'
+                    ? t('quiz.correct')
                     : question.correct === false
-                      ? 'Not correct'
-                      : 'Not marked'}
+                      ? t('quiz.notCorrect')
+                      : t('quiz.notMarked')}
                 </span>
               </div>
-              <p className="text-sm text-ink-muted">{question.explanation}</p>
+              <p className="text-sm text-muted">{question.explanation}</p>
             </li>
           ))}
         </ul>

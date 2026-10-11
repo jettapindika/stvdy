@@ -87,7 +87,7 @@ intent is permitted, affordable, or well-formed is decided on the right.
 | **Scripted abuser** | Bulk account creation, direct API calls, quota exhaustion | A43 (verification + signup limits + global cap), `provider_cost_ceiling_usd` |
 | **Cross-tenant attacker** | Guesses ids, replays cursors, probes endpoints | Per-`user_id` scoping everywhere; `change_log` filtered; Phase 8 isolation test |
 | **Malicious document author** | Uploads a PDF/DOCX/SVG containing prompt injection or markup | Retrieved text is data (`<user_context_data>`, A39); citations validated (A17); render escapes and allowlists SVG (A37) |
-| **Payment attacker** | Forged/replayed webhook, amount tampering | Signature verification, idempotency, amount equality check (`docs/SPEC.md:535`, `:541`) |
+| **Payment attacker** | Forged/replayed webhook, amount tampering | Signature verification, idempotency, amount equality check (`docs/SPEC.md` § Payments: QRIS via my gateway) |
 | **Insider / server compromise** | — | **Out of scope** (trusted base) |
 
 ---
@@ -102,14 +102,14 @@ This is the table to consult before adding any check. Each row is a test case in
 | Unlock a paid feature by editing UI state | **Fails.** Next request → `422 plan_required` / `feature_locked` | Entitlements read from `users.plan_id` + subscription per request (A22, A21) |
 | Edit the JWT to add a plan or raise limits | **Fails.** The plan is deliberately not a claim in the token | A22 |
 | Grant credits locally, or replay a grant | **Fails.** Balance is `sum(delta)` over `credit_ledger`, written only by the server | A9 |
-| Call the LLM / search / Google directly from the app | **Fails.** No provider key exists on any device | `docs/SPEC.md:28` |
+| Call the LLM / search / Google directly from the app | **Fails.** No provider key exists on any device | `docs/SPEC.md` § PLATFORMS AND ARCHITECTURE |
 | Forge an assistant message with fabricated citations | **Fails.** `Message` is rejected with `read_only_entity`; labels are validated against the context the server sent | roadmap § Sync protocol; A17 |
 | Mark a source `ready`, or skip ingestion | **Fails.** `Source` is rejected; `status`/`file_key`/`read_only` are server-owned | roadmap § Sync protocol |
-| Upload beyond the storage quota | **Fails.** Quota checked server-side before presign | A15, `docs/SPEC.md:545` |
+| Upload beyond the storage quota | **Fails.** Quota checked server-side before presign | A15, `docs/SPEC.md` § AUTH AND SECURITY |
 | Write `flashcards.ease/interval/due` directly | **Fails.** Derived by server-side SM-2 replay; client writes rejected | roadmap § Conflict rules |
-| Exceed `web_searches_per_day` / `chat_msgs_per_day` | **Fails.** Counters are `usage_events`, server-side | `docs/SPEC.md:526` |
+| Exceed `web_searches_per_day` / `chat_msgs_per_day` | **Fails.** Counters are `usage_events`, server-side | `docs/SPEC.md` § Entitlements engine |
 | Enable checkout on iOS/Android | **Fails.** Server refuses `platform in (ios, android)` | A24 |
-| Read another user's rows | **Fails.** Every query scoped by `user_id`; pull is filtered; signed URLs are short-lived and scoped | `docs/SPEC.md:545`; Phase 8 test |
+| Read another user's rows | **Fails.** Every query scoped by `user_id`; pull is filtered; signed URLs are short-lived and scoped | `docs/SPEC.md` § AUTH AND SECURITY; Phase 8 test |
 | Farm free accounts | **Slowed, not eliminated.** Verification + signup limits + per-account cap bound the cost | A43 |
 | Fabricate `study_sessions` / `quiz_attempts` / `flashcard_reviews` | **Succeeds.** Accepted — see R1 | — |
 | Read or edit the local SQLite cache | **Succeeds.** Accepted — see R2 | — |
@@ -128,7 +128,7 @@ Each is a deliberate decision with a stated revisit trigger. Do not close one wi
 section and the corresponding assumption row.
 
 **R1 — Fabricated append-only rows.** `flashcard_reviews`, `quiz_attempts` and `study_sessions` accept
-client `upsert` by design (they are the offline-write scope, `docs/SPEC.md:33`). A modified client can
+client `upsert` by design (they are the offline-write scope, `docs/SPEC.md` § PLATFORMS AND ARCHITECTURE, "Offline scope"). A modified client can
 invent rows, inflating its own streaks, dashboard metrics and weak-topic summary, and polluting the
 Phase 11 planner's busy-time model.
 *Bounded because:* no credit, quota, plan or money depends on these rows. The attacker deceives only
@@ -139,7 +139,7 @@ exceed cards × a plausible rate) — never a client check.
 
 **R2 — Local cache is readable and editable.** SQLCipher is off by default (A13). The cache holds only
 the user's own synced entities — never `chunks`, embeddings, or other users' rows
-(`docs/SPEC.md:506`). Local edits are overwritten by the next pull.
+(`docs/SPEC.md` § What is cached locally on native clients). Local edits are overwritten by the next pull.
 *Revisit if:* the local cache ever holds more than the user's own synced rows, or a device is ever
 shared between accounts.
 
@@ -185,13 +185,13 @@ The design never depends on this column. It is recorded so that no phase mistake
 ## 8. Non-goals
 
 - **DRM.** The user may read, export and delete all of their own data (`Export my data`,
-  `Delete account` — `docs/SPEC.md:547`). That is a product promise, not a leak.
+  `Delete account` — `docs/SPEC.md` § AUTH AND SECURITY, "Account deletion"). That is a product promise, not a leak.
 - **Client-side anti-cheat or integrity checks as a security control.** See R3.
 - **Hiding the API contract.** `docs/API.md` is internal but the contract is discoverable by any
   authenticated client. Security rests on enforcement, not obscurity.
 - **Protecting the operator from a compromised server.** Out of scope.
 - **Offline enforcement.** Anything offline is advisory; the server re-validates on push
-  (`docs/SPEC.md:33` limits offline writes to six entities precisely so this stays true).
+  (`docs/SPEC.md` § PLATFORMS AND ARCHITECTURE, "Offline scope", limits offline writes to six entities precisely so this stays true).
 
 ---
 
@@ -204,7 +204,7 @@ The design never depends on this column. It is recorded so that no phase mistake
 | No cross-tenant leakage through `change_log` or pull | 8 | pull for user A never contains user B's `seq` |
 | Free-tier abuse controls are live | 7 | unverified account cannot chat/search/ingest; per-IP signup limit trips and logs |
 | Provider cost ceiling stops spend | 7 | an account at its ceiling gets a clear error, not a silent spend |
-| Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md:616`) |
+| Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md` § QUALITY BAR, "Payment tests") |
 | Retrieved text cannot act as instructions | 12 | injection fixture in an uploaded document does not alter tool behaviour |
 | Rendered documents are inert | 6 | a source containing `</div><script>` and `<svg onload=…>` produces a PDF with neither |
 

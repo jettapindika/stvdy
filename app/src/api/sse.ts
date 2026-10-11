@@ -1,7 +1,7 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 
 import { API_BASE_URL, ensureFreshSession } from './client'
-import { apiErrorFromBody, ApiError, statusForCode, type ApiErrorCode } from './errors'
+import { apiErrorFromBody, ApiError, networkReason, statusForCode, type ApiErrorCode } from './errors'
 import { getAccessToken } from '../lib/tokens'
 
 /**
@@ -265,6 +265,18 @@ export interface ChatStreamInput {
    * indistinguishable on the wire.
    */
   useWeb: boolean
+  /**
+   * Whether this turn is answered only from the workspace's own sources.
+   *
+   * Always sent for the same reason as `useWeb`. The server's default is `true`,
+   * so a body that omitted it would still be grounded; sending it explicitly is
+   * what makes the two states distinguishable in a log.
+   *
+   * This is independent of `useWeb`: turning web search on does not turn grounding
+   * off, because a web result the student explicitly asked for is a citation they
+   * can check, while an answer from the model's own memory is not.
+   */
+  sourcesOnly: boolean
   signal?: AbortSignal
 }
 
@@ -278,7 +290,11 @@ async function readJsonBody(response: Response): Promise<unknown> {
 }
 
 function post(input: ChatStreamInput): Promise<Response> {
-  const body: Record<string, unknown> = { message: input.message, use_web: input.useWeb }
+  const body: Record<string, unknown> = {
+    message: input.message,
+    use_web: input.useWeb,
+    sources_only: input.sourcesOnly,
+  }
   if (input.sourceIds !== undefined && input.sourceIds.length > 0) body.source_ids = input.sourceIds
 
   const token = getAccessToken()
@@ -313,11 +329,7 @@ export async function streamChat(
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error
       handlers.onError?.(
-        new ApiError({
-          status: 0,
-          code: 'network',
-          message: `Could not reach the server at ${API_BASE_URL}.`,
-        }),
+        new ApiError({ status: 0, code: 'network', message: networkReason(API_BASE_URL) }),
       )
       return
     }

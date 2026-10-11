@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
@@ -49,24 +50,6 @@ type Panel = 'sources' | 'chat' | 'studio'
 
 type StudioSection = 'flashcards' | 'quiz'
 
-const STUDIO_SECTIONS: { id: StudioSection; label: string }[] = [
-  { id: 'flashcards', label: 'Flashcards' },
-  { id: 'quiz', label: 'Quiz' },
-]
-
-const PANELS: { id: Panel; label: string }[] = [
-  { id: 'sources', label: 'Sources' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'studio', label: 'Studio' },
-]
-
-const STATUS_LABEL: Record<SourceStatusName, string> = {
-  pending: 'Waiting to start',
-  processing: 'Processing',
-  ready: 'Ready',
-  failed: 'Failed',
-}
-
 const STATUS_CHIP: Record<SourceStatusName, string> = {
   pending: 'chip',
   processing: 'chip chip-working',
@@ -75,10 +58,19 @@ const STATUS_CHIP: Record<SourceStatusName, string> = {
 }
 
 export function WorkspaceScreen() {
+  const { t } = useTranslation()
   const { workspaceId = '' } = useParams()
   const workspace = useWorkspace(workspaceId)
   const [active, setActive] = useState<Panel>('sources')
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
+  // The strip's labels are copy, so they are resolved per render rather than
+  // kept in a module-scope table that would have no language to read from.
+  const panels: { id: Panel; label: string }[] = [
+    { id: 'sources', label: t('workspaces.panel.sources') },
+    { id: 'chat', label: t('workspaces.panel.chat') },
+    { id: 'studio', label: t('workspaces.panel.studio') },
+  ]
 
   const workspaceError = asApiError(workspace.error)
 
@@ -86,15 +78,15 @@ export function WorkspaceScreen() {
   // tablist pattern expects. Without this, Tab walks all three and the arrows do
   // nothing, so the roles would be promising behaviour that is not there.
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const index = PANELS.findIndex((p) => p.id === active)
+    const index = panels.findIndex((p) => p.id === active)
     let next = index
-    if (event.key === 'ArrowRight') next = (index + 1) % PANELS.length
-    else if (event.key === 'ArrowLeft') next = (index - 1 + PANELS.length) % PANELS.length
+    if (event.key === 'ArrowRight') next = (index + 1) % panels.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + panels.length) % panels.length
     else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = PANELS.length - 1
+    else if (event.key === 'End') next = panels.length - 1
     else return
 
-    const target = PANELS[next]
+    const target = panels[next]
     if (!target) return
     event.preventDefault()
     setActive(target.id)
@@ -105,13 +97,13 @@ export function WorkspaceScreen() {
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-3 px-5 py-3">
         <h1 className="break-words text-base font-semibold">
-          {workspace.data?.name ?? 'Workspace'}
+          {workspace.data?.name ?? t('workspaces.detail.titleFallback')}
         </h1>
       </header>
 
       {workspaceError !== null && (
         <div className="px-5 pb-3">
-          <ApiErrorNotice error={workspaceError} noun="workspaces" />
+          <ApiErrorNotice error={workspaceError} noun={t('workspaces.noun')} />
         </div>
       )}
 
@@ -119,11 +111,11 @@ export function WorkspaceScreen() {
         <>
           <div
             role="tablist"
-            aria-label="Workspace panels"
+            aria-label={t('workspaces.panels.label')}
             onKeyDown={onKeyDown}
-            className="mx-3 mb-3 flex gap-1 rounded-pill bg-surface-sunk p-1 lg:hidden"
+            className="mx-3 mb-3 flex gap-1 rounded-pill bg-surface-raised p-1 lg:hidden"
           >
-            {PANELS.map((panel) => {
+            {panels.map((panel) => {
               const selected = active === panel.id
               return (
                 <button
@@ -150,17 +142,17 @@ export function WorkspaceScreen() {
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(200px,1fr)_minmax(320px,2fr)_minmax(220px,1fr)]">
-            {PANELS.map((panel) => (
+            {panels.map((panel) => (
               <section
                 key={panel.id}
                 id={`panel-${panel.id}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${panel.id}`}
-                className={`min-h-0 flex-col border-rule lg:flex lg:border-r lg:last:border-r-0 ${
+                className={`min-h-0 flex-col border-border lg:flex lg:border-r lg:last:border-r-0 ${
                   active === panel.id ? 'flex' : 'hidden'
                 }`}
               >
-                <div className="border-b border-rule px-4 py-2">
+                <div className="border-b border-border px-4 py-2">
                   <span className="label">{panel.label}</span>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
@@ -187,19 +179,25 @@ export function WorkspaceScreen() {
  * thing for a student to learn.
  */
 function StudioPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const [section, setSection] = useState<StudioSection>('flashcards')
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
+  const sections: { id: StudioSection; label: string }[] = [
+    { id: 'flashcards', label: t('workspaces.studio.flashcards') },
+    { id: 'quiz', label: t('workspaces.studio.quiz') },
+  ]
+
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const index = STUDIO_SECTIONS.findIndex((entry) => entry.id === section)
+    const index = sections.findIndex((entry) => entry.id === section)
     let next = index
-    if (event.key === 'ArrowRight') next = (index + 1) % STUDIO_SECTIONS.length
-    else if (event.key === 'ArrowLeft') next = (index - 1 + STUDIO_SECTIONS.length) % STUDIO_SECTIONS.length
+    if (event.key === 'ArrowRight') next = (index + 1) % sections.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + sections.length) % sections.length
     else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = STUDIO_SECTIONS.length - 1
+    else if (event.key === 'End') next = sections.length - 1
     else return
 
-    const target = STUDIO_SECTIONS[next]
+    const target = sections[next]
     if (target === undefined) return
     event.preventDefault()
     setSection(target.id)
@@ -210,11 +208,11 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
     <div className="flex flex-col">
       <div
         role="tablist"
-        aria-label="Studio sections"
+        aria-label={t('workspaces.studio.sections')}
         onKeyDown={onKeyDown}
-        className="mx-3 mt-3 flex gap-1 rounded-pill bg-surface-sunk p-1"
+        className="mx-3 mt-3 flex gap-1 rounded-pill bg-surface-raised p-1"
       >
-        {STUDIO_SECTIONS.map((entry) => {
+        {sections.map((entry) => {
           const selected = entry.id === section
           return (
             <button
@@ -252,6 +250,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
 }
 
 function SourcesPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const sources = useSources(workspaceId)
   const listError = asApiError(sources.error)
 
@@ -259,7 +258,9 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
     <div className="flex flex-col gap-3 px-4 py-4">
       <UploadForm workspaceId={workspaceId} />
 
-      {sources.isPending && <SkeletonRows rows={2} label="Loading this workspace's sources" />}
+      {sources.isPending && (
+        <SkeletonRows rows={2} label={t('workspaces.sources.loading')} />
+      )}
 
       {listError !== null && (
         <ApiErrorNotice
@@ -270,7 +271,7 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
               className="btn btn-secondary"
               onClick={() => void sources.refetch()}
             >
-              Try again
+              {t('actions.retry')}
             </button>
           }
         />
@@ -278,13 +279,13 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
 
       {sources.data !== undefined && sources.data.length === 0 && (
         <EmptyState
-          title="No sources yet"
-          reason="Add a PDF or paste text above. Each one is chunked and indexed, so a question can be answered from any of them and cite the page it came from."
+          title={t('workspaces.sources.emptyTitle')}
+          reason={t('workspaces.sources.emptyReason')}
         />
       )}
 
       {sources.data !== undefined && sources.data.length > 0 && (
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
           {sources.data.map((source) => (
             <SourceRow key={source.id} workspaceId={workspaceId} source={source} />
           ))}
@@ -295,8 +296,18 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
 }
 
 function SourceRow({ workspaceId, source }: { workspaceId: string; source: Source }) {
+  const { t } = useTranslation()
   const remove = useDeleteSource(workspaceId)
   const [confirming, setConfirming] = useState(false)
+
+  // The word carries the state, so it is copy like any other and lives here
+  // rather than in a module-scope table with no language to read from.
+  const statusLabel: Record<SourceStatusName, string> = {
+    pending: t('workspaces.source.status.pending'),
+    processing: t('workspaces.source.status.processing'),
+    ready: t('workspaces.source.status.ready'),
+    failed: t('workspaces.source.status.failed'),
+  }
 
   // Poll while the job is still moving. The list's status is a snapshot from
   // whenever it was last fetched, so the live value comes from the status
@@ -312,20 +323,24 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 flex-1 break-words font-medium">
-          {source.title.length > 0 ? source.title : 'Untitled source'}
+          {source.title.length > 0 ? source.title : t('workspaces.source.untitled')}
         </span>
-        <span className="meta">{source.kind === 'pdf' ? 'PDF' : 'Text'}</span>
+        <span className="meta">
+          {source.kind === 'pdf'
+            ? t('workspaces.source.kindPdf')
+            : t('workspaces.source.kindText')}
+        </span>
         {/* The word carries the state; the chip's tone repeats it. Colour is
             never the only signal, and "Ready" is readable in monochrome. */}
         <span className={STATUS_CHIP[status]} role="status">
           {(status === 'pending' || status === 'processing') && (
             <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
           )}
-          {STATUS_LABEL[status]}
+          {statusLabel[status]}
         </span>
         {status === 'ready' && chunkCount !== null && (
           <span className="meta">
-            {chunkCount} {chunkCount === 1 ? 'chunk' : 'chunks'}
+            {t('workspaces.source.chunkCount', { count: chunkCount })}
           </span>
         )}
         {!confirming && (
@@ -336,7 +351,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
               setConfirming(true)
             }}
           >
-            Remove
+            {t('actions.remove')}
           </button>
         )}
       </div>
@@ -349,7 +364,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
 
       {confirming && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-ink-muted">Remove this source?</span>
+          <span className="text-sm text-muted">{t('workspaces.source.removeConfirm')}</span>
           <button
             type="button"
             className="btn btn-secondary"
@@ -363,7 +378,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
               })
             }}
           >
-            {remove.isPending ? 'Removing' : 'Remove it'}
+            {remove.isPending ? t('workspaces.source.removing') : t('workspaces.source.removeIt')}
           </button>
           <button
             type="button"
@@ -373,17 +388,20 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
               setConfirming(false)
             }}
           >
-            Keep it
+            {t('workspaces.keepIt')}
           </button>
         </div>
       )}
 
-      {removeError !== null && <ApiErrorNotice error={removeError} noun="sources" />}
+      {removeError !== null && (
+        <ApiErrorNotice error={removeError} noun={t('workspaces.source.noun')} />
+      )}
     </li>
   )
 }
 
 function UploadForm({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const [kind, setKind] = useState<SourceKind>('pdf')
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
@@ -428,16 +446,16 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       }}
     >
       {showNotice && uploadError !== null && (
-        <ApiErrorNotice error={uploadError} noun="uploading sources" />
+        <ApiErrorNotice error={uploadError} noun={t('workspaces.upload.noun')} />
       )}
 
       <fieldset className="flex flex-col gap-1">
-        <legend className="label">Add material</legend>
+        <legend className="label">{t('workspaces.upload.legend')}</legend>
         <div className="flex flex-wrap gap-2">
           {(['pdf', 'text'] as const).map((option) => (
             <label
               key={option}
-              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-rule px-3 py-2 text-sm has-[:focus-visible]:border-accent has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
             >
               <input
                 type="radio"
@@ -448,7 +466,9 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
                   setKind(option)
                 }}
               />
-              {option === 'pdf' ? 'PDF file' : 'Pasted text'}
+              {option === 'pdf'
+                ? t('workspaces.upload.kindPdf')
+                : t('workspaces.upload.kindText')}
             </label>
           ))}
         </div>
@@ -457,7 +477,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       {kind === 'pdf' ? (
         <div className="flex flex-col gap-1">
           <label className="label" htmlFor={fileId}>
-            PDF file
+            {t('workspaces.upload.kindPdf')}
           </label>
           <input
             ref={fileInput}
@@ -481,7 +501,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       ) : (
         <div className="flex flex-col gap-1">
           <label className="label" htmlFor={textId}>
-            Text to add
+            {t('workspaces.upload.textLabel')}
           </label>
           <textarea
             id={textId}
@@ -503,10 +523,10 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       )}
 
       <Field
-        label="Title"
+        label={t('workspaces.upload.titleLabel')}
         name="title"
         value={title}
-        hint="Optional. The name this source is listed under."
+        hint={t('workspaces.upload.titleHint')}
         error={validation?.field === 'title' ? validation.message : undefined}
         onChange={(event) => {
           setTitle(event.target.value)
@@ -514,15 +534,12 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       />
 
       <button type="submit" className="btn btn-primary self-start" disabled={!ready || upload.isPending}>
-        {upload.isPending ? 'Uploading' : 'Add source'}
+        {upload.isPending ? t('workspaces.upload.uploading') : t('workspaces.upload.submit')}
       </button>
       {/* Upload progress is the ingestion status below, not a fake percentage:
           `fetch` cannot report bytes sent, and a bar that is not measuring
           anything is worse than a word that is true. */}
-      <p className="text-xs text-ink-muted">
-        After the file is stored, this workspace's source list shows extraction and
-        indexing until the source is ready.
-      </p>
+      <p className="text-xs text-muted">{t('workspaces.upload.afterStored')}</p>
     </form>
   )
 }

@@ -1,4 +1,4 @@
-import { apiErrorFromBody, ApiError } from './errors'
+import { apiErrorFromBody, ApiError, networkReason } from './errors'
 import {
   clearSession,
   getAccessToken,
@@ -76,13 +76,12 @@ interface RefreshResponse {
 
 let refreshInFlight: Promise<boolean> | null = null
 
-function toApiError(error: unknown, fallback: string): ApiError {
+function toApiError(error: unknown, sentence: string): ApiError {
   if (error instanceof ApiError) return error
-  return new ApiError({
-    status: 0,
-    code: 'network',
-    message: error instanceof Error && error.message ? error.message : fallback,
-  })
+  // The sentence is the caller's, not the browser's. `fetch` rejects with "Failed
+  // to fetch" / "Load failed", which names neither the origin that was tried nor
+  // what can be done about it; the caller builds `sentence` from the origin.
+  return new ApiError({ status: 0, code: 'network', message: sentence })
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -191,7 +190,7 @@ async function send<T>(path: string, options: RequestOptions, mayRefresh: boolea
       buildRequest(options, options.auth === false ? null : getAccessToken()),
     )
   } catch (error) {
-    throw toApiError(error, `Could not reach the server at ${API_BASE_URL}.`)
+    throw toApiError(error, networkReason(API_BASE_URL))
   }
 
   if (!response.ok) {

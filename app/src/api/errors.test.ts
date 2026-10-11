@@ -11,6 +11,7 @@ import {
   codeForStatus,
   planLabel,
   planLimitMessage,
+  networkReason,
   statusForCode,
   validationMessage,
 } from './errors'
@@ -107,6 +108,31 @@ describe('mapping a response body', () => {
     expect(asApiError(new Error('boom'))?.code).toBe('internal')
     const known = apiErrorFromBody(404, { code: 'not_found' })
     expect(asApiError(known)).toBe(known)
+  })
+
+  it('names the origin it could not reach, and keeps a sentence without one', () => {
+    // A `network` error is raised by the client, not by the server, so its
+    // message is the user's sentence rather than a log line. It is the one code
+    // whose reason is not the fixed copy, and the reason is that the origin is
+    // the actionable part: a development build pointed at an origin nothing
+    // serves reads as an outage until the URL is on screen.
+    expect(networkReason('http://127.0.0.1:8099')).toBe(
+      'The server could not be reached at http://127.0.0.1:8099. Check your connection and try again.',
+    )
+
+    const reached = new ApiError({
+      status: 0,
+      code: 'network',
+      message: networkReason('http://localhost:8080'),
+    })
+    expect(apiErrorReason(reached)).toContain('http://localhost:8080')
+
+    // An error built without a message still reads as something, which is what
+    // the exhaustive table above guarantees.
+    const bare = new ApiError({ status: 0, code: 'network', message: '' })
+    expect(apiErrorReason(bare)).toBe(
+      'The server could not be reached. Check your connection and try again.',
+    )
   })
 
   it('has a title and a reason for every code', () => {

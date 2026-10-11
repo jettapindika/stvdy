@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { createBrowserRouter } from 'react-router'
 
 import { App } from './App'
@@ -13,6 +14,19 @@ import { StudyScreen } from './features/study/StudyScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
 import { WorkspaceScreen } from './features/workspaces/WorkspaceScreen'
+
+/**
+ * A route whose screen is planned but not built yet.
+ *
+ * This file is a route table, not a component: it is evaluated once at module
+ * scope, before any language is known, so a `t` call in the table itself would
+ * freeze whichever language happened to load first. The table passes the keys and
+ * this component resolves them at render, where a language exists.
+ */
+function NotBuiltRoute({ titleKey, whatKey }: { titleKey: string; whatKey: string }) {
+  const { t } = useTranslation()
+  return <NotBuiltYet title={t(titleKey)} what={t(whatKey)} />
+}
 
 /**
  * Routes.
@@ -61,39 +75,19 @@ export const router = createBrowserRouter([
           { path: 'quiz/:quizId', element: <QuizScreen /> },
           {
             path: 'calendar',
-            element: (
-              <NotBuiltYet
-                title="Calendar"
-                what="a week and month view of classes, deadlines, and the study blocks the planner proposes, plus Google Calendar and ICS connections"
-              />
-            ),
+            element: <NotBuiltRoute titleKey="nav.calendar" whatKey="routes.calendar.what" />,
           },
           {
             path: 'tasks',
-            element: (
-              <NotBuiltYet
-                title="Tasks"
-                what="tasks and subtasks across your workspaces, with quick capture and an assistant that proposes breakdowns you confirm before they save"
-              />
-            ),
+            element: <NotBuiltRoute titleKey="nav.tasks" whatKey="routes.tasks.what" />,
           },
           {
             path: 'settings',
-            element: (
-              <NotBuiltYet
-                title="Settings"
-                what="timezone and study hours, daily limits, reminder channels, connected calendars, and your signed-in devices"
-              />
-            ),
+            element: <NotBuiltRoute titleKey="nav.settings" whatKey="routes.settings.what" />,
           },
           {
             path: 'billing',
-            element: (
-              <NotBuiltYet
-                title="Plan and usage"
-                what="your current plan, when the prepaid period ends, and your remaining credits. Purchase screens live on the web and desktop builds only."
-              />
-            ),
+            element: <NotBuiltRoute titleKey="billing.planAndUsage" whatKey="routes.billing.what" />,
           },
           {
             path: 'styleguide',
@@ -101,9 +95,7 @@ export const router = createBrowserRouter([
           },
           {
             path: '*',
-            element: (
-              <NotBuiltYet title="Not found" what="nothing: this address does not match a screen" />
-            ),
+            element: <NotBuiltRoute titleKey="routes.notFound.title" whatKey="routes.notFound.what" />,
           },
         ],
       },

@@ -4,16 +4,23 @@
 /* ==========================================================================
    Stvdy design tokens
    --------------------------------------------------------------------------
-   Transcribed from the user's Figma design (DESIGN.md records the source and
-   the sampled values). Two cores plus two functional colours, per R-29.
+   Transcribed from docs/SPEC.md § Design system. The values are the spec's; the
+   contrast figures beside them were computed, not asserted, and the same pairs
+   are re-checked in `app/src/tokens/contrast.test.ts` so a later edit cannot
+   quietly break one.
 
-   The load-bearing decision from that design: BLUE IS THE IDENTITY, BLACK IS THE
-   ACTION. The brand azure carries the wordmark, links, and the illustration; the
-   primary button is near-black. A blue button would be the generic choice, and
-   the design deliberately avoids it.
+   Two rules carry the meaning, and both are load-bearing rather than stylistic:
 
-   Both themes are designed. Dark maps the same hues onto a cool near-black ground
-   and inverts only the action fill, so every pair stays above AA.
+   - INDIGO IS THE ACTION. `--primary` fills buttons, selections and the brand.
+     The previous design made the action fill near-black and reserved a blue for
+     identity; the spec reverses that, so this file does too.
+   - SKY IS SOURCES ONLY. `--source` and `--source-tint` are for citations and
+     nothing else. A sky chip on screen must mean "this came from your material",
+     or the one visual signal that distinguishes grounded text from generated
+     text stops meaning anything.
+
+   Both themes are designed. Every text/background pair below is >= 4.5:1, and
+   every border or icon pair is >= 3:1 (WCAG 2.2 AA), in both themes.
 
    `@theme inline` makes utilities reference these variables rather than copying
    their values, which is what lets the dark overrides work without a second set
@@ -21,105 +28,164 @@
    ========================================================================== */
 
 :root {
-  /* ground */
-  --paper: #f5f7fb;
-  --card: #ffffff;
-  --surface-sunk: #eef1f7;
+  /* ground and structure */
+  --bg: #faf8ff;
+  --surface: #ffffff;
+  --surface-raised: #f2f3ff;
+  /* The spec's `border` is a hairline for panel edges (1.25:1 on the ground),
+     which is right for a divider and cannot carry a control's boundary at the
+     3:1 an input or a focusable outline needs. `--border-strong` is the same hue
+     family taken down to 3.14:1 on surface / 2.98:1 on bg, so a field boundary
+     is a real edge. */
+  --border: #dde0f0;
+  --border-strong: #7e85a6;      /* 3.44:1 on bg, 3.63:1 on surface: a real edge */
+
   /* text */
-  --ink: #101010;
-  --ink-muted: #5f6b7a;
-  /* structure */
-  --rule: #dfe4ee;
-  --rule-strong: #c6cede;
-  /* identity: the sampled brand azure, plus a darkened form for body text.
-     The raw azure is 3.56:1 on paper (AA-large only), so links use the dark one. */
-  --accent: #3588c8;
-  --accent-text: #1a6aa8;
-  --accent-soft: #e8f2fa;
-  /* the sampled checkmark teal, plus a darkened form for body text */
-  --success: #0e9080;
-  --success-text: #0c7f71;
-  --success-soft: #e4f4f1;
-  /* Text that sits on `--success-soft` rather than on the ground. The body-text
-     teal is 4.56:1 on paper but only 4.31:1 on the tint, which fails AA at
-     chip and note sizes; this is the same hue taken far enough down to clear it
-     (6.05:1 here). DESIGN.md's rule about measuring the rendered DOM rather than
-     the token values is what caught this: the token was correct on the ground it
-     was recorded for and wrong on the one it was being used on. */
-  --success-on-soft: #0a6a5e;
-  /* functional */
-  --danger: #b3261e;
-  --danger-soft: #fdeceb;
-  /* the action fill. Black in light mode, inverted in dark. */
-  --action: #101010;
-  --on-action: #ffffff;
-  /* elevation, used only where something genuinely floats above the ground */
-  --shadow-card: 0 1px 2px rgb(16 16 16 / 0.04), 0 8px 24px -12px rgb(16 16 16 / 0.12);
+  --text: #131b2e;        /* 17.16:1 on surface */
+  --text-muted: #464555;  /*  9.36:1 on surface */
+  --text-subtle: #6b6a7c; /*  5.28:1 on surface */
+
+  /* actions and brand */
+  --primary: #4f46e5;      /* white on this is 6.29:1 */
+  --on-primary: #ffffff;
+  --primary-text: #3525cd; /*  9.14:1 on surface, 7.07:1 on the tint */
+  --primary-tint: #e2dfff;
+
+  /* sources and citations */
+  --source: #006591;       /*  4.97:1 on the tint, 6.42:1 on surface */
+  --source-tint: #c9e6ff;
+
+  /* state */
+  --success: #005338;      /*  7.87:1 on the tint */
+  --success-tint: #d5f5e8;
+  --warning: #92400e;      /*  6.37:1 on the tint */
+  --warning-tint: #fef3c7;
+  --danger: #ba1a1a;       /*  5.00:1 on the tint */
+  --danger-tint: #ffdad6;
+
+  /* Course colours: six categorical hues, used as a 4px marker plus a tinted
+     chip plus an initial or icon. Never as the only signal, and never as a
+     status colour: a course is not a state. Each is >= 4.5:1 both on the ground
+     and on its own tint. */
+  --course-indigo: #4f46e5;
+  --course-sky: #0369a1;
+  --course-emerald: #047857;
+  --course-amber: #b45309;
+  --course-rose: #be123c;
+  --course-violet: #6d28d9;
+  --course-indigo-tint: #e2dfff;
+  --course-sky-tint: #c9e6ff;
+  --course-emerald-tint: #d5f5e8;
+  --course-amber-tint: #fef3c7;
+  --course-rose-tint: #ffdad6;
+  --course-violet-tint: #ede4ff;
+
+  /* Elevation, used only where something genuinely floats above the ground. */
+  --ring: #4f46e5;          /* 5.97:1 on bg, 6.29:1 on surface */
+  --shadow-float: 0 1px 2px rgb(19 27 46 / 0.05), 0 12px 32px -16px rgb(19 27 46 / 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #12141a;
-    --card: #22262e;
-    --surface-sunk: #0e1015;
-    --ink: #f2f4f8;
-    --ink-muted: #9aa5b8;
-    --rule: #353b47;
-    --rule-strong: #454c59;
-    --accent: #6db4e8;
-    --accent-text: #6db4e8;
-    --accent-soft: #16232f;
-    --success: #3fbfae;
-    --success-text: #3fbfae;
-    --success-soft: #12251f;
-    /* Same as `--success-text` here, because on this ground the body teal is
-       already 7.08:1. The token exists in both themes so a component can name
-       the pairing it needs rather than branching on the theme. */
-    --success-on-soft: #3fbfae;
-    --danger: #f2b8b5;
-    --danger-soft: #2a1a19;
-    /* Inverted, not recoloured: a light fill with dark text keeps the same
-       "highest contrast wins the action" logic as light mode. */
-    --action: #f2f4f8;
-    --on-action: #12141a;
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+    --bg: #0b0f19;
+    --surface: #111827;
+    --surface-raised: #1a2335;
+    --border: #263246;
+    /* 4.04:1 on surface, 4.36:1 on bg. */
+    --border-strong: #6a789d;
+
+    --text: #f1f5f9;        /* 16.19:1 on surface */
+    --text-muted: #a3b1c6;  /*  8.16:1 on surface */
+    --text-subtle: #8493aa; /*  5.69:1 on surface */
+
+    /* Unchanged in dark: the fill is dark enough for white text at 6.29:1, and
+       the same indigo in both themes is what makes the brand recognisable. */
+    --primary: #4f46e5;
+    --on-primary: #ffffff;
+    --primary-text: #a5b4fc; /* 8.90:1 on surface */
+    --primary-tint: #1e1b4b;
+
+    --source: #7dd3fc;       /* 8.88:1 on the tint */
+    --source-tint: #0c2a3f;
+
+    --success: #4edea3;      /* 9.01:1 on the tint */
+    --success-tint: #0b2a1f;
+    --warning: #fbbf24;      /* 8.31:1 on the tint */
+    --warning-tint: #3a2a08;
+    --danger: #fda4af;       /* 8.34:1 on the tint */
+    --danger-tint: #3f1420;
+
+    --course-indigo: #a5b4fc;
+    --course-sky: #7dd3fc;
+    --course-emerald: #4edea3;
+    --course-amber: #fbbf24;
+    --course-rose: #fda4af;
+    --course-violet: #c4b5fd;
+    --course-indigo-tint: #1e1b4b;
+    --course-sky-tint: #0c2a3f;
+    --course-emerald-tint: #0b2a1f;
+    --course-amber-tint: #3a2a08;
+    --course-rose-tint: #3f1420;
+    --course-violet-tint: #2a1b4d;
+
+    --ring: #a5b4fc;        /* 9.61:1 on bg, 8.90:1 on surface */
+    --shadow-float: 0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px -16px rgb(0 0 0 / 0.55);
   }
 }
 
 @theme inline {
-  --color-paper: var(--paper);
-  --color-card: var(--card);
-  --color-surface-sunk: var(--surface-sunk);
-  --color-ink: var(--ink);
-  --color-ink-muted: var(--ink-muted);
-  --color-rule: var(--rule);
-  --color-rule-strong: var(--rule-strong);
-  --color-accent: var(--accent);
-  --color-accent-text: var(--accent-text);
-  --color-accent-soft: var(--accent-soft);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-text: var(--primary-text);
+  --color-primary-tint: var(--primary-tint);
+  --color-source: var(--source);
+  --color-source-tint: var(--source-tint);
   --color-success: var(--success);
-  --color-success-text: var(--success-text);
-  --color-success-soft: var(--success-soft);
-  --color-success-on-soft: var(--success-on-soft);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
   --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
-  --color-action: var(--action);
-  --color-on-action: var(--on-action);
+  --color-danger-tint: var(--danger-tint);
+  --color-ring: var(--ring);
 
   /* Type. Self-hosted (src/fonts.css + public/fonts), so the app needs no
-     network for type: the desktop build renders Plex offline and there is no CDN
-     for the shell's CSP to allow. The design's typeface could not be read from
-     the render (DESIGN.md says so); Plex is chosen for Latin-Extended coverage,
-     which Indonesian source material needs, and for narrower forms in dense
-     reading views. */
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+     network for type: the desktop build renders offline and there is no CDN for
+     the shell's CSP to allow. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* Shape carries meaning: pill means action or count, 14px means a panel that
-     floats, 8px means a field. */
-  --radius-pill: 999px;
-  --radius-card: 14px;
+  /* The spec's scale, as utilities: text-display, text-h1, text-h2, text-h3,
+     text-body, text-small, text-caption. Nothing is defined below 12px, and
+     `text-caption` is the floor. */
+  --text-display: 2rem;
+  --text-display--line-height: 2.5rem;
+  --text-h1: 1.5rem;
+  --text-h1--line-height: 2rem;
+  --text-h2: 1.25rem;
+  --text-h2--line-height: 1.75rem;
+  --text-h3: 1rem;
+  --text-h3--line-height: 1.5rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.375rem;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.125rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+
+  /* Shape. 8 controls, 12 cards, 16 sheets and modals, 999 chips. */
   --radius-field: 8px;
+  --radius-card: 12px;
+  --radius-sheet: 16px;
+  --radius-pill: 999px;
 
   /* Safe-area insets as spacing tokens -> pt-safe-top / pb-safe-bottom. */
   --spacing-safe-top: env(safe-area-inset-top, 0px);
@@ -128,91 +194,145 @@
   --spacing-safe-right: env(safe-area-inset-right, 0px);
 }
 
+/* Motion: 120/200/300 ms ease-out, and nothing else. Named so a component says
+   which of the three it means instead of inventing a fourth. */
+:root {
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
 @layer base {
   html {
     /* Kill pull-to-refresh and scroll chaining in the webview. */
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
+    /* Pinch-zoom stays allowed: no `user-scalable=no`, no `maximum-scale`. */
   }
 
   body {
     min-height: 100dvh;
-    background-color: var(--paper);
-    color: var(--ink);
+    background-color: var(--bg);
+    color: var(--text);
     font-family: var(--font-sans);
-    /* 15px: the reading views are dense, and 16 pushes line length past
-       comfortable at this column width. */
-    font-size: 0.9375rem;
-    line-height: 1.6;
+    /* Body is 14/22 on desktop and 16/24 on mobile (spec § Type). The desktop
+       value is the base and the phone value is the override below, because the
+       webview reports a phone width and the desktop layout is the one the rest of
+       the scale is built against. */
+    font-size: 0.875rem;
+    line-height: 1.375rem;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The phone body size. It is 16px for the same reason the inputs are: a smaller
+     body size is what makes a phone feel cramped on a long answer, and 16px is
+     also the size iOS will not zoom on. */
+  @media (max-width: 767px) {
+    body {
+      font-size: 1rem;
+      line-height: 1.5rem;
+    }
   }
 
   #root {
     min-height: 100dvh;
   }
 
-  /* The design's headline treatment: large, tight leading, balanced wrapping.
-     Hierarchy comes from size and space, never from colour. */
-  h1, h2, h3 {
-    color: var(--ink);
+  /* Hierarchy comes from size and space, never from colour. Headings take Plus
+     Jakarta Sans; the same size in a different weight would read as an accident
+     rather than a system. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--text);
+    font-family: var(--font-heading);
     font-weight: 600;
     letter-spacing: -0.02em;
     text-wrap: balance;
   }
-  h1 { font-size: 1.5rem; line-height: 1.2; }
-  h2 { font-size: 1.125rem; line-height: 1.3; letter-spacing: -0.01em; }
-  h3 { font-size: 1rem; letter-spacing: -0.005em; }
+  h1 {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  h4 {
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+    letter-spacing: -0.005em;
+  }
 
-  p { text-wrap: pretty; }
+  p {
+    text-wrap: pretty;
+  }
 
-  code, kbd, samp, pre {
+  code,
+  kbd,
+  samp,
+  pre {
     font-family: var(--font-mono);
     font-size: 0.875em;
   }
 
   /* One focus treatment, on the browser's own semantics so it works for every
-     control without per-component effort. `focus-visible` only, so a mouse click
-     does not leave a ring behind. */
+     control without per-component effort: 2px primary ring plus a 2px offset,
+     in both themes. `focus-visible` only, so a mouse click does not leave a ring
+     behind, and the ring is never removed without this replacement. */
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: var(--radius-field);
   }
 
   ::selection {
-    background-color: var(--accent-soft);
-    color: var(--accent-text);
+    background-color: var(--primary-tint);
+    color: var(--primary-text);
   }
 }
 
 @layer components {
   /* --- Surfaces ----------------------------------------------------------- */
 
-  /* The design's card: white on the tinted ground, with a shadow doing the
-     elevation rather than a hard border. The shadow has a stated reason (the card
-     genuinely floats above the page), which is what R-12 asks for. */
+  /* A card sits on the ground: surface fill, hairline border, 12px radius. The
+     spec allows shadows only for floating layers, so elevation is not how a card
+     reads here. */
   .card {
-    background-color: var(--card);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card);
-  }
-  /* In dark mode the shadow cannot do the work (a black shadow on a near-black
-     ground is invisible), so the card gets a hairline as well. That is the one
-     place the design's borderless-card rule is adapted rather than copied, and
-     the reason is elevation: without it the card reads as a flat rectangle. */
-  @media (prefers-color-scheme: dark) {
-    .card {
-      border: 1px solid var(--rule);
-    }
   }
 
-  /* A flat region: no elevation, no shadow, separated by a hairline. Used for
-     panels that are part of the page rather than floating above it. */
+  /* A region inside a card: same fill, no border, separated by space. */
   .panel {
-    background-color: var(--card);
-    border: 1px solid var(--rule);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius-card);
+  }
+
+  /* An inset or a secondary block: the raised tint, which is what the spec's
+     `surface-raised` is for. */
+  .raised {
+    background-color: var(--surface-raised);
+    border-radius: var(--radius-card);
+  }
+
+  /* The one place a shadow is allowed: a layer that genuinely floats above the
+     page (popover, sheet, modal, command palette). */
+  .float {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sheet);
+    box-shadow: var(--shadow-float);
   }
 
   /* --- Buttons: pills ----------------------------------------------------- */
@@ -228,53 +348,66 @@
     font-size: 0.875rem;
     font-weight: 500;
     line-height: 1.2;
-    /* 44px minimum touch target (R-03). */
+    /* 44px minimum touch target, which also clears the spec's 32px desktop
+       floor. */
     min-height: 2.75rem;
     /* A flex item defaults to `min-width: auto`, so it refuses to shrink below
        its content. In a row of buttons that is an overflow the page cannot
        scroll away from: at 200% text scale the three workspace panel tabs were
        510px wide on a 390px phone. `min-width: 0` lets the label wrap inside the
        button instead, and `min-height` grows to fit it. Long labels are the
-       layout test case (DESIGN.md), not an edge case. */
+       layout test case, not an edge case. */
     min-width: 0;
     cursor: pointer;
-    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease,
-      opacity 140ms ease;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      opacity var(--duration-fast) var(--ease-out);
   }
   .btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
 
-  /* The action fill. Black in light mode, inverted in dark: never the brand blue,
-     which is the design's most distinctive decision (DESIGN.md). */
+  /* The action fill: the brand indigo, with white text at 6.29:1 in both
+     themes. */
   .btn-primary {
-    background-color: var(--action);
-    color: var(--on-action);
-    border-color: var(--action);
+    background-color: var(--primary);
+    color: var(--on-primary);
+    border-color: var(--primary);
   }
   .btn-primary:hover:not(:disabled) {
-    opacity: 0.88;
+    background-color: color-mix(in oklab, var(--primary) 88%, var(--bg));
   }
 
-  /* The design's "Continue with Google" treatment: white pill, hairline border. */
+  /* A secondary action: surface fill with a real boundary. */
   .btn-secondary {
-    background-color: var(--card);
-    color: var(--ink);
-    border-color: var(--rule-strong);
+    background-color: var(--surface);
+    color: var(--text);
+    border-color: var(--border-strong);
   }
   .btn-secondary:hover:not(:disabled) {
-    border-color: var(--ink-muted);
+    background-color: var(--surface-raised);
   }
 
   .btn-quiet {
     background-color: transparent;
-    color: var(--ink-muted);
+    color: var(--text-muted);
     border-color: transparent;
   }
   .btn-quiet:hover:not(:disabled) {
-    color: var(--ink);
-    background-color: var(--surface-sunk);
+    color: var(--text);
+    background-color: var(--surface-raised);
+  }
+
+  /* A destructive action. The fill is the danger text colour, which is a real
+     boundary (>= 4.5:1 against both grounds), and the label sits on it in the
+     theme's inverse so the pair is the same contrast as `.btn-primary`. */
+  .btn-danger {
+    background-color: var(--danger);
+    color: var(--bg);
+    border-color: var(--danger);
   }
 
   /* --- Fields ------------------------------------------------------------- */
@@ -283,30 +416,37 @@
     width: 100%;
     min-height: 2.75rem;
     padding: 0.5rem 0.9rem;
-    background-color: var(--surface-sunk);
-    color: var(--ink);
-    border: 1px solid var(--rule);
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-field);
     font-size: 0.875rem;
   }
   .field::placeholder {
-    color: var(--ink-muted);
+    color: var(--text-subtle);
   }
   .field:focus {
-    border-color: var(--accent);
-    outline: none;
+    border-color: var(--primary);
   }
   .field:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ring);
     outline-offset: 1px;
+  }
+
+  /* iOS zooms the whole page when a focused input's text is under 16px, which
+     leaves the student's view scrolled sideways mid-sentence. Phones get 16px;
+     desktop keeps 14. */
+  @media (max-width: 767px) {
+    .field {
+      font-size: 1rem;
+    }
   }
 
   /* --- Navigation --------------------------------------------------------- */
 
-  /* Sidebar items. The active item is marked by weight plus a short azure bar
-     (`.nav-item[aria-current]::before` below). Azure is right here because
-     DESIGN.md makes it the identity colour and forbids it in exactly one place, a
-     button; a blue navigation marker is not a blue action. */
+  /* The active item is marked by weight plus a short primary bar
+     (`.nav-item[aria-current]::before` below). Weight plus a marker rather than
+     colour alone, so the state survives monochrome. */
   .nav-item {
     position: relative;
     display: flex;
@@ -315,17 +455,17 @@
     border-radius: var(--radius-field);
     padding: 0.55rem 0.7rem;
     font-size: 0.875rem;
-    color: var(--ink-muted);
+    color: var(--text-muted);
     text-decoration: none;
     min-height: 2.5rem;
   }
   .nav-item:hover {
-    background-color: var(--surface-sunk);
-    color: var(--ink);
+    background-color: var(--surface-raised);
+    color: var(--text);
   }
   .nav-item[aria-current="page"] {
-    background-color: var(--surface-sunk);
-    color: var(--ink);
+    background-color: var(--primary-tint);
+    color: var(--primary-text);
     font-weight: 500;
   }
   .nav-item[aria-current="page"]::before {
@@ -336,7 +476,7 @@
     bottom: 0.4rem;
     width: 3px;
     border-radius: var(--radius-pill);
-    background-color: var(--accent);
+    background-color: var(--primary);
   }
 
   /* Tab-bar items share the base rule with `.nav-item` above but differ in
@@ -348,10 +488,10 @@
     gap: 0.15rem;
     border-radius: 0;
     padding: 0.4rem 0.25rem;
-    /* 44px minimum touch target (R-03). */
+    /* 44px minimum touch target. */
     min-height: 2.75rem;
     flex: 1;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     text-align: center;
   }
   .nav-item-tab:hover {
@@ -394,10 +534,10 @@
 
   /* --- Identity: the citation mark ---------------------------------------- */
 
-  /* The product's core mechanic: a bracket label pointing back at a page in the
-     student's own material. It carries the brand azure, which is the identity
-     colour, and the one place a chip shape is right. Monospace keeps it visually
-     distinct from prose, so a pointer reads differently from a sentence. */
+  /* The product's core mechanic: a pointer back at a page in the student's own
+     material. It carries the source pair, which is reserved for exactly this, and
+     the one place a chip shape is right. Monospace keeps it visually distinct
+     from prose, so a pointer reads differently from a sentence. */
   .cite {
     display: inline-flex;
     align-items: center;
@@ -405,8 +545,8 @@
     min-width: 1.375rem;
     padding: 0 0.35rem;
     border-radius: var(--radius-pill);
-    background-color: var(--accent-soft);
-    color: var(--accent-text);
+    background-color: var(--source-tint);
+    color: var(--source);
     font-family: var(--font-mono);
     font-size: 0.75em;
     font-weight: 500;
@@ -416,28 +556,23 @@
   }
 
   /* Only the interactive form gets hover treatment, so the visual difference
-     tracks the real difference in behaviour (R-26). */
+     tracks the real difference in behaviour. The text colour inverts with the
+     fill rather than being hardcoded: `--source` on `--source-tint` is 4.97:1
+     light and 8.88:1 dark, and the inverted pair is the same idea. */
   a.cite:hover,
   button.cite:hover {
-    /* `--accent-text` rather than `--accent`: the raw brand azure with light text
-       is 3.81:1, which fails AA at the chip's ~11px size.
-       The text colour must invert with the fill, not be hardcoded. `--accent-text`
-       is dark in light mode and light in dark mode, and `--on-action` is exactly
-       its opposite in both (5.72:1 light, 8.19:1 dark). Hardcoding white here
-       measured 2.25:1 in dark mode, which is the same class of mistake as the
-       original. */
-    background-color: var(--accent-text);
-    color: var(--on-action);
+    background-color: var(--source);
+    color: var(--bg);
   }
 
   /* A citation is a control once it has somewhere to go, and a control needs a
-     real target on a phone (R-03). At phone widths the interactive pill grows to
-     44px; the non-interactive `span` form stays compact, because it is text.
+     real target on a phone. At phone widths the interactive pill grows to 44px;
+     the non-interactive `span` form stays compact, because it is text.
 
-     The alternative, keeping the 15px box and expanding the hit area with an
+     The alternative, keeping the small box and expanding the hit area with an
      absolutely-positioned pseudo-element, was rejected: it leaves the element's
-     own box at 15px, so it passes only an audit that measures something other
-     than the target, and two citations in adjacent lines would then overlap their
+     own box small, so it passes only an audit that measures something other than
+     the target, and two citations in adjacent lines would then overlap their
      invisible hit areas. The cost here is honest and visible: the line holding a
      citation is taller than the lines around it. */
   @media (max-width: 767px) {
@@ -455,14 +590,15 @@
      sentence rather than a bracket. It stays a pill, because it is still the same
      gesture: a claim pointing at where it came from.
 
-     Both parts are `--accent-text` on `--accent-soft` (5.04:1 light, 7.10:1
-     dark). The host is told apart from the title by being monospace and smaller,
-     which is the evidence layer's own convention, rather than by a second colour:
-     a chip whose two halves were two greys would fail the contrast check the
-     moment either token moved. */
+     A web citation is deliberately NOT the source pair. Sky means "your
+     material"; a search result is not that, so it takes the neutral raised
+     surface and is told apart from a chunk citation by shape and by its host in
+     monospace, not by pretending to be grounded. */
   .cite-web {
     align-items: baseline;
     gap: 0.4em;
+    background-color: var(--surface-raised);
+    color: var(--text-muted);
     font-size: 0.875em;
     max-width: 100%;
   }
@@ -490,7 +626,7 @@
     text-overflow: ellipsis;
     font-family: var(--font-mono);
     font-size: 0.8em;
-    color: var(--muted);
+    color: var(--text-subtle);
   }
   @media (max-width: 767px) {
     .cite-web .cite-doi {
@@ -505,63 +641,74 @@
   .meta {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: var(--ink-muted);
+    line-height: 1rem;
+    color: var(--text-muted);
   }
 
-  /* A section label. Sentence case, not uppercase-with-wide-tracking (R-06):
-     wide-tracked caps are the default way to fake typographic work. */
+  /* A section label. Sentence case, not uppercase-with-wide-tracking: wide-tracked
+     caps are the default way to fake typographic work. */
   .label {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--ink-muted);
+    color: var(--text-muted);
   }
 
-  /* A link in body copy uses the darkened azure, because the raw brand blue is
-     only AA at large sizes (DESIGN.md). */
+  /* A link in body copy uses the body-text indigo, because the fill indigo is
+     for surfaces that carry white text. */
   .link {
-    color: var(--accent-text);
+    color: var(--primary-text);
     text-decoration: none;
-    border-bottom: 1px solid color-mix(in oklab, var(--accent-text) 35%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--primary-text) 35%, transparent);
   }
   .link:hover {
-    border-bottom-color: var(--accent-text);
+    border-bottom-color: var(--primary-text);
   }
 
   .note {
     border-radius: var(--radius-field);
     padding: 0.7rem 0.9rem;
     font-size: 0.875rem;
-    border: 1px solid var(--rule);
-    background-color: var(--surface-sunk);
+    border: 1px solid var(--border);
+    background-color: var(--surface-raised);
+    color: var(--text);
   }
   .note-danger {
-    background-color: var(--danger-soft);
+    background-color: var(--danger-tint);
     border-color: color-mix(in oklab, var(--danger) 30%, transparent);
     color: var(--danger);
   }
   .note-success {
-    background-color: var(--success-soft);
+    background-color: var(--success-tint);
     border-color: color-mix(in oklab, var(--success) 30%, transparent);
-    /* On the tint, not on the ground: `--success-text` measures 4.31:1 there,
-       which fails AA for body text. */
-    color: var(--success-on-soft);
+    color: var(--success);
+  }
+  .note-warning {
+    background-color: var(--warning-tint);
+    border-color: color-mix(in oklab, var(--warning) 30%, transparent);
+    color: var(--warning);
+  }
+  /* The source pair as a note: used by the citation popover's snippet block. */
+  .note-source {
+    background-color: var(--source-tint);
+    border-color: color-mix(in oklab, var(--source) 30%, transparent);
+    color: var(--source);
   }
 
   /* --- Status chips ------------------------------------------------------- */
 
-  /* A chip is a pill carrying a state: the design reserves the pill for
-     "action or count", and a state belongs to that family rather than to the
-     8px rectangle that means "field". The tone repeats what the chip's word
-     already says, so the state is never carried by colour alone and reads
-     correctly in monochrome. */
+  /* A chip is a pill carrying a state: the pill is reserved for "action or
+     count", and a state belongs to that family rather than to the 8px rectangle
+     that means "field". The tone repeats what the chip's word already says, so
+     the state is never carried by colour alone and reads correctly in
+     monochrome. */
   .chip {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
     padding: 0.1rem 0.6rem;
     border-radius: var(--radius-pill);
-    background-color: var(--surface-sunk);
-    color: var(--ink-muted);
+    background-color: var(--surface-raised);
+    color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 500;
     line-height: 1.5;
@@ -571,25 +718,60 @@
     text-align: left;
   }
   .chip-working {
-    background-color: var(--accent-soft);
-    color: var(--accent-text);
+    background-color: var(--primary-tint);
+    color: var(--primary-text);
   }
   .chip-ready {
-    background-color: var(--success-soft);
-    color: var(--success-on-soft);
+    background-color: var(--success-tint);
+    color: var(--success);
+  }
+  .chip-due {
+    background-color: var(--warning-tint);
+    color: var(--warning);
   }
   .chip-failed {
-    background-color: var(--danger-soft);
+    background-color: var(--danger-tint);
     color: var(--danger);
+  }
+  .chip-source {
+    background-color: var(--source-tint);
+    color: var(--source);
+  }
+
+  /* --- Course markers ----------------------------------------------------- */
+
+  /* The course colour as a 4px bar. It reads `--course-marker`, which
+     `courseVars()` sets inline on the ancestor, and falls back to indigo so a row
+     whose colour column holds something unexpected still renders. The fallback is
+     what makes this a single declaration rather than a rule per course.
+     The chip and the initial that go with it are in `CourseMarker`, and the rule
+     is that the colour is never the only signal: the initial and the name are
+     always present. */
+  .course-marker {
+    width: 4px;
+    border-radius: var(--radius-pill);
+    background-color: var(--course-marker, var(--course-indigo));
+  }
+
+  /* --- Honesty: the chat composer hint ------------------------------------ */
+
+  /* The one line that must sit under every composer. Small, muted, and never
+     hidden behind a tooltip: the spec makes it part of the composer. */
+  .composer-hint {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    color: var(--text-subtle);
   }
 }
 
 @layer utilities {
-  /* Motion is limited to state transitions (MOTION 1). One exception with a
-     written purpose: a running job genuinely is working, so its indicator may
-     pulse. Nothing else loops. */
+  /* Motion is limited to state transitions. One exception with a written
+     purpose: a running job genuinely is working, so its indicator may pulse.
+     Nothing else loops. */
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
+    *,
+    *::before,
+    *::after {
       animation-duration: 0.001ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.001ms !important;
@@ -597,10 +779,24 @@
   }
 
   @keyframes working {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
   }
   .animate-working {
     animation: working 1.4s ease-in-out infinite;
+  }
+
+  /* A card flip becomes a crossfade when the student asks for reduced motion;
+     the flashcard's two faces are cross-faded rather than rotated. */
+  @media (prefers-reduced-motion: reduce) {
+    .flip {
+      transform: none !important;
+      transition: opacity var(--duration-fast) var(--ease-out) !important;
+    }
   }
 }

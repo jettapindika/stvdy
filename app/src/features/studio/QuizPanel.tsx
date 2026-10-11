@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { asApiError } from '@/api/errors'
@@ -25,12 +26,6 @@ import { SourcePicker } from '@/features/workspaces/SourcePicker'
  * typo would be a wasted generation.
  */
 
-const STATUS_LABEL: Record<QuizStatus, string> = {
-  generating: 'Generating',
-  ready: 'Ready',
-  failed: 'Failed',
-}
-
 const STATUS_CHIP: Record<QuizStatus, string> = {
   generating: 'chip chip-working',
   ready: 'chip chip-ready',
@@ -41,6 +36,7 @@ const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 const TYPE_SETTINGS: QuestionTypes[] = ['mcq', 'short', 'mixed']
 
 export function QuizPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const sources = useSources(workspaceId)
   const quizzes = useQuizzes(workspaceId)
   const create = useCreateQuiz(workspaceId)
@@ -58,6 +54,14 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
   // `GET /workspaces/:id/quizzes` serves rather than a literal that can drift from
   // the plan matrix.
   const cost = quizzes.data?.cost
+
+  // Resolved here rather than at module scope: a constant holding copy is
+  // evaluated before there is a language, so it could only ever ship one of them.
+  const difficultyLabel: Record<Difficulty, string> = {
+    easy: t('studio.quiz.difficulty.easy'),
+    medium: t('studio.quiz.difficulty.medium'),
+    hard: t('studio.quiz.difficulty.hard'),
+  }
 
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
@@ -78,10 +82,10 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
         }}
       >
         <Field
-          label="Quiz name"
+          label={t('studio.quiz.nameLabel')}
           name="quiz-title"
           value={title}
-          hint="What this quiz is for."
+          hint={t('studio.quiz.nameHint')}
           onChange={(event) => {
             setTitle(event.target.value)
           }}
@@ -92,13 +96,13 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
           selected={selected}
           onChange={setSelected}
           disabled={create.isPending}
-          legend="Generate from"
-          emptyHint="No indexed sources yet. Add one in the Sources panel, then come back."
+          legend={t('studio.generateFrom')}
+          emptyHint={t('studio.noIndexedSources')}
         />
         <div className="flex flex-wrap gap-3">
           <div className="flex min-w-40 flex-1 flex-col gap-1">
             <label className="label" htmlFor="quiz-difficulty">
-              Difficulty
+              {t('studio.quiz.difficultyLabel')}
             </label>
             <select
               id="quiz-difficulty"
@@ -110,14 +114,14 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
             >
               {DIFFICULTIES.map((value) => (
                 <option key={value} value={value}>
-                  {value}
+                  {difficultyLabel[value]}
                 </option>
               ))}
             </select>
           </div>
           <div className="flex min-w-40 flex-1 flex-col gap-1">
             <label className="label" htmlFor="quiz-types">
-              Questions
+              {t('studio.quiz.typesLabel')}
             </label>
             <select
               id="quiz-types"
@@ -129,14 +133,18 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
             >
               {TYPE_SETTINGS.map((value) => (
                 <option key={value} value={value}>
-                  {value === 'mcq' ? 'multiple choice' : value === 'short' ? 'short answer' : 'mixed'}
+                  {value === 'mcq'
+                    ? t('studio.quiz.types.mcq')
+                    : value === 'short'
+                      ? t('studio.quiz.types.short')
+                      : t('studio.quiz.types.mixed')}
                 </option>
               ))}
             </select>
           </div>
         </div>
         <label className="label" htmlFor="quiz-count">
-          How many questions
+          {t('studio.quiz.countLabel')}
         </label>
         <input
           id="quiz-count"
@@ -151,28 +159,24 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
           }}
         />
         {cost !== undefined && (
-          <p className="text-xs text-ink-muted">
-            Costs {cost.per_batch} credits per {cost.batch_size} questions. The quiz appears here
-            while it is generated, usually within a minute.
+          <p className="text-xs text-muted">
+            {t('studio.quiz.cost', { credits: cost.per_batch, count: cost.batch_size })}
           </p>
         )}
         <button type="submit" className="btn btn-primary self-start" disabled={!ready}>
-          {create.isPending ? 'Starting' : 'Generate quiz'}
+          {create.isPending ? t('studio.starting') : t('studio.quiz.generate')}
         </button>
-        {error !== null && <ApiErrorNotice error={error} noun="quizzes" />}
+        {error !== null && <ApiErrorNotice error={error} noun={t('errors.nouns.quizzes')} />}
       </form>
 
-      {quizzes.isPending && <SkeletonRows rows={2} label="Loading this workspace's quizzes" />}
+      {quizzes.isPending && <SkeletonRows rows={2} label={t('studio.quiz.loading')} />}
 
       {quizzesList !== undefined && quizzesList.length === 0 && (
-        <EmptyState
-          title="No quizzes yet"
-          reason="Pick the sources above and generate one. Every question is linked to the passage it came from."
-        />
+        <EmptyState title={t('studio.quiz.empty.title')} reason={t('studio.quiz.empty.reason')} />
       )}
 
       {quizzesList !== undefined && quizzesList.length > 0 && (
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
           {quizzesList.map((quiz) => (
             <QuizRow key={quiz.id} quiz={quiz} />
           ))}
@@ -189,24 +193,30 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
  * "Failed" are still readable in monochrome and to a screen reader.
  */
 function QuizRow({ quiz }: { quiz: Quiz }) {
+  const { t } = useTranslation()
+  // Resolved here rather than at module scope: a constant holding copy is
+  // evaluated before there is a language, so it could only ever ship one of them.
+  const statusLabel: Record<QuizStatus, string> = {
+    generating: t('studio.status.generating'),
+    ready: t('studio.status.ready'),
+    failed: t('studio.status.failed'),
+  }
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 flex-1 break-words font-medium">
-          {quiz.title.length > 0 ? quiz.title : 'Untitled quiz'}
+          {quiz.title.length > 0 ? quiz.title : t('studio.quiz.untitled')}
         </span>
-        <span className="meta">
-          {quiz.question_count} {quiz.question_count === 1 ? 'question' : 'questions'}
-        </span>
+        <span className="meta">{t('studio.quiz.questions', { count: quiz.question_count })}</span>
         <span className={STATUS_CHIP[quiz.status]} role="status">
           {quiz.status === 'generating' && (
             <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
           )}
-          {STATUS_LABEL[quiz.status]}
+          {statusLabel[quiz.status]}
         </span>
         {quiz.status === 'ready' && (
           <Link to={`/quiz/${quiz.id}`} className="btn btn-secondary">
-            Take quiz
+            {t('studio.quiz.take')}
           </Link>
         )}
       </div>

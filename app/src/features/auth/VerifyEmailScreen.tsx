@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -27,26 +28,8 @@ import { useSession } from './useSession'
 
 type View = 'awaiting-link' | 'verifying' | 'verified' | 'failed'
 
-const VIEW_COPY: Record<View, { title: string; subtitle: string }> = {
-  'awaiting-link': {
-    title: 'Check your email',
-    subtitle: 'One more step before your account is fully set up.',
-  },
-  verifying: {
-    title: 'Verifying your email',
-    subtitle: 'Checking this link with the server.',
-  },
-  verified: {
-    title: 'Email verified',
-    subtitle: 'Your address is confirmed. Nothing else is needed from you.',
-  },
-  failed: {
-    title: 'Verification failed',
-    subtitle: 'This link could not be used.',
-  },
-}
-
 export function VerifyEmailScreen() {
+  const { t } = useTranslation()
   const [params] = useSearchParams()
   // An empty `?token=` is a malformed link, not a token to spend. Treating it as
   // one sends a request that can only fail, and shows the user "verifying" for
@@ -60,6 +43,27 @@ export function VerifyEmailScreen() {
   const started = useRef(false)
 
   const signedIn = session.status === 'signed-in'
+
+  // Resolved here rather than at module scope: copy needs a language, and there
+  // is none until the component renders.
+  const copy: Record<View, { title: string; subtitle: string }> = {
+    'awaiting-link': {
+      title: t('auth.verify.awaitingTitle'),
+      subtitle: t('auth.verify.awaitingSubtitle'),
+    },
+    verifying: {
+      title: t('auth.verify.verifyingTitle'),
+      subtitle: t('auth.verify.verifyingSubtitle'),
+    },
+    verified: {
+      title: t('auth.verify.verifiedTitle'),
+      subtitle: t('auth.verify.verifiedSubtitle'),
+    },
+    failed: {
+      title: t('auth.verify.failedTitle'),
+      subtitle: t('auth.verify.failedSubtitle'),
+    },
+  }
 
   useEffect(() => {
     if (token === null || started.current) return
@@ -90,7 +94,7 @@ export function VerifyEmailScreen() {
     <div className="flex flex-col gap-2">
       {resend.isSuccess && (
         <p className="note note-success" role="status">
-          A new link is on its way. It can take a minute to arrive.
+          {t('auth.verify.resendSent')}
         </p>
       )}
       {resendError !== null && <ApiErrorNotice error={resendError} />}
@@ -102,46 +106,44 @@ export function VerifyEmailScreen() {
           resend.mutate()
         }}
       >
-        {resend.isPending ? 'Sending a new link' : 'Send a new link'}
+        {resend.isPending ? t('auth.verify.resendPending') : t('auth.verify.resend')}
       </button>
     </div>
   ) : null
 
   return (
-    <AuthCard title={VIEW_COPY[view].title} subtitle={VIEW_COPY[view].subtitle}>
+    <AuthCard title={copy[view].title} subtitle={copy[view].subtitle}>
       {view === 'awaiting-link' && (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-ink-muted">
+          <p className="text-sm text-muted">
             {signedIn
-              ? `We sent a verification link to ${session.user.email}. Open it to confirm that address.`
-              : 'This page needs the link from your verification email. Open the newest one, or sign in to request another.'}
+              ? t('auth.verify.sentTo', { email: session.user.email })
+              : t('auth.verify.needLink')}
           </p>
           {signedIn ? (
             <>
               {resendBlock}
               <Link to="/workspaces" className="btn btn-primary w-full">
-                Go to your workspaces
+                {t('auth.verify.goToWorkspaces')}
               </Link>
             </>
           ) : (
             <Link to="/signin" className="btn btn-primary w-full">
-              Sign in
+              {t('auth.signIn.title')}
             </Link>
           )}
         </div>
       )}
 
-      {view === 'verifying' && <LoadingState label="Checking this verification link" />}
+      {view === 'verifying' && <LoadingState label={t('auth.verify.checking')} />}
 
       {view === 'verified' && (
         <div className="flex flex-col gap-4">
           <p className="note note-success" role="status">
-            {signedIn
-              ? 'Your email address is verified.'
-              : 'Your email address is verified. Sign in to continue.'}
+            {signedIn ? t('auth.verify.verifiedSignedIn') : t('auth.verify.verifiedSignedOut')}
           </p>
           <Link to={signedIn ? '/workspaces' : '/signin'} className="btn btn-primary w-full">
-            {signedIn ? 'Go to your workspaces' : 'Sign in'}
+            {signedIn ? t('auth.verify.goToWorkspaces') : t('auth.signIn.title')}
           </Link>
         </div>
       )}
@@ -150,8 +152,8 @@ export function VerifyEmailScreen() {
         <div className="flex flex-col gap-4">
           {linkRejected ? (
             <ErrorState
-              title="This link no longer works"
-              reason="Verification links are single use and they expire. Request a new one and open the newest email, because older links stop working as soon as a newer one is issued."
+              title={t('auth.verify.linkGoneTitle')}
+              reason={t('auth.verify.linkGoneReason')}
             />
           ) : (
             error !== null && <ApiErrorNotice error={error} />
@@ -160,7 +162,7 @@ export function VerifyEmailScreen() {
             resendBlock
           ) : (
             <Link to="/signin" className="btn btn-primary w-full">
-              Sign in to request a new link
+              {t('auth.verify.signInToRequest')}
             </Link>
           )}
         </div>

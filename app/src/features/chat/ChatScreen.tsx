@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { useChunk, useMessages } from '@/api/queries/chat'
 import { useSources } from '@/api/queries/sources'
@@ -31,6 +32,7 @@ import { useChatStream } from './useChatStream'
  * user even though it looks perfect.
  */
 export function ChatScreen({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const messages = useMessages(workspaceId)
   const sources = useSources(workspaceId)
   const stream = useChatStream(workspaceId)
@@ -43,6 +45,12 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
   // internet, and the choice to make it is per question, not per session.
   const [webByWorkspace, setWebByWorkspace] = useState<Record<string, boolean>>({})
   const useWeb = webByWorkspace[workspaceId] === true
+  // Grounded by default, and keyed by workspace for the same reason as the web
+  // toggle: the setting belongs to the question being asked, not to the session.
+  // An explicit `false` is a real choice, so the map is consulted rather than
+  // defaulted at the call site.
+  const [groundedByWorkspace, setGroundedByWorkspace] = useState<Record<string, boolean>>({})
+  const sourcesOnly = groundedByWorkspace[workspaceId] !== false
 
   const listError = asApiError(messages.error)
   const readySources = (sources.data ?? []).filter((source) => source.status === 'ready')
@@ -52,30 +60,39 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
   function submit() {
     const message = draft.trim()
     if (message.length === 0 || streaming) return
-    stream.send({ message, sourceIds: selected, useWeb })
+    stream.send({ message, sourceIds: selected, useWeb, sourcesOnly })
     setDraft('')
   }
 
   const titleOf = (sourceId: string) =>
-    sources.data?.find((source) => source.id === sourceId)?.title ?? 'A source'
+    sources.data?.find((source) => source.id === sourceId)?.title ??
+    t('citation.unknownSource')
+
+  // The four empty-state sentences are spelled out rather than assembled from a
+  // shared head and a web clause: a translated sentence is a unit, and two halves
+  // glued together cannot be reordered by whoever writes the Indonesian.
+  const noSourcesReason = useWeb
+    ? t('chat.empty.noSourcesWithWeb')
+    : t('chat.empty.noSources')
+  const readyReason = useWeb ? t('chat.empty.defaultWithWeb') : t('chat.empty.default')
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {messages.isPending && <SkeletonRows rows={3} label="Loading this conversation" />}
+        {messages.isPending && <SkeletonRows rows={3} label={t('chat.list.loading')} />}
 
         {listError !== null && (
           <div className="px-4 py-4">
             <ApiErrorNotice
               error={listError}
-              noun="messages"
+              noun={t('errors.nouns.messages')}
               action={
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => void messages.refetch()}
                 >
-                  Try again
+                  {t('actions.retry')}
                 </button>
               }
             />
@@ -89,11 +106,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             sourceTitle={titleOf}
             onOpenCitation={setOpenCitation}
             onRetry={stream.retry}
-            emptyReason={
-              readySources.length === 0
-                ? `Ask once a source has finished indexing. A question is answered from this workspace\u2019s material and cites the page each claim came from.${useWeb ? ' Web results are searched for as well.' : ''}`
-                : `Ask about anything in this workspace\u2019s material. The answer cites the page each claim came from.${useWeb ? ' Web results are cited with links to where they came from.' : ''}`
-            }
+            emptyReason={readySources.length === 0 ? noSourcesReason : readyReason}
           />
         )}
       </div>
@@ -109,7 +122,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
       )}
 
       <form
-        className="flex flex-col gap-3 border-t border-rule px-4 py-3"
+        className="flex flex-col gap-3 border-t border-border px-4 py-3"
         onSubmit={(event) => {
           event.preventDefault()
           submit()
@@ -125,7 +138,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
 
         <div className="flex flex-col gap-1">
           <label className="label" htmlFor="chat-message">
-            Ask about this workspace
+            {t('chat.composer.label')}
           </label>
           <textarea
             id="chat-message"
@@ -144,21 +157,43 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
               submit()
             }}
           />
-          <span id="chat-message-hint" className="text-xs text-ink-muted">
-            Enter sends. Shift and Enter starts a new line.
+          <span id="chat-message-hint" className="text-xs text-muted">
+            {t('chat.composer.hint')}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {streaming ? (
             <button type="button" className="btn btn-secondary" onClick={stream.stop}>
-              Stop
+              {t('actions.stop')}
             </button>
           ) : (
             <button type="submit" className="btn btn-primary" disabled={!canSend}>
-              Ask
+              {t('chat.composer.ask')}
             </button>
           )}
+
+          {/* The grounding toggle, default on. It sits first because it is the
+              setting that changes what an answer *is*, and it is a checkbox so
+              the state is announced as checked/unchecked rather than conveyed by
+              colour. The tooltip is `title` rather than a custom popover: the
+              text is one sentence, and a custom one would need its own focus and
+              dismissal behaviour to be worth the accessibility cost. */}
+          <label
+            className="flex min-h-11 items-center gap-2 text-sm text-muted"
+            title={t('honesty.sourcesOnlyTooltip')}
+          >
+            <input
+              type="checkbox"
+              checked={sourcesOnly}
+              aria-describedby="chat-grounding-hint"
+              onChange={(event) => {
+                const next = event.target.checked
+                setGroundedByWorkspace((current) => ({ ...current, [workspaceId]: next }))
+              }}
+            />
+            {t('honesty.sourcesOnly')}
+          </label>
 
           {/* A checkbox is its own on/off state: the box is filled when checked
               and the label is the accessible name, so the state is announced as
@@ -166,7 +201,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
               without either depending on the accent colour. The row is a 44px
               label wrapping the box, so the whole row is the target on a phone
               and the box itself is a normal tab stop with the shared focus ring. */}
-          <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
+          <label className="flex min-h-11 items-center gap-2 text-sm text-muted">
             <input
               type="checkbox"
               checked={useWeb}
@@ -176,13 +211,19 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
                 setWebByWorkspace((current) => ({ ...current, [workspaceId]: next }))
               }}
             />
-            Search the web too
+            {t('chat.webToggle.label')}
           </label>
-          <span id="chat-web-hint" className="text-xs text-ink-muted">
-            Also searches outside this workspace and cites what it finds, with links. Answers stay
-            grounded in your sources, and a search that finds nothing still answers from them.
+          <span id="chat-web-hint" className="text-xs text-muted">
+            {t('chat.webToggle.hint')}
           </span>
         </div>
+
+        {/* The honesty line. It is part of the composer rather than a tooltip:
+            the spec requires it under every composer, and a warning nobody has to
+            open is a warning most people never read. */}
+        <p id="chat-grounding-hint" className="composer-hint">
+          {t('honesty.composerHint')}
+        </p>
       </form>
     </div>
   )
@@ -206,6 +247,7 @@ function CitationPanel({
   sourceTitle: string
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const chunk = useChunk(citation.chunk_id)
   const error = asApiError(chunk.error)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -223,33 +265,35 @@ function CitationPanel({
       <div className="flex items-start justify-between gap-2">
         <h3 id={headingId} className="min-w-0 flex-1 break-words">
           {sourceTitle}
-          {citation.page !== null && <span className="meta"> page {String(citation.page)}</span>}
+          {citation.page !== null && (
+            <span className="meta"> {t('citation.page', { page: citation.page })}</span>
+          )}
         </h3>
         <button ref={closeRef} type="button" className="btn btn-quiet" onClick={onClose}>
-          Close
+          {t('actions.close')}
         </button>
       </div>
 
-      {chunk.isPending && <p className="text-sm text-ink-muted">Loading the cited passage</p>}
+      {chunk.isPending && <p className="text-sm text-muted">{t('citation.loading')}</p>}
 
       {error !== null && (
         <ApiErrorNotice
           error={error}
-          noun="this passage"
+          noun={t('errors.nouns.passage')}
           action={
             <button
               type="button"
               className="btn btn-secondary"
               onClick={() => void chunk.refetch()}
             >
-              Try again
+              {t('actions.retry')}
             </button>
           }
         />
       )}
 
       {chunk.data !== undefined && (
-        <p className="whitespace-pre-wrap text-sm text-ink-muted">{chunk.data.content}</p>
+        <p className="whitespace-pre-wrap text-sm text-muted">{chunk.data.content}</p>
       )}
     </section>
   )

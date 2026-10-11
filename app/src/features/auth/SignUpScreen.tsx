@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
@@ -24,6 +25,7 @@ import { AuthCard } from './AuthLayout'
 const FIELDS = ['email', 'password', 'device'] as const
 
 export function SignUpScreen() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -38,13 +40,13 @@ export function SignUpScreen() {
 
   return (
     <AuthCard
-      title="Create your account"
-      subtitle="One workspace per course, with everything inside it readable together."
+      title={t('auth.signUp.title')}
+      subtitle={t('auth.signUp.subtitle')}
       footer={
         <>
-          <span className="text-sm text-ink-muted">Already have an account?</span>
+          <span className="text-sm text-muted">{t('auth.signUp.haveAccount')}</span>
           <Link to="/signin" className="btn btn-quiet">
-            Sign in
+            {t('auth.signIn.title')}
           </Link>
         </>
       }
@@ -70,16 +72,15 @@ export function SignUpScreen() {
             // else changed this first") describes a lost update instead.
             {...(error.code === 'conflict'
               ? {
-                  title: 'That address is already registered',
-                  reason:
-                    'Sign in with it instead, or use a different email address for this account.',
+                  title: t('auth.signUp.takenTitle'),
+                  reason: t('auth.signUp.takenReason'),
                 }
               : {})}
           />
         )}
 
         <Field
-          label="Email"
+          label={t('auth.field.email')}
           type="email"
           name="email"
           autoComplete="email"
@@ -92,7 +93,7 @@ export function SignUpScreen() {
         />
 
         <Field
-          label="Password"
+          label={t('auth.field.password')}
           type="password"
           name="password"
           autoComplete="new-password"
@@ -105,12 +106,12 @@ export function SignUpScreen() {
         />
 
         <Field
-          label="This device"
+          label={t('auth.signUp.deviceLabel')}
           name="device"
           autoComplete="off"
           required
           value={deviceName}
-          hint="The name this machine appears under in your device list. You can rename it later."
+          hint={t('auth.signUp.deviceHint')}
           error={errorFor('device')}
           onChange={(event) => {
             setDeviceName(event.target.value)
@@ -118,7 +119,7 @@ export function SignUpScreen() {
         />
 
         <button type="submit" className="btn btn-primary w-full" disabled={signUp.isPending}>
-          {signUp.isPending ? 'Creating your account' : 'Create account'}
+          {signUp.isPending ? t('auth.signUp.pending') : t('auth.signUp.submit')}
         </button>
       </form>
     </AuthCard>

@@ -55,6 +55,21 @@ pub struct ChatBody {
     /// Study mode makes the prompt guide with hints before the answer.
     #[serde(default)]
     pub study_mode: bool,
+    /// The per-chat "Answer only from my sources" toggle. When true the prompt
+    /// forbids an ungrounded general-knowledge answer; web results, when the user
+    /// turned web search on, are still allowed and citable.
+    ///
+    /// Defaults to `true` when the field is omitted because that is the UI
+    /// default: a client that predates the toggle, or a request that drops it,
+    /// must behave as grounded ON rather than silently answering from general
+    /// knowledge.
+    #[serde(default = "sources_only_default")]
+    pub sources_only: bool,
+}
+
+/// The serde default for [`ChatBody::sources_only`]: grounded ON, the UI default.
+fn sources_only_default() -> bool {
+    true
 }
 
 /// `POST /workspaces/:id/chat`, answering `text/event-stream`.
@@ -129,6 +144,7 @@ pub async fn chat(
         &chunks,
         &web.prompt_hits,
         body.use_web,
+        body.sources_only,
         body.study_mode,
     )?;
 

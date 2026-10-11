@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import { asApiError } from '@/api/errors'
 import { useChunk } from '@/api/queries/chat'
 import { ApiErrorNotice } from '@/components/ui/States'
@@ -16,34 +18,36 @@ import { ApiErrorNotice } from '@/components/ui/States'
 export function SourcePassage({
   chunkId,
   sources,
-  label = 'Source passage',
+  label,
 }: {
   chunkId: string
   sources: { id: string; title: string }[]
   label?: string
 }) {
+  const { t } = useTranslation()
   const chunk = useChunk(chunkId)
   const error = asApiError(chunk.error)
   const title =
     chunk.data !== undefined
-      ? (sources.find((source) => source.id === chunk.data.source_id)?.title ?? 'A source')
+      ? (sources.find((source) => source.id === chunk.data.source_id)?.title ??
+        t('sources.passage.unknownSource'))
       : null
 
   return (
-    <section aria-label={label} className="note flex flex-col gap-2">
-      {chunk.isPending && <p className="text-sm text-ink-muted">Loading the source passage</p>}
+    <section aria-label={label ?? t('sources.passage.label')} className="note flex flex-col gap-2">
+      {chunk.isPending && <p className="text-sm text-muted">{t('sources.passage.loading')}</p>}
 
       {error !== null && (
         <ApiErrorNotice
           error={error}
-          noun="this passage"
+          noun={t('sources.passage.noun')}
           action={
             <button
               type="button"
               className="btn btn-secondary"
               onClick={() => void chunk.refetch()}
             >
-              Try again
+              {t('actions.retry')}
             </button>
           }
         />
@@ -53,9 +57,9 @@ export function SourcePassage({
         <>
           <p className="meta">
             {title}
-            {chunk.data.page !== null && ` page ${String(chunk.data.page)}`}
+            {chunk.data.page !== null && ` ${t('sources.page', { page: String(chunk.data.page) })}`}
           </p>
-          <p className="whitespace-pre-wrap break-words text-sm text-ink-muted">
+          <p className="whitespace-pre-wrap break-words text-sm text-muted">
             {chunk.data.content}
           </p>
         </>

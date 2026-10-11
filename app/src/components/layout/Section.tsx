@@ -56,7 +56,7 @@ export function PageHeader({ title, subtitle }: { title: string; subtitle?: stri
   return (
     <header className="flex flex-col gap-1">
       <h1>{title}</h1>
-      {subtitle && <p className="max-w-prose text-sm text-ink-muted">{subtitle}</p>}
+      {subtitle && <p className="max-w-prose text-sm text-muted">{subtitle}</p>}
     </header>
   )
 }

@@ -85,7 +85,11 @@ struct QuizJson {
     id: Uuid,
     workspace_id: Uuid,
     title: String,
-    difficulty: String,
+    /// Nullable in the schema (`0010_quizzes_attempts.sql`), and null for a quiz
+    /// created before the column carried a value. Decoding it into a `String`
+    /// panicked the whole handler on such a row, which is why it is an `Option`
+    /// here: a legacy row must render, not take the route down.
+    difficulty: Option<String>,
     question_types: String,
     source_ids: Vec<Uuid>,
     status: String,
@@ -303,7 +307,9 @@ pub async fn create_quiz(
         id: quiz_id,
         workspace_id,
         title,
-        difficulty: body.difficulty,
+        // Always set on this path, but the column is nullable so the type is an
+        // `Option` (see the struct's doc comment).
+        difficulty: Some(body.difficulty),
         question_types: body.types,
         source_ids,
         status: "generating".to_string(),

@@ -7,6 +7,10 @@ import { installPlatform, isTauri } from './platform'
 import { currentOsPlatform, desktopPlatform } from './platform/desktop'
 import { mobilePlatform } from './platform/mobile'
 import { router } from './router'
+// Initialises i18next before the first render, so no screen ever paints a key
+// instead of a sentence. Imported for its side effect, and first among the app
+// imports so the resources are registered before any component module runs.
+import './i18n'
 import './styles.css'
 
 const queryClient = new QueryClient({

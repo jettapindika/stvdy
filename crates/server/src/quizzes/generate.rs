@@ -91,6 +91,10 @@ pub async fn generate(state: &AppState, quiz: &QuizRow) -> Result<Generation, Fa
         PlanId::parse(&user.plan_id),
         false,
         false,
+        // Task prompts compose on v1's trimmed base, which has no
+        // `{{sources_only}}`; a quiz is always generated from the user's sources,
+        // so the value is `true` and is never read.
+        true,
         &quiz.workspace_name,
     );
 

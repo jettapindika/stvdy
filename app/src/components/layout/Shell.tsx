@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { useFormFactor } from '@/lib/useFormFactor'
 import { Sidebar } from './Sidebar'
@@ -20,15 +21,16 @@ import { TabBar } from './TabBar'
  * through the whole nav to reach content, and `<main>` is the landmark to skip to.
  */
 export function Shell({ children }: { children: ReactNode }) {
+  const { t } = useTranslation()
   const isPhone = useFormFactor() === 'phone'
 
   return (
-    <div className="flex min-h-[100dvh] bg-paper text-ink">
+    <div className="flex min-h-[100dvh] bg-bg text-text">
       <a
         href="#main"
         className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50"
       >
-        Skip to content
+        {t('shell.skipToContent')}
       </a>
 
       {!isPhone && <Sidebar />}

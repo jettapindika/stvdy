@@ -103,9 +103,47 @@ step 4**. The second Vite cannot bind 5173 (`strictPort: true`) and prints
 4 for the browser build, or step 5 for the desktop app, not both.
 
 Recipes: `just db-up`, `just migrate`, `just server`, `just web`, `just tauri`,
-`just search-up`, `just check`, `just prepare`. Run them from the repo root. The
-Tauri CLI resolves `src-tauri` as a subdirectory of the working directory and
-will not find it from `app/`.
+`just search-up`, `just mail`, `just check`, `just prepare`. Run them from the
+repo root. The Tauri CLI resolves `src-tauri` as a subdirectory of the working
+directory and will not find it from `app/`.
+
+### Email in dev
+
+`SMTP_URL` is unset, so the server **writes** each message to `var/mail/*.eml`
+instead of sending it (B3) and logs the path. A verification link is therefore a
+file, not an inbox — the signup screen's "check your inbox" has nowhere to
+arrive, and nothing is delivered to the address you typed:
+
+```bash
+just mail                      # print the newest message
+just mail jettabackupacc1      # the newest one addressed to a matching address
+```
+
+Open the printed link while `just web` (or `just tauri`) is serving
+`http://localhost:5173`: the link is built from `WEB_ORIGIN`, because that is
+where the `/verify-email` route exists.
+
+This is not optional in a fresh checkout. A43 makes a verified address a
+precondition for anything that spends — chat, generation, web search and
+ingestion all answer `403 email_not_verified` without it.
+
+To send real mail, set `SMTP_URL` in `.env` and restart the server; the provider
+swap is config-only (`crates/server/src/integrations/mailer.rs`). The scheme
+picks the transport, and credentials come from the URL:
+
+```bash
+# implicit TLS — the usual choice
+SMTP_URL=smtps://resend:re_xxxxxxxx@smtp.resend.com:465
+SMTP_URL=smtps://you@gmail.com:APP_PASSWORD@smtp.gmail.com:465
+# STARTTLS (mandatory whenever credentials are present)
+SMTP_URL=smtp://user:pass@smtp.example.com:587
+MAIL_FROM='Stvdy <no-reply@stvdy.app>'    # a display name is allowed
+```
+
+A wrong `SMTP_URL` scheme or an unloadable `MAIL_FROM` is not silent: the send is
+logged as `sending the verification mail failed` with the reason, and signup still
+succeeds, so the account can be recovered with `Send a new link`. The URL is never
+logged.
 
 ### What needs which service
 
@@ -193,7 +231,7 @@ crates/server    Axum API + job worker
 app/             the shared SPA (web + Tauri frontend)
 src-tauri/       native shell
 config/          plans.toml, billing_policy.toml
-DESIGN.md        the design direction (palette sampled from the Figma design)
+docs/DESIGN.md   the design direction: tokens, type, shape, motion, a11y
 prompts/         versioned prompt modules
 templates/       print templates (cheatsheet PDF)
 migrations/      sqlx migrations; 0017 attaches sync triggers and must stay last
@@ -212,6 +250,7 @@ docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md,
 - `docs/THREAT_MODEL.md`. The normative trust boundary: assets, attacker
   classes, what a modified client can and cannot do, residual risks, and the
   per-phase verification obligations that follow.
-- `DESIGN.md`. The design direction: palette sampled from the Figma design,
-  type, shape, dials, and the rules it commits to.
+- `docs/DESIGN.md`. The design direction: the token palette and what each role
+  means, type, shape, motion, the accessibility checks, and which earlier
+  decisions the current spec supersedes.
 - `docs/superpowers/plans/`. The master roadmap and per-phase plans.

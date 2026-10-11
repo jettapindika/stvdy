@@ -12,6 +12,7 @@ prompt file is missing.
 ```
 prompts/
   base.v1.md                    # identity, language, grounding, security, tone, tools
+  base.v2.md                    # v1 + the per-chat grounding toggle ({{sources_only}})
   flashcards.v1.md              # task modules: appended to a base
   quiz.v1.md
   report_outline.v1.md
@@ -39,8 +40,18 @@ Two shapes, and only two:
 
 | Job | Composition |
 |---|---|
-| Chat / assistant | `base.v1.md` + `<sources>` + `<web_results>` + tool schemas |
+| Chat / assistant | `base.v2.md` + `<sources>` + `<web_results>` + tool schemas |
 | Strict-JSON task | `base.v1.md` **trimmed** (see below) + `json_contract.v1.md` + the module + `<sources>` |
+
+`base.v2.md` is `base.v1.md` superseded (rule 1) in exactly one place: rule 2 of
+`<grounding_and_citations>` now reads the per-chat "Answer only from my sources"
+toggle through `{{sources_only}}` (`on`/`off`, mirroring `{{use_web}}`). With it
+`on`, the model may answer only from `<sources>` and must offer web search or the
+toggle itself as the next step; with it `off`, a general-knowledge answer is
+allowed but must be labelled and uncited — v1's wording, kept verbatim. The toggle
+governs general knowledge, **not** web: `<web_results>` and `[W#]` citations are
+unaffected by it. A request that omits the field is grounded `on`, because that is
+the UI default.
 
 Trimming the base for task calls is deliberate, not an optimisation to skip: the base is
 long, and `<tools_and_actions>`, `<planning_help>` and `<teaching_style>` are actively
@@ -136,5 +147,9 @@ The behavioural suite is separate: ~30 recorded scenarios (answer not in the sou
 prompt injection inside a document, relative-date task creation, Indonesian, English,
 a locked feature on a mobile build) run against a provider whenever a prompt version
 changes. Results are appended to `prompts/CHANGELOG.md` with the version and date.
-`prompts/CHANGELOG.md` is created in the phase that first runs the suite (Phase 2, when
-chat exists); until then the structural tests above are the only gate.
+
+**Status: not built yet.** Chat has existed since Phase 2 and the suite and its
+changelog do not exist, so the structural tests above are still the only gate. The
+spec requires `prompts/evals/` plus a runner; that is tracked as an open gap in
+`docs/ASSUMPTIONS.md` (A112), together with the prompt filenames that differ from the
+spec's list. Nothing here should be read as a claim that the suite runs.

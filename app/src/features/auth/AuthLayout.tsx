@@ -27,11 +27,11 @@ export function AuthCard({
   footer?: ReactNode
 }) {
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-paper px-5 py-10 pt-safe-top pb-safe-bottom">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-bg px-5 py-10 pt-safe-top pb-safe-bottom">
       <div className="card w-full max-w-md px-6 py-7">
         <Wordmark className="mb-6" />
         <h1>{title}</h1>
-        <p className="mt-1 text-sm text-ink-muted">{subtitle}</p>
+        <p className="mt-1 text-sm text-muted">{subtitle}</p>
         <div className="mt-6">{children}</div>
       </div>
       {footer && <div className="flex flex-wrap items-center justify-center gap-2">{footer}</div>}

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
@@ -41,6 +42,7 @@ export function GoogleCallbackScreen({
    */
   onLeave?: () => void
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const google = useGoogleSignIn()
   const started = useRef(false)
@@ -63,16 +65,16 @@ export function GoogleCallbackScreen({
   if (ticket === null) {
     return (
       <AuthCard
-        title="This sign-in link is incomplete"
-        subtitle="Google sent you back without the one-time ticket that completes the sign-in."
+        title={t('auth.googleCallback.incompleteTitle')}
+        subtitle={t('auth.googleCallback.incompleteSubtitle')}
       >
         <div className="flex flex-col gap-4">
           <ErrorState
-            title="Nothing to complete"
-            reason="Open the Google sign-in button again and finish it in one go. This page needs the ticket that Google returns with."
+            title={t('auth.googleCallback.nothingToComplete')}
+            reason={t('auth.googleCallback.nothingToCompleteReason')}
           />
           <Link to="/signin" className="btn btn-primary w-full" onClick={onLeave}>
-            Back to sign in
+            {t('auth.googleCallback.backToSignIn')}
           </Link>
         </div>
       </AuthCard>
@@ -82,25 +84,24 @@ export function GoogleCallbackScreen({
   if (error !== null) {
     return (
       <AuthCard
-        title="Google sign-in did not finish"
-        subtitle="The sign-in could not be completed. Nothing was changed on your account."
+        title={t('auth.googleCallback.failedTitle')}
+        subtitle={t('auth.googleCallback.failedSubtitle')}
       >
         <div className="flex flex-col gap-4">
           <ApiErrorNotice
             error={error}
-            noun="signing in with Google"
+            noun={t('auth.googleCallback.noun')}
             // An unknown, used, or expired ticket is the only 401 this route can
             // see, so it must not be described as an ended session.
             {...(error.code === 'unauthorized'
               ? {
-                  title: 'That link no longer works',
-                  reason:
-                    'Sign-in tickets are single use and they expire after five minutes. Start the Google sign-in again.',
+                  title: t('auth.googleCallback.linkGoneTitle'),
+                  reason: t('auth.googleCallback.linkGoneReason'),
                 }
               : {})}
           />
           <Link to="/signin" className="btn btn-primary w-full" onClick={onLeave}>
-            Back to sign in
+            {t('auth.googleCallback.backToSignIn')}
           </Link>
         </div>
       </AuthCard>
@@ -109,10 +110,10 @@ export function GoogleCallbackScreen({
 
   return (
     <AuthCard
-      title="Signing you in"
-      subtitle="Finishing the Google sign-in you just started."
+      title={t('auth.googleCallback.pendingTitle')}
+      subtitle={t('auth.googleCallback.pendingSubtitle')}
     >
-      <LoadingState label="Completing sign-in" />
+      <LoadingState label={t('auth.googleCallback.loading')} />
     </AuthCard>
   )
 }

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
 
 import { Wordmark } from '@/components/ui/BrandIllustration'
@@ -14,23 +15,27 @@ import { Wordmark } from '@/components/ui/BrandIllustration'
  * `.nav-item-tab`), so a change to the base treatment reaches both. That is what
  * keeps them from drifting apart.
  */
-export const NAV_ITEMS = [
-  { to: '/', label: 'Today', short: 'Today' },
-  { to: '/workspaces', label: 'Workspaces', short: 'Work' },
-  { to: '/calendar', label: 'Calendar', short: 'Calendar' },
-  { to: '/tasks', label: 'Tasks', short: 'Tasks' },
-  { to: '/settings', label: 'Settings', short: 'More' },
-] as const
-
 export function Sidebar() {
+  const { t } = useTranslation()
+  // The labels are resolved here rather than at module scope: a constant holding
+  // copy is evaluated before there is a language, so it could only ever ship one
+  // of them.
+  const items = [
+    { to: '/', label: t('nav.today') },
+    { to: '/workspaces', label: t('nav.workspaces') },
+    { to: '/calendar', label: t('nav.calendar') },
+    { to: '/tasks', label: t('nav.tasks') },
+    { to: '/settings', label: t('nav.settings') },
+  ]
+
   return (
     <nav
-      aria-label="Main"
-      className="hidden w-60 shrink-0 flex-col gap-1 border-r border-rule bg-card px-3 py-4 pt-safe-top md:flex"
+      aria-label={t('shell.nav.main')}
+      className="hidden w-60 shrink-0 flex-col gap-1 border-r border-border bg-surface px-3 py-4 pt-safe-top md:flex"
     >
       <Wordmark className="mb-4 px-2" />
 
-      {NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-item">
           {item.label}
         </NavLink>

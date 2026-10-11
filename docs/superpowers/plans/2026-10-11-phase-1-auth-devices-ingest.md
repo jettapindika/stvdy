@@ -436,7 +436,7 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 
 ## Self-Review
 
-- **Spec coverage.** SPEC `docs/SPEC.md:597` (Phase 1) is fully covered:
+- **Spec coverage.** SPEC `docs/SPEC.md` § PHASES, Phase 1, is fully covered:
   auth + devices + rotating refresh + email verification, workspaces, source
   upload to object storage, ingestion worker (PDF + text), chunking, embeddings,
   status polling, keychain + deep-link prototype. The mobile spike is the

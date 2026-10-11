@@ -100,8 +100,14 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci --prefix app
+      # `npm test` carries the design-system gates: token contrast (every
+      # documented pair, both themes), the i18n contract, the pseudo-locale
+      # expansion, and axe on the component gallery.
       - run: npm --prefix app test
       - run: npm --prefix app run build
+      # Every runtime asset must be bundled: the desktop shell's CSP allows no
+      # remote origin, and the phone build is used on Wi-Fi that is often down.
+      - run: node scripts/check-no-cdn.mjs
 
   desktop:
     name: desktop build (${{ matrix.os }})

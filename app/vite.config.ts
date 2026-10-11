@@ -13,7 +13,13 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
 
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // The repo's shared config, so the app reads the same
+      // `billing_policy.toml` the server does rather than a copy that can
+      // drift. Imported as text (`?raw`) and parsed in `features/billing`.
+      '@config': fileURLToPath(new URL('../config', import.meta.url)),
+    },
   },
 
   // Tauri prints Rust compiler output to the same terminal; never wipe it.
@@ -30,6 +36,10 @@ export default defineConfig({
     // Vite 8: server.hmr's ws fields are deprecated in favour of server.ws.
     ws: host ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
+    // `@config` resolves outside the app root, and the dev server refuses to
+    // serve a file outside its allowed list. Granting exactly the one directory
+    // keeps the rest of the repo unreachable from the browser.
+    fs: { allow: ['.', '../config'] },
   },
 
   build: {

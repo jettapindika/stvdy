@@ -1,0 +1,554 @@
+{
+  "app": {
+    "name": "Stvdy",
+    "session": {
+      "restoring": "Memulihkan sesimu"
+    }
+  },
+  "nav": {
+    "today": "Hari ini",
+    "workspaces": "Ruang belajar",
+    "study": "Belajar",
+    "planner": "Jadwal",
+    "calendar": "Kalender",
+    "tasks": "Tugas",
+    "more": "Lainnya",
+    "settings": "Pengaturan",
+    "plan": "Paket",
+    "help": "Bantuan",
+    "devices": "Perangkat dan sinkronisasi",
+    "work": "Kerja"
+  },
+  "actions": {
+    "add": "Tambah",
+    "save": "Simpan",
+    "cancel": "Batal",
+    "delete": "Hapus",
+    "remove": "Buang",
+    "close": "Tutup",
+    "retry": "Coba lagi",
+    "dismiss": "Abaikan",
+    "confirm": "Konfirmasi",
+    "edit": "Ubah",
+    "undo": "Batalkan",
+    "copy": "Salin",
+    "open": "Buka",
+    "back": "Kembali",
+    "next": "Lanjut",
+    "done": "Selesai",
+    "stop": "Hentikan",
+    "send": "Kirim",
+    "search": "Cari"
+  },
+  "states": {
+    "loading": "Memuat",
+    "offline": "Kamu sedang offline",
+    "offlineReason": "Ini butuh koneksi. Tugas, jadwal, dan ulangan kartu tetap jalan.",
+    "error": "Ada yang salah",
+    "notFound": "Halaman ini tidak ada",
+    "empty": "Belum ada apa-apa",
+    "synced": "Tersinkron",
+    "syncing": "Menyinkronkan",
+    "needsAttention": "Perlu diperiksa",
+    "notBuiltYet": "Belum dibuat. Layar ini nanti berisi {{what}}."
+  },
+  "honesty": {
+    "composerHint": "AI bisa salah. Periksa kutipannya.",
+    "sourcesOnly": "Jawab hanya dari sumberku",
+    "sourcesOnlyTooltip": "Stvdy hanya memakai sumber yang kamu pilih dan menyebutkannya. Tetap bisa salah, jadi periksa halaman yang dikutip.",
+    "basedOnSources_other": "Berdasarkan {{count}} sumber",
+    "notInSources": "Ini tidak ada di sumber yang kamu pilih.",
+    "suggested": "Saran {{what}}",
+    "nothingAddedYet": "Tidak ada yang ditambahkan sampai kamu konfirmasi."
+  },
+  "lock": {
+    "notOnPlan": "Tidak tersedia di paketmu",
+    "availableOn": "Tersedia di {{plan}}",
+    "upgrade": "Naik ke {{plan}}"
+  },
+  "shell": {
+    "nav": {
+      "main": "Utama"
+    },
+    "skipToContent": "Lewati ke konten"
+  },
+  "routes": {
+    "calendar": {
+      "what": "tampilan minggu dan bulan untuk kelas, tenggat, dan blok belajar yang diusulkan jadwal, plus koneksi Google Calendar dan ICS"
+    },
+    "tasks": {
+      "what": "tugas dan subtugas di semua ruang belajarmu, dengan penambahan cepat dan asisten yang mengusulkan rincian yang kamu konfirmasi sebelum disimpan"
+    },
+    "settings": {
+      "what": "zona waktu dan jam belajar, batas harian, saluran pengingat, kalender yang terhubung, dan perangkat yang kamu pakai masuk"
+    },
+    "billing": {
+      "what": "paketmu sekarang, kapan periode prabayar berakhir, dan sisa kreditmu. Layar pembelian hanya ada di versi web dan desktop."
+    },
+    "notFound": {
+      "title": "Tidak ditemukan",
+      "what": "tidak ada: alamat ini tidak cocok dengan layar mana pun"
+    }
+  },
+  "billing": {
+    "planAndUsage": "Paket dan pemakaian",
+    "seePlans": "Lihat paket"
+  },
+  "brand": {
+    "illustration": {
+      "alt": "Buku terbuka dengan kilau dan tanda centang"
+    }
+  },
+  "sources": {
+    "passage": {
+      "label": "Kutipan sumber",
+      "loading": "Memuat kutipan sumber",
+      "unknownSource": "Sebuah sumber",
+      "noun": "kutipan ini"
+    },
+    "page": "halaman {{page}}",
+    "pageUnknown": "halaman tidak diketahui"
+  },
+  "citation": {
+    "chunkLabel": "{{title}}, {{page}}",
+    "webLabel": "{{title}}, {{host}}",
+    "webSourceLabel": "Sumber web: {{label}}",
+    "openWebSourceLabel": "Buka sumber web: {{label}}",
+    "sourceLabel": "Sumber: {{label}}",
+    "openSourceLabel": "Buka sumber: {{label}}",
+    "unknownSource": "Sebuah sumber",
+    "page": "halaman {{page}}",
+    "pageUnknown": "halaman tidak diketahui",
+    "open": "Buka sumber: {{label}}",
+    "loading": "Memuat kutipannya"
+  },
+  "auth": {
+    "field": {
+      "email": "Email",
+      "password": "Password"
+    },
+    "signIn": {
+      "title": "Masuk",
+      "subtitle": "Ruang belajar, sumber, dan materi belajarmu, di setiap perangkat yang kamu pakai masuk.",
+      "newHere": "Baru di Stvdy?",
+      "createAccount": "Buat akun",
+      "mismatchTitle": "Itu tidak cocok",
+      "mismatchReason": "Periksa email dan password lalu coba lagi. Keduanya tidak ditampilkan ke siapa pun.",
+      "pending": "Sedang masuk"
+    },
+    "signUp": {
+      "title": "Buat akunmu",
+      "subtitle": "Satu ruang belajar per mata kuliah, dan semua isinya bisa dibaca bersama.",
+      "haveAccount": "Sudah punya akun?",
+      "takenTitle": "Alamat itu sudah terdaftar",
+      "takenReason": "Masuk saja dengan alamat itu, atau pakai email lain untuk akun ini.",
+      "deviceLabel": "Perangkat ini",
+      "deviceHint": "Nama perangkat ini di daftar perangkatmu. Bisa kamu ganti nanti.",
+      "pending": "Sedang membuat akunmu",
+      "submit": "Buat akun"
+    },
+    "verify": {
+      "awaitingTitle": "Cek emailmu",
+      "awaitingSubtitle": "Satu langkah lagi sebelum akunmu siap sepenuhnya.",
+      "verifyingTitle": "Memverifikasi emailmu",
+      "verifyingSubtitle": "Memeriksa tautan ini ke server.",
+      "verifiedTitle": "Email terverifikasi",
+      "verifiedSubtitle": "Alamatmu sudah dikonfirmasi. Tidak ada lagi yang perlu kamu lakukan.",
+      "failedTitle": "Verifikasi gagal",
+      "failedSubtitle": "Tautan ini tidak bisa dipakai.",
+      "resendSent": "Tautan baru sedang dikirim. Butuh sekitar satu menit sampai.",
+      "resendPending": "Sedang mengirim tautan baru",
+      "resend": "Kirim tautan baru",
+      "sentTo": "Kami mengirim tautan verifikasi ke {{email}}. Buka untuk mengonfirmasi alamat itu.",
+      "needLink": "Halaman ini butuh tautan dari email verifikasimu. Buka yang paling baru, atau masuk untuk minta tautan lain.",
+      "goToWorkspaces": "Buka ruang belajarmu",
+      "checking": "Memeriksa tautan verifikasi ini",
+      "verifiedSignedIn": "Alamat emailmu sudah terverifikasi.",
+      "verifiedSignedOut": "Alamat emailmu sudah terverifikasi. Masuk untuk lanjut.",
+      "linkGoneTitle": "Tautan ini sudah tidak berlaku",
+      "linkGoneReason": "Tautan verifikasi hanya bisa dipakai sekali dan kedaluwarsa. Minta tautan baru dan buka email paling baru, karena tautan lama langsung mati begitu tautan baru dibuat.",
+      "signInToRequest": "Masuk untuk minta tautan baru"
+    },
+    "googleCallback": {
+      "noun": "masuk dengan Google",
+      "incompleteTitle": "Tautan masuk ini tidak lengkap",
+      "incompleteSubtitle": "Google mengembalikanmu tanpa tiket sekali pakai yang menyelesaikan proses masuk.",
+      "nothingToComplete": "Tidak ada yang perlu diselesaikan",
+      "nothingToCompleteReason": "Buka lagi tombol masuk Google dan selesaikan sekaligus. Halaman ini butuh tiket yang dikembalikan Google.",
+      "backToSignIn": "Kembali ke halaman masuk",
+      "failedTitle": "Masuk dengan Google tidak selesai",
+      "failedSubtitle": "Proses masuk tidak bisa diselesaikan. Tidak ada yang berubah di akunmu.",
+      "linkGoneTitle": "Tautan itu sudah tidak berlaku",
+      "linkGoneReason": "Tiket masuk hanya bisa dipakai sekali dan kedaluwarsa setelah lima menit. Mulai lagi proses masuk Google.",
+      "pendingTitle": "Sedang memasukkanmu",
+      "pendingSubtitle": "Menyelesaikan proses masuk Google yang baru kamu mulai.",
+      "loading": "Menyelesaikan proses masuk"
+    }
+  },
+  "today": {
+    "subtitle": "Blok belajar, kartu yang jatuh tempo, dan tenggat, disusun sesuai waktu yang kamu punya.",
+    "studyBlocks": {
+      "title": "Blok belajar",
+      "emptyTitle": "Belum ada blok belajar terjadwal",
+      "emptyReason": "Blok muncul setelah kamu menetapkan tanggal ujian dan menambahkan materi yang harus dikuasai. Penjadwal bekerja mundur dari ujian, menyesuaikan sesi dengan jam belajarmu, dan tidak pernah menabrak jadwal kuliah."
+    },
+    "dueCards": {
+      "title": "Flashcard jatuh tempo",
+      "emptyTitle": "Tidak ada kartu jatuh tempo",
+      "emptyReason": "Kartu ulangan muncul di sini saat intervalnya habis. Buat dek dari sebuah sumber dan Stvdy yang mengatur jadwal ulangannya."
+    },
+    "tasks": {
+      "emptyTitle": "Tidak ada yang jatuh tempo",
+      "emptyReason": "Tugas dari ruang belajar, impor silabus, atau catatan cepat masuk ke sini, diurutkan berdasarkan tenggat."
+    },
+    "exams": {
+      "title": "Ujian mendatang",
+      "emptyTitle": "Belum ada ujian yang dicatat",
+      "emptyReason": "Tambahkan ujian sebagai target, dan itu jadi patokan penjadwalan."
+    }
+  },
+  "workspaces": {
+    "noun": "ruang belajar",
+    "keepIt": "Biarkan saja",
+    "detail": {
+      "titleFallback": "Ruang belajar"
+    },
+    "panels": {
+      "label": "Panel ruang belajar"
+    },
+    "panel": {
+      "sources": "Sumber",
+      "chat": "Chat",
+      "studio": "Studio"
+    },
+    "studio": {
+      "sections": "Bagian Studio",
+      "flashcards": "Flashcard",
+      "quiz": "Quiz"
+    },
+    "sources": {
+      "loading": "Memuat sumber ruang belajar ini",
+      "emptyTitle": "Belum ada sumber",
+      "emptyReason": "Tambahkan PDF atau tempel teks di atas. Semuanya dipecah dan diindeks, jadi pertanyaan bisa dijawab dari sumber mana pun dan menyebut halaman asalnya."
+    },
+    "source": {
+      "untitled": "Sumber tanpa judul",
+      "kindPdf": "PDF",
+      "kindText": "Teks",
+      "status": {
+        "pending": "Menunggu dimulai",
+        "processing": "Diproses",
+        "ready": "Siap",
+        "failed": "Gagal"
+      },
+      "chunkCount_other": "{{count}} potongan",
+      "removeConfirm": "Buang sumber ini?",
+      "removing": "Membuang",
+      "removeIt": "Buang",
+      "noun": "sumber"
+    },
+    "upload": {
+      "legend": "Tambah materi",
+      "kindPdf": "File PDF",
+      "kindText": "Teks yang ditempel",
+      "textLabel": "Teks yang ditambahkan",
+      "titleLabel": "Judul",
+      "titleHint": "Opsional. Nama sumber ini di daftar.",
+      "uploading": "Mengunggah",
+      "submit": "Tambah sumber",
+      "afterStored": "Setelah file tersimpan, daftar sumber di ruang belajar ini menampilkan proses ekstraksi dan pengindeksan sampai sumbernya siap.",
+      "noun": "mengunggah sumber"
+    },
+    "sourcePicker": {
+      "legend": "Jawab dari",
+      "emptyHint": "Belum ada sumber yang terindeks. Unggah satu di panel Sumber dan kotak ini akan memakainya.",
+      "nothingSelectedAllReady": "Tidak ada yang dipilih, jadi jawabannya memakai semua sumber yang siap di ruang belajar ini.",
+      "nothingSelected": "Belum ada yang dipilih.",
+      "selectedCount": "{{selected}} dari {{total}} sumber dipilih."
+    },
+    "list": {
+      "subtitle": "Satu ruang belajar per mata kuliah. Semua isinya dibaca dari seluruh sumbernya.",
+      "sectionTitle": "Ruang belajarmu",
+      "newLabel": "Ruang belajar baru",
+      "namePlaceholder": "Struktur Data",
+      "nameHint": "Mata kuliah atau pelajaran tempat materi ini.",
+      "creating": "Sedang membuat",
+      "create": "Buat",
+      "loading": "Memuat ruang belajarmu",
+      "emptyTitle": "Belum ada ruang belajar",
+      "emptyReason": "Buat satu per mata kuliah, lalu tambahkan materinya: PDF atau teks yang ditempel. Jawabannya akan menyebut halaman asalnya, dan semua sumber tetap bisa dicari bersama, bukan di buku terpisah.",
+      "renameLabel": "Nama ruang belajar",
+      "saving": "Menyimpan",
+      "sourceCount_other": "{{count}} sumber",
+      "rename": "Ganti nama",
+      "deleteConfirmTitle": "Hapus {{name}}?",
+      "deleteNoSources": "Belum ada sumber di dalamnya, jadi tidak ada yang hilang. Ini tidak bisa dibatalkan.",
+      "deleteSources_other": "{{count}} sumber ikut terhapus. Ini tidak bisa dibatalkan.",
+      "deleting": "Menghapus",
+      "deleteConfirm": "Hapus ruang belajar"
+    }
+  },
+  "chat": {
+    "composer": {
+      "label": "Tanya tentang ruang belajar ini",
+      "hint": "Enter mengirim. Shift dan Enter memulai baris baru.",
+      "ask": "Tanya"
+    },
+    "webToggle": {
+      "label": "Cari di web juga",
+      "hint": "Juga mencari di luar ruang belajar ini dan menyebut hasilnya, lengkap dengan tautan. Jawaban tetap berpijak pada sumbermu, dan pencarian yang tidak menemukan apa pun tetap dijawab dari sumber itu."
+    },
+    "empty": {
+      "title": "Belum ada pertanyaan",
+      "noSources": "Tanya setelah satu sumber selesai diindeks. Pertanyaan dijawab dari materi ruang belajar ini dan menyebut halaman asal tiap klaim.",
+      "noSourcesWithWeb": "Tanya setelah satu sumber selesai diindeks. Pertanyaan dijawab dari materi ruang belajar ini dan menyebut halaman asal tiap klaim. Hasil web juga dicari.",
+      "default": "Tanya apa saja tentang materi di ruang belajar ini. Jawabannya menyebut halaman asal tiap klaim.",
+      "defaultWithWeb": "Tanya apa saja tentang materi di ruang belajar ini. Jawabannya menyebut halaman asal tiap klaim. Hasil web dikutip dengan tautan ke asalnya."
+    },
+    "list": {
+      "label": "Percakapan",
+      "loading": "Memuat percakapan ini",
+      "searching": "Menelusuri ruang belajar ini"
+    },
+    "retry": "Tanya lagi",
+    "turn": {
+      "you": "Kamu"
+    }
+  },
+  "errors": {
+    "nouns": {
+      "messages": "pesan",
+      "passage": "kutipan ini",
+      "answers": "jawaban",
+      "deck": "dek ini",
+      "dueCards": "kartu yang jatuh tempo",
+      "review": "ulangan ini",
+      "quiz": "kuis ini",
+      "results": "hasilmu",
+      "answer": "jawaban ini",
+      "decks": "dek",
+      "quizzes": "kuis"
+    }
+  },
+  "study": {
+    "backToWorkspace": "Kembali ke ruang belajar",
+    "refreshFailed": "Gagal menyegarkan dek ini. Sesi kamu tidak terganggu.",
+    "loadingDue": "Memuat kartu yang jatuh tempo di dek ini",
+    "cardProgress": "Kartu {{current}} dari {{total}}",
+    "cardLabel": "Flashcard",
+    "showSource": "Tampilkan sumber",
+    "hideSource": "Sembunyikan sumber",
+    "showAnswer": "Tampilkan jawaban",
+    "grade": {
+      "again": "Ulangi",
+      "hard": "Sulit",
+      "good": "Bagus",
+      "easy": "Mudah"
+    },
+    "nothingDue": {
+      "title": "Tidak ada yang jatuh tempo di dek ini",
+      "scheduled": "Semua kartu di dek ini sudah dijadwalkan. Kembali setelah kartu berikutnya jatuh tempo.",
+      "next": "Semua kartu di sini sudah dijadwalkan. Kartu berikutnya jatuh tempo {{when}}."
+    }
+  },
+  "quiz": {
+    "loading": "Memuat kuis ini",
+    "backToWorkspaces": "Kembali ke ruang belajar",
+    "generating": "Kuis ini masih dibuat",
+    "generateFailed": {
+      "title": "Kuis ini gagal dibuat",
+      "reason": "Pembuatannya gagal. Kreditmu sudah dikembalikan."
+    },
+    "empty": {
+      "title": "Kuis ini tidak punya pertanyaan",
+      "reason": "Buat ulang dari Studio."
+    },
+    "defaultTitle": "Kuis",
+    "count_other": "{{count}} pertanyaan",
+    "questionProgress": "Pertanyaan {{current}} dari {{total}}",
+    "chooseOne": "Pilih satu",
+    "yourAnswer": "Jawabanmu",
+    "checking": "Memeriksa",
+    "submit": "Kirim jawaban",
+    "correct": "Benar",
+    "notCorrect": "Belum benar",
+    "notCorrectWithAnswer": "Belum benar. Jawabannya: {{answer}}",
+    "notMarked": "Belum dinilai",
+    "goodAnswer": "Jawaban yang bagus",
+    "didYouSay": "Apakah kamu menyebut",
+    "gotIt": "Aku benar",
+    "missedIt": "Aku salah",
+    "sourceLabel": "Asal pertanyaan ini",
+    "seeResults": "Lihat hasil",
+    "nextQuestion": "Pertanyaan berikutnya",
+    "results": {
+      "loading": "Memuat hasilmu",
+      "score": "Skormu",
+      "nothingMarked": "Belum ada yang dinilai. Jawab satu pertanyaan dan skormu muncul di sini.",
+      "correctOf": "{{correct}} dari {{graded}} benar",
+      "answeredOf": "{{answered}} dari {{total}} terjawab",
+      "answeredOfWaiting": "{{answered}} dari {{total}} terjawab, {{waiting}} menunggu dinilai",
+      "topics": "Yang perlu dibaca lagi",
+      "sourceUnavailable": "Sumber tidak tersedia",
+      "everyQuestion": "Semua pertanyaan"
+    }
+  },
+  "studio": {
+    "status": {
+      "generating": "Sedang dibuat",
+      "ready": "Siap",
+      "failed": "Gagal"
+    },
+    "starting": "Memulai",
+    "generateFrom": "Buat dari",
+    "noIndexedSources": "Belum ada sumber yang terindeks. Tambahkan satu di panel Sumber, lalu kembali ke sini.",
+    "deck": {
+      "nameLabel": "Nama dek",
+      "nameHint": "Untuk apa dek ini.",
+      "countLabel": "Berapa kartu",
+      "cost_other": "Butuh {{credits}} kredit per {{count}} kartu. Dek muncul di sini saat dibuat, biasanya dalam satu menit.",
+      "generate": "Buat dek",
+      "loading": "Memuat dek di ruang belajar ini",
+      "empty": {
+        "title": "Belum ada dek",
+        "reason": "Pilih sumber di atas lalu buat satu. Setiap kartu terhubung ke bagian asalnya."
+      },
+      "untitled": "Dek tanpa judul",
+      "cards_other": "{{count}} kartu"
+    },
+    "quiz": {
+      "nameLabel": "Nama kuis",
+      "nameHint": "Untuk apa kuis ini.",
+      "difficultyLabel": "Tingkat kesulitan",
+      "difficulty": {
+        "easy": "mudah",
+        "medium": "sedang",
+        "hard": "sulit"
+      },
+      "typesLabel": "Pertanyaan",
+      "types": {
+        "mcq": "pilihan ganda",
+        "short": "jawaban singkat",
+        "mixed": "campuran"
+      },
+      "countLabel": "Berapa pertanyaan",
+      "cost_other": "Butuh {{credits}} kredit per {{count}} pertanyaan. Kuis muncul di sini saat dibuat, biasanya dalam satu menit.",
+      "generate": "Buat kuis",
+      "loading": "Memuat kuis di ruang belajar ini",
+      "empty": {
+        "title": "Belum ada kuis",
+        "reason": "Pilih sumber di atas lalu buat satu. Setiap pertanyaan terhubung ke bagian asalnya."
+      },
+      "untitled": "Kuis tanpa judul",
+      "questions_other": "{{count}} pertanyaan",
+      "take": "Kerjakan kuis"
+    }
+  },
+  "styleguide": {
+    "title": "Referensi desain",
+    "subtitle": "Bukan layar produk. Token dan komponen dalam satu tempat, dengan konten placeholder, bukan data contoh.",
+    "palette": {
+      "title": "Palet",
+      "description": "Indigo adalah aksi: mengisi tombol utama, menandai pilihan, dan membawa merek. Sky hanya untuk sumber dan kutipan, tidak untuk hal lain — chip sky di layar berarti teks di sebelahnya berasal dari materimu sendiri. Emerald berarti selesai, amber berarti segera jatuh tempo, rose berarti ulangi, terlambat, atau merusak. Setiap pasangan teks/latar di bawah diperiksa di kedua tema oleh uji kontras, jadi daftar ini tidak bisa menyimpang dari yang benar-benar tampil.",
+      "contrastNote": "Pasangan teks lolos 4.5:1 dan garis, ikon, serta cincin fokus lolos 3:1, di tema terang maupun gelap. Pemeriksaannya jalan di CI dan menggagalkan build kalau ada yang gagal."
+    },
+    "swatch": {
+      "success": "selesai dan sudah dikuasai",
+      "bg": "latar halaman",
+      "surface": "kartu dan panel",
+      "raised": "sisipan dan blok sekunder",
+      "border": "garis tipis dan pemisah",
+      "borderStrong": "batas yang harus terlihat: tepi kolom isian",
+      "text": "teks utama",
+      "textMuted": "teks sekunder",
+      "textSubtle": "keterangan dan petunjuk",
+      "primary": "warna isian aksi",
+      "primaryText": "indigo sebagai teks: tautan, nav aktif",
+      "primaryTint": "baris terpilih, chip yang bekerja",
+      "source": "hanya untuk kutipan",
+      "sourceTint": "latar chip kutipan",
+      "successTint": "chip siap",
+      "warning": "segera jatuh tempo",
+      "warningTint": "chip jatuh tempo",
+      "dangerTint": "catatan galat",
+      "ring": "cincin fokus",
+      "danger": "galat"
+    },
+    "type": {
+      "title": "Tipografi",
+      "headingOne": "Judul satu",
+      "headingTwo": "Judul dua",
+      "headingThree": "Judul tiga",
+      "body": "Teks utama 14px di desktop dan 16px di ponsel. Inter untuk antarmuka, Plus Jakarta Sans untuk judul, JetBrains Mono untuk rujukan halaman dan waktu. Ketiganya dibundel, jadi aplikasi tetap tampil tanpa jaringan.",
+      "meta": "Metadata monospace: halaman 12, 24 menit, 2026-10-11",
+      "linkBefore": "Sebuah",
+      "linkText": "tautan di teks isi",
+      "linkAfter": "memakai indigo untuk teks, karena indigo isian dipakai untuk permukaan yang berisi teks putih."
+    },
+    "citations": {
+      "title": "Tanda kutipan",
+      "description": "Motif identitas. Tanda hanya muncul di sebelah sesuatu yang benar-benar bisa ditelusuri, jadi tidak pernah menyiratkan dasar yang tidak ada. Tanda yang punya tujuan adalah kontrol; tanpa tujuan ia teks biasa.",
+      "exampleLayer": "Enkapsulasi menambah header di tiap lapisan",
+      "exampleOverhead": ", dan biaya tambahannya bisa diprediksi",
+      "exampleSeparately": ". Hasil dari luar ditandai terpisah",
+      "exampleEnd": ".",
+      "sampleSource": "Judul sumber",
+      "sampleAnotherSource": "Sumber lain",
+      "sampleWebResult": "Hasil web",
+      "interactive": "Bentuk interaktifnya ditunjukkan di atas sebagai kutipan web, yang punya tujuan nyata. Kutipan chunk jadi tombol hanya kalau pemanggilnya memberi handler; tanpa itu ia dirender sebagai teks, bukan kontrol yang menelan klik."
+    },
+    "controls": {
+      "title": "Kontrol",
+      "descriptionBefore": "Hanya tampilan. Ini sampel mati, bukan kontrol: semuanya membawa",
+      "descriptionCode": "aria-disabled",
+      "descriptionAfter": "dan berada di luar urutan tab, karena tombol yang tidak melakukan apa pun adalah cacat, bukan demo (R-26). Layar sungguhan menghubungkan setiap tombol ke aksinya sendiri.",
+      "primary": "Aksi utama",
+      "secondary": "Sekunder",
+      "quiet": "Senyap",
+      "disabled": "Nonaktif",
+      "fieldLabel": "Label kolom",
+      "placeholder": "Teks placeholder"
+    },
+    "states": {
+      "title": "Status",
+      "emptyTitle": "Status kosong",
+      "emptyReason": "Menyebut kenapa kosong dan apa yang mengisinya. Alasannya prop wajib, jadi status kosong tidak bisa lolos karena lupa.",
+      "errorTitle": "Status galat",
+      "errorReason": "Menyebut apa yang gagal dan apa yang harus dilakukan.",
+      "loading": "Memuat sesuatu yang disebut namanya, bukan sekadar memuat",
+      "loadingRows": "Memuat baris"
+    },
+    "course": {
+      "title": "Warna mata kuliah",
+      "description": "Enam warna kategori. Masing-masing jadi penanda 4px plus chip bertint plus inisial atau ikon, dan tidak pernah jadi satu-satunya tanda: dua mata kuliah berwarna sama dibedakan dari namanya, dan warna mata kuliah bukan warna status.",
+      "indigo": "Algoritma",
+      "sky": "Statistika",
+      "emerald": "Biologi",
+      "amber": "Ekonomi",
+      "violet": "Sastra",
+      "rose": "Kalkulus"
+    },
+    "chips": {
+      "title": "Chip dan ikon",
+      "description": "Chip membawa status dalam kata; warnanya mengulang kata itu, jadi statusnya tetap terbaca tanpa warna. Ikonnya satu set outline di 20px, digambar dengan currentColor supaya tidak bisa memunculkan warna yang belum diukur uji kontras.",
+      "neutral": "Menunggu",
+      "working": "Memproses 42%",
+      "ready": "Siap",
+      "due": "Jatuh tempo hari ini",
+      "failed": "Gagal",
+      "source": "Dari sumbermu"
+    },
+    "locked": {
+      "title": "Fitur terkunci",
+      "description": "Satu komponen, dua varian, dipilih menurut platform. Web dan desktop menyebut paketnya dan menautkan ke checkout; iOS dan Android menyatakan faktanya tanpa harga, tanpa tombol, dan tanpa tautan, karena itulah yang diperiksa toko aplikasi."
+    },
+    "composer": {
+      "title": "Kejujuran composer",
+      "description": "Baris di bawah setiap composer chat, dan tombol dasar di atasnya. Keduanya bagian dari composer, bukan tooltip: peringatan yang tidak wajib dibuka adalah peringatan yang jarang dibaca."
+    }
+  },
+  "planner": {
+    "rebalance": "Seimbangkan ulang mingguku",
+    "rebalanceReason": "Memindahkan dan memecah blok belajar saat satu minggu terlalu padat."
+  }
+}

@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use sqlx::PgPool;
+use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
 use stvdy_core::traits::testing::ScriptedLlm;
+use stvdy_server::integrations::search::composite::CompositeSearch;
 use stvdy_server::testing::TestState;
 
 mod common;
@@ -1192,4 +1194,279 @@ async fn a_web_turn_without_a_search_provider_still_answers_from_the_sources(poo
     .await
     .unwrap();
     assert!(!stored, "the stored row must not claim web use either");
+}
+
+/// The UI default, asserted through the stub seam: a body that omits
+/// `sources_only` entirely must be grounded ON, and the version logged to
+/// `usage_events` must be the v2 text that was actually sent.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_request_that_omits_sources_only_is_grounded_on(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "grounded-default@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // The route attaches the prompt version when the provider reports usage, so
+    // this turn needs a provider that does. `ScriptedLlm` records the request;
+    // `ReportingLlm` adds the `Usage` event a real provider always sends.
+    let llm = Arc::new(ReportingLlm::new(vec![
+        "This isn't covered in your selected sources.".to_string(),
+    ]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    // `chat_body` has no `sources_only` key: the serde default has to supply it.
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("what is not in my notes?"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let requests = llm.requests();
+    assert_eq!(requests.len(), 1, "the provider was called once");
+    let system = &requests[0].messages[0].content;
+    assert!(
+        system.contains("which is on:"),
+        "an omitted toggle must render as grounded ON: {system}"
+    );
+    assert!(
+        !system.contains("{{"),
+        "no prompt variable may survive composition: {system}"
+    );
+
+    // The turn must log the version it actually sent, not the superseded one.
+    let version: Option<String> = sqlx::query_scalar(
+        "select prompt_version from usage_events where action = 'chat_message' \
+         order by created_at desc limit 1",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        version.as_deref(),
+        Some("base.v2"),
+        "the logged prompt version must be the text that was sent"
+    );
+}
+
+/// `ScriptedLlm` plus the `StreamEvent::Usage` a real provider always sends.
+///
+/// The chat route attaches `prompt_version` (and the token counts) to the usage
+/// row only when that event arrives, so a turn driven by the plain double leaves
+/// the column NULL. Request recording is delegated to the inner double, so
+/// `requests()` still asserts on the prompt the model actually saw.
+struct ReportingLlm {
+    inner: ScriptedLlm,
+}
+
+impl ReportingLlm {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            inner: ScriptedLlm::new(responses),
+        }
+    }
+
+    fn requests(&self) -> Vec<stvdy_core::traits::llm::ChatRequest> {
+        self.inner.requests()
+    }
+}
+
+#[async_trait::async_trait]
+impl stvdy_core::traits::llm::LlmProvider for ReportingLlm {
+    fn name(&self) -> &'static str {
+        "reporting"
+    }
+
+    fn supports_tools(&self) -> bool {
+        false
+    }
+
+    async fn complete(
+        &self,
+        req: stvdy_core::traits::llm::ChatRequest,
+    ) -> Result<stvdy_core::traits::llm::ChatResponse, stvdy_core::traits::llm::LlmError> {
+        self.inner.complete(req).await
+    }
+
+    async fn stream(
+        &self,
+        req: stvdy_core::traits::llm::ChatRequest,
+    ) -> Result<stvdy_core::traits::llm::ChatStream, stvdy_core::traits::llm::LlmError> {
+        let mut stream = self.inner.stream(req).await?;
+        let mut events: Vec<stvdy_core::traits::llm::StreamEvent> = Vec::new();
+        while let Some(event) = stream.recv().await {
+            // Usage before `Done`, because the route stops reading at `Done`: a
+            // real provider reports usage first, and the prompt version is only
+            // attached to the usage row when that event arrives.
+            if matches!(event, stvdy_core::traits::llm::StreamEvent::Done) {
+                events.push(stvdy_core::traits::llm::StreamEvent::Usage(
+                    stvdy_core::traits::llm::Usage {
+                        in_tokens: 10,
+                        out_tokens: 20,
+                        provider_cost_usd: None,
+                    },
+                ));
+            }
+            events.push(event);
+        }
+
+        // Drained above, so every send fits: nobody reads this receiver until the
+        // route does, and an awaited `send` past the capacity would deadlock.
+        let (sender, receiver) = tokio::sync::mpsc::channel(events.len() + 1);
+        for event in events {
+            if sender.try_send(event).is_err() {
+                break;
+            }
+        }
+        Ok(receiver)
+    }
+}
+
+/// With the toggle off, the composed prompt keeps `base.v1.md`'s permission: a
+/// general-knowledge answer is allowed, labelled, and uncited. The prohibition is
+/// scoped to the setting being on, so the off branch does not forbid it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn sources_only_off_allows_a_general_knowledge_answer(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "general-knowledge@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        "Not from your sources: mitochondria are membrane-bound organelles.".to_string(),
+    ]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "tell me something else", "sources_only": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let requests = llm.requests();
+    let system = &requests[0].messages[0].content;
+    assert!(
+        system.contains("which is off:"),
+        "the toggle must render as off: {system}"
+    );
+    assert!(
+        system.contains(
+            "you may offer a general-knowledge answer, but label it as not from their sources \
+             and do not attach citations to it"
+        ),
+        "the off behaviour is v1's wording: {system}"
+    );
+    // The prohibition lives in the on branch, which the rendered value does not
+    // select, so nothing in the off prompt forbids a general-knowledge answer.
+    let off_branch = system
+        .split_once("When it is off:")
+        .expect("the off branch is present")
+        .1;
+    assert!(
+        !off_branch.contains("never answer from general knowledge"),
+        "the off branch must not forbid a general-knowledge answer: {off_branch}"
+    );
+}
+
+/// A tier that returns one hit, so a web turn has something to cite without a
+/// network. The URL is fixed so the test can name it.
+struct StubWebTier;
+
+#[async_trait::async_trait]
+impl SearchProvider for StubWebTier {
+    fn name(&self) -> &'static str {
+        "stub_web"
+    }
+
+    async fn search(&self, _query: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
+        Ok(vec![SearchHit::new(
+            "Attention Is All You Need",
+            "https://example.test/recurrence",
+            "The dominant sequence transduction models are based on complex recurrent networks.",
+            SourceKind::Academic,
+            "stub_web",
+        )])
+    }
+}
+
+fn with_web_stub(harness: TestState) -> TestState {
+    let composite = CompositeSearch::with_tiers(
+        vec![Arc::new(StubWebTier)],
+        harness.state.pool.clone(),
+        std::time::Duration::from_secs(3600),
+    );
+    harness.with_search(Arc::new(composite))
+}
+
+/// The toggle governs general knowledge, not web search. With web search on *and*
+/// the toggle on, the prompt still carries `<web_results>` and `[W#]` citations
+/// still resolve.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_sources_only_toggle_does_not_suppress_web_results(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "grounded-web@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    let harness = with_web_stub(harness);
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        "Transformers replaced recurrence [W1].".to_string(),
+    ]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({
+            "message": "what replaced recurrence?",
+            "use_web": true,
+            "sources_only": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    // The grounding toggle is on, and the web arm still ran: the two are
+    // independent, which is the whole point of the toggle.
+    let requests = llm.requests();
+    let system = &requests[0].messages[0].content;
+    assert!(
+        system.contains("which is on:"),
+        "the toggle must be on for this turn: {system}"
+    );
+    assert!(
+        system.contains("<web_results>"),
+        "the toggle must not suppress the web block: {system}"
+    );
+    assert!(
+        system.contains("[W1]"),
+        "the web hit must still be labelled in the prompt: {system}"
+    );
+    assert!(
+        system.contains("https://example.test/recurrence"),
+        "the web hit's URL must reach the model: {system}"
+    );
+
+    // And the `[W1]` the model wrote resolves to the web citation, not a chunk.
+    let citations = events
+        .iter()
+        .find(|event| event.kind() == "citations")
+        .map(|event| event.json()["citations"].clone())
+        .expect("a citations event");
+    let array = citations.as_array().expect("an array");
+    assert_eq!(array.len(), 1, "one web citation: {citations}");
+    assert_eq!(array[0]["type"], "web");
+    assert_eq!(array[0]["url"], "https://example.test/recurrence");
 }

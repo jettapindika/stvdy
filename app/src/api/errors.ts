@@ -211,10 +211,34 @@ const REASON_BY_CODE: Record<ApiErrorCode, string> = {
   rate_limited: 'Too many attempts in a row. Wait a minute and try again.',
   provider_error: 'A service this depends on is failing. Nothing was saved. Try again shortly.',
   internal: 'The server failed on this request. Nothing was saved. Try again shortly.',
+  /** The fallback for a `network` error that carries no sentence of its own. */
   network: 'The server could not be reached. Check your connection and try again.',
 }
 
+/**
+ * The sentence for a request that never reached the server, naming the origin it
+ * tried.
+ *
+ * The origin is the value of this sentence. Without it, the same notice covers
+ * three different situations with three different fixes: the API is not running,
+ * the machine has no network, and the app is pointed at an origin nothing serves
+ * any more (a smoke server that has exited, a build made with an old
+ * `VITE_API_BASE_URL`). Only the last two are about a connection at all, and the
+ * third is the one that reads as an outage. Naming the origin makes it a glance
+ * at a URL instead of an investigation.
+ *
+ * It is built here so the wording has one home, and the client passes the origin
+ * because the client is what knows it.
+ */
+export function networkReason(origin: string): string {
+  return `The server could not be reached at ${origin}. Check your connection and try again.`
+}
+
 export function apiErrorReason(error: ApiError): string {
+  // `network` is the only code this client raises itself, so its `message` is a
+  // sentence written for the user (`networkReason`) rather than the server's log
+  // line. Every other code discards the message for exactly that reason.
+  if (error.code === 'network' && error.message.length > 0) return error.message
   return REASON_BY_CODE[error.code]
 }
 

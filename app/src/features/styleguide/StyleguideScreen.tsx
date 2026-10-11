@@ -1,6 +1,11 @@
+import { useTranslation } from 'react-i18next'
+
 import { CitationList } from '@/components/ui/Citation'
 import { EmptyState, ErrorState, LoadingState, SkeletonRows } from '@/components/ui/States'
+import { Icon } from '@/components/ui/Icon'
+import { LockedFeature } from '@/components/ui/LockedFeature'
 import { PageHeader, Section } from '@/components/layout/Section'
+import { COURSE_NAMES, courseVars } from '@/tokens/tokens'
 
 /**
  * A reference page for the design system, at `/styleguide`.
@@ -15,138 +20,245 @@ import { PageHeader, Section } from '@/components/layout/Section'
  * forbid, and it would be the easiest place to let it in unnoticed.
  */
 
-const SWATCHES: { token: string; className: string; role: string }[] = [
-  { token: 'paper', className: 'bg-paper', role: 'page ground' },
-  { token: 'card', className: 'bg-card', role: 'panels that float' },
-  { token: 'surface-sunk', className: 'bg-surface-sunk', role: 'fields, insets' },
-  { token: 'rule', className: 'bg-rule', role: 'hairlines' },
-  { token: 'rule-strong', className: 'bg-rule-strong', role: 'control borders' },
-  { token: 'accent', className: 'bg-accent', role: 'identity: wordmark, links, illustration' },
-  { token: 'accent-text', className: 'bg-accent-text', role: 'the same hue, for body text' },
-  { token: 'success', className: 'bg-success', role: 'the checkmark teal' },
-  { token: 'ink', className: 'bg-ink', role: 'body text and the action fill' },
-  { token: 'ink-muted', className: 'bg-ink-muted', role: 'metadata' },
-  { token: 'danger', className: 'bg-danger', role: 'errors' },
-]
-
 export function StyleguideScreen() {
+  const { t } = useTranslation()
+  // Resolved here rather than at module scope: a constant holding copy is
+  // evaluated before there is a language, so it could only ever ship one of them.
+  //
+  // The token names are the CSS variable names, and they must match
+  // `app/src/tokens/tokens.ts`: the contrast test parses this file's stylesheet and
+  // fails when the two disagree, so a swatch labelled with the wrong token is a
+  // build failure rather than a page that lies to whoever reads it.
+  const swatches: { token: string; className: string; role: string }[] = [
+    { token: 'bg', className: 'bg-bg', role: t('styleguide.swatch.bg') },
+    { token: 'surface', className: 'bg-surface', role: t('styleguide.swatch.surface') },
+    { token: 'surface-raised', className: 'bg-surface-raised', role: t('styleguide.swatch.raised') },
+    { token: 'border', className: 'bg-border', role: t('styleguide.swatch.border') },
+    { token: 'border-strong', className: 'bg-border-strong', role: t('styleguide.swatch.borderStrong') },
+    { token: 'text', className: 'bg-text', role: t('styleguide.swatch.text') },
+    { token: 'text-muted', className: 'bg-muted', role: t('styleguide.swatch.textMuted') },
+    { token: 'text-subtle', className: 'bg-subtle', role: t('styleguide.swatch.textSubtle') },
+    { token: 'primary', className: 'bg-primary', role: t('styleguide.swatch.primary') },
+    { token: 'primary-text', className: 'bg-primary-text', role: t('styleguide.swatch.primaryText') },
+    { token: 'primary-tint', className: 'bg-primary-tint', role: t('styleguide.swatch.primaryTint') },
+    { token: 'source', className: 'bg-source', role: t('styleguide.swatch.source') },
+    { token: 'source-tint', className: 'bg-source-tint', role: t('styleguide.swatch.sourceTint') },
+    { token: 'success', className: 'bg-success', role: t('styleguide.swatch.success') },
+    { token: 'success-tint', className: 'bg-success-tint', role: t('styleguide.swatch.successTint') },
+    { token: 'warning', className: 'bg-warning', role: t('styleguide.swatch.warning') },
+    { token: 'warning-tint', className: 'bg-warning-tint', role: t('styleguide.swatch.warningTint') },
+    { token: 'danger', className: 'bg-danger', role: t('styleguide.swatch.danger') },
+    { token: 'danger-tint', className: 'bg-danger-tint', role: t('styleguide.swatch.dangerTint') },
+    { token: 'ring', className: 'bg-ring', role: t('styleguide.swatch.ring') },
+  ]
+
+  // The six course hues. Shown as the marker plus the chip plus the initial,
+  // which is the whole point: the colour is never the only signal, so the swatch
+  // has to demonstrate the redundancy rather than just the hue.
+  const courses = COURSE_NAMES.map((name) => ({
+    name,
+    vars: courseVars(name),
+    label: t(`styleguide.course.${name}`),
+  }))
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-10 px-5 py-8">
-      <PageHeader
-        title="Design reference"
-        subtitle="Not a product screen. The tokens and components in one place, with placeholder content rather than sample data."
-      />
+      <PageHeader title={t('styleguide.title')} subtitle={t('styleguide.subtitle')} />
 
-      <Section title="Palette">
-        <p className="max-w-prose text-sm text-ink-muted">
-          Two cores plus two functional colours. Blue is the identity, carried
-          by the wordmark, links, the citation marks, and the illustration. Black
-          is the action: the primary button is near-black, never blue, which is
-          the design's most distinctive decision. Teal is reserved for a positive
-          mark and red for errors.
-        </p>
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
-          {SWATCHES.map((swatch) => (
+      <Section title={t('styleguide.palette.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.palette.description')}</p>
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
+          {swatches.map((swatch) => (
             <li key={swatch.token} className="flex items-center gap-3 py-2">
               <span
-                className={`h-6 w-6 shrink-0 rounded-sm border border-rule ${swatch.className}`}
+                className={`h-6 w-6 shrink-0 rounded-sm border border-border ${swatch.className}`}
                 aria-hidden="true"
               />
               <span className="font-mono text-xs">{swatch.token}</span>
-              <span className="ml-auto text-right text-xs text-ink-muted">{swatch.role}</span>
+              <span className="ml-auto text-right text-xs text-muted">{swatch.role}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.palette.contrastNote')}</p>
+      </Section>
+
+      <Section title={t('styleguide.course.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.course.description')}</p>
+        <ul className="flex flex-wrap gap-2">
+          {courses.map((course) => (
+            <li key={course.name} className="flex items-center gap-2" style={course.vars}>
+              <span className="course-marker h-6" aria-hidden="true" />
+              <span
+                className="chip"
+                style={{ backgroundColor: 'var(--course-tint)', color: 'var(--course-marker)' }}
+              >
+                {course.label.charAt(0)}
+              </span>
+              <span className="text-sm">{course.label}</span>
             </li>
           ))}
         </ul>
       </Section>
 
-      <Section title="Type">
+      <Section title={t('styleguide.type.title')}>
         <div className="flex flex-col gap-3">
-          <p className="text-2xl font-semibold">Heading one</p>
-          <p className="text-lg font-semibold">Heading two</p>
-          <p className="font-semibold">Heading three</p>
+          <p className="text-2xl font-semibold">{t('styleguide.type.headingOne')}</p>
+          <p className="text-lg font-semibold">{t('styleguide.type.headingTwo')}</p>
+          <p className="font-semibold">{t('styleguide.type.headingThree')}</p>
+          <p>{t('styleguide.type.body')}</p>
+          <p className="meta">{t('styleguide.type.meta')}</p>
           <p>
-            Body text at 15px. IBM Plex Sans, chosen for its coverage of
-            Latin-Extended characters, which matters for Indonesian, and because
-            its narrower forms hold up in the dense reading views this product is
-            mostly made of.
-          </p>
-          <p className="meta">Monospace metadata: page 12, 24 min, 2026-10-11</p>
-          <p>
-            A <a className="link" href="#palette">link in body copy</a> uses the darkened
-            azure, because the raw brand blue is only AA at 18px and above.
+            {t('styleguide.type.linkBefore')}{' '}
+            <a className="link" href="#palette">
+              {t('styleguide.type.linkText')}
+            </a>{' '}
+            {t('styleguide.type.linkAfter')}
           </p>
         </div>
       </Section>
 
-      <Section title="Citation marks">
-        <p className="max-w-prose text-sm text-ink-muted">
-          The identity motif. A mark appears only next to something genuinely
-          traceable, so it never implies grounding that is not there. A mark with
-          a destination is a control; without one it is plain text.
-        </p>
-        <div className="flex flex-col gap-3 border-y border-rule py-3">
+      <Section title={t('styleguide.citations.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.citations.description')}</p>
+        <div className="flex flex-col gap-3 border-y border-border py-3">
           <p className="text-sm">
-            Encapsulation adds a header at each layer <CitationList citations={[{ type: 'chunk', label: 1, sourceTitle: 'Source title', page: 12 }]} />
-            , and the overhead is predictable <CitationList citations={[
-              { type: 'chunk', label: 2, sourceTitle: 'Source title', page: 4 },
-              { type: 'chunk', label: 3, sourceTitle: 'Another source', page: null },
-            ]} />
-            . An outside result is marked separately <CitationList citations={[{ type: 'web', url: 'https://example.com/paper', title: 'Web result' }]} />.
+            {t('styleguide.citations.exampleLayer')}{' '}
+            <CitationList
+              citations={[
+                {
+                  type: 'chunk',
+                  label: 1,
+                  sourceTitle: t('styleguide.citations.sampleSource'),
+                  page: 12,
+                },
+              ]}
+            />
+            {t('styleguide.citations.exampleOverhead')}{' '}
+            <CitationList
+              citations={[
+                {
+                  type: 'chunk',
+                  label: 2,
+                  sourceTitle: t('styleguide.citations.sampleSource'),
+                  page: 4,
+                },
+                {
+                  type: 'chunk',
+                  label: 3,
+                  sourceTitle: t('styleguide.citations.sampleAnotherSource'),
+                  page: null,
+                },
+              ]}
+            />
+            {t('styleguide.citations.exampleSeparately')}{' '}
+            <CitationList
+              citations={[
+                {
+                  type: 'web',
+                  url: 'https://example.com/paper',
+                  title: t('styleguide.citations.sampleWebResult'),
+                },
+              ]}
+            />
+            {t('styleguide.citations.exampleEnd')}
           </p>
-          <p className="text-sm">
-            The interactive form is shown above as a web citation, which has a real
-            destination. A chunk citation becomes a button only when a caller
-            passes a handler; with none it renders as text rather than a control
-            that swallows clicks.
-          </p>
+          <p className="text-sm">{t('styleguide.citations.interactive')}</p>
         </div>
       </Section>
 
-      <Section title="Controls">
-        <p className="max-w-prose text-sm text-ink-muted">
-          Appearance only. These are inert samples, not controls: they carry
-          <code> aria-disabled</code> and are outside the tab order, because a
-          button that does nothing is a defect rather than a demo (R-26). A real
-          screen wires each one to its own action.
+      <Section title={t('styleguide.controls.title')}>
+        <p className="max-w-prose text-sm text-muted">
+          {t('styleguide.controls.descriptionBefore')}{' '}
+          <code>{t('styleguide.controls.descriptionCode')}</code>{' '}
+          {t('styleguide.controls.descriptionAfter')}
         </p>
         <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
           <button type="button" className="btn btn-primary" aria-disabled="true" tabIndex={-1}>
-            Primary action
+            {t('styleguide.controls.primary')}
           </button>
           <button type="button" className="btn btn-secondary" aria-disabled="true" tabIndex={-1}>
-            Secondary
+            {t('styleguide.controls.secondary')}
           </button>
           <button type="button" className="btn btn-quiet" aria-disabled="true" tabIndex={-1}>
-            Quiet
+            {t('styleguide.controls.quiet')}
           </button>
           <button type="button" className="btn btn-primary" disabled>
-            Disabled
+            {t('styleguide.controls.disabled')}
           </button>
         </div>
         <label className="flex max-w-sm flex-col gap-1" aria-hidden="true">
-          <span className="label">Field label</span>
-          <input className="field" placeholder="Placeholder text" tabIndex={-1} readOnly />
+          <span className="label">{t('styleguide.controls.fieldLabel')}</span>
+          <input
+            className="field"
+            placeholder={t('styleguide.controls.placeholder')}
+            tabIndex={-1}
+            readOnly
+          />
         </label>
       </Section>
 
-      <Section title="States">
+      <Section title={t('styleguide.states.title')}>
         <div className="flex flex-col gap-3">
           <div className="panel">
             <EmptyState
-              title="Empty state"
-              reason="Names why it is empty and what fills it. The reason is a required prop, so a blank state cannot ship by forgetting."
+              title={t('styleguide.states.emptyTitle')}
+              reason={t('styleguide.states.emptyReason')}
             />
           </div>
           <ErrorState
-            title="Error state"
-            reason="Names what failed and what to do about it."
+            title={t('styleguide.states.errorTitle')}
+            reason={t('styleguide.states.errorReason')}
           />
           <div className="panel">
-            <LoadingState label="Loading a named thing, not just loading" />
+            <LoadingState label={t('styleguide.states.loading')} />
           </div>
           <div className="panel">
-            <SkeletonRows label="Loading rows" />
+            <SkeletonRows label={t('styleguide.states.loadingRows')} />
           </div>
+        </div>
+      </Section>
+
+      <Section title={t('styleguide.chips.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.chips.description')}</p>
+        <ul className="flex flex-wrap items-center gap-2">
+          <li className="chip">{t('styleguide.chips.neutral')}</li>
+          <li className="chip chip-working">{t('styleguide.chips.working')}</li>
+          <li className="chip chip-ready">{t('styleguide.chips.ready')}</li>
+          <li className="chip chip-due">{t('styleguide.chips.due')}</li>
+          <li className="chip chip-failed">{t('styleguide.chips.failed')}</li>
+          <li className="chip chip-source">{t('styleguide.chips.source')}</li>
+        </ul>
+        <ul className="flex flex-wrap items-center gap-4">
+          {(['lock', 'streak', 'check', 'clock', 'cards', 'chevron-right', 'external', 'search', 'plus', 'close'] as const).map(
+            (name) => (
+              <li key={name} className="flex items-center gap-2 text-muted">
+                <Icon name={name} />
+                <span className="font-mono text-xs">{name}</span>
+              </li>
+            ),
+          )}
+        </ul>
+      </Section>
+
+      <Section title={t('styleguide.locked.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.locked.description')}</p>
+        <div className="flex flex-col gap-3">
+          <LockedFeature whatKey="planner.rebalance" minPlan="Power" />
+          <LockedFeature
+            whatKey="planner.rebalance"
+            minPlan="Power"
+            reasonKey="planner.rebalanceReason"
+          />
+        </div>
+      </Section>
+
+      <Section title={t('styleguide.composer.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.composer.description')}</p>
+        <div className="flex flex-col gap-2 border-y border-border py-3">
+          <label className="flex min-h-11 items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked readOnly tabIndex={-1} />
+            {t('honesty.sourcesOnly')}
+          </label>
+          <p className="composer-hint">{t('honesty.composerHint')}</p>
         </div>
       </Section>
     </div>

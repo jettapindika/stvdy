@@ -52,7 +52,7 @@ export function Field({
         {...input}
       />
       {hint && (
-        <span id={hintId} className="text-xs text-ink-muted">
+        <span id={hintId} className="text-xs text-muted">
           {hint}
         </span>
       )}

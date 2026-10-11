@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
@@ -30,13 +31,6 @@ import { dueCards, type StudyCard } from './due'
  * and a second one here is how two devices start disagreeing.
  */
 
-const GRADES: { rating: Rating; label: string; key: string }[] = [
-  { rating: 'again', label: 'Again', key: '1' },
-  { rating: 'hard', label: 'Hard', key: '2' },
-  { rating: 'good', label: 'Good', key: '3' },
-  { rating: 'easy', label: 'Easy', key: '4' },
-]
-
 const KEY_RATING: Record<string, Rating> = {
   '1': 'again',
   '2': 'hard',
@@ -56,6 +50,7 @@ interface FailedReview {
 }
 
 export function StudyScreen() {
+  const { t } = useTranslation()
   const { deckId = '' } = useParams()
   const deck = useDeck(deckId)
   const due = useDueCards(deckId)
@@ -108,6 +103,16 @@ export function StudyScreen() {
   // The same instant the queue was filtered with, so the end state's "next due"
   // cannot disagree with the list it is describing.
   const nextDueAt = nextDue(deck.data?.cards ?? [], seedNow ?? new Date())
+
+  // The labels are resolved here rather than at module scope: a constant holding
+  // copy is evaluated before there is a language, so it could only ever ship one
+  // of them. The keys are shortcuts, not copy, and stay as they are.
+  const grades: { rating: Rating; label: string; key: string }[] = [
+    { rating: 'again', label: t('study.grade.again'), key: '1' },
+    { rating: 'hard', label: t('study.grade.hard'), key: '2' },
+    { rating: 'good', label: t('study.grade.good'), key: '3' },
+    { rating: 'easy', label: t('study.grade.easy'), key: '4' },
+  ]
 
   function grade(rating: Rating) {
     if (card === null || review.isPending) return
@@ -189,11 +194,11 @@ export function StudyScreen() {
     <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-col gap-4 px-4 py-6">
       <header className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
         <h1 className="min-w-0 break-words text-base font-semibold sm:flex-1">
-          {deck.data?.deck.title ?? 'Study'}
+          {deck.data?.deck.title ?? t('nav.study')}
         </h1>
         {workspaceId.length > 0 && (
           <Link to={`/workspaces/${workspaceId}`} className="link self-start text-sm sm:self-auto">
-            Back to the workspace
+            {t('study.backToWorkspace')}
           </Link>
         )}
       </header>
@@ -206,10 +211,10 @@ export function StudyScreen() {
       {deckError !== null && queue === null && (
         <ApiErrorNotice
           error={deckError}
-          noun="this deck"
+          noun={t('errors.nouns.deck')}
           action={
             <button type="button" className="btn btn-secondary" onClick={() => void deck.refetch()}>
-              Try again
+              {t('actions.retry')}
             </button>
           }
         />
@@ -218,10 +223,10 @@ export function StudyScreen() {
       {dueError !== null && queue === null && (
         <ApiErrorNotice
           error={dueError}
-          noun="the due cards"
+          noun={t('errors.nouns.dueCards')}
           action={
             <button type="button" className="btn btn-secondary" onClick={() => void due.refetch()}>
-              Try again
+              {t('actions.retry')}
             </button>
           }
         />
@@ -229,34 +234,34 @@ export function StudyScreen() {
 
       {deckError !== null && queue !== null && (
         <p className="note note-danger text-sm" role="status">
-          Could not refresh this deck. Your session is unaffected.
+          {t('study.refreshFailed')}
         </p>
       )}
 
       {deckError === null && dueError === null && queue === null && (
-        <LoadingState label="Loading this deck's due cards" />
+        <LoadingState label={t('study.loadingDue')} />
       )}
 
       {queue !== null && card !== null && (
         <>
           <p className="meta" role="status">
-            Card {index + 1} of {queue.length}
+            {t('study.cardProgress', { current: index + 1, total: queue.length })}
           </p>
 
           <div
             ref={cardRef}
             tabIndex={-1}
             role="group"
-            aria-label="Flashcard"
+            aria-label={t('study.cardLabel')}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className="panel touch-pan-y flex flex-col gap-4 px-4 py-5 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-accent"
+            className="panel touch-pan-y flex flex-col gap-4 px-4 py-5 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
           >
             <p className="whitespace-pre-wrap break-words text-base">{card.front}</p>
 
             {revealed && (
-              <div className="flex flex-col gap-4 border-t border-rule pt-4">
-                <p className="whitespace-pre-wrap break-words text-base text-ink-muted">
+              <div className="flex flex-col gap-4 border-t border-border pt-4">
+                <p className="whitespace-pre-wrap break-words text-base text-muted">
                   {card.back}
                 </p>
 
@@ -270,7 +275,7 @@ export function StudyScreen() {
                         setSourceOpen((open) => !open)
                       }}
                     >
-                      {sourceOpen ? 'Hide source' : 'Show source'}
+                      {sourceOpen ? t('study.hideSource') : t('study.showSource')}
                     </button>
                     {sourceOpen && (
                       <SourcePassage
@@ -286,13 +291,13 @@ export function StudyScreen() {
 
           {!revealed && (
             <button type="button" className="btn btn-primary self-start" onClick={reveal}>
-              Show answer
+              {t('study.showAnswer')}
             </button>
           )}
 
           {revealed && (
             <div className="flex flex-wrap gap-2">
-              {GRADES.map((option) => (
+              {grades.map((option) => (
                 <button
                   key={option.rating}
                   type="button"
@@ -315,7 +320,7 @@ export function StudyScreen() {
           {reviewError !== null && (
             <ApiErrorNotice
               error={reviewError}
-              noun="this review"
+              noun={t('errors.nouns.review')}
               action={
                 <button
                   type="button"
@@ -324,7 +329,7 @@ export function StudyScreen() {
                     if (failed !== null) grade(failed.rating)
                   }}
                 >
-                  Try again
+                  {t('actions.retry')}
                 </button>
               }
             />
@@ -339,19 +344,19 @@ export function StudyScreen() {
         <div
           ref={endRef}
           tabIndex={-1}
-          className="focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-accent"
+          className="focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
         >
           <EmptyState
-            title="Nothing due in this deck"
+            title={t('study.nothingDue.title')}
             reason={
               nextDueAt === null
-                ? 'Every card in this deck has been scheduled. Come back after the next one is due.'
-                : `Every card here is scheduled. The next one comes due ${nextDueAt}.`
+                ? t('study.nothingDue.scheduled')
+                : t('study.nothingDue.next', { when: nextDueAt })
             }
             action={
               workspaceId.length > 0 ? (
                 <Link to={`/workspaces/${workspaceId}`} className="btn btn-secondary">
-                  Back to the workspace
+                  {t('study.backToWorkspace')}
                 </Link>
               ) : undefined
             }

@@ -498,7 +498,7 @@ long_doc_credits_per_1k_tokens = 1
 # the normal operating point: at the cheapest tier the free plan's full 60 credits cost
 # about $0.044 against a $0.50 ceiling, and power's 2000 credits about $2.39 against
 # $6.00. Exceeding one pauses expensive actions with a clear message rather than
-# silently spending (docs/SPEC.md:528). They are what makes an unattended free tier
+# silently spending (docs/SPEC.md § Entitlements engine, "Margin safety"). They are what makes an unattended free tier
 # survivable, so they MUST be enforced in Phase 7, not merely configured.
 
 [provider_cost_ceiling_usd]

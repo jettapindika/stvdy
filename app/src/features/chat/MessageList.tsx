@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { Message } from '@/api/queries/chat'
 import type { ChatCitation, ChunkCitation } from '@/api/sse'
@@ -189,14 +190,15 @@ function Turn({
   role: 'user' | 'assistant'
   children: ReactNode
 }) {
+  const { t } = useTranslation()
   const isUser = role === 'user'
   return (
     <article className="flex flex-col gap-1">
-      <span className="label">{isUser ? 'You' : 'Stvdy'}</span>
+      <span className="label">{isUser ? t('chat.turn.you') : t('app.name')}</span>
       <div
         className={
           isUser
-            ? 'max-w-prose rounded-card bg-surface-sunk px-3 py-2 text-sm'
+            ? 'max-w-prose rounded-card bg-surface-raised px-3 py-2 text-sm'
             : 'max-w-prose text-sm leading-relaxed'
         }
       >
@@ -204,6 +206,27 @@ function Turn({
       </div>
     </article>
   )
+}
+
+/**
+ * How many distinct sources the answer drew on.
+ *
+ * Distinct sources, not citations: an answer that cites three pages of one
+ * textbook is "based on 1 source", which is the fact a student can act on. The
+ * number is counted from the citations the server resolved, so it cannot claim
+ * more grounding than the answer actually has, and it is hidden entirely when
+ * there are none — an answer from general knowledge or from web results alone
+ * must not be dressed up with a source count of zero.
+ */
+function SourceCount({ citations }: { citations: ChatCitation[] }) {
+  const { t } = useTranslation()
+  const sourceIds = new Set(
+    citations.flatMap((citation) =>
+      citation.type === 'chunk' && citation.source_id ? [citation.source_id] : [],
+    ),
+  )
+  if (sourceIds.size === 0) return null
+  return <p className="meta mt-1">{t('honesty.basedOnSources', { count: sourceIds.size })}</p>
 }
 
 export function MessageList({
@@ -223,13 +246,14 @@ export function MessageList({
   /** Why the thread is empty, when it is. */
   emptyReason: string
 }) {
+  const { t } = useTranslation()
   const streaming = turn?.streaming === true
 
   if (messages.length === 0 && turn === null) {
     return (
       <div className="flex flex-col items-start gap-2 px-4 py-6">
-        <p className="font-medium">No questions yet</p>
-        <p className="max-w-prose text-sm text-ink-muted">{emptyReason}</p>
+        <p className="font-medium">{t('chat.empty.title')}</p>
+        <p className="max-w-prose text-sm text-muted">{emptyReason}</p>
       </div>
     )
   }
@@ -239,18 +263,21 @@ export function MessageList({
       role="log"
       aria-live="polite"
       aria-busy={streaming}
-      aria-label="Conversation"
+      aria-label={t('chat.list.label')}
       className="flex flex-col gap-5 px-4 py-4"
     >
       {messages.map((message) => (
         <Turn key={message.id} role={message.role}>
           {message.role === 'assistant' ? (
-            <AnswerText
-              text={message.content}
-              citations={message.citations}
-              sourceTitle={sourceTitle}
-              onOpenCitation={onOpenCitation}
-            />
+            <>
+              <AnswerText
+                text={message.content}
+                citations={message.citations}
+                sourceTitle={sourceTitle}
+                onOpenCitation={onOpenCitation}
+              />
+              <SourceCount citations={message.citations} />
+            </>
           ) : (
             <p className="whitespace-pre-wrap">{message.content}</p>
           )}
@@ -275,26 +302,27 @@ export function MessageList({
                 sourceTitle={sourceTitle}
                 onOpenCitation={onOpenCitation}
               />
+              <SourceCount citations={turn.citations} />
             </Turn>
           )}
 
           {turn.streaming && turn.text.length === 0 && (
-            <p className="flex items-center gap-2 text-ink-muted" role="status">
+            <p className="flex items-center gap-2 text-muted" role="status">
               <span
-                className="h-2 w-2 animate-working rounded-full bg-ink-muted"
+                className="h-2 w-2 animate-working rounded-full bg-muted"
                 aria-hidden="true"
               />
-              Searching this workspace
+              {t('chat.list.searching')}
             </p>
           )}
 
           {turn.error !== null && (
             <ApiErrorNotice
               error={turn.error}
-              noun="answers"
+              noun={t('errors.nouns.answers')}
               action={
                 <button type="button" className="btn btn-secondary" onClick={onRetry}>
-                  Ask again
+                  {t('chat.retry')}
                 </button>
               }
             />

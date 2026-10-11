@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import {
@@ -44,8 +45,8 @@ export function EmptyState({
 }) {
   return (
     <div className={`flex flex-col items-start gap-2 ${padded ? 'px-4 py-6' : ''}`}>
-      <p className="font-medium text-ink">{title}</p>
-      <p className="max-w-prose text-sm text-ink-muted">{reason}</p>
+      <p className="font-medium text-text">{title}</p>
+      <p className="max-w-prose text-sm text-muted">{reason}</p>
       {action && <div className="mt-1">{action}</div>}
     </div>
   )
@@ -79,8 +80,8 @@ export function LoadingState({
 }) {
   return (
     <div className="flex items-center gap-2 px-4 py-6" role="status" aria-live="polite">
-      <span className="h-2 w-2 animate-working rounded-full bg-ink-muted" aria-hidden="true" />
-      <span className="text-sm text-ink-muted">{label}</span>
+      <span className="h-2 w-2 animate-working rounded-full bg-muted" aria-hidden="true" />
+      <span className="text-sm text-muted">{label}</span>
     </div>
   )
 }
@@ -97,8 +98,8 @@ export function SkeletonRows({ rows = 3, label }: { rows?: number; label: string
       <span className="sr-only">{label}</span>
       {Array.from({ length: rows }, (_, index) => (
         <div key={index} className="flex flex-col gap-1.5" aria-hidden="true">
-          <div className="h-3 w-2/5 rounded-sm bg-surface-sunk" />
-          <div className="h-3 w-4/5 rounded-sm bg-surface-sunk" />
+          <div className="h-3 w-2/5 rounded-sm bg-surface-raised" />
+          <div className="h-3 w-4/5 rounded-sm bg-surface-raised" />
         </div>
       ))}
     </div>
@@ -122,13 +123,13 @@ export function NotBuiltYet({
   what: string
   level?: 1 | 2 | 3
 }) {
+  const { t } = useTranslation()
+
   return (
     <section className="mx-auto flex max-w-2xl flex-col gap-3 px-5 py-10">
       {level === 1 ? <h1>{title}</h1> : level === 2 ? <h2>{title}</h2> : <h3>{title}</h3>}
       <div className="note">
-        <p className="text-sm text-ink-muted">
-          Not built yet. This screen will hold {what}.
-        </p>
+        <p className="text-sm text-muted">{t('states.notBuiltYet', { what })}</p>
       </div>
     </section>
   )
@@ -171,6 +172,7 @@ export function ApiErrorNotice({
   title?: string
   reason?: string
 }) {
+  const { t } = useTranslation()
   const kind = platform.kind()
   const isMobile = kind === 'ios' || kind === 'android'
 
@@ -183,12 +185,12 @@ export function ApiErrorNotice({
         <p className="font-medium" role="status">
           {title ?? apiErrorTitle(error)}
         </p>
-        <p className="text-sm text-ink-muted">{planLimitMessage(error, noun)}</p>
+        <p className="text-sm text-muted">{planLimitMessage(error, noun)}</p>
         {/* Mobile builds carry no purchase UI (SPEC § Pricing), so they get the
             statement and no route to a checkout. */}
         {!isMobile && (
           <Link to="/billing" className="link inline-flex min-h-11 items-center text-sm">
-            See plans
+            {t('billing.seePlans')}
           </Link>
         )}
       </div>

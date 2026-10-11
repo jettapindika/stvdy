@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
@@ -18,6 +19,7 @@ import { AuthCard } from './AuthLayout'
 const FIELDS = ['email', 'password'] as const
 
 export function SignInScreen() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -31,13 +33,13 @@ export function SignInScreen() {
 
   return (
     <AuthCard
-      title="Sign in"
-      subtitle="Your workspaces, sources, and study material, on every device you sign in from."
+      title={t('auth.signIn.title')}
+      subtitle={t('auth.signIn.subtitle')}
       footer={
         <>
-          <span className="text-sm text-ink-muted">New to Stvdy?</span>
+          <span className="text-sm text-muted">{t('auth.signIn.newHere')}</span>
           <Link to="/signup" className="btn btn-quiet">
-            Create an account
+            {t('auth.signIn.createAccount')}
           </Link>
         </>
       }
@@ -57,16 +59,15 @@ export function SignInScreen() {
             // user looking for a problem they do not have.
             {...(error.code === 'unauthorized'
               ? {
-                  title: 'That did not match',
-                  reason:
-                    'Check the email and the password and try again. Neither is shown to anyone else.',
+                  title: t('auth.signIn.mismatchTitle'),
+                  reason: t('auth.signIn.mismatchReason'),
                 }
               : {})}
           />
         )}
 
         <Field
-          label="Email"
+          label={t('auth.field.email')}
           type="email"
           name="email"
           autoComplete="email"
@@ -79,7 +80,7 @@ export function SignInScreen() {
         />
 
         <Field
-          label="Password"
+          label={t('auth.field.password')}
           type="password"
           name="password"
           autoComplete="current-password"
@@ -92,7 +93,7 @@ export function SignInScreen() {
         />
 
         <button type="submit" className="btn btn-primary w-full" disabled={signIn.isPending}>
-          {signIn.isPending ? 'Signing in' : 'Sign in'}
+          {signIn.isPending ? t('auth.signIn.pending') : t('auth.signIn.title')}
         </button>
       </form>
     </AuthCard>

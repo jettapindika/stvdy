@@ -24,7 +24,11 @@ export interface Quiz {
   id: string
   workspace_id: string
   title: string
-  difficulty: string
+  /**
+   * Nullable: a quiz created before the column carried a value has none, and the
+   * screen shows the title and the questions rather than a difficulty label.
+   */
+  difficulty: string | null
   question_types: string
   source_ids: string[]
   status: QuizStatus

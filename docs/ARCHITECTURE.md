@@ -434,11 +434,14 @@ never persisted; `messages.citations` stores the resolved structured array.
 
 ### Prompt composition
 
-Chat uses the other of the two composition shapes: `base.v1.md` plus a
+Chat uses the other of the two composition shapes: `base.v2.md` plus a
 `<sources>` block, rendered by `crates/core/src/prompts/` from the compiled-in
 registry. No prompt sentence is written in the server: a string literal in a
 handler could not be versioned or reviewed as prose, and a unit test asserts the
-assembly module contains none.
+assembly module contains none. `base.v2.md` supersedes `base.v1.md` (A38) only in
+its grounding rules, which honour the per-chat "Answer only from my sources"
+toggle through `{{sources_only}}`; task modules still compose on v1's trimmed
+base.
 
 The composer treats user-controlled values (`user_name`, `workspace_name`) as
 data, escaping them so they cannot close the `<user_context_data>` block, and it

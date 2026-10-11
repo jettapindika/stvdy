@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { API_BASE_URL, api, apiRequest, ensureFreshSession } from './client'
+import { ApiError, apiErrorReason, networkReason } from './errors'
 import { getAccessToken, saveSession, setAccessToken } from '../lib/tokens'
 import { bearerOf, installFakePlatform, jsonResponse, mockFetch } from '../test/harness'
 import type { FakeSecureStore } from '../test/harness'
@@ -194,6 +195,14 @@ describe('the signed-out path', () => {
     setAccessToken('access-1')
 
     await expect(api.get('/workspaces')).rejects.toMatchObject({ code: 'network', status: 0 })
+
+    // The sentence the user reads names the origin that was tried. Without it,
+    // "the server could not be reached" is the same notice for a machine with no
+    // network, an API that is not running, and an app pointed at an origin
+    // nothing serves any more — three situations with three different fixes.
+    const failure = await api.get('/workspaces').catch((error: unknown) => error)
+    expect(apiErrorReason(failure as ApiError)).toBe(networkReason(API_BASE_URL))
+    expect(networkReason(API_BASE_URL)).toContain(API_BASE_URL)
 
     // Offline is not the same as refused. Signing a user out because the network
     // dropped would cost them their session for a transient failure.

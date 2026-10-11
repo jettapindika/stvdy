@@ -10,12 +10,43 @@ use stvdy_core::traits::mailer::{Email, MailError, Mailer};
 pub fn from_config(
     cfg: &crate::config::MailerConfig,
 ) -> anyhow::Result<std::sync::Arc<dyn Mailer>> {
+    // Which mailer is live is otherwise invisible: a deploy with `SMTP_URL`
+    // unset looks healthy and writes verification mail to a directory nobody
+    // reads, so every new account stalls at "check your inbox" with no error
+    // anywhere. One line at boot makes the difference visible, and it is the
+    // first thing to check when mail "does not arrive".
     match &cfg.smtp_url {
-        Some(url) => Ok(std::sync::Arc::new(SmtpMailer::new(url, cfg.from.clone())?)),
-        None => Ok(std::sync::Arc::new(FileSinkMailer::new(
-            cfg.dir.clone(),
-            cfg.from.clone(),
-        ))),
+        Some(url) => {
+            // The URL carries credentials, so only the parts that identify the
+            // relay are logged — never the userinfo.
+            let (scheme, host) = match url::Url::parse(url) {
+                Ok(parsed) => (
+                    parsed.scheme().to_string(),
+                    format!(
+                        "{}:{}",
+                        parsed.host_str().unwrap_or("?"),
+                        parsed.port().unwrap_or_else(|| {
+                            if parsed.scheme() == "smtps" { 465 } else { 587 }
+                        })
+                    ),
+                ),
+                Err(_) => ("?".to_string(), "?".to_string()),
+            };
+            let mailer = SmtpMailer::new(url, cfg.from.clone())?;
+            tracing::info!(scheme = %scheme, relay = %host, from = %cfg.from, "mailer ready: sending over SMTP");
+            Ok(std::sync::Arc::new(mailer))
+        }
+        None => {
+            tracing::info!(
+                dir = %cfg.dir.display(),
+                from = %cfg.from,
+                "mailer ready: the dev file sink (SMTP_URL is unset), so nothing is delivered"
+            );
+            Ok(std::sync::Arc::new(FileSinkMailer::new(
+                cfg.dir.clone(),
+                cfg.from.clone(),
+            )))
+        }
     }
 }
 

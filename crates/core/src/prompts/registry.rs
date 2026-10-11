@@ -14,6 +14,18 @@ pub const BASE_V1: &str = include_str!("../../../../prompts/base.v1.md");
 /// The version stored with every request composed from [`BASE_V1`].
 pub const BASE_V1_VERSION: &str = "base.v1";
 
+/// The chat base prompt, v2. Byte-identical to [`BASE_V1`] except that its
+/// `<grounding_and_citations>` rules honour the per-chat "Answer only from my
+/// sources" toggle through `{{sources_only}}`.
+///
+/// A38: a shipped version is never edited, only superseded. `base.v1.md` stays
+/// compiled in so task modules (which keep composing on v1's trimmed base) and
+/// any `usage_events` row that named it remain attributable.
+pub const BASE_V2: &str = include_str!("../../../../prompts/base.v2.md");
+
+/// The version stored with every request composed from [`BASE_V2`].
+pub const BASE_V2_VERSION: &str = "base.v2";
+
 /// The shared strict-JSON preamble every task module is followed by.
 pub const JSON_CONTRACT_V1: &str = include_str!("../../../../prompts/json_contract.v1.md");
 

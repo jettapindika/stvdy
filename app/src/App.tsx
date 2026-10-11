@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Navigate, Outlet } from 'react-router'
 
 import { Shell } from './components/layout/Shell'
@@ -18,12 +19,13 @@ import { useSession } from './features/auth/useSession'
  * having been logged out.
  */
 export function App() {
+  const { t } = useTranslation()
   const session = useSession()
 
   if (session.status === 'loading') {
     return (
-      <div className="flex min-h-[100dvh] items-start justify-center bg-paper pt-safe-top">
-        <LoadingState label="Restoring your session" />
+      <div className="flex min-h-[100dvh] items-start justify-center bg-bg pt-safe-top">
+        <LoadingState label={t('app.session.restoring')} />
       </div>
     )
   }

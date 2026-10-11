@@ -70,7 +70,7 @@ describe('a completed answer', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Apa ibu kota Indonesia?', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Apa ibu kota Indonesia?', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     // Each fragment is a state the screen renders, so each is asserted on. The
@@ -106,7 +106,7 @@ describe('a completed answer', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Apa itu?', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Apa itu?', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -126,7 +126,7 @@ describe('a completed answer', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -170,7 +170,7 @@ describe('a completed answer', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Halo', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Halo', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -189,7 +189,12 @@ describe('a completed answer', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Halo', sourceIds: ['s1', 's2'], useWeb: false })
+      view.result.current.send({
+        message: 'Halo',
+        sourceIds: ['s1', 's2'],
+        useWeb: false,
+        sourcesOnly: true,
+      })
     })
     await waitFor(() => {
       expect(calls).toHaveLength(1)
@@ -199,10 +204,11 @@ describe('a completed answer', () => {
       message: 'Halo',
       source_ids: ['s1', 's2'],
       use_web: false,
+      sources_only: true,
     })
 
     act(() => {
-      view.result.current.send({ message: 'Lagi', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Lagi', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
     await waitFor(() => {
       expect(calls).toHaveLength(2)
@@ -211,7 +217,11 @@ describe('a completed answer', () => {
     // not what "the whole workspace" means. `use_web` is always sent, because the
     // client always knows the toggle's state and an absent field would make "off"
     // and "too old to ask" indistinguishable on the wire.
-    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ message: 'Lagi', use_web: false })
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({
+      message: 'Lagi',
+      use_web: false,
+      sources_only: true,
+    })
 
     // The bearer token is on the stream request, which is the reason the
     // transport cannot be `EventSource`.
@@ -232,7 +242,7 @@ describe('a completed answer', () => {
     })
 
     act(() => {
-      view.result.current.send({ message: 'Halo', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Halo', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
     act(() => {
       stream.push(frame('token', { t: 'ok' }))
@@ -261,7 +271,7 @@ describe('an error event before any token', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -295,7 +305,7 @@ describe('an error event before any token', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     await waitFor(() => {
@@ -326,7 +336,7 @@ describe('an error event before any token', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     await waitFor(() => {
@@ -342,7 +352,7 @@ describe('an error event before any token', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     await waitFor(() => {
@@ -359,7 +369,7 @@ describe('a failure mid-stream', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -391,7 +401,11 @@ describe('a failure mid-stream', () => {
     await waitFor(() => {
       expect(calls).toHaveLength(1)
     })
-    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ message: 'Tanya', use_web: false })
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      message: 'Tanya',
+      use_web: false,
+      sources_only: true,
+    })
 
     act(() => {
       retry.push(frame('token', { t: 'Utuh' }))
@@ -412,7 +426,7 @@ describe('a failure mid-stream', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -439,7 +453,7 @@ describe('a failure mid-stream', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -467,7 +481,7 @@ describe('stopping a stream', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Tanya', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
 
     act(() => {
@@ -508,7 +522,7 @@ describe('stopping a stream', () => {
 
     const { view } = harness()
     act(() => {
-      view.result.current.send({ message: 'Pertanyaan pertama', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Pertanyaan pertama', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
     act(() => {
       first.push(frame('token', { t: 'Jawaban pertama' }))
@@ -518,7 +532,7 @@ describe('stopping a stream', () => {
     })
 
     act(() => {
-      view.result.current.send({ message: 'Pertanyaan kedua', sourceIds: [], useWeb: false })
+      view.result.current.send({ message: 'Pertanyaan kedua', sourceIds: [], useWeb: false, sourcesOnly: true })
     })
     await waitFor(() => {
       expect(view.result.current.turn?.question).toBe('Pertanyaan kedua')

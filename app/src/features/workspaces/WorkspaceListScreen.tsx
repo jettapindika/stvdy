@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
@@ -34,6 +35,7 @@ import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States
  * its sources.
  */
 export function WorkspaceListScreen() {
+  const { t } = useTranslation()
   const list = useWorkspaces()
   const create = useCreateWorkspace()
   const [name, setName] = useState('')
@@ -47,14 +49,14 @@ export function WorkspaceListScreen() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader
-        title="Workspaces"
-        subtitle="One workspace per course. Everything inside it reads across all of its sources."
+        title={t('nav.workspaces')}
+        subtitle={t('workspaces.list.subtitle')}
       />
 
-      <Section title="Your workspaces" count={list.data?.length}>
+      <Section title={t('workspaces.list.sectionTitle')} count={list.data?.length}>
         <div className="card">
           <form
-            className="flex flex-col gap-3 border-b border-rule px-4 py-4 sm:flex-row sm:items-end"
+            className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-end"
             onSubmit={(event) => {
               event.preventDefault()
               create.mutate(name, {
@@ -66,12 +68,12 @@ export function WorkspaceListScreen() {
           >
             <div className="flex-1">
               <Field
-                label="New workspace"
+                label={t('workspaces.list.newLabel')}
                 name="name"
                 value={name}
                 required
-                placeholder="Data Structures"
-                hint="The course or subject this material belongs to."
+                placeholder={t('workspaces.list.namePlaceholder')}
+                hint={t('workspaces.list.nameHint')}
                 error={validation?.field === 'name' ? validation.message : undefined}
                 onChange={(event) => {
                   setName(event.target.value)
@@ -79,17 +81,19 @@ export function WorkspaceListScreen() {
               />
             </div>
             <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-              {create.isPending ? 'Creating' : 'Create'}
+              {create.isPending ? t('workspaces.list.creating') : t('workspaces.list.create')}
             </button>
           </form>
 
           {showNotice && createError !== null && (
             <div className="px-4 py-4">
-              <ApiErrorNotice error={createError} noun="workspaces" />
+              <ApiErrorNotice error={createError} noun={t('workspaces.noun')} />
             </div>
           )}
 
-          {list.isPending && <SkeletonRows rows={2} label="Loading your workspaces" />}
+          {list.isPending && (
+            <SkeletonRows rows={2} label={t('workspaces.list.loading')} />
+          )}
 
           {listError !== null && (
             <div className="px-4 py-4">
@@ -101,7 +105,7 @@ export function WorkspaceListScreen() {
                     className="btn btn-secondary"
                     onClick={() => void list.refetch()}
                   >
-                    Try again
+                    {t('actions.retry')}
                   </button>
                 }
               />
@@ -116,8 +120,8 @@ export function WorkspaceListScreen() {
                   would push the text off the illustration's left edge. */}
               <EmptyState
                 padded={false}
-                title="No workspaces yet"
-                reason="Create one per course, then add its material: a PDF or pasted text. Answers will cite the page they came from, and the sources stay searchable together rather than in separate notebooks."
+                title={t('workspaces.list.emptyTitle')}
+                reason={t('workspaces.list.emptyReason')}
               />
             </div>
           )}
@@ -136,6 +140,7 @@ export function WorkspaceListScreen() {
 }
 
 function WorkspaceRow({ workspace }: { workspace: Workspace }) {
+  const { t } = useTranslation()
   const rename = useRenameWorkspace()
   const remove = useDeleteWorkspace()
   const [mode, setMode] = useState<'idle' | 'renaming' | 'deleting'>('idle')
@@ -145,7 +150,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
   const removeError = asApiError(remove.error)
 
   return (
-    <li className="flex flex-col gap-3 border-b border-rule px-4 py-3 last:border-b-0">
+    <li className="flex flex-col gap-3 border-b border-border px-4 py-3 last:border-b-0">
       {mode === 'renaming' ? (
         <form
           className="flex flex-col gap-3 sm:flex-row sm:items-end"
@@ -163,7 +168,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
         >
           <div className="flex-1">
             <Field
-              label="Workspace name"
+              label={t('workspaces.list.renameLabel')}
               value={name}
               required
               autoFocus
@@ -174,7 +179,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
           </div>
           <div className="flex gap-2">
             <button type="submit" className="btn btn-primary" disabled={rename.isPending}>
-              {rename.isPending ? 'Saving' : 'Save'}
+              {rename.isPending ? t('workspaces.list.saving') : t('actions.save')}
             </button>
             <button
               type="button"
@@ -185,7 +190,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
                 rename.reset()
               }}
             >
-              Cancel
+              {t('actions.cancel')}
             </button>
           </div>
         </form>
@@ -199,7 +204,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
           </Link>
           {/* A real count from the list response, never a placeholder. */}
           <span className="meta">
-            {workspace.source_count} {workspace.source_count === 1 ? 'source' : 'sources'}
+            {t('workspaces.list.sourceCount', { count: workspace.source_count })}
           </span>
           <button
             type="button"
@@ -208,7 +213,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
               setMode('renaming')
             }}
           >
-            Rename
+            {t('workspaces.list.rename')}
           </button>
           <button
             type="button"
@@ -217,20 +222,20 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
               setMode('deleting')
             }}
           >
-            Delete
+            {t('actions.delete')}
           </button>
         </div>
       )}
 
       {mode === 'deleting' && (
         <div className="note note-danger flex flex-col items-start gap-2">
-          <p className="font-medium">Delete {workspace.name}?</p>
+          <p className="font-medium">
+            {t('workspaces.list.deleteConfirmTitle', { name: workspace.name })}
+          </p>
           <p className="text-sm">
             {workspace.source_count === 0
-              ? 'It has no sources yet, so nothing else is lost. This cannot be undone.'
-              : `${String(workspace.source_count)} ${
-                  workspace.source_count === 1 ? 'source goes' : 'sources go'
-                } with it. This cannot be undone.`}
+              ? t('workspaces.list.deleteNoSources')
+              : t('workspaces.list.deleteSources', { count: workspace.source_count })}
           </p>
           <div className="flex gap-2">
             <button
@@ -246,7 +251,9 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
                 })
               }}
             >
-              {remove.isPending ? 'Deleting' : 'Delete workspace'}
+              {remove.isPending
+                ? t('workspaces.list.deleting')
+                : t('workspaces.list.deleteConfirm')}
             </button>
             <button
               type="button"
@@ -256,14 +263,18 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
                 setMode('idle')
               }}
             >
-              Keep it
+              {t('workspaces.keepIt')}
             </button>
           </div>
         </div>
       )}
 
-      {renameError !== null && <ApiErrorNotice error={renameError} noun="workspaces" />}
-      {removeError !== null && <ApiErrorNotice error={removeError} noun="workspaces" />}
+      {renameError !== null && (
+        <ApiErrorNotice error={renameError} noun={t('workspaces.noun')} />
+      )}
+      {removeError !== null && (
+        <ApiErrorNotice error={removeError} noun={t('workspaces.noun')} />
+      )}
     </li>
   )
 }

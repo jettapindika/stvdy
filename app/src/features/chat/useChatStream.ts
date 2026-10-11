@@ -37,6 +37,15 @@ export interface ChatRequest {
   /** Narrows retrieval to these sources. Empty means the whole workspace. */
   sourceIds: string[]
   useWeb: boolean
+  /**
+   * Whether the answer is written only from the selected sources.
+   *
+   * Kept separate from `useWeb` because they answer different questions: this one
+   * decides whether the model may use its own memory, that one whether it may
+   * leave the workspace. Both on is a coherent request — the student wants a
+   * grounded answer that may also cite a page they can open.
+   */
+  sourcesOnly: boolean
 }
 
 export interface ChatStreamState {
@@ -85,6 +94,7 @@ export function useChatStream(workspaceId: string): ChatStreamState {
             message: request.message,
             sourceIds: request.sourceIds,
             useWeb: request.useWeb,
+            sourcesOnly: request.sourcesOnly,
             signal: controller.signal,
           },
           {

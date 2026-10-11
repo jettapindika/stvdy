@@ -654,3 +654,46 @@ async fn the_generation_settings_are_validated(pool: PgPool) {
         .unwrap();
     assert_eq!(quizzes, 0);
 }
+
+/// A quiz row whose `difficulty` is NULL must read, not panic the route.
+///
+/// `quizzes.difficulty` is nullable (`0010_quizzes_attempts.sql`), and the row
+/// decoder read it into a non-`Option` `String`. A NULL therefore reached
+/// `row.get("difficulty")` and unwrapped into a `ColumnDecode` panic, which
+/// `CatchPanicLayer` turned into a 500 for the whole handler — observed in the
+/// server log on a real row, not inferred. The route must answer 200 and report
+/// the difficulty as absent.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_quiz_with_no_difficulty_still_reads(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![reply(1)])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "nulldiff@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (quiz_id, _) = generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
+
+    // The state a legacy or hand-created row can be in, written directly because
+    // the API always supplies a difficulty.
+    sqlx::query("update quizzes set difficulty = null where id = $1")
+        .bind(uuid::Uuid::parse_str(&quiz_id).unwrap())
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["quiz"]["difficulty"].is_null(), "{body}");
+    // The rest of the row still arrives, so this is a decoding fix and not a
+    // silently truncated response.
+    assert_eq!(body["quiz"]["status"], "ready", "{body}");
+    assert_eq!(body["quiz"]["id"], quiz_id, "{body}");
+}

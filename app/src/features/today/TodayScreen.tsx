@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import { PageHeader, Section } from '@/components/layout/Section'
 import { EmptyState } from '@/components/ui/States'
 
@@ -13,45 +15,44 @@ import { EmptyState } from '@/components/ui/States'
  * produce, so the layout is real and will fill in as those phases land.
  */
 export function TodayScreen() {
+  const { t } = useTranslation()
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
-      <PageHeader
-        title="Today"
-        subtitle="Study blocks, due cards, and deadlines, arranged by the time you have available."
-      />
+      <PageHeader title={t('nav.today')} subtitle={t('today.subtitle')} />
 
-      <Section title="Study blocks">
+      <Section title={t('today.studyBlocks.title')}>
         <div className="card">
           <EmptyState
-            title="No study blocks scheduled"
-            reason="Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class."
+            title={t('today.studyBlocks.emptyTitle')}
+            reason={t('today.studyBlocks.emptyReason')}
           />
         </div>
       </Section>
 
-      <Section title="Due flashcards">
+      <Section title={t('today.dueCards.title')}>
         <div className="card">
           <EmptyState
-            title="No cards due"
-            reason="Review cards appear here when their interval elapses. Generate a deck from a source and Stvdy schedules the reviews."
+            title={t('today.dueCards.emptyTitle')}
+            reason={t('today.dueCards.emptyReason')}
           />
         </div>
       </Section>
 
-      <Section title="Tasks">
+      <Section title={t('nav.tasks')}>
         <div className="card">
           <EmptyState
-            title="Nothing due"
-            reason="Tasks from a workspace, a syllabus import, or a quick capture land here, ordered by due date."
+            title={t('today.tasks.emptyTitle')}
+            reason={t('today.tasks.emptyReason')}
           />
         </div>
       </Section>
 
-      <Section title="Upcoming exams">
+      <Section title={t('today.exams.title')}>
         <div className="card">
           <EmptyState
-            title="No exams tracked"
-            reason="Add an exam as a goal and it becomes the anchor the planner schedules against."
+            title={t('today.exams.emptyTitle')}
+            reason={t('today.exams.emptyReason')}
           />
         </div>
       </Section>

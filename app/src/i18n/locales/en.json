@@ -1,0 +1,563 @@
+{
+  "app": {
+    "name": "Stvdy",
+    "session": {
+      "restoring": "Restoring your session"
+    }
+  },
+  "nav": {
+    "today": "Today",
+    "workspaces": "Workspaces",
+    "study": "Study",
+    "planner": "Planner",
+    "calendar": "Calendar",
+    "tasks": "Tasks",
+    "more": "More",
+    "settings": "Settings",
+    "plan": "Plan",
+    "help": "Help",
+    "devices": "Devices and sync",
+    "work": "Work"
+  },
+  "actions": {
+    "add": "Add",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "remove": "Remove",
+    "close": "Close",
+    "retry": "Try again",
+    "dismiss": "Dismiss",
+    "confirm": "Confirm",
+    "edit": "Edit",
+    "undo": "Undo",
+    "copy": "Copy",
+    "open": "Open",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "stop": "Stop",
+    "send": "Send",
+    "search": "Search"
+  },
+  "states": {
+    "loading": "Loading",
+    "offline": "You are offline",
+    "offlineReason": "This needs a connection. Your tasks, events, and reviews still work.",
+    "error": "Something went wrong",
+    "notFound": "This page does not exist",
+    "empty": "Nothing here yet",
+    "synced": "Synced",
+    "syncing": "Syncing",
+    "needsAttention": "Needs attention",
+    "notBuiltYet": "Not built yet. This screen will hold {{what}}."
+  },
+  "honesty": {
+    "composerHint": "AI can make mistakes. Check the citations.",
+    "sourcesOnly": "Answer only from my sources",
+    "sourcesOnlyTooltip": "Stvdy uses only your selected sources and cites them. It can still make mistakes, so check the cited page.",
+    "basedOnSources_one": "Based on {{count}} source",
+    "basedOnSources_other": "Based on {{count}} sources",
+    "notInSources": "This isn't covered in your selected sources.",
+    "suggested": "Suggested {{what}}",
+    "nothingAddedYet": "Nothing is added until you confirm."
+  },
+  "lock": {
+    "notOnPlan": "Not available on your plan",
+    "availableOn": "Available on {{plan}}",
+    "upgrade": "Upgrade to {{plan}}"
+  },
+  "shell": {
+    "nav": {
+      "main": "Main"
+    },
+    "skipToContent": "Skip to content"
+  },
+  "routes": {
+    "calendar": {
+      "what": "a week and month view of classes, deadlines, and the study blocks the planner proposes, plus Google Calendar and ICS connections"
+    },
+    "tasks": {
+      "what": "tasks and subtasks across your workspaces, with quick capture and an assistant that proposes breakdowns you confirm before they save"
+    },
+    "settings": {
+      "what": "timezone and study hours, daily limits, reminder channels, connected calendars, and your signed-in devices"
+    },
+    "billing": {
+      "what": "your current plan, when the prepaid period ends, and your remaining credits. Purchase screens live on the web and desktop builds only."
+    },
+    "notFound": {
+      "title": "Not found",
+      "what": "nothing: this address does not match a screen"
+    }
+  },
+  "billing": {
+    "planAndUsage": "Plan and usage",
+    "seePlans": "See plans"
+  },
+  "brand": {
+    "illustration": {
+      "alt": "An open book with a sparkle and a checkmark"
+    }
+  },
+  "sources": {
+    "passage": {
+      "label": "Source passage",
+      "loading": "Loading the source passage",
+      "unknownSource": "A source",
+      "noun": "this passage"
+    },
+    "page": "page {{page}}",
+    "pageUnknown": "page unknown"
+  },
+  "citation": {
+    "chunkLabel": "{{title}}, {{page}}",
+    "webLabel": "{{title}}, {{host}}",
+    "webSourceLabel": "Web source: {{label}}",
+    "openWebSourceLabel": "Open web source: {{label}}",
+    "sourceLabel": "Source: {{label}}",
+    "openSourceLabel": "Open source: {{label}}",
+    "unknownSource": "A source",
+    "page": "page {{page}}",
+    "pageUnknown": "page unknown",
+    "open": "Open source: {{label}}",
+    "loading": "Loading the cited passage"
+  },
+  "auth": {
+    "field": {
+      "email": "Email",
+      "password": "Password"
+    },
+    "signIn": {
+      "title": "Sign in",
+      "subtitle": "Your workspaces, sources, and study material, on every device you sign in from.",
+      "newHere": "New to Stvdy?",
+      "createAccount": "Create an account",
+      "mismatchTitle": "That did not match",
+      "mismatchReason": "Check the email and the password and try again. Neither is shown to anyone else.",
+      "pending": "Signing in"
+    },
+    "signUp": {
+      "title": "Create your account",
+      "subtitle": "One workspace per course, with everything inside it readable together.",
+      "haveAccount": "Already have an account?",
+      "takenTitle": "That address is already registered",
+      "takenReason": "Sign in with it instead, or use a different email address for this account.",
+      "deviceLabel": "This device",
+      "deviceHint": "The name this machine appears under in your device list. You can rename it later.",
+      "pending": "Creating your account",
+      "submit": "Create account"
+    },
+    "verify": {
+      "awaitingTitle": "Check your email",
+      "awaitingSubtitle": "One more step before your account is fully set up.",
+      "verifyingTitle": "Verifying your email",
+      "verifyingSubtitle": "Checking this link with the server.",
+      "verifiedTitle": "Email verified",
+      "verifiedSubtitle": "Your address is confirmed. Nothing else is needed from you.",
+      "failedTitle": "Verification failed",
+      "failedSubtitle": "This link could not be used.",
+      "resendSent": "A new link is on its way. It can take a minute to arrive.",
+      "resendPending": "Sending a new link",
+      "resend": "Send a new link",
+      "sentTo": "We sent a verification link to {{email}}. Open it to confirm that address.",
+      "needLink": "This page needs the link from your verification email. Open the newest one, or sign in to request another.",
+      "goToWorkspaces": "Go to your workspaces",
+      "checking": "Checking this verification link",
+      "verifiedSignedIn": "Your email address is verified.",
+      "verifiedSignedOut": "Your email address is verified. Sign in to continue.",
+      "linkGoneTitle": "This link no longer works",
+      "linkGoneReason": "Verification links are single use and they expire. Request a new one and open the newest email, because older links stop working as soon as a newer one is issued.",
+      "signInToRequest": "Sign in to request a new link"
+    },
+    "googleCallback": {
+      "noun": "signing in with Google",
+      "incompleteTitle": "This sign-in link is incomplete",
+      "incompleteSubtitle": "Google sent you back without the one-time ticket that completes the sign-in.",
+      "nothingToComplete": "Nothing to complete",
+      "nothingToCompleteReason": "Open the Google sign-in button again and finish it in one go. This page needs the ticket that Google returns with.",
+      "backToSignIn": "Back to sign in",
+      "failedTitle": "Google sign-in did not finish",
+      "failedSubtitle": "The sign-in could not be completed. Nothing was changed on your account.",
+      "linkGoneTitle": "That link no longer works",
+      "linkGoneReason": "Sign-in tickets are single use and they expire after five minutes. Start the Google sign-in again.",
+      "pendingTitle": "Signing you in",
+      "pendingSubtitle": "Finishing the Google sign-in you just started.",
+      "loading": "Completing sign-in"
+    }
+  },
+  "today": {
+    "subtitle": "Study blocks, due cards, and deadlines, arranged by the time you have available.",
+    "studyBlocks": {
+      "title": "Study blocks",
+      "emptyTitle": "No study blocks scheduled",
+      "emptyReason": "Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class."
+    },
+    "dueCards": {
+      "title": "Due flashcards",
+      "emptyTitle": "No cards due",
+      "emptyReason": "Review cards appear here when their interval elapses. Generate a deck from a source and Stvdy schedules the reviews."
+    },
+    "tasks": {
+      "emptyTitle": "Nothing due",
+      "emptyReason": "Tasks from a workspace, a syllabus import, or a quick capture land here, ordered by due date."
+    },
+    "exams": {
+      "title": "Upcoming exams",
+      "emptyTitle": "No exams tracked",
+      "emptyReason": "Add an exam as a goal and it becomes the anchor the planner schedules against."
+    }
+  },
+  "workspaces": {
+    "noun": "workspaces",
+    "keepIt": "Keep it",
+    "detail": {
+      "titleFallback": "Workspace"
+    },
+    "panels": {
+      "label": "Workspace panels"
+    },
+    "panel": {
+      "sources": "Sources",
+      "chat": "Chat",
+      "studio": "Studio"
+    },
+    "studio": {
+      "sections": "Studio sections",
+      "flashcards": "Flashcards",
+      "quiz": "Quiz"
+    },
+    "sources": {
+      "loading": "Loading this workspace's sources",
+      "emptyTitle": "No sources yet",
+      "emptyReason": "Add a PDF or paste text above. Each one is chunked and indexed, so a question can be answered from any of them and cite the page it came from."
+    },
+    "source": {
+      "untitled": "Untitled source",
+      "kindPdf": "PDF",
+      "kindText": "Text",
+      "status": {
+        "pending": "Waiting to start",
+        "processing": "Processing",
+        "ready": "Ready",
+        "failed": "Failed"
+      },
+      "chunkCount_one": "{{count}} chunk",
+      "chunkCount_other": "{{count}} chunks",
+      "removeConfirm": "Remove this source?",
+      "removing": "Removing",
+      "removeIt": "Remove it",
+      "noun": "sources"
+    },
+    "upload": {
+      "legend": "Add material",
+      "kindPdf": "PDF file",
+      "kindText": "Pasted text",
+      "textLabel": "Text to add",
+      "titleLabel": "Title",
+      "titleHint": "Optional. The name this source is listed under.",
+      "uploading": "Uploading",
+      "submit": "Add source",
+      "afterStored": "After the file is stored, this workspace's source list shows extraction and indexing until the source is ready.",
+      "noun": "uploading sources"
+    },
+    "sourcePicker": {
+      "legend": "Answer from",
+      "emptyHint": "No indexed sources yet. Upload one in the Sources panel and this box will use it.",
+      "nothingSelectedAllReady": "Nothing selected, so the answer uses every ready source in this workspace.",
+      "nothingSelected": "Nothing selected yet.",
+      "selectedCount": "{{selected}} of {{total}} sources selected."
+    },
+    "list": {
+      "subtitle": "One workspace per course. Everything inside it reads across all of its sources.",
+      "sectionTitle": "Your workspaces",
+      "newLabel": "New workspace",
+      "namePlaceholder": "Data Structures",
+      "nameHint": "The course or subject this material belongs to.",
+      "creating": "Creating",
+      "create": "Create",
+      "loading": "Loading your workspaces",
+      "emptyTitle": "No workspaces yet",
+      "emptyReason": "Create one per course, then add its material: a PDF or pasted text. Answers will cite the page they came from, and the sources stay searchable together rather than in separate notebooks.",
+      "renameLabel": "Workspace name",
+      "saving": "Saving",
+      "sourceCount_one": "{{count}} source",
+      "sourceCount_other": "{{count}} sources",
+      "rename": "Rename",
+      "deleteConfirmTitle": "Delete {{name}}?",
+      "deleteNoSources": "It has no sources yet, so nothing else is lost. This cannot be undone.",
+      "deleteSources_one": "{{count}} source goes with it. This cannot be undone.",
+      "deleteSources_other": "{{count}} sources go with it. This cannot be undone.",
+      "deleting": "Deleting",
+      "deleteConfirm": "Delete workspace"
+    }
+  },
+  "chat": {
+    "composer": {
+      "label": "Ask about this workspace",
+      "hint": "Enter sends. Shift and Enter starts a new line.",
+      "ask": "Ask"
+    },
+    "webToggle": {
+      "label": "Search the web too",
+      "hint": "Also searches outside this workspace and cites what it finds, with links. Answers stay grounded in your sources, and a search that finds nothing still answers from them."
+    },
+    "empty": {
+      "title": "No questions yet",
+      "noSources": "Ask once a source has finished indexing. A question is answered from this workspace’s material and cites the page each claim came from.",
+      "noSourcesWithWeb": "Ask once a source has finished indexing. A question is answered from this workspace’s material and cites the page each claim came from. Web results are searched for as well.",
+      "default": "Ask about anything in this workspace’s material. The answer cites the page each claim came from.",
+      "defaultWithWeb": "Ask about anything in this workspace’s material. The answer cites the page each claim came from. Web results are cited with links to where they came from."
+    },
+    "list": {
+      "label": "Conversation",
+      "loading": "Loading this conversation",
+      "searching": "Searching this workspace"
+    },
+    "retry": "Ask again",
+    "turn": {
+      "you": "You"
+    }
+  },
+  "errors": {
+    "nouns": {
+      "messages": "messages",
+      "passage": "this passage",
+      "answers": "answers",
+      "deck": "this deck",
+      "dueCards": "the due cards",
+      "review": "this review",
+      "quiz": "this quiz",
+      "results": "your results",
+      "answer": "this answer",
+      "decks": "decks",
+      "quizzes": "quizzes"
+    }
+  },
+  "study": {
+    "backToWorkspace": "Back to the workspace",
+    "refreshFailed": "Could not refresh this deck. Your session is unaffected.",
+    "loadingDue": "Loading this deck's due cards",
+    "cardProgress": "Card {{current}} of {{total}}",
+    "cardLabel": "Flashcard",
+    "showSource": "Show source",
+    "hideSource": "Hide source",
+    "showAnswer": "Show answer",
+    "grade": {
+      "again": "Again",
+      "hard": "Hard",
+      "good": "Good",
+      "easy": "Easy"
+    },
+    "nothingDue": {
+      "title": "Nothing due in this deck",
+      "scheduled": "Every card in this deck has been scheduled. Come back after the next one is due.",
+      "next": "Every card here is scheduled. The next one comes due {{when}}."
+    }
+  },
+  "quiz": {
+    "loading": "Loading this quiz",
+    "backToWorkspaces": "Back to workspaces",
+    "generating": "This quiz is still being generated",
+    "generateFailed": {
+      "title": "This quiz could not be generated",
+      "reason": "The generation failed. Your credits were refunded."
+    },
+    "empty": {
+      "title": "This quiz has no questions",
+      "reason": "Generate it again from the Studio."
+    },
+    "defaultTitle": "Quiz",
+    "count_one": "{{count}} question",
+    "count_other": "{{count}} questions",
+    "questionProgress": "Question {{current}} of {{total}}",
+    "chooseOne": "Choose one",
+    "yourAnswer": "Your answer",
+    "checking": "Checking",
+    "submit": "Submit answer",
+    "correct": "Correct",
+    "notCorrect": "Not correct",
+    "notCorrectWithAnswer": "Not correct. The answer is: {{answer}}",
+    "notMarked": "Not marked",
+    "goodAnswer": "A good answer",
+    "didYouSay": "Did you say",
+    "gotIt": "I got it",
+    "missedIt": "I missed it",
+    "sourceLabel": "Where this question came from",
+    "seeResults": "See results",
+    "nextQuestion": "Next question",
+    "results": {
+      "loading": "Loading your results",
+      "score": "Your score",
+      "nothingMarked": "Nothing is marked yet. Answer a question and your score appears here.",
+      "correctOf": "{{correct}} of {{graded}} correct",
+      "answeredOf": "{{answered}} of {{total}} answered",
+      "answeredOfWaiting": "{{answered}} of {{total}} answered, {{waiting}} waiting for you to mark",
+      "topics": "Where to look again",
+      "sourceUnavailable": "Source unavailable",
+      "everyQuestion": "Every question"
+    }
+  },
+  "studio": {
+    "status": {
+      "generating": "Generating",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "starting": "Starting",
+    "generateFrom": "Generate from",
+    "noIndexedSources": "No indexed sources yet. Add one in the Sources panel, then come back.",
+    "deck": {
+      "nameLabel": "Deck name",
+      "nameHint": "What this deck is for.",
+      "countLabel": "How many cards",
+      "cost_one": "Costs {{credits}} credits per {{count}} card. The deck appears here while it is generated, usually within a minute.",
+      "cost_other": "Costs {{credits}} credits per {{count}} cards. The deck appears here while it is generated, usually within a minute.",
+      "generate": "Generate deck",
+      "loading": "Loading this workspace's decks",
+      "empty": {
+        "title": "No decks yet",
+        "reason": "Pick the sources above and generate one. Every card is linked to the passage it came from."
+      },
+      "untitled": "Untitled deck",
+      "cards_one": "{{count}} card",
+      "cards_other": "{{count}} cards"
+    },
+    "quiz": {
+      "nameLabel": "Quiz name",
+      "nameHint": "What this quiz is for.",
+      "difficultyLabel": "Difficulty",
+      "difficulty": {
+        "easy": "easy",
+        "medium": "medium",
+        "hard": "hard"
+      },
+      "typesLabel": "Questions",
+      "types": {
+        "mcq": "multiple choice",
+        "short": "short answer",
+        "mixed": "mixed"
+      },
+      "countLabel": "How many questions",
+      "cost_one": "Costs {{credits}} credits per {{count}} question. The quiz appears here while it is generated, usually within a minute.",
+      "cost_other": "Costs {{credits}} credits per {{count}} questions. The quiz appears here while it is generated, usually within a minute.",
+      "generate": "Generate quiz",
+      "loading": "Loading this workspace's quizzes",
+      "empty": {
+        "title": "No quizzes yet",
+        "reason": "Pick the sources above and generate one. Every question is linked to the passage it came from."
+      },
+      "untitled": "Untitled quiz",
+      "questions_one": "{{count}} question",
+      "questions_other": "{{count}} questions",
+      "take": "Take quiz"
+    }
+  },
+  "styleguide": {
+    "title": "Design reference",
+    "subtitle": "Not a product screen. The tokens and components in one place, with placeholder content rather than sample data.",
+    "palette": {
+      "title": "Palette",
+      "description": "Indigo is the action: it fills the primary button, marks the selected item, and carries the brand. Sky is reserved for sources and citations, and nothing else — a sky chip on screen means the text beside it came from your own material. Emerald is done, amber is due soon, rose is again, overdue, or destructive. Every text/background pair below is checked in both themes by the contrast test, so this list cannot drift from what renders.",
+      "contrastNote": "Text pairs clear 4.5:1 and borders, icons and the focus ring clear 3:1, in light and dark. The check runs in CI and fails the build on a miss."
+    },
+    "swatch": {
+      "success": "done and mastered",
+      "bg": "page ground",
+      "surface": "cards and panels",
+      "raised": "insets and secondary blocks",
+      "border": "hairlines and dividers",
+      "borderStrong": "a boundary that must be visible: input edges",
+      "text": "body text",
+      "textMuted": "secondary text",
+      "textSubtle": "captions and hints",
+      "primary": "the action fill",
+      "primaryText": "indigo as text: links, active nav",
+      "primaryTint": "selected rows, working chips",
+      "source": "citations only",
+      "sourceTint": "the citation chip's fill",
+      "successTint": "the ready chip",
+      "warning": "due soon",
+      "warningTint": "the due chip",
+      "dangerTint": "the error note",
+      "ring": "the focus ring",
+      "danger": "errors"
+    },
+    "type": {
+      "title": "Type",
+      "headingOne": "Heading one",
+      "headingTwo": "Heading two",
+      "headingThree": "Heading three",
+      "body": "Body text at 14px on desktop and 16px on mobile. Inter for the interface, Plus Jakarta Sans for headings, JetBrains Mono for page refs and timestamps. All three are bundled, so the app renders with no network.",
+      "meta": "Monospace metadata: page 12, 24 min, 2026-10-11",
+      "linkBefore": "A",
+      "linkText": "link in body copy",
+      "linkAfter": "uses the body-text indigo, because the fill indigo is for surfaces that carry white text."
+    },
+    "citations": {
+      "title": "Citation marks",
+      "description": "The identity motif. A mark appears only next to something genuinely traceable, so it never implies grounding that is not there. A mark with a destination is a control; without one it is plain text.",
+      "exampleLayer": "Encapsulation adds a header at each layer",
+      "exampleOverhead": ", and the overhead is predictable",
+      "exampleSeparately": ". An outside result is marked separately",
+      "exampleEnd": ".",
+      "sampleSource": "Source title",
+      "sampleAnotherSource": "Another source",
+      "sampleWebResult": "Web result",
+      "interactive": "The interactive form is shown above as a web citation, which has a real destination. A chunk citation becomes a button only when a caller passes a handler; with none it renders as text rather than a control that swallows clicks."
+    },
+    "controls": {
+      "title": "Controls",
+      "descriptionBefore": "Appearance only. These are inert samples, not controls: they carry",
+      "descriptionCode": "aria-disabled",
+      "descriptionAfter": "and are outside the tab order, because a button that does nothing is a defect rather than a demo (R-26). A real screen wires each one to its own action.",
+      "primary": "Primary action",
+      "secondary": "Secondary",
+      "quiet": "Quiet",
+      "disabled": "Disabled",
+      "fieldLabel": "Field label",
+      "placeholder": "Placeholder text"
+    },
+    "states": {
+      "title": "States",
+      "emptyTitle": "Empty state",
+      "emptyReason": "Names why it is empty and what fills it. The reason is a required prop, so a blank state cannot ship by forgetting.",
+      "errorTitle": "Error state",
+      "errorReason": "Names what failed and what to do about it.",
+      "loading": "Loading a named thing, not just loading",
+      "loadingRows": "Loading rows"
+    },
+    "course": {
+      "title": "Course colours",
+      "description": "Six categorical hues. Each is a 4px marker plus a tinted chip plus an initial or icon, and never the only signal: two courses in the same colour are told apart by their names, and a course colour is not a status colour.",
+      "indigo": "Algorithms",
+      "sky": "Statistics",
+      "emerald": "Biology",
+      "amber": "Economics",
+      "violet": "Literature",
+      "rose": "Calculus"
+    },
+    "chips": {
+      "title": "Chips and icons",
+      "description": "A chip carries a state in words; the tone repeats it, so the state reads correctly in monochrome. Icons are one outline set at 20px, drawn in currentColor so they cannot introduce a colour the contrast check has not measured.",
+      "neutral": "Pending",
+      "working": "Processing 42%",
+      "ready": "Ready",
+      "due": "Due today",
+      "failed": "Failed",
+      "source": "From your sources"
+    },
+    "locked": {
+      "title": "Locked features",
+      "description": "One component, two variants, chosen by the platform. Web and desktop name the plan and link to checkout; iOS and Android state the fact with no price, no button and no link, because the stores review for exactly that."
+    },
+    "composer": {
+      "title": "Composer honesty",
+      "description": "The line under every chat composer, and the grounding toggle above it. Both are part of the composer rather than a tooltip: a warning nobody has to open is one most people never read."
+    }
+  },
+  "planner": {
+    "rebalance": "Rebalance my week",
+    "rebalanceReason": "Moves and splits study blocks when a week is overloaded."
+  }
+}

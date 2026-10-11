@@ -8,15 +8,20 @@
 use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, resolve};
-use stvdy_core::prompts::registry::{BASE_V1, BASE_V1_VERSION};
+use stvdy_core::prompts::registry::{BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION};
 use stvdy_core::prompts::{
-    ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, VarKind, base_variable_kind,
-    base_variables, compose_chat, module_variables,
+    ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, VarKind, base_v2_variables,
+    base_variable_kind, base_variables, compose_chat, module_variables,
 };
 
 /// The base prompt file, read from disk by the same relative path the registry
 /// compiles it from, so this test checks the *file* and not a copy of it.
 const BASE_FILE: &str = include_str!("../../../prompts/base.v1.md");
+
+/// The v2 base prompt file, read the same way, so the "v2 is v1 plus the
+/// grounding toggle" check is against the files rather than against the
+/// registry's copies of them.
+const BASE_V2_FILE: &str = include_str!("../../../prompts/base.v2.md");
 
 /// The flashcards module file, for the documented-schema check.
 const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
@@ -36,6 +41,7 @@ fn vars() -> ChatVars {
         study_mode: "off".to_string(),
         study_hours_summary: "2 hours per day".to_string(),
         use_web: "off".to_string(),
+        sources_only: "on".to_string(),
         allow_upgrade_hint: false,
         user_name: "Jetta".to_string(),
         workspace_name: "Jaringan Komputer".to_string(),
@@ -89,10 +95,91 @@ fn base_variables_covers_every_variable_in_the_file() {
     }
 }
 
+/// The v2 half of the same contract: the chat composer renders `base.v2.md`, so
+/// its own table must cover that file exactly, including `{{sources_only}}`.
+#[test]
+fn base_v2_variables_covers_every_variable_in_the_file() {
+    let declared: Vec<&str> = base_v2_variables().iter().map(|(name, _)| *name).collect();
+
+    for name in variables_in(BASE_V2_FILE) {
+        assert!(
+            declared.contains(&name.as_str()),
+            "prompts/base.v2.md uses {{{{{name}}}}} but base_v2_variables() does not declare it"
+        );
+    }
+    for name in &declared {
+        assert!(
+            variables_in(BASE_V2_FILE).iter().any(|used| used == name),
+            "base_v2_variables() declares {name} but prompts/base.v2.md never uses it"
+        );
+    }
+}
+
 #[test]
 fn the_registry_compiles_the_base_file_verbatim() {
     assert_eq!(BASE_V1, BASE_FILE);
     assert_eq!(BASE_V1_VERSION, "base.v1");
+    assert_eq!(BASE_V2, BASE_V2_FILE);
+    assert_eq!(BASE_V2_VERSION, "base.v2");
+}
+
+/// v2's declared variables are v1's plus the one toggle, so a future edit that
+/// adds a variable to one table and forgets the other fails here rather than
+/// shipping a prompt whose `{{name}}` is undeclared.
+#[test]
+fn base_v2_variables_are_v1_plus_the_sources_only_toggle() {
+    let mut expected = base_variables().to_vec();
+    expected.push(("sources_only", VarKind::Caller));
+    assert_eq!(base_v2_variables(), expected.as_slice());
+}
+
+/// v2 is v1 superseded, not rewritten: outside `<grounding_and_citations>` the
+/// two files must be byte-identical, so a v2 edit cannot silently change the
+/// tone, tools, or security rules the v1 text was reviewed for.
+#[test]
+fn base_v2_differs_from_v1_only_in_the_grounding_section() {
+    let (before_v1, after_v1) = split_around(BASE_FILE, "grounding_and_citations");
+    let (before_v2, after_v2) = split_around(BASE_V2_FILE, "grounding_and_citations");
+
+    assert_eq!(
+        before_v1, before_v2,
+        "the text before grounding must be equal"
+    );
+    assert_eq!(after_v1, after_v2, "the text after grounding must be equal");
+    assert_ne!(
+        section(BASE_FILE, "grounding_and_citations"),
+        section(BASE_V2_FILE, "grounding_and_citations"),
+        "v2 exists precisely because the grounding rules changed"
+    );
+}
+
+/// Everything before the `<name>` opening tag and everything after its closing
+/// tag, so two texts can be compared with that one section excluded.
+fn split_around<'a>(text: &'a str, name: &str) -> (&'a str, &'a str) {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let start = text
+        .find(&open)
+        .unwrap_or_else(|| panic!("<{name}> is missing"));
+    let end = text
+        .find(&close)
+        .unwrap_or_else(|| panic!("</{name}> is missing"))
+        + close.len();
+    (&text[..start], &text[end..])
+}
+
+/// One section of a prompt, tags included.
+fn section<'a>(text: &'a str, name: &str) -> &'a str {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let start = text
+        .find(&open)
+        .unwrap_or_else(|| panic!("<{name}> is missing"));
+    let end = text
+        .find(&close)
+        .unwrap_or_else(|| panic!("</{name}> is missing"))
+        + close.len();
+    &text[start..end]
 }
 
 #[test]
@@ -111,7 +198,9 @@ fn the_plan_gate_instruction_is_declared_derived() {
 
 #[test]
 fn a_missing_caller_variable_is_an_error_named_after_it() {
-    for (name, kind) in base_variables() {
+    // The chat composer renders v2, so the sweep is over v2's table: a caller
+    // variable only v2 uses (`sources_only`) must be checked too.
+    for (name, kind) in base_v2_variables() {
         if *kind != VarKind::Caller || *name == "allow_upgrade_hint" {
             // The boolean is always supplied; a string cannot represent "absent".
             continue;
@@ -141,6 +230,7 @@ fn blank(name: &str, vars: &mut ChatVars) {
         "study_mode" => vars.study_mode = String::new(),
         "study_hours_summary" => vars.study_hours_summary = String::new(),
         "use_web" => vars.use_web = String::new(),
+        "sources_only" => vars.sources_only = String::new(),
         "user_name" => vars.user_name = String::new(),
         "workspace_name" => vars.workspace_name = String::new(),
         other => panic!("blank() has no case for caller variable {other}"),
@@ -160,9 +250,96 @@ fn the_composed_prompt_has_no_unfilled_variable() {
         !composed.text.contains("{{"),
         "an unfilled variable must never reach a model"
     );
-    assert_eq!(composed.prompt_version, "base.v1");
+    assert_eq!(composed.prompt_version, "base.v2");
     assert!(composed.text.contains("Jetta"));
     assert!(composed.text.contains("Jaringan Komputer"));
+}
+
+/// The per-chat toggle, rendered both ways: neither leaves a literal marker, and
+/// the two texts differ *only* inside `<grounding_and_citations>` because that is
+/// the only place `{{sources_only}}` appears.
+#[test]
+fn sources_only_on_and_off_render_cleanly_and_differ_only_in_grounding() {
+    let mut on = vars();
+    on.sources_only = "on".to_string();
+    let mut off = vars();
+    off.sources_only = "off".to_string();
+
+    let on_text = compose_chat(&on, &[], &[]).unwrap().text;
+    let off_text = compose_chat(&off, &[], &[]).unwrap().text;
+
+    assert!(!on_text.contains("{{"), "{on_text}");
+    assert!(!off_text.contains("{{"), "{off_text}");
+
+    let (on_before, on_after) = split_around(&on_text, "grounding_and_citations");
+    let (off_before, off_after) = split_around(&off_text, "grounding_and_citations");
+    assert_eq!(
+        on_before, off_before,
+        "only the grounding section may differ"
+    );
+    assert_eq!(on_after, off_after, "only the grounding section may differ");
+    assert_ne!(
+        section(&on_text, "grounding_and_citations"),
+        section(&off_text, "grounding_and_citations"),
+        "the toggle must actually change the grounding rules"
+    );
+}
+
+/// With the toggle on, the prompt tells the model the setting is on and forbids an
+/// ungrounded answer, naming the two honest next steps the spec requires.
+#[test]
+fn sources_only_on_forbids_an_ungrounded_answer() {
+    let mut on = vars();
+    on.sources_only = "on".to_string();
+    let text = compose_chat(&on, &[], &[]).unwrap().text;
+
+    assert!(text.contains("which is on:"), "{text}");
+    assert!(
+        text.contains("never answer from general knowledge"),
+        "the on setting must forbid a general-knowledge answer: {text}"
+    );
+    assert!(
+        text.contains("turn on web search"),
+        "the on setting must offer web search as a next step: {text}"
+    );
+    assert!(
+        text.contains("switch this setting off"),
+        "the on setting must offer the general-knowledge alternative: {text}"
+    );
+}
+
+/// With the toggle off, the permission keeps `base.v1.md`'s wording and the
+/// prohibition is scoped to the setting being on, so nothing in the prompt
+/// forbids a general-knowledge answer in this state.
+#[test]
+fn sources_only_off_permits_a_general_knowledge_answer() {
+    let mut off = vars();
+    off.sources_only = "off".to_string();
+    let text = compose_chat(&off, &[], &[]).unwrap().text;
+
+    assert!(text.contains("which is off:"), "{text}");
+    assert!(
+        text.contains(
+            "you may offer a general-knowledge answer, but label it as not from their sources \
+             and do not attach citations to it"
+        ),
+        "the off behaviour is v1's wording: {text}"
+    );
+    // The prohibition lives in the "When it is on:" branch, not in the "off"
+    // branch the rendered value ("off") selects.
+    let grounding = section(&text, "grounding_and_citations");
+    let off_branch = grounding
+        .split_once("When it is off:")
+        .expect("the off branch is present")
+        .1;
+    assert!(
+        !off_branch.contains("never answer from general knowledge"),
+        "the off branch must not forbid a general-knowledge answer: {off_branch}"
+    );
+    assert!(
+        grounding.contains("When it is on:"),
+        "the prohibition is scoped to the setting being on: {grounding}"
+    );
 }
 
 /// A source is data, not a template: a programming document legitimately contains
@@ -398,6 +575,7 @@ mod task_composition {
             study_mode: "off".to_string(),
             study_hours_summary: "19:00-22:00".to_string(),
             use_web: "off".to_string(),
+            sources_only: "on".to_string(),
             allow_upgrade_hint: false,
             user_name: "Jetta".to_string(),
             workspace_name: "Jaringan Komputer".to_string(),

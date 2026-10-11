@@ -287,8 +287,21 @@ locked until then, so an unverified account gets 403 `email_not_verified`).
 Answers `text/event-stream`.
 
 Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
-"study_mode"?: bool}`. `source_ids` narrows retrieval to the selected sources; an
-absent or empty list searches the whole workspace.
+"sources_only"?: bool, "study_mode"?: bool}`. `source_ids` narrows retrieval to the
+selected sources; an absent or empty list searches the whole workspace.
+
+`sources_only` is the per-chat "Answer only from my sources" toggle. It defaults to
+`true` when omitted, because that is the UI default: a request that drops the field
+must behave as grounded ON rather than silently answering from general knowledge.
+With it on, the prompt forbids an answer from general knowledge and tells the model
+to offer web search or the toggle itself instead; with it off, a general-knowledge
+answer is allowed but must be labelled as not coming from the user's sources and
+carry no citations.
+
+It is independent of `use_web`: web results are still retrieved, still arrive as
+`<web_results>`, and are still citable as `[W#]` when the toggle is on. The toggle
+governs general knowledge, not web. A turn composed with it on logs
+`prompt_version = "base.v2"` (A38) on its `usage_events` row.
 
 `use_web` runs a web search and puts the results in the prompt as a separate
 `<web_results>` block, labelled `[W1]`, `[W2]`. A tier that fails is recorded and

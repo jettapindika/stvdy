@@ -1,3 +1,6 @@
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+
 import type { WebCitation } from '@/api/sse'
 import { platform } from '@/platform'
 
@@ -54,12 +57,20 @@ function isBrowsable(url: string): boolean {
   }
 }
 
-function describe(citation: CitationSource): string {
+/**
+ * What the mark says when it is read out or hovered: which source, and where in
+ * it. It takes `t` because it composes copy, and copy cannot be resolved without
+ * a language.
+ */
+function describe(citation: CitationSource, t: TFunction): string {
   if (citation.type === 'chunk') {
-    const page = citation.page === null ? 'page unknown' : `page ${citation.page}`
-    return `${citation.sourceTitle}, ${page}`
+    const page =
+      citation.page === null
+        ? t('sources.pageUnknown')
+        : t('sources.page', { page: String(citation.page) })
+    return t('citation.chunkLabel', { title: citation.sourceTitle, page })
   }
-  return `${citation.title}, ${hostOf(citation.url)}`
+  return t('citation.webLabel', { title: citation.title, host: hostOf(citation.url) })
 }
 
 /**
@@ -78,12 +89,17 @@ function describe(citation: CitationSource): string {
  * cannot go anywhere, which is the same rule the chunk mark follows.
  */
 export function WebCitationMark({ citation }: { citation: WebCitation }) {
+  const { t } = useTranslation()
   const host = hostOf(citation.url)
-  const label = `${citation.title}, ${host}`
+  const label = describe(citation, t)
 
   if (!isBrowsable(citation.url)) {
     return (
-      <span className="cite cite-web" title={label} aria-label={`Web source: ${label}`}>
+      <span
+        className="cite cite-web"
+        title={label}
+        aria-label={t('citation.webSourceLabel', { label })}
+      >
         <span className="cite-title">{citation.title}</span>
         <span className="cite-host">{host}</span>
       </span>
@@ -95,7 +111,7 @@ export function WebCitationMark({ citation }: { citation: WebCitation }) {
       className="cite cite-web"
       href={citation.url}
       title={label}
-      aria-label={`Open web source: ${label}`}
+      aria-label={t('citation.openWebSourceLabel', { label })}
       onClick={(event) => {
         // The default is prevented even though the href is correct: without it
         // the browser would also follow the link inside the app.
@@ -122,15 +138,17 @@ export function Citation({
   /** Opens the cited chunk at its page. Omit when there is nowhere to go. */
   onOpen?: (citation: ChunkCitation) => void
 }) {
+  const { t } = useTranslation()
+
   if (citation.type === 'web') return <WebCitationMark citation={citation} />
 
-  const label = describe(citation)
+  const label = describe(citation, t)
 
   if (!onOpen) {
     // No destination yet, so no control. Plain text with a tooltip still tells
     // the student which source the claim came from.
     return (
-      <span className="cite" title={label} aria-label={`Source: ${label}`}>
+      <span className="cite" title={label} aria-label={t('citation.sourceLabel', { label })}>
         {citation.label}
       </span>
     )
@@ -142,7 +160,7 @@ export function Citation({
       className="cite"
       onClick={() => onOpen(citation)}
       title={label}
-      aria-label={`Open source: ${label}`}
+      aria-label={t('citation.openSourceLabel', { label })}
     >
       {citation.label}
     </button>

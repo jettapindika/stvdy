@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 /**
  * The brand illustration, reproduced from the user's Figma design.
  *
@@ -18,6 +20,8 @@
  * sparkle occupies the space above and to the right of it.
  */
 export function Wordmark({ className }: { className?: string }) {
+  const { t } = useTranslation()
+
   return (
     <span className={`flex items-center gap-2 ${className ?? ''}`}>
       {/* The mark is the book from the design's own illustration, which is a
@@ -25,45 +29,47 @@ export function Wordmark({ className }: { className?: string }) {
       <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none">
         <path
           d="M12 6C9.8 4.4 6.8 4 4.5 4.7v12.6c2.3-.7 5.3-.3 7.5 1.3"
-          stroke="var(--accent)"
+          stroke="var(--primary)"
           strokeWidth="1.9"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
         <path
           d="M12 6c2.2-1.6 5.2-2 7.5-1.3v12.6c-2.3-.7-5.3-.3-7.5 1.3"
-          stroke="var(--accent)"
+          stroke="var(--primary)"
           strokeWidth="1.9"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
       </svg>
-      <span className="text-base font-semibold tracking-tight">Stvdy</span>
+      <span className="text-base font-semibold tracking-tight">{t('app.name')}</span>
     </span>
   )
 }
 
 export function BrandIllustration({ className }: { className?: string }) {
+  const { t } = useTranslation()
+
   return (
     <svg
       viewBox="0 0 440 300"
       className={className}
       role="img"
-      aria-label="An open book with a sparkle and a checkmark"
+      aria-label={t('brand.illustration.alt')}
       fill="none"
     >
       {/* The open book: two pages meeting at a spine. The top and bottom edges
           curve so the pages read as lifted rather than as a flat rectangle. */}
       <path
         d="M200 104 C164 84 116 79 76 90 L76 208 C116 197 164 202 200 222"
-        stroke="var(--accent)"
+        stroke="var(--primary)"
         strokeWidth="12"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M200 104 C236 84 284 79 324 90 L324 208 C284 197 236 202 200 222"
-        stroke="var(--accent)"
+        stroke="var(--primary)"
         strokeWidth="12"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -71,7 +77,7 @@ export function BrandIllustration({ className }: { className?: string }) {
       {/* Spine. */}
       <path
         d="M200 104 L200 222"
-        stroke="var(--accent)"
+        stroke="var(--primary)"
         strokeWidth="12"
         strokeLinecap="round"
       />
@@ -80,7 +86,7 @@ export function BrandIllustration({ className }: { className?: string }) {
           as in the design. */}
       <path
         d="M388 26 C392 54 404 66 432 70 C404 74 392 86 388 114 C384 86 372 74 344 70 C372 66 384 54 388 26 Z"
-        fill="var(--accent)"
+        fill="var(--primary)"
       />
 
       {/* Teal checkmark, inside the right page. */}
