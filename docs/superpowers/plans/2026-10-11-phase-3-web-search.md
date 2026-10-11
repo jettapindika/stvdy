@@ -317,6 +317,106 @@ passes.
 - [ ] What could not be verified here (the real SearXNG engine list) is named.
 - [ ] Phase summary posted; wait for "continue".
 
+## Execution notes (Phase 3, as built)
+
+1. **The cache was read per tier inside the walk, and that double-billed.** Which
+   free academic API answers is not stable: they return empty under load without
+   erroring, so two identical queries can be answered by two different tiers.
+   Reading only the tier currently being tried then misses the entry the previous
+   answer wrote, calls the network again, and charges a second search for a
+   question already answered. The read now happens for every tier before any tier
+   is called (A75). Found by the smoke run, whose query OpenAlex and Crossref
+   answered on consecutive identical calls.
+2. **The DOI had nowhere to travel.** `SearchHit` carried one, but neither
+   `PromptWebHit`, nor `LabeledWeb`, nor `Citation::Web` had a field for it, so the
+   gate's "URLs and DOIs" would have been URLs only. Threaded through all three,
+   plus the prompt block, because a DOI the model never sees is one it cannot cite.
+3. **`used_web` meant "the toggle was on" rather than "this turn used web".** A
+   toggle-on turn where every tier returned nothing stored `true`, which is a lie
+   about where the answer came from. It is now `!web.is_empty()`.
+4. **The spend covered the chat charge but the usage event reported the total**, so
+   a web turn debited one credit and told the client three. One spend now covers
+   both charges, in one lock and one transaction.
+5. **`SEARCH_PROVIDER` in an untracked `.env` broke every suite.** The documented
+   acceptance command sources `.env`, and a stale `SEARCH_PROVIDER=tavily` with no
+   key made `search_config` fail at boot for every integration test in the crate.
+   `testing::config` now pins the search keys, because `from_env_at` falls back to
+   the process environment for anything not in its override list; that is the same
+   class of surprise the Phase 0 note recorded about global environment state.
+6. **Three academic API mappings were wrong and the live APIs showed it.** PubMed's
+   `articleids` entries carry `value`, not the documented `idval`, so every PubMed
+   DOI would have been `None`. arXiv reports a rejected query as a well-formed feed
+   whose entry is titled "Error", which would have become a citable hit. ERIC
+   silently ignores an unquoted multi-word query and returns the whole corpus,
+   which would have filled the prompt with the first N records of everything.
+   Checking against the real APIs is what found these; they are invisible in a
+   fixture written from the same assumption as the code.
+7. **The reqwest feature set needed `query`**, which the tiers use to build
+   URL-encoded query strings.
+
+### Phase 3 verification (as executed)
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **313 passing**, 0 failing |
+| `npm --prefix app test` | **144 passing** |
+| `npm --prefix app run build` | clean |
+| `src-tauri` tests + `tauri build --no-bundle` | green |
+| `cargo sqlx prepare --workspace --check` (`SQLX_OFFLINE=true`) | exits 0 |
+| Migration `0020` | applied to the **existing** dev database, and idempotent on a re-run |
+| End-to-end smoke (`scripts/smoke-phase3.sh`) | PASS, quoted below |
+
+The smoke run's own output, which is the acceptance evidence:
+
+```
+1 web citation(s), 1 with a DOI
+  https://doi.org/10.5281/zenodo.19225200  doi=10.5281/zenodo.19225200
+first turn spent 3, second (cached) spent 1
+search rows (cache_hit|tier): ['false|openalex', 'true|openalex']
+ledger 56 == reported 56
+2 result(s), 2 unresponsive engine(s)
+search rows unchanged at 15
+prompt carries the Indonesian chunk labelled [1] and a web result labelled [W1]
+```
+
+**The DOI is real**, from OpenAlex, not from a fixture: two separate runs returned
+`10.5281/zenodo.19225200` and `10.21203/rs.3.rs-10916252/v1`.
+
+### What this phase did NOT verify, and why
+
+- **The real SearXNG engine list.** Docker is not running on this machine, and A3
+  measured that a laptop answers with 1 of 8 engines against 3 on the production
+  host. Verifying or tuning the list from here would measure the wrong sample, so
+  the tier is exercised against `scripts/stub-searxng.py` and the list is verified
+  on the staging VPS (A45). The smoke run prints this at the end.
+- **Exa and Tavily.** No keys. Their request bodies and response mappings are
+  documentation-only, and their `SearchHit` mappings are covered by unit tests
+  against recorded shapes rather than against the live services.
+- **`moli`.** Not installed here, so the chain is Exa (absent) then reqwest; the
+  `--block-private-networks` invocation is asserted by construction, not by running
+  it.
+
+### Roadmap gate 6, with web context present: PASS
+
+The Indonesian query, with `use_web: true`, still has its chunk in the prompt
+labelled `[1]` alongside the web result labelled `[W1]`. Asserted on the recorded
+prompt rather than on the answer, because whether the model *chooses* to cite the
+chunk is the model's behaviour while whether the chunk was *available* is the
+server's, and that is what the gate is about. The chunk's own citation resolution
+with web context present is covered by `crates/server/tests/indonesian.rs`.
+
+### Roadmap gate 5: accessibility on the changed screen
+
+The changed controls are the web toggle and the web citation chip, both on the chat
+screen. The SPA's suite asserts the toggle is a real, keyboard-operable control
+(it was a permanently disabled checkbox) and that a web citation renders as a link
+with a distinguishable focus state and a target at least 44px at phone width, with
+its on/off state carried by a label rather than by colour alone. The DOI line is
+hidden below the phone breakpoint where the chip already carries a title and a
+host, so it cannot push the target below 44px.
+
 ## Self-Review
 
 - **Spec coverage.** SPEC § Retrieval and chat's `use_web` paragraph and the
