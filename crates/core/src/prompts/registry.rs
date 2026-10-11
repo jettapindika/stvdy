@@ -35,6 +35,19 @@ pub const FLASHCARDS_V1: &str = include_str!("../../../../prompts/flashcards.v1.
 /// The quiz module.
 pub const QUIZ_V1: &str = include_str!("../../../../prompts/quiz.v1.md");
 
+/// The report outline module. The first half of a report: the shape the student
+/// edits before any section is written.
+pub const REPORT_OUTLINE_V1: &str = include_str!("../../../../prompts/report_outline.v1.md");
+
+/// The report section module. One call per section, so a student can regenerate
+/// section 3 without paying for the whole report again.
+pub const REPORT_SECTION_V1: &str = include_str!("../../../../prompts/report_section.v1.md");
+
+/// The cheatsheet module. Its reply is parsed by [`crate::render::blocks`], the
+/// renderer's own block model, so the contract that accepts a reply and the contract
+/// that renders it are one thing.
+pub const CHEATSHEET_V1: &str = include_str!("../../../../prompts/cheatsheet.v1.md");
+
 /// What `{{output_language}}` means when the caller supplies nothing.
 ///
 /// A study app's cards must be in the language of the student's material. There is
@@ -42,6 +55,23 @@ pub const QUIZ_V1: &str = include_str!("../../../../prompts/quiz.v1.md");
 /// a silent content bug for every Indonesian student, so the default names the
 /// material rather than picking a language.
 pub const SOURCE_LANGUAGE: &str = "the same language as the source material (do not translate)";
+
+/// What `{{other_section_headings}}` means when there is no other section yet.
+///
+/// The first section of every report has nothing to avoid repeating, so absence here is a
+/// normal state and not a caller mistake: `prompts/README.md` declares the variable
+/// Optional for exactly that reason. The sentence is prompt content, so it lives with the
+/// prompt rather than being invented by each call site, where two call sites would end up
+/// saying two different things to the model.
+pub const NO_OTHER_SECTIONS: &str = "(no other sections yet)";
+
+/// What `{{exam_date}}` means when the student has not set one.
+///
+/// `cheatsheets.exam_date` is nullable, so "no date" is a state the schema models rather
+/// than an omission, and the prompt has to be able to say it: a `Caller` variable cannot
+/// be empty, so the alternative is every call site inventing its own placeholder for the
+/// same state.
+pub const NO_EXAM_DATE: &str = "not set";
 
 /// The `base.v1.md` sections a strict-JSON task keeps.
 ///
@@ -70,17 +100,29 @@ pub const TASK_BASE_SECTIONS: &[&str] = &[
 pub enum ModuleId {
     FlashcardsV1,
     QuizV1,
+    ReportOutlineV1,
+    ReportSectionV1,
+    CheatsheetV1,
 }
 
 impl ModuleId {
     /// Every module, for the contract sweep in `tests/prompts.rs`.
-    pub const ALL: [ModuleId; 2] = [ModuleId::FlashcardsV1, ModuleId::QuizV1];
+    pub const ALL: [ModuleId; 5] = [
+        ModuleId::FlashcardsV1,
+        ModuleId::QuizV1,
+        ModuleId::ReportOutlineV1,
+        ModuleId::ReportSectionV1,
+        ModuleId::CheatsheetV1,
+    ];
 
     /// The version string logged to `usage_events.prompt_version`.
     pub fn version(self) -> &'static str {
         match self {
             ModuleId::FlashcardsV1 => "flashcards.v1",
             ModuleId::QuizV1 => "quiz.v1",
+            ModuleId::ReportOutlineV1 => "report_outline.v1",
+            ModuleId::ReportSectionV1 => "report_section.v1",
+            ModuleId::CheatsheetV1 => "cheatsheet.v1",
         }
     }
 
@@ -88,10 +130,18 @@ impl ModuleId {
         match self {
             ModuleId::FlashcardsV1 => FLASHCARDS_V1,
             ModuleId::QuizV1 => QUIZ_V1,
+            ModuleId::ReportOutlineV1 => REPORT_OUTLINE_V1,
+            ModuleId::ReportSectionV1 => REPORT_SECTION_V1,
+            ModuleId::CheatsheetV1 => CHEATSHEET_V1,
         }
     }
 
     /// The variables the module's own text (and the JSON contract) uses.
+    ///
+    /// No module text uses a `base.v1.md` variable, so nothing here is left undeclared on
+    /// the grounds that the base supplies it: the trimmed base is rendered against
+    /// [`crate::prompts::base_variables`], and a name that only appears in the module would
+    /// be an unfilled `{{…}}` in the prompt the model reads.
     pub fn variables(self) -> &'static [(&'static str, VarKind)] {
         match self {
             ModuleId::FlashcardsV1 => &[
@@ -107,13 +157,53 @@ impl ModuleId {
                 ("types", VarKind::Caller),
                 ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
             ],
+            // `topic` is what the report is about, and `style` and `length` are the two
+            // settings the student chose on the same screen. All three are `Caller`: a
+            // default would let a report come out in a length or register nobody asked
+            // for, which reads as a model quality problem rather than a missing value.
+            ModuleId::ReportOutlineV1 => &[
+                ("topic", VarKind::Caller),
+                ("style", VarKind::Caller),
+                ("length", VarKind::Caller),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
+            // `heading`, `title` and `purpose` come from the outline row the student may
+            // have edited, so the caller has them exactly; a default would substitute a
+            // section of the report the student did not ask for. `other_section_headings`
+            // is the one exception: the first section of a report genuinely has none.
+            ModuleId::ReportSectionV1 => &[
+                ("heading", VarKind::Caller),
+                ("title", VarKind::Caller),
+                ("purpose", VarKind::Caller),
+                ("style", VarKind::Caller),
+                ("length", VarKind::Caller),
+                (
+                    "other_section_headings",
+                    VarKind::Optional(NO_OTHER_SECTIONS),
+                ),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
+            // `depth` is stored non-null with a `normal` default in `cheatsheets`, so the
+            // caller always has the value the student's request resolved to and there is
+            // nothing for a prompt default to stand in for. `exam_date` is nullable, and
+            // is the one state the prompt has to be able to say.
+            ModuleId::CheatsheetV1 => &[
+                ("scope", VarKind::Caller),
+                ("exam_date", VarKind::Optional(NO_EXAM_DATE)),
+                ("depth", VarKind::Caller),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
         }
     }
 
     /// The `base.v1.md` sections this module keeps.
     pub fn base_sections(self) -> &'static [&'static str] {
         match self {
-            ModuleId::FlashcardsV1 | ModuleId::QuizV1 => TASK_BASE_SECTIONS,
+            ModuleId::FlashcardsV1
+            | ModuleId::QuizV1
+            | ModuleId::ReportOutlineV1
+            | ModuleId::ReportSectionV1
+            | ModuleId::CheatsheetV1 => TASK_BASE_SECTIONS,
         }
     }
 }

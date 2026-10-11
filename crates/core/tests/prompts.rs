@@ -8,10 +8,13 @@
 use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, resolve};
-use stvdy_core::prompts::registry::{BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION};
+use stvdy_core::prompts::registry::{
+    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, NO_EXAM_DATE, NO_OTHER_SECTIONS,
+    SOURCE_LANGUAGE,
+};
 use stvdy_core::prompts::{
     ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, VarKind, base_v2_variables,
-    base_variable_kind, base_variables, compose_chat, module_variables,
+    base_variable_kind, base_variables, compose_chat, compose_task, module_variables,
 };
 
 /// The base prompt file, read from disk by the same relative path the registry
@@ -29,6 +32,14 @@ const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
 /// The quiz module file. Its documented schema spans several lines, unlike the
 /// flashcards one, so the check below takes everything after `Schema:`.
 const QUIZ_FILE: &str = include_str!("../../../prompts/quiz.v1.md");
+
+/// The report outline module file, for the documented-schema check.
+const REPORT_OUTLINE_FILE: &str = include_str!("../../../prompts/report_outline.v1.md");
+
+/// The cheatsheet module file. Its documented schema is the whole twelve-kind block set,
+/// one line per kind, so it is the largest single contract in the tree and the one most
+/// worth checking against the struct that parses it.
+const CHEATSHEET_FILE: &str = include_str!("../../../prompts/cheatsheet.v1.md");
 
 fn vars() -> ChatVars {
     ChatVars {
@@ -558,11 +569,12 @@ mod task_composition {
     use std::collections::BTreeMap;
     use stvdy_core::generation::flashcards::CardsFile;
     use stvdy_core::prompts::{
-        ChatVars, ModuleId, PromptChunk, PromptError, compose_task, module_variables, trim_base,
+        ChatVars, ModuleId, PromptChunk, PromptError, VarKind, compose_task, module_variables,
+        trim_base,
     };
     use uuid::Uuid;
 
-    use crate::FLASHCARDS_FILE;
+    use crate::{CHEATSHEET_FILE, FLASHCARDS_FILE, REPORT_OUTLINE_FILE};
 
     fn base() -> ChatVars {
         ChatVars {
@@ -818,6 +830,101 @@ mod task_composition {
             serde_json::from_str(schema).expect("the documented example must parse");
         assert_eq!(parsed.cards.len(), 1, "the example carries one card");
     }
+
+    /// Every module composes with the values its own table declares, and no marker survives.
+    ///
+    /// This is the sweep's promise applied to the modules that arrived after it, and it is
+    /// generic on purpose: a module whose text uses a variable it did not declare, or whose
+    /// declared table is missing a value the composer would refuse, fails here rather than
+    /// in front of a student. The declared `Optional` variables are deliberately not
+    /// supplied — their defaults are the values under test.
+    #[test]
+    fn every_module_composes_with_its_declared_variables_and_leaves_no_marker() {
+        for module in ModuleId::ALL {
+            let mut module_vars = BTreeMap::new();
+            for (name, kind) in module_variables(module) {
+                if matches!(kind, VarKind::Caller) {
+                    module_vars.insert(*name, "x".to_string());
+                }
+            }
+
+            let composed = compose_task(module, &base(), &module_vars, &[chunk(1)]).unwrap();
+
+            assert!(
+                !composed.text.contains("{{"),
+                "{} left a marker in the prompt: {}",
+                module.version(),
+                composed.text
+            );
+            assert_eq!(composed.prompt_version, module.version());
+        }
+    }
+
+    /// The report outline's documented example must parse into the struct the server reads,
+    /// and into an outline the validator accepts. The example is what the model is shown,
+    /// so a prompt edit that renames a field has to fail the build rather than a student's
+    /// outline call.
+    #[test]
+    fn the_report_outline_documented_schema_parses_into_the_generation_contract() {
+        let schema = REPORT_OUTLINE_FILE
+            .split_once("Schema:")
+            .expect("report_outline.v1.md documents a Schema line")
+            .1
+            .trim();
+
+        let parsed: stvdy_core::generation::report::ReportOutline =
+            serde_json::from_str(schema).expect("the documented example must parse");
+        assert_eq!(parsed.sections.len(), 1, "the example carries one section");
+        assert_eq!(
+            parsed.sections[0].labels,
+            vec![1, 4],
+            "the example shows a section supported by two labels"
+        );
+
+        let validated = stvdy_core::generation::report::parse_outline(schema)
+            .expect("the module's own example must satisfy the module's own rules");
+        assert_eq!(validated.sections.len(), 1);
+    }
+
+    /// The cheatsheet's documented schema is the twelve block kinds the renderer renders,
+    /// and it must parse into the renderer's own model: the generation contract *is* the
+    /// renderer's input type. A kind whose example drifted from its struct is a kind every
+    /// generation would fail on, which is exactly what this check exists to catch.
+    #[test]
+    fn the_cheatsheet_documented_schema_parses_into_the_generation_contract() {
+        let schema = CHEATSHEET_FILE
+            .split_once("Schema:")
+            .expect("cheatsheet.v1.md documents a Schema line")
+            .1
+            .trim();
+
+        let parsed = stvdy_core::generation::cheatsheet::parse_blocks(schema)
+            .expect("the module's own example must satisfy the module's own rules");
+
+        let kinds: Vec<&str> = parsed.chapters[0].sections[0]
+            .blocks
+            .iter()
+            .map(stvdy_core::generation::cheatsheet::Block::kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "text",
+                "bullets",
+                "concept",
+                "formula",
+                "quickformula",
+                "analogy",
+                "trap",
+                "memorize",
+                "table",
+                "question",
+                "diagram",
+                "svg",
+            ],
+            "every kind the module documents must parse, in the order it documents them"
+        );
+    }
 }
 
 /// `quiz.v1` is the second strict-JSON module and the first with three settings rather
@@ -887,4 +994,115 @@ fn the_quiz_documented_schema_parses_into_the_generation_contract() {
     let validated = stvdy_core::generation::quiz::parse_questions(schema)
         .expect("the module's own example must satisfy the module's own rules");
     assert_eq!(validated.len(), 2);
+}
+
+/// The Phase 6 modules' settings, by kind. The sweep proves every variable is declared;
+/// this proves the right ones cannot be defaulted, which is what stops a report coming out
+/// in a length or a register the student never chose and reading as a model quality problem
+/// rather than a missing value.
+///
+/// The two exceptions are absences rather than omissions, and each is pinned to the sentence
+/// the prompt renders in its place: the first section of a report has no other section to
+/// avoid repeating, and `cheatsheets.exam_date` is a nullable column, so "no date" is a state
+/// the prompt has to be able to say. A `Caller` variable cannot be empty, so those two are
+/// `Optional` by the composer's own rule rather than by preference.
+#[test]
+fn the_phase_6_modules_require_the_settings_the_student_chose() {
+    let kinds = |module: ModuleId, name: &str| {
+        module_variables(module)
+            .iter()
+            .find(|(declared, _)| *declared == name)
+            .map(|(_, kind)| *kind)
+    };
+
+    for (module, name) in [
+        (ModuleId::ReportOutlineV1, "topic"),
+        (ModuleId::ReportOutlineV1, "style"),
+        (ModuleId::ReportOutlineV1, "length"),
+        (ModuleId::ReportSectionV1, "heading"),
+        (ModuleId::ReportSectionV1, "title"),
+        (ModuleId::ReportSectionV1, "purpose"),
+        (ModuleId::ReportSectionV1, "style"),
+        (ModuleId::ReportSectionV1, "length"),
+        (ModuleId::CheatsheetV1, "scope"),
+        (ModuleId::CheatsheetV1, "depth"),
+    ] {
+        assert_eq!(
+            kinds(module, name),
+            Some(VarKind::Caller),
+            "{}: {name} must be required",
+            module.version()
+        );
+    }
+
+    assert_eq!(
+        kinds(ModuleId::ReportSectionV1, "other_section_headings"),
+        Some(VarKind::Optional(NO_OTHER_SECTIONS)),
+        "the first section of a report genuinely has no other heading to avoid repeating"
+    );
+    assert_eq!(
+        kinds(ModuleId::CheatsheetV1, "exam_date"),
+        Some(VarKind::Optional(NO_EXAM_DATE)),
+        "a cheatsheet with no exam date is a state the schema models, not an omission"
+    );
+
+    for module in [
+        ModuleId::ReportOutlineV1,
+        ModuleId::ReportSectionV1,
+        ModuleId::CheatsheetV1,
+    ] {
+        assert_eq!(
+            kinds(module, "output_language"),
+            Some(VarKind::Optional(SOURCE_LANGUAGE)),
+            "{}: the material-language default is what keeps an Indonesian report Indonesian",
+            module.version()
+        );
+    }
+}
+
+/// The two defaults above are prompt content, so what matters is the text the model
+/// receives: an absent value must render the sentence, not an empty string and not a
+/// literal marker.
+#[test]
+fn an_absent_optional_variable_renders_its_sentence() {
+    let mut module_vars = std::collections::BTreeMap::new();
+    module_vars.insert("heading", "Pendahuluan".to_string());
+    module_vars.insert("title", "Jaringan Komputer".to_string());
+    module_vars.insert("purpose", "establish the layers".to_string());
+    module_vars.insert("style", "academic".to_string());
+    module_vars.insert("length", "1200 words".to_string());
+
+    let composed = compose_task(
+        ModuleId::ReportSectionV1,
+        &vars(),
+        &module_vars,
+        &[chunk(1, "Modul 3", Some(4), "TCP memakai handshake.")],
+    )
+    .unwrap();
+
+    assert!(
+        composed.text.contains(NO_OTHER_SECTIONS),
+        "the first section must be told there is nothing to repeat: {}",
+        composed.text
+    );
+    assert!(!composed.text.contains("{{"), "{}", composed.text);
+
+    let mut cheatsheet_vars = std::collections::BTreeMap::new();
+    cheatsheet_vars.insert("scope", "UTS Jaringan Komputer".to_string());
+    cheatsheet_vars.insert("depth", "normal".to_string());
+
+    let composed = compose_task(
+        ModuleId::CheatsheetV1,
+        &vars(),
+        &cheatsheet_vars,
+        &[chunk(1, "Modul 3", Some(4), "TCP memakai handshake.")],
+    )
+    .unwrap();
+
+    assert!(
+        composed.text.contains(NO_EXAM_DATE),
+        "a cheatsheet with no exam date must say so rather than leaving the line blank: {}",
+        composed.text
+    );
+    assert!(!composed.text.contains("{{"), "{}", composed.text);
 }

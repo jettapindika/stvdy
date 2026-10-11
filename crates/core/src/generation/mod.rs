@@ -5,8 +5,10 @@
 //! the *decision* it retries on — is this a parse failure — is made here, so the
 //! rule is testable without a model.
 
+pub mod cheatsheet;
 pub mod flashcards;
 pub mod quiz;
+pub mod report;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GenerationError {

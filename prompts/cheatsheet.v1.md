@@ -77,7 +77,7 @@ Schema:
          {"kind":"concept","term":"string","text":"string","labels":[1]},
          {"kind":"formula","latex":"$$...$$","caption":null,
           "legend":[{"symbol":"v","meaning":"string","unit":"m/s"}],"labels":[2]},
-         {"kind":"quickformula","name":"string","latex":"$...$","note":"string","labels":[2]},
+         {"kind":"quickformula","latex":"$...$","text":"string","valid_when":"string","labels":[2]},
          {"kind":"analogy","text":"string","labels":[]},
          {"kind":"trap","text":"string","labels":[4]},
          {"kind":"memorize","items":["string"],"labels":[4]},
