@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::citations::ContextLabels;
-use crate::generation::GenerationError;
+use crate::generation::{GenerationError, strip_code_fence};
 
 /// The most cards one reply may carry. Above the largest request the API accepts,
 /// so a model that ignores `{{count}}` cannot store an unbounded deck.
@@ -76,22 +76,6 @@ pub fn parse_cards(raw: &str) -> Result<Vec<GeneratedCard>, GenerationError> {
         )));
     }
     Ok(file.cards)
-}
-
-/// ```` ```json … ``` ```` becomes `…`; anything else is returned trimmed.
-fn strip_code_fence(raw: &str) -> &str {
-    let trimmed = raw.trim();
-    let Some(rest) = trimmed.strip_prefix("```") else {
-        return trimmed;
-    };
-    let body = match rest.find('\n') {
-        Some(index) => &rest[index + 1..],
-        None => rest,
-    };
-    body.trim_end()
-        .strip_suffix("```")
-        .map(str::trim)
-        .unwrap_or(body)
 }
 
 /// Resolves each card's label against the labels the prompt actually sent, and

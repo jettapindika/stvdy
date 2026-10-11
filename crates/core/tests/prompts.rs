@@ -10,8 +10,8 @@ use uuid::Uuid;
 use stvdy_core::citations::{Citation, resolve};
 use stvdy_core::prompts::registry::{BASE_V1, BASE_V1_VERSION};
 use stvdy_core::prompts::{
-    ChatVars, PromptChunk, PromptError, PromptWebHit, VarKind, base_variable_kind, base_variables,
-    compose_chat,
+    ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, VarKind, base_variable_kind,
+    base_variables, compose_chat, module_variables,
 };
 
 /// The base prompt file, read from disk by the same relative path the registry
@@ -20,6 +20,10 @@ const BASE_FILE: &str = include_str!("../../../prompts/base.v1.md");
 
 /// The flashcards module file, for the documented-schema check.
 const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
+
+/// The quiz module file. Its documented schema spans several lines, unlike the
+/// flashcards one, so the check below takes everything after `Schema:`.
+const QUIZ_FILE: &str = include_str!("../../../prompts/quiz.v1.md");
 
 fn vars() -> ChatVars {
     ChatVars {
@@ -636,4 +640,73 @@ mod task_composition {
             serde_json::from_str(schema).expect("the documented example must parse");
         assert_eq!(parsed.cards.len(), 1, "the example carries one card");
     }
+}
+
+/// `quiz.v1` is the second strict-JSON module and the first with three settings rather
+/// than one. The sweep above proves the variables are declared; this proves they are
+/// the right *kinds*, which is what stops a caller from supplying `output_language` and
+/// silently overriding the material-language default for an Indonesian class.
+#[test]
+fn quiz_v1_declares_its_three_settings_as_required_caller_variables() {
+    let table = module_variables(ModuleId::QuizV1);
+
+    for name in ["count", "difficulty", "types"] {
+        let kind = table
+            .iter()
+            .find(|(declared, _)| *declared == name)
+            .map(|(_, kind)| *kind);
+        assert_eq!(
+            kind,
+            Some(VarKind::Caller),
+            "{name} must be required: an unfilled setting changes what the quiz is"
+        );
+    }
+
+    let language = table
+        .iter()
+        .find(|(declared, _)| *declared == "output_language")
+        .map(|(_, kind)| *kind);
+    assert_eq!(
+        language,
+        Some(VarKind::Optional(
+            stvdy_core::prompts::registry::SOURCE_LANGUAGE
+        )),
+        "the material-language default is what keeps an Indonesian quiz Indonesian"
+    );
+}
+
+/// The schema the module shows the model must parse into the struct the server
+/// deserialises, or the prompt and the contract have drifted apart. `deny_unknown_fields`
+/// is in force on `QuestionsFile`, so an example that grows a field is a failure here
+/// too.
+#[test]
+fn the_quiz_documented_schema_parses_into_the_generation_contract() {
+    let schema = QUIZ_FILE
+        .split_once("Schema:")
+        .expect("quiz.v1.md documents a Schema line")
+        .1
+        .trim();
+
+    let parsed: stvdy_core::generation::quiz::QuestionsFile =
+        serde_json::from_str(schema).expect("the documented example must parse");
+
+    assert_eq!(parsed.questions.len(), 2, "one mcq and one short answer");
+    assert!(
+        parsed.questions[0].options.is_some(),
+        "the mcq carries options"
+    );
+    assert!(
+        parsed.questions[1].options.is_none(),
+        "the short answer carries none"
+    );
+    assert!(
+        parsed.questions[1].key_points.is_some(),
+        "the short answer carries key points"
+    );
+
+    // And the documented example is one the validator accepts, not merely one that
+    // deserialises: the module's own example must pass the rules the module states.
+    let validated = stvdy_core::generation::quiz::parse_questions(schema)
+        .expect("the module's own example must satisfy the module's own rules");
+    assert_eq!(validated.len(), 2);
 }

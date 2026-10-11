@@ -20,6 +20,9 @@ pub const JSON_CONTRACT_V1: &str = include_str!("../../../../prompts/json_contra
 /// The flashcards module.
 pub const FLASHCARDS_V1: &str = include_str!("../../../../prompts/flashcards.v1.md");
 
+/// The quiz module.
+pub const QUIZ_V1: &str = include_str!("../../../../prompts/quiz.v1.md");
+
 /// What `{{output_language}}` means when the caller supplies nothing.
 ///
 /// A study app's cards must be in the language of the student's material. There is
@@ -54,22 +57,25 @@ pub const TASK_BASE_SECTIONS: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleId {
     FlashcardsV1,
+    QuizV1,
 }
 
 impl ModuleId {
     /// Every module, for the contract sweep in `tests/prompts.rs`.
-    pub const ALL: [ModuleId; 1] = [ModuleId::FlashcardsV1];
+    pub const ALL: [ModuleId; 2] = [ModuleId::FlashcardsV1, ModuleId::QuizV1];
 
     /// The version string logged to `usage_events.prompt_version`.
     pub fn version(self) -> &'static str {
         match self {
             ModuleId::FlashcardsV1 => "flashcards.v1",
+            ModuleId::QuizV1 => "quiz.v1",
         }
     }
 
     pub fn text(self) -> &'static str {
         match self {
             ModuleId::FlashcardsV1 => FLASHCARDS_V1,
+            ModuleId::QuizV1 => QUIZ_V1,
         }
     }
 
@@ -80,13 +86,22 @@ impl ModuleId {
                 ("count", VarKind::Caller),
                 ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
             ],
+            // `difficulty` and `types` are `Caller` rather than `Optional` on purpose: a
+            // default would make "mixed, medium" the silent meaning of an absent
+            // setting, and what the student got would differ from what they asked for.
+            ModuleId::QuizV1 => &[
+                ("count", VarKind::Caller),
+                ("difficulty", VarKind::Caller),
+                ("types", VarKind::Caller),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
         }
     }
 
     /// The `base.v1.md` sections this module keeps.
     pub fn base_sections(self) -> &'static [&'static str] {
         match self {
-            ModuleId::FlashcardsV1 => TASK_BASE_SECTIONS,
+            ModuleId::FlashcardsV1 | ModuleId::QuizV1 => TASK_BASE_SECTIONS,
         }
     }
 }

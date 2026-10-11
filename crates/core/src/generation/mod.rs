@@ -6,6 +6,7 @@
 //! rule is testable without a model.
 
 pub mod flashcards;
+pub mod quiz;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GenerationError {
@@ -24,4 +25,23 @@ pub enum GenerationError {
 /// "no cards", and retrying would spend a second call to be told the same thing.
 pub fn is_retryable(error: &GenerationError) -> bool {
     matches!(error, GenerationError::Json(_) | GenerationError::Schema(_))
+}
+
+/// ```` ```json … ``` ```` becomes `…`; anything else is returned trimmed.
+///
+/// Shared by every strict-JSON contract, because a provider occasionally adds a fence
+/// despite the module saying not to, and two copies of this rule would drift.
+pub fn strip_code_fence(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
+    let body = match rest.find('\n') {
+        Some(index) => &rest[index + 1..],
+        None => rest,
+    };
+    body.trim_end()
+        .strip_suffix("```")
+        .map(str::trim)
+        .unwrap_or(body)
 }

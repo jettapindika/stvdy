@@ -36,7 +36,10 @@ fn rec(
 /// to raise its own score.
 #[test]
 fn mcq_grading_normalises_but_does_not_forgive() {
-    assert!(grade_mcq("Membuka koneksi TCP.", "  membuka   koneksi tcp. "));
+    assert!(grade_mcq(
+        "Membuka koneksi TCP.",
+        "  membuka   koneksi tcp. "
+    ));
     assert!(grade_mcq("Membuka koneksi TCP.", "Membuka koneksi TCP."));
     assert!(!grade_mcq("Membuka koneksi TCP.", "Menutup koneksi TCP."));
 
@@ -95,7 +98,11 @@ fn an_unattempted_question_is_counted_but_is_not_a_topic() {
     assert_eq!(summary.graded, 1);
     assert_eq!(summary.score, Some(0.0));
 
-    assert_eq!(summary.topics.len(), 1, "the unattempted topic is not listed");
+    assert_eq!(
+        summary.topics.len(),
+        1,
+        "the unattempted topic is not listed"
+    );
     assert_eq!(summary.topics[0].page, Some(12));
 }
 

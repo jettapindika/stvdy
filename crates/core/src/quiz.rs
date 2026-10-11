@@ -116,10 +116,7 @@ pub fn summarize(records: &[AnswerRecord]) -> QuizSummary {
     let total = records.len() as i64;
     let answered = records.iter().filter(|r| r.attempted).count() as i64;
     let graded = records.iter().filter(|r| r.correct.is_some()).count() as i64;
-    let correct = records
-        .iter()
-        .filter(|r| r.correct == Some(true))
-        .count() as i64;
+    let correct = records.iter().filter(|r| r.correct == Some(true)).count() as i64;
 
     let score = if graded > 0 {
         Some(correct as f64 / graded as f64)
@@ -135,11 +132,11 @@ pub fn summarize(records: &[AnswerRecord]) -> QuizSummary {
             continue;
         }
         let key: TopicKey = (record.source_id, record.page);
-        let row = match topics
-            .iter_mut()
-            .find(|row| (row.source_id, row.page) == key)
+        let index = match topics
+            .iter()
+            .position(|row| (row.source_id, row.page) == key)
         {
-            Some(row) => row,
+            Some(index) => index,
             None => {
                 topics.push(TopicRow {
                     source_id: record.source_id,
@@ -149,9 +146,11 @@ pub fn summarize(records: &[AnswerRecord]) -> QuizSummary {
                     graded: 0,
                     correct: 0,
                 });
-                topics.last_mut().expect("just pushed")
+                // The row was pushed on the line above, so this is the row just added.
+                topics.len() - 1
             }
         };
+        let row = &mut topics[index];
         row.answered += 1;
         if let Some(correct) = record.correct {
             row.graded += 1;
