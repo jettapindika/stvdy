@@ -400,10 +400,16 @@ generate (cheatsheet.v1.md -> strict JSON blocks)
 
 The security property that makes this safe: **the model produces structured JSON, never markup.** Every string it emits passes through HTML escaping, and SVG blocks are sanitised against an element/attribute allowlist (`svg,g,rect,circle,ellipse,line,polyline,polygon,path,text,tspan,defs,marker,title`; no `script`, `style`, `on*`, `href`, or `foreignObject`). This matters because source text is attacker-controlled: a document containing `</div><script>` or an `<svg onload=...>` must be inert in the rendered PDF. Two further rules the renderer enforces:
 
-- Every `id` inside an inline SVG is prefixed with the block index, and every `url(#...)` reference is rewritten to match. Bare ids like `a` are document-global, so the second diagram would silently reuse the first one's marker.
+- Every `id` inside an inline SVG is prefixed with the **document path** of its block
+  (`b{chapter}-{section}-{block}-`), and every `url(#...)` reference is rewritten to match.
+  Bare ids like `a` are document-global, so the second diagram would silently reuse the
+  first one's marker. The prefix is the path rather than a flat block index because two
+  diagrams in different sections are still one document: a flat index distinguished them by
+  accident, and the section-level version of that bug was found by a test after the first
+  implementation shipped the flat form.
 - The template is compiled in with `include_str!`, so a PDF can never render against a template file that is missing or drifted from the binary.
 
-**PDF engine:** server-side headless Chromium via `headless_chrome`, with `printBackground: true` (without it every coloured box prints white), `preferCSSPageSize: true` (A4 comes from the template's `@page`), `generateDocumentOutline: true` (real PDF bookmarks from the headings) and `generateTaggedPDF: true` (accessibility). Verified in this repo: Chrome honours `@page` margin boxes and `@page :first`, so the running header and `Halaman N dari M` footer come from CSS; CDP `headerTemplate`/`footerTemplate` is the fallback for per-job overrides. Chromium runs as a pooled, sandboxed child process; the render step is a `jobs` row so a large cheatsheet never blocks a request, and it is gated by plan (A39).
+**PDF engine:** server-side headless Chromium via `headless_chrome`, with `printBackground: true` (without it every coloured box prints white), `preferCSSPageSize: true` (A4 comes from the template's `@page`), `generateDocumentOutline: true` (real PDF bookmarks from the headings) and `generateTaggedPDF: true` (accessibility). **The running header and the `Halaman N dari M` footer come from CDP's `headerTemplate`/`footerTemplate`, not from CSS:** Chromium has never implemented the CSS Paged Media margin boxes (`@top-center`, `@bottom-center`), so a template that carries them renders no header and no footer and reports no error — which is why the template's own comments now say which path is real. One consequence is deliberate: CDP's templates apply to **every** page including the cover, so the cover carries the header and the footer counts it. Chromium runs as a pooled child process; the pool must survive a browser that exited between renders (a cached `Arc<Browser>` that outlives its process fails every later print permanently), the render step is a `jobs` row so a large cheatsheet never blocks a request, and it is gated by plan (A39).
 
 ### 8. Job kinds and schedule
 
