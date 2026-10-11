@@ -92,6 +92,14 @@ smoke-phase2:
 smoke-phase4:
     BASE=http://localhost:8099 bash scripts/smoke-phase4.sh
 
+# Phase 5's run. Same stub and server, and the stub must answer with a questions JSON:
+# the quiz job asks for a strict-JSON reply, so the phase 2 default (a prose answer)
+# would fail the job for good. Start the stub by hand for this one:
+#   python3 scripts/stub-llm.py --port 8100 --log var/stub-requests.jsonl \
+#     --answer '{"questions":[{"kind":"mcq","prompt":"Apa fungsi three-way handshake?","options":["Membuka koneksi TCP.","Menutup koneksi TCP.","Mengenkripsi data.","Mengompres data."],"answer":"Membuka koneksi TCP.","explanation":"Handshake menegosiasikan parameter.","label":1,"key_points":null}]}'
+smoke-phase5:
+    BASE=http://localhost:8099 bash scripts/smoke-phase5.sh
+
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
 # The academic tier is keyless and reachable from this machine, so the run gets

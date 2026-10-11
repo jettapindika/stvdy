@@ -529,6 +529,95 @@ Constants: `MAX_REQUESTED_CARDS = 50`, `MAX_SOURCES = 20`,
 `MAX_CARDS_PER_REPLY = 60`, `GENERATION_CHUNK_LIMIT = 40` chunks ordered
 `(source_id, idx)`.
 
+## Quiz (Phase 5)
+
+### The score is derived, never stored
+
+`quiz_attempts` is the only place a quiz's outcome lives. `GET
+/quizzes/:id/results` folds those rows into a score and a weak-topic summary on
+every read (`crates/core/src/quiz.rs`), and there is no `score` column anywhere.
+That is the property, not an implementation detail: two devices cannot disagree
+about a score neither of them stores, and a replayed attempt cannot double-count
+because it is the same row.
+
+Two rules inside the fold, and both are the kind a later refactor flattens
+silently:
+
+- **The denominator is `graded`, not `answered`.** A short answer the student has
+  not marked yet stores `correct = NULL`, which is not the same fact as `false`.
+  Counting it as wrong would make the score *fall* as the student works through
+  the quiz, which is the opposite of what a score is for. `score` is `None`, not
+  `0.0`, when nothing is graded (A91).
+- **Topics sort weakest first, and an ungraded topic sorts last.** A topic with
+  nothing graded is unknown, not weak; putting it at the top of a list headed
+  "where to look again" would tell the student something false. A question whose
+  label never resolved gets its own bucket rather than being dropped, because the
+  bucket is the visible symptom of a label-map regression (A97).
+
+### Grading is per kind, and only one of them is the server's
+
+An **MCQ** is graded by the server: the submitted option text is normalised (trim,
+case-fold, collapse internal whitespace) and compared to the stored `answer`. A
+client's `correct` field is ignored for an MCQ, so a device cannot raise its own
+score (A90). The contract is what makes this possible — `prompts/quiz.v1.md` tells
+the model to copy the correct option verbatim into `answer`, and
+`generation::quiz::parse_questions` *rejects* an MCQ whose answer is not among its
+options, because such a question marks every student wrong and cannot be graded at
+all.
+
+A **short answer** is self-assessed: the student sees the model answer and the
+`key_points` and marks it. No string comparison can judge free prose, and a second
+model call per answer would cost more than generating the quiz did. This is the
+same shape Phase 4 uses for a review — a self-reported grade — so a student learns
+one mental model rather than two.
+
+The answer a client submits is the option **text**, never a letter or an index
+(A93): accepting `"B"` would mean guessing which option was meant, and a wrong
+guess is a silently wrong score.
+
+### An attempt is append-only, and the monthly cap reserves
+
+`POST /quizzes/:id/attempts` inserts with a client-generated id and `on conflict
+(id) do nothing`, answering `applied: bool`. A retry after a lost response is
+therefore a no-op rather than a second judgement (A92). This is the rule that
+makes attempts safe to send from an offline device, and it is the same rule
+`flashcard_reviews` follows.
+
+`quizzes_per_month` is enforced in **one transaction** that holds the per-user
+advisory lock for the count, the charge (`credits::spend_in`) and the quiz row
+that reserves it. Two things follow, and Phase 4 shipped without the first:
+
+- The count includes the quizzes still `generating`. A quiz has no
+  `quiz_questions` rows until its job runs, so a count that only looked at stored
+  questions would read zero while a quiz was in flight and the cap could be
+  exceeded by asking twice in a row.
+- Because the count is read under the lock, a second request sees the first
+  request's row. Counting outside it lets concurrent requests all read the same
+  `used` and all pass.
+
+The cap counts **quizzes, not questions** (A94). The same reservation applies to
+`flashcards_per_month`, which is where the pattern came from.
+
+### The refund mirrors Phase 4's, deliberately
+
+A generation that fails for good marks the quiz `failed` and refunds exactly once,
+with the same guard: `quizzes.credits_spent` is zeroed in the same statement as the
+status change in both directions, so `credits_spent > 0` is exactly "charged and
+not yet delivered". The recovery sweep is shared —
+`credits::refund_pending(pool, RefundTarget)` picks between `decks` and `quizzes`
+via two sets of literal statements, because `sqlx` refuses a dynamically built
+query and a table name is exactly the value that should never be interpolated.
+
+The sequence itself is *not* abstracted into one generic function: the claim is a
+table-specific `update … where status = 'generating' returning id` that cannot be
+parameterised without interpolating SQL. Two call sites is not yet an abstraction,
+and the extraction happens at the third (A98).
+
+Constants: `MAX_REQUESTED_QUESTIONS = 50`, `MAX_SOURCES = 20`,
+`QUESTIONS_PER_BATCH = 10`, `MAX_QUESTIONS_PER_REPLY = 60`, `MCQ_OPTIONS = 4`, and
+`GENERATION_CHUNK_LIMIT = 40` chunks shared with the deck generator
+(`chunks::select_for_generation`, round-robin across the selected sources, A99).
+
 ## Build environment note: the server's release binary is blocked here
 
 **What ships to users builds fine.** `tauri build --no-bundle` and the full

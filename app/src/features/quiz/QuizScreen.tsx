@@ -175,12 +175,19 @@ export function QuizScreen() {
           <p className="font-medium break-words">{question.prompt}</p>
 
           {question.kind === 'mcq' && question.options !== null && (
-            <fieldset className="flex flex-col gap-2">
+            // `min-w-0` is load-bearing, not decoration. A `fieldset` carries the UA
+            // default `min-inline-size: min-content`, so it refuses to shrink below its
+            // widest option's minimum and overflows its parent: measured at 200% text
+            // scale on a 390px viewport, the panel's content box was 324px while the
+            // fieldset rendered 325px and its options reached 24px past the panel's
+            // right edge. This is the same failure the `.btn` rule documents for
+            // `min-width: auto`, and it is invisible at 100%.
+            <fieldset className="flex min-w-0 flex-col gap-2">
               <legend className="label">Choose one</legend>
               {question.options.map((option, position) => (
                 <label
                   key={option}
-                  className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-card border border-rule px-3 py-2 ${
+                  className={`flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-card border border-rule px-3 py-2 ${
                     choice === option ? 'border-accent' : ''
                   } ${answered ? 'cursor-default' : ''}`}
                 >

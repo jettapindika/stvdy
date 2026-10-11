@@ -433,8 +433,135 @@ devices converge on one schedule rather than on whichever wrote last (A82).
 
 ## Quiz (Phase 5)
 
-`POST /workspaces/:id/quizzes`, `GET /quizzes/:id`,
-`POST /quizzes/:id/attempts`, `GET /quizzes/:id/results`.
+Generation is asynchronous, exactly as a deck's is: `POST /workspaces/:id/quizzes`
+returns 201 immediately with a quiz in status `generating`, and the client polls
+`GET /quizzes/:id` until it settles to `ready` or `failed`.
+
+**The score is derived, never stored.** `GET /quizzes/:id/results` computes it from
+the attempts on every read, which is what makes attempts from several devices
+conflict-free: there is no stored score for two devices to disagree about, and a
+replayed attempt cannot double-count because it is the same row.
+
+`Quiz = {"id", "workspace_id", "title", "difficulty", "question_types",
+"source_ids", "status", "error", "requested_count", "question_count",
+"created_at"}`.
+`QuizQuestion = {"id", "quiz_id", "kind", "prompt", "options", "answer",
+"explanation", "key_points", "chunk_id"}`. `kind` is `mcq | short`; `options` is
+four strings for an `mcq` and null for a `short`; `key_points` is the reverse.
+`chunk_id` is null when the model cited a label that was not in the prompt's
+context: the question is kept and only its link is lost (A17).
+
+### `POST /workspaces/:id/quizzes`
+
+Auth, and the email must be verified: generation is one of the four actions A43
+keeps locked until then, so an unverified account gets 403 `email_not_verified`.
+
+Body: `{"title": string, "source_ids": [uuid], "count": number, "difficulty":
+"easy"|"medium"|"hard", "types": "mcq"|"short"|"mixed"}`. `count` is how many
+questions to ask for; the generator may return fewer and is told never to pad.
+`difficulty` and `types` are required rather than defaulted: a default would make
+"mixed, medium" the silent meaning of an absent setting, and what the student got
+would differ from what they asked for.
+
+201 `{"quiz": {"id", "workspace_id", "title", "difficulty", "question_types",
+"source_ids", "status": "generating", "error": null, "requested_count",
+"question_count": 0, "created_at"}}`. The body is the same `Quiz` shape every
+other route serialises, so it cannot drift from `GET /quizzes/:id`.
+
+- 400 `validation` when the title is empty or over 120 characters, `count` is
+  outside `1..=50`, `difficulty` or `types` is not one of the values the prompt
+  documents, `source_ids` is empty or longer than 20, or a source is not this
+  workspace's, not this user's, or not `ready`.
+- 402 `insufficient_credits` when the cost exceeds the balance. The cost is
+  `ceil(count / 10) × quiz_10`, i.e. **6 credits per 10 requested questions** (21
+  questions is three batches). Quoted from the *requested* count, so a request
+  larger than the generator will produce is refused rather than truncated and the
+  quote can never overcharge (A96).
+- 422 `limit_reached` when the request would cross the plan's `quizzes_per_month`,
+  counted over the user's **local calendar month**. `quizzes_per_month` counts
+  **quizzes, not questions** (A94): free is 2, and counting questions would make a
+  single ten-question quiz exceed it. The count includes the quizzes still
+  generating, so a burst of concurrent requests cannot each pass on the last slot;
+  the check, the charge and the quiz row are one transaction for the same reason.
+  The body carries `limit` and `used`.
+- 403 `email_not_verified`.
+
+Every check that can fail runs before the credit is spent, so a refused request
+costs nothing.
+
+### `GET /workspaces/:id/quizzes`
+
+Auth. 200 `{"quizzes": [Quiz], "cost": {"per_batch", "batch_size",
+"max_questions"}}`, newest first, tombstones excluded. `cost` is the credit price
+descriptor the studio panel renders — `per_batch` is the plan matrix's `quiz_10`,
+`batch_size` the number of questions one batch covers, and `max_questions` the
+request cap the POST enforces — so the client never quotes a hardcoded price or
+limit. A client that ignores `cost` still reads `quizzes` unchanged. **This route
+is a deliberate addition beyond the spec's route list** (A95), for the same reason
+the deck list is.
+
+### `GET /quizzes/:id`
+
+Auth. 200 `{"quiz": Quiz, "questions": [QuizQuestion]}`, ordered by the model's
+own `idx`, which is stored rather than re-derived: every question of one
+generation is inserted in one transaction, so they share a `created_at` to the
+microsecond and the order would otherwise fall through to a random uuid.
+
+Another account's quiz is 404, not 403: the id must not confirm that it exists.
+`Quiz.status` is `generating | ready | failed`; a `failed` quiz carries a readable
+`error` and its credits are refunded (A98).
+
+### `POST /quizzes/:id/attempts`
+
+Auth. Body: `{"question_id": uuid, "user_answer": string, "id": uuid?,
+"correct": bool?}`.
+
+**The answer is the option *text*, never a letter or an index** (A93). The prompt
+tells the model to copy the correct option verbatim into `answer`, so text is the
+one representation both sides already agree on; accepting a letter would mean
+guessing which option the client meant, and a wrong guess is a silently wrong
+score.
+
+`correct` is read **only for a short answer**. An MCQ is graded by the server,
+which normalises both sides (trim, case-fold, collapse internal whitespace) and
+compares them; a client that claims `correct: true` for a wrong option cannot
+raise its own score (A90). For a short answer `correct` is the student's own
+verdict and may be absent, which stores `NULL` and means "answered, not yet
+judged" (A91).
+
+`id` is client-generated, so a retry after a lost response cannot apply twice: the
+insert is `on conflict (id) do nothing` and the response says whether it applied
+(A92).
+
+200 `{"applied": bool, "attempt": {"id", "question_id", "correct"}}`.
+`correct` is `null` for an unmarked short answer.
+- 400 `validation` when `user_answer` is empty.
+- 404 when the quiz or the question is not this user's.
+
+### `GET /quizzes/:id/results`
+
+Auth. 200 `{"summary": {...}, "questions": [...]}`.
+
+`summary = {"total", "answered", "graded", "correct", "score", "topics"}`.
+`score` is `correct / graded`, or **`null` when nothing is graded yet**: "nothing
+marked yet" and "everything wrong" are different facts and a client that renders
+them the same is lying. `graded` counts only the attempts with a verdict, so an
+unmarked short answer does not lower the score as the student works through the
+quiz (A91).
+
+`topics` is the weak-topic summary, grouped by `(source_id, page)` and sorted
+**weakest first** by `correct / graded`, then title, page and id so the order is
+total. A topic with nothing graded sorts after every assessed topic, because it is
+unknown rather than weak. A question whose label never resolved appears in its own
+bucket with a null `source_id` rather than being dropped: a summary that omitted
+what it could not attribute would look better and mean less (A97).
+
+`questions` is one entry per question with the student's latest attempt
+(`user_answer`, `correct`, `answered_at`), where a graded attempt supersedes an
+ungraded one for the same question: marking your own answer is the fact that
+matters, and the two rows can share an `answered_at`.
+
+Another account's quiz is 404.
 
 ## Reports (Phase 6)
 
