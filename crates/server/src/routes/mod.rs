@@ -1,18 +1,30 @@
 //! Route table assembly.
+//!
+//! Three groups, because they carry different guarantees:
+//!   * public: `/health` and the OAuth start/callback pair.
+//!   * rate limited: everything under `/auth` that takes credentials.
+//!   * authenticated: the rest, each handler taking `AuthUser` or `VerifiedUser`
+//!     so scoping is decided by the extractor rather than by remembering to add
+//!     a `where user_id = $1`.
 
 pub mod health;
 
 use axum::Router;
 use axum::http::HeaderValue;
-use axum::routing::get;
+use axum::routing::{get, post};
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::auth;
+use crate::chunks;
 use crate::config::AppConfig;
+use crate::devices;
+use crate::sources;
 use crate::state::AppState;
+use crate::workspaces;
 
 /// Origins the native shell presents. These are NOT `http://localhost`: Tauri
 /// serves the SPA from its own scheme, so omitting them is the classic
@@ -58,11 +70,55 @@ fn cors_layer(config: &AppConfig) -> CorsLayer {
         ])
 }
 
-pub fn router(state: AppState) -> Router {
+/// Builds the router.
+///
+/// Returns a `Result` because the rate limiter's configuration is validated
+/// here: a process that cannot limit its auth endpoints must fail to start
+/// rather than serve them unprotected.
+pub fn router(state: AppState) -> anyhow::Result<Router> {
     let cors = cors_layer(&state.config);
+    let auth_limiter = crate::ratelimit::auth_layer()?;
 
-    Router::new()
+    // Credential-taking routes. Separate from the rest so the limiter cannot be
+    // lost by a later `.merge()` that forgets to re-apply it.
+    let auth_routes = Router::new()
+        .route("/auth/signup", post(auth::routes::signup))
+        .route("/auth/login", post(auth::routes::login))
+        .route("/auth/refresh", post(auth::routes::refresh))
+        .route("/auth/logout", post(auth::routes::logout))
+        .route("/auth/verify-email", post(auth::routes::verify_email))
+        // Google's callback is a browser redirect, so it is a GET and it is not
+        // rate limited by peer IP: the peer is Google's redirect, not the user.
+        .route("/auth/google/exchange", post(auth::routes::google_exchange))
+        .layer(auth_limiter);
+
+    let public_routes = Router::new()
         .route("/health", get(health::health))
+        .route("/auth/google/start", get(auth::routes::google_start))
+        .route("/auth/google/callback", get(auth::routes::google_callback));
+
+    let authenticated = Router::new()
+        .route("/auth/me", get(auth::routes::me))
+        .route("/auth/logout-all", post(auth::routes::logout_all))
+        .route(
+            "/auth/resend-verification",
+            post(auth::routes::resend_verification),
+        )
+        .route(
+            "/auth/google/set-password",
+            post(auth::routes::google_set_password),
+        )
+        // Each feature module owns its own paths, so a new route in one file
+        // cannot be lost by forgetting to register it here.
+        .merge(devices::routes())
+        .merge(workspaces::routes())
+        .merge(chunks::routes())
+        .merge(sources::routes());
+
+    let router = Router::new()
+        .merge(public_routes)
+        .merge(auth_routes)
+        .merge(authenticated)
         .fallback(health::not_found)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
@@ -72,5 +128,7 @@ pub fn router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(cors)
-        .with_state(state)
+        .with_state(state);
+
+    Ok(router)
 }
