@@ -771,6 +771,11 @@ async fn the_source_count_limit_is_enforced(pool: PgPool) {
         .expect("the free plan caps sources");
 
     for index in 0..max {
+        // A155's per-account spend cap would refuse the eleventh upload in this
+        // loop, and that refusal is about *rate*, not about the count this test is
+        // about. The cap is cleared between uploads so the loop measures the axis
+        // it names.
+        stvdy_server::ratelimit::reset_spend_buckets();
         let (content_type, body) = multipart(&[
             ("kind", "text", None),
             ("text", &format!("Note number {index}."), None),

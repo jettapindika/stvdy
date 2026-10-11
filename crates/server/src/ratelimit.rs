@@ -355,6 +355,20 @@ fn spend_allowed(user_id: Uuid) -> bool {
     true
 }
 
+/// Empties every spend bucket, so the next action gets the full allowance.
+///
+/// For tests, and for the same reason `crate::testing` exists: a suite that drives
+/// twenty uploads in a loop to reach `sources_total` is exercising the *count* axis,
+/// and the cap would refuse the eleventh for a reason that has nothing to do with
+/// what the test is about. Public rather than `#[cfg(test)]` because an integration
+/// test is a separate crate and cannot see a `cfg(test)` item.
+pub fn reset_spend_buckets() {
+    SPEND_BUCKETS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
 /// The routes that spend provider money or credits, by their router template.
 ///
 /// A read is never here (A149): the sweep's `ReadOnly` rows are exactly the ones
