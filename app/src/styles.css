@@ -449,6 +449,38 @@
     }
   }
 
+  /* --- Identity: the web citation ----------------------------------------- */
+
+  /* A result from outside the workspace carries a title, so this mark is a
+     sentence rather than a bracket. It stays a pill, because it is still the same
+     gesture: a claim pointing at where it came from.
+
+     Both parts are `--accent-text` on `--accent-soft` (5.04:1 light, 7.10:1
+     dark). The host is told apart from the title by being monospace and smaller,
+     which is the evidence layer's own convention, rather than by a second colour:
+     a chip whose two halves were two greys would fail the contrast check the
+     moment either token moved. */
+  .cite-web {
+    align-items: baseline;
+    gap: 0.4em;
+    font-size: 0.875em;
+    max-width: 100%;
+  }
+  .cite-web .cite-title {
+    max-width: 18rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cite-web .cite-host {
+    max-width: 12rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
   /* --- Labels and state --------------------------------------------------- */
 
   /* Metadata: page numbers, timestamps, counts. Monospace so it reads as

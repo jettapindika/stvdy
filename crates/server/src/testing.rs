@@ -78,6 +78,7 @@ pub fn state(pool: PgPool) -> AppState {
         mailer: Arc::new(RecordingMailer::default()),
         clock: Arc::new(FixedClock::at(chrono::Utc::now())),
         llm: None,
+        search: None,
         jobs: Queue::new(),
     }
 }
@@ -116,6 +117,7 @@ impl TestState {
                 mailer: mailer.clone(),
                 clock: clock.clone(),
                 llm: None,
+                search: None,
                 jobs: Queue::new(),
             },
             storage,
@@ -147,6 +149,16 @@ impl TestState {
     /// assertion run on the path that ships.
     pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
         self.state.embedder = embedder;
+        self
+    }
+
+    /// The same state with a search composite, so the web suite runs without a
+    /// network.
+    pub fn with_search(
+        mut self,
+        search: Arc<crate::integrations::search::composite::CompositeSearch>,
+    ) -> Self {
+        self.state.search = Some(search);
         self
     }
 

@@ -104,6 +104,9 @@ pub struct PromptWebHit {
     pub url: String,
     pub title: String,
     pub snippet: String,
+    /// Rendered into the prompt when present, so the model can cite a work by its
+    /// DOI, and carried into the label map so the citation resolves with it.
+    pub doi: Option<String>,
 }
 
 /// The composed prompt and everything needed to interpret the model's reply.
@@ -161,6 +164,7 @@ pub fn compose_chat(
                 label: hit.label,
                 url: hit.url.clone(),
                 title: hit.title.clone(),
+                doi: hit.doi.clone(),
             })
             .collect(),
     );

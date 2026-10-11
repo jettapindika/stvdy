@@ -289,6 +289,46 @@ pub fn daily_chat_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -
     }
 }
 
+/// The cost of one web search, from the config rather than a literal.
+///
+/// Charged once per search that actually called a provider. A cache hit is free
+/// (A40): re-billing a repeated query would burn the user's daily allowance on a
+/// question already answered.
+pub fn search_cost(state: &AppState) -> i64 {
+    state.config.plans.credits.web_search
+}
+
+/// Records a search that ran, whether or not it cost anything.
+///
+/// A cache hit still writes a row with `cache_hit = true`, because the row is what
+/// makes the cache visible in the margin report: without it a cache hit and a
+/// never-run search look identical. `search_tier` and `unresponsive_engines` are
+/// the A3 health signal, so silent degradation of the free path shows up in the
+/// report rather than being discovered by a user.
+pub async fn record_search(
+    pool: &PgPool,
+    user_id: Uuid,
+    credits: i64,
+    answered_by: Option<&str>,
+    unresponsive: &[String],
+    cache_hit: bool,
+) -> AppResult<()> {
+    sqlx::query(
+        "insert into usage_events
+           (user_id, action, credits, search_tier, unresponsive_engines, cache_hit)
+         values ($1, 'web_search', $2, $3, $4, $5)",
+    )
+    .bind(user_id)
+    .bind(i32::try_from(credits).unwrap_or(i32::MAX))
+    .bind(answered_by)
+    .bind(unresponsive)
+    .bind(cache_hit)
+    .execute(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("recording a search: {error}")))?;
+    Ok(())
+}
+
 /// The cost of one chat message, from the config rather than a literal.
 pub fn chat_message_cost(state: &AppState) -> i64 {
     state.config.plans.credits.chat_message

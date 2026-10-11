@@ -20,7 +20,7 @@ use stvdy_core::citations::{Citation, strip_unknown};
 use stvdy_core::traits::llm::{ChatMsg, ChatRequest, Role, StreamEvent};
 
 use crate::auth::extract::VerifiedUser;
-use crate::chat::{prompt, retrieve, sse};
+use crate::chat::{prompt, retrieve, sse, web};
 use crate::credits;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -74,17 +74,6 @@ pub async fn chat(
         ));
     }
 
-    // Web search arrives in Phase 3. Accepting the flag now would make three
-    // things untrue at once: the prompt tells the model "Web search: on" with no
-    // web context, the stored turn asserts `used_web: true`, and the model will
-    // claim to have searched. Refusing is the only honest option, and it is
-    // refused before anything is spent or written.
-    if body.use_web {
-        return Err(AppError::Validation(
-            "web search arrives in Phase 3; this chat has no web context".to_string(),
-        ));
-    }
-
     let workspace_name = owned_workspace_name(&state, user.user_id, workspace_id).await?;
 
     // Every check that can fail runs before the spend and before anything is
@@ -110,18 +99,51 @@ pub async fn chat(
     )
     .await?;
 
+    // The web arm runs before the spend, because its result decides whether a
+    // search is charged: a cache hit costs nothing (A40), and a query every tier
+    // failed is not an error, so the turn proceeds without web context rather than
+    // failing. Either way the user's own sources are already in hand.
+    // The composite does not return a `Result`, and that is deliberate: a tier
+    // failing is recorded in `unresponsive` rather than propagated, because a
+    // query every tier failed is not an error. The turn proceeds without web
+    // context and answers from the user's own sources, which is strictly better
+    // than an error for the user.
+    let web = match (&state.search, body.use_web) {
+        (Some(search), true) => web::build(
+            search
+                .search(&message, state.config.search.max_results)
+                .await,
+        ),
+        (None, true) => {
+            tracing::warn!("use_web was requested but no search provider is configured");
+            web::WebContext::empty()
+        }
+        (_, false) => web::WebContext::empty(),
+    };
+
     let composed = prompt::compose(
         &state,
         &user,
         &workspace_name,
         &chunks,
-        &[],
+        &web.prompt_hits,
         body.use_web,
         body.study_mode,
     )?;
 
     let labels = composed.labels.clone();
     let prompt_version = composed.prompt_version.clone();
+
+    // A search is charged only when it actually called a provider. A cache hit
+    // writes its usage row below without a ledger entry (A40), because re-billing
+    // a repeated query would burn the user's daily allowance on a question already
+    // answered.
+    let search_cost = if body.use_web && !web.cache_hit && !web.is_empty() {
+        credits::search_cost(&state)
+    } else {
+        0
+    };
+    let total_cost = cost + search_cost;
 
     // The spend comes after every read that can fail, and immediately before the
     // provider is called: retrieval and composition are a database read and a
@@ -131,9 +153,23 @@ pub async fn chat(
     // The daily cap is enforced inside this call, under the same lock, because a
     // separate check and spend can interleave and let two requests through on the
     // last slot.
-    let spent = credits::spend(&state, user.user_id, user.plan(), ACTION, cost, Some(cap)).await?;
+    let spent = credits::spend(
+        &state,
+        user.user_id,
+        user.plan(),
+        ACTION,
+        total_cost,
+        Some(cap),
+    )
+    .await?;
     let remaining = spent.remaining;
     let usage_event_id = spent.usage_event_id;
+
+    // What the turn actually used, which is not the same as what was requested: a
+    // toggle-on turn where every tier returned nothing used no web context, and
+    // recording `used_web: true` for it would make the stored assistant row a lie
+    // about where the answer came from.
+    let used_web = !web.is_empty();
 
     let user_message_id = insert_message(
         &state,
@@ -142,9 +178,29 @@ pub async fn chat(
         "user",
         &message,
         &[],
-        body.use_web,
+        used_web,
     )
     .await?;
+
+    // The search's own row, written whether or not it cost anything: `cache_hit`
+    // is what makes the cache visible in the margin report, and `search_tier` plus
+    // `unresponsive_engines` is the A3 health signal that turns silent degradation
+    // of the free path into something an operator can see.
+    if body.use_web
+        && let Err(error) = credits::record_search(
+            &state.pool,
+            user.user_id,
+            search_cost,
+            web.answered_by.as_deref(),
+            &web.unresponsive,
+            web.cache_hit,
+        )
+        .await
+    {
+        // Not fatal: the answer is already being produced and the credit is
+        // already spent. Losing the telemetry affects the report, not the user.
+        tracing::error!(%error, "recording the search usage failed");
+    }
 
     // History is deliberately just the prompt plus the user's turn: the prompt
     // carries the sources, and replaying prior turns would send a second copy of
@@ -292,7 +348,7 @@ pub async fn chat(
             {
                 Ok(message_id) => {
                     yield Ok(sse::citations(&resolved));
-                    yield Ok(sse::usage(cost, remaining));
+                    yield Ok(sse::usage(total_cost, remaining));
                     yield Ok(sse::done(message_id, body.use_web));
                 }
                 Err(error) => {

@@ -18,7 +18,7 @@ pub use composite::{CompositeSearch, SearchOutcome};
 
 use std::time::Duration;
 
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use stvdy_core::traits::search::SearchError;
 
 /// OpenAlex and Crossref both ask callers to identify themselves rather than send
@@ -71,17 +71,33 @@ pub(crate) fn midnight(date: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(&date.and_time(NaiveTime::MIN))
 }
 
-/// The four date shapes the tiers actually send: RFC 3339, `2024-01-02`,
-/// `2024-01` and a bare year. A partial date becomes the first of its period
-/// rather than being dropped, because a year is still worth ranking on.
+/// The date shapes the tiers actually send: RFC 3339, a timestamp with no offset,
+/// `2024-01-02`, `2024-01` and a bare year. A partial date becomes the first of
+/// its period rather than being dropped, because a year is still worth ranking on.
 pub(crate) fn parse_date(raw: &str) -> Option<DateTime<Utc>> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
+    // A timestamp carrying its own offset.
     if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
         return Some(parsed.with_timezone(&Utc));
     }
+    // A timestamp with no offset, which is UTC by convention: SearXNG's
+    // `publishedDate` and PubMed's `sortpubdate` both arrive this way.
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M",
+    ] {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(raw, format) {
+            return Some(Utc.from_utc_datetime(&parsed));
+        }
+    }
+    // A date alone.
     for format in ["%Y-%m-%d", "%Y/%m/%d"] {
         if let Ok(date) = NaiveDate::parse_from_str(raw, format) {
             return Some(midnight(date));
@@ -176,10 +192,10 @@ pub(crate) fn unescape_xml(raw: &str) -> String {
             .take(12)
             .find(|(_, ch)| *ch == ';')
             .map(|(index, _)| index);
-        match end.and_then(|end| decode_entity(&tail[1..end])) {
-            Some(decoded) => {
+        match end.and_then(|end| decode_entity(&tail[1..end]).map(|ch| (end, ch))) {
+            Some((end, decoded)) => {
                 out.push(decoded);
-                rest = &tail[end.unwrap_or(0) + 1..];
+                rest = &tail[end + 1..];
             }
             None => {
                 out.push('&');
@@ -220,10 +236,18 @@ mod tests {
     }
 
     #[test]
-    fn the_four_date_shapes_all_parse() {
+    fn every_date_shape_the_tiers_send_parses() {
         assert_eq!(
             parse_date("2024-03-04T05:06:07Z"),
             Some(Utc.with_ymd_and_hms(2024, 3, 4, 5, 6, 7).unwrap())
+        );
+        assert_eq!(
+            parse_date("2024-03-04T05:06:07"),
+            Some(Utc.with_ymd_and_hms(2024, 3, 4, 5, 6, 7).unwrap())
+        );
+        assert_eq!(
+            parse_date("2024/03/04 05:06"),
+            Some(Utc.with_ymd_and_hms(2024, 3, 4, 5, 6, 0).unwrap())
         );
         assert_eq!(
             parse_date("2024-03-04"),

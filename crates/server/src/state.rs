@@ -11,6 +11,7 @@ use stvdy_core::traits::storage::Storage;
 use stvdy_core::traits::llm::LlmProvider;
 
 use crate::config::AppConfig;
+use crate::integrations::search::composite::CompositeSearch;
 use crate::jobs::Queue;
 
 /// Provider handles and the job queue. Built once at startup by
@@ -28,6 +29,9 @@ pub struct AppState {
     /// `provider_error` rather than failing at the first request with a
     /// transport error that looks like an outage.
     pub llm: Option<Arc<dyn LlmProvider>>,
+    /// `None` only when the pinned tier is unconfigured. The composite itself
+    /// needs no keys, so this is present on a default deployment.
+    pub search: Option<Arc<CompositeSearch>>,
     pub jobs: Queue,
 }
 

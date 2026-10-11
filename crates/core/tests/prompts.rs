@@ -265,6 +265,7 @@ fn the_web_results_block_renders_hits_and_an_empty_state() {
         &vars(),
         &[],
         &[PromptWebHit {
+            doi: Some("10.1000/xyz".to_string()),
             label: 1,
             url: "https://example.test/tcp".to_string(),
             title: "TCP overview".to_string(),

@@ -48,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         mailer: providers.mailer,
         clock: providers.clock,
         llm: providers.llm,
+        search: providers.search,
         jobs: jobs::Queue::new(),
     };
 

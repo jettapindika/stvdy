@@ -1,4 +1,4 @@
-import type { ChatCitation } from '@/api/sse'
+import type { ChunkCitation } from '@/api/sse'
 
 /**
  * The citation mark, for a citation the stream delivered.
@@ -22,10 +22,10 @@ export function CitationChip({
   sourceTitle,
   onOpen,
 }: {
-  citation: ChatCitation
+  citation: ChunkCitation
   /** The source's title, from the workspace's source list. */
   sourceTitle: string
-  onOpen: (citation: ChatCitation) => void
+  onOpen: (citation: ChunkCitation) => void
 }) {
   const where = citation.page === null ? 'page unknown' : `page ${String(citation.page)}`
   const label = `${sourceTitle}, ${where}`

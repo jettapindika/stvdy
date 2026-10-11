@@ -81,9 +81,12 @@ afterEach(() => {
 /** What the chat route answers with: a stream the test drives, or a bare status. */
 type ChatAnswer =
   | { kind: 'stream'; stream: ManualStream }
+  /** One stream per chat request, in order, for a test that sends more than one. */
+  | { kind: 'streams'; streams: ManualStream[] }
   | { kind: 'response'; response: Response }
 
 function serve(chat?: ChatAnswer) {
+  let next = 0
   return mockFetch((url, init) => {
     const path = new URL(url).pathname
     if (path === '/workspaces/w1') return jsonResponse(200, { workspace: WORKSPACE })
@@ -91,9 +94,15 @@ function serve(chat?: ChatAnswer) {
     if (path === '/workspaces/w1/messages') return jsonResponse(200, { messages })
     if (path === '/workspaces/w1/chat') {
       if (chat?.kind === 'response') return chat.response
-      if (chat?.kind === 'stream') {
-        chat.stream.attach(init.signal)
-        return chat.stream.response
+      const stream =
+        chat?.kind === 'stream'
+          ? chat.stream
+          : chat?.kind === 'streams'
+            ? chat.streams[next++]
+            : undefined
+      if (stream !== undefined) {
+        stream.attach(init.signal)
+        return stream.response
       }
     }
     const chunk = /^\/chunks\/([^/]+)$/.exec(path)

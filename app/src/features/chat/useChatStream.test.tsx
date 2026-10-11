@@ -198,6 +198,7 @@ describe('a completed answer', () => {
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
       message: 'Halo',
       source_ids: ['s1', 's2'],
+      use_web: false,
     })
 
     act(() => {
@@ -207,8 +208,10 @@ describe('a completed answer', () => {
       expect(calls).toHaveLength(2)
     })
     // No empty `source_ids`: an empty array would read as "no sources", which is
-    // not what "the whole workspace" means.
-    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ message: 'Lagi' })
+    // not what "the whole workspace" means. `use_web` is always sent, because the
+    // client always knows the toggle's state and an absent field would make "off"
+    // and "too old to ask" indistinguishable on the wire.
+    expect(JSON.parse(String(calls[1]?.init.body))).toEqual({ message: 'Lagi', use_web: false })
 
     // The bearer token is on the stream request, which is the reason the
     // transport cannot be `EventSource`.
@@ -388,7 +391,7 @@ describe('a failure mid-stream', () => {
     await waitFor(() => {
       expect(calls).toHaveLength(1)
     })
-    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ message: 'Tanya' })
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ message: 'Tanya', use_web: false })
 
     act(() => {
       retry.push(frame('token', { t: 'Utuh' }))

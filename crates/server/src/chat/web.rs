@@ -33,6 +33,10 @@ pub struct WebContext {
     /// Whether the results came from the cache, which decides whether this turn is
     /// charged for a search (A40).
     pub cache_hit: bool,
+    /// The SearXNG engines that did not answer, which is the A3 health signal
+    /// distinct from an unresponsive *tier*: one engine dying degrades a tier
+    /// without failing it.
+    pub unresponsive_engines: Vec<String>,
 }
 
 impl WebContext {
@@ -45,6 +49,7 @@ impl WebContext {
             answered_by: None,
             unresponsive: Vec::new(),
             cache_hit: false,
+            unresponsive_engines: Vec::new(),
         }
     }
 
@@ -69,6 +74,10 @@ pub fn build(outcome: SearchOutcome) -> WebContext {
             url: hit.url.clone(),
             title: hit.title.clone(),
             snippet: truncate_snippet(&hit.snippet),
+            // The DOI rides along so the model can cite a work by its stable
+            // identifier and the citation resolves with it. Dropping it here is how
+            // "URLs and DOIs" quietly becomes "URLs".
+            doi: hit.doi.clone(),
         });
         hits.push(hit);
     }
@@ -79,6 +88,7 @@ pub fn build(outcome: SearchOutcome) -> WebContext {
         answered_by: outcome.answered_by,
         unresponsive: outcome.unresponsive,
         cache_hit: outcome.cache_hit,
+        unresponsive_engines: outcome.unresponsive_engines,
     }
 }
 
@@ -129,6 +139,7 @@ mod tests {
             answered_by: Some("tavily".to_string()),
             unresponsive: vec!["searxng".to_string()],
             cache_hit: false,
+            unresponsive_engines: vec!["mojeek".to_string()],
         };
 
         let context = build(outcome);
@@ -139,6 +150,9 @@ mod tests {
         assert_eq!(context.hits.len(), 3);
         assert_eq!(context.prompt_hits[0].title, "a");
         assert_eq!(context.unresponsive, vec!["searxng".to_string()]);
+        // The engine-level list is separate from the tier-level one: one engine
+        // dying degrades a tier without failing it.
+        assert_eq!(context.unresponsive_engines, vec!["mojeek".to_string()]);
     }
 
     #[test]
@@ -149,6 +163,7 @@ mod tests {
             answered_by: Some("tavily".to_string()),
             unresponsive: Vec::new(),
             cache_hit: false,
+            unresponsive_engines: Vec::new(),
         });
 
         let snippet = &context.prompt_hits[0].snippet;
@@ -174,6 +189,7 @@ mod tests {
             answered_by: None,
             unresponsive: Vec::new(),
             cache_hit: false,
+            unresponsive_engines: Vec::new(),
         });
         assert_eq!(context.prompt_hits[0].snippet, "one two three");
     }

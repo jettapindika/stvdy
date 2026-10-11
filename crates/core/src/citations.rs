@@ -25,6 +25,10 @@ pub struct LabeledWeb {
     pub label: u32,
     pub url: String,
     pub title: String,
+    /// The DOI where the tier provided one. It travels with the citation because
+    /// an academic hit is identified by its DOI, not by whichever host served it,
+    /// and the client renders it as the stable link (A3).
+    pub doi: Option<String>,
 }
 
 /// The per-request label map. Fields are private so the only way to look a
@@ -73,6 +77,7 @@ pub enum Citation {
     Web {
         url: String,
         title: String,
+        doi: Option<String>,
     },
 }
 
@@ -186,6 +191,7 @@ pub fn resolve(text: &str, labels: &ContextLabels) -> Vec<Citation> {
             Label::Web(value) => labels.web(value).map(|entry| Citation::Web {
                 url: entry.url.clone(),
                 title: entry.title.clone(),
+                doi: entry.doi.clone(),
             }),
         };
         if let Some(citation) = citation {

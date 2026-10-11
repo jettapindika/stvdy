@@ -247,7 +247,15 @@ export interface ChatStreamInput {
   message: string
   /** Narrows retrieval to these sources. Omitted means the whole workspace. */
   sourceIds?: string[]
-  useWeb?: boolean
+  /**
+   * Whether this turn may also search outside the workspace.
+   *
+   * Required rather than optional, and always sent: the client always knows the
+   * answer (the toggle is either on or off), and a body that sometimes omits the
+   * field makes "the toggle was off" and "the client is too old to have one"
+   * indistinguishable on the wire.
+   */
+  useWeb: boolean
   signal?: AbortSignal
 }
 
@@ -261,9 +269,8 @@ async function readJsonBody(response: Response): Promise<unknown> {
 }
 
 function post(input: ChatStreamInput): Promise<Response> {
-  const body: Record<string, unknown> = { message: input.message }
+  const body: Record<string, unknown> = { message: input.message, use_web: input.useWeb }
   if (input.sourceIds !== undefined && input.sourceIds.length > 0) body.source_ids = input.sourceIds
-  if (input.useWeb === true) body.use_web = true
 
   const token = getAccessToken()
   return fetch(`${API_BASE_URL}/workspaces/${input.workspaceId}/chat`, {

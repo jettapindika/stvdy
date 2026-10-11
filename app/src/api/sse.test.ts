@@ -114,7 +114,11 @@ describe('the chat stream parser', () => {
 
     parser.feed(frame('citations', { citations: [{ type: 'chunk', chunk_id: 'c1', source_id: 's1', page: null }] }))
 
-    expect(citations[0]?.[0]?.page).toBeNull()
+    const first = citations[0]?.[0]
+    expect(first?.type).toBe('chunk')
+    // Narrowed rather than cast: `page` exists only on the chunk variant, and the
+    // point of the union is that a caller cannot read it off a web citation.
+    if (first?.type === 'chunk') expect(first.page).toBeNull()
   })
 
   it('drops a citation it could not render instead of losing the answer', () => {

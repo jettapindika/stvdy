@@ -40,9 +40,14 @@ export interface FakeDeepLinks {
 export function installFakePlatform(
   kind: PlatformKind = 'web',
   options: { current?: DeepLinkIntent | null; deepLinks?: boolean } = {},
-): FakeSecureStore & { deepLinks: FakeDeepLinks } {
+): FakeSecureStore & { deepLinks: FakeDeepLinks; opened: string[] } {
   const values = new Map<string, string>()
   const deleted: string[] = []
+  // Every URL the app handed to the system browser, in order. Recorded rather
+  // than spied so a test can assert *what* was opened and that nothing else was:
+  // a web citation that navigated the app would show up here as a missing entry
+  // and in the DOM as a page that is no longer the answer.
+  const opened: string[] = []
 
   const secureStore: SecureStore = {
     async set(key, value) {
@@ -73,6 +78,9 @@ export function installFakePlatform(
   installPlatform({
     ...webPlatform(kind),
     secureStore,
+    async openExternal(url) {
+      opened.push(url)
+    },
     ...(options.deepLinks
       ? {
           deepLinks: {
@@ -89,7 +97,7 @@ export function installFakePlatform(
         }
       : {}),
   })
-  return { values, deleted, deepLinks }
+  return { values, deleted, deepLinks, opened }
 }
 
 /**
