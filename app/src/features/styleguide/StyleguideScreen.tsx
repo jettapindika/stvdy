@@ -256,6 +256,9 @@ export function StyleguideScreen() {
             minPlan="Pro"
             reasonKey="reports.locked.pdfReason"
           />
+          {/* The same gate as the plan screen states it: no reason line, because
+              the screen's own heading already says what the section is. */}
+          <LockedFeature whatKey="plan.formats.pdf" minPlan="Pro" />
         </div>
       </Section>
 

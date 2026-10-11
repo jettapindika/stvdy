@@ -1,7 +1,7 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 
 import { API_BASE_URL, ensureFreshSession } from './client'
-import { apiErrorFromBody, ApiError, networkReason, statusForCode, type ApiErrorCode } from './errors'
+import { apiErrorFromBody, ApiError, statusForCode, type ApiErrorCode } from './errors'
 import { getAccessToken } from '../lib/tokens'
 
 /**
@@ -329,7 +329,7 @@ export async function streamChat(
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error
       handlers.onError?.(
-        new ApiError({ status: 0, code: 'network', message: networkReason(API_BASE_URL) }),
+        new ApiError({ status: 0, code: 'network', message: '', origin: API_BASE_URL }),
       )
       return
     }
@@ -365,7 +365,11 @@ export async function streamChat(
       new ApiError({
         status: 0,
         code: 'network',
-        message: 'The connection to the server dropped before the answer finished.',
+        message: '',
+        // The connection was established and the server had already answered: the
+        // body was cut off mid-stream. Saying "the server could not be reached"
+        // here would be untrue, so this drop names its own sentence.
+        reasonKey: 'error.network.dropped',
       }),
     )
   } finally {

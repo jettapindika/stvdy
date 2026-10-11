@@ -11,17 +11,32 @@ import {
   codeForStatus,
   planLabel,
   planLimitMessage,
-  networkReason,
   statusForCode,
   validationMessage,
 } from './errors'
+import i18n from '@/i18n'
+
+/**
+ * A `t` for the accessors outside a component.
+ *
+ * `getFixedT(null)` follows the current language rather than pinning one, which
+ * is what lets the Indonesian assertions below drive the same functions the
+ * screens call. Screens use the reactive `t` from `useTranslation` instead: this
+ * one is not a hook, so a language change would not re-render around it.
+ */
+const t = i18n.getFixedT(null, 'translation')
 
 /**
  * The error vocabulary.
  *
- * These tests pin the two things a screen depends on: that a server body becomes
- * the right typed error, and that the sentence the user reads is built from the
- * numbers the server actually sent rather than from a guess.
+ * These tests pin the three things a screen depends on: that a server body
+ * becomes the right typed error, that the sentence the user reads is built from
+ * the numbers the server actually sent rather than from a guess, and that every
+ * one of those sentences exists in both languages. The last one is here rather
+ * than in `i18n.test.ts` because the keys are built by interpolation
+ * (`error.${code}.title`), which no static scan of the source can see: the
+ * i18n contract would pass with a code whose copy is missing, and the user would
+ * read the key itself.
  */
 
 describe('mapping a response body', () => {
@@ -100,7 +115,7 @@ describe('mapping a response body', () => {
     const unverified = apiErrorFromBody(403, { code: 'email_not_verified' })
     expect(unverified.isPlanLimit).toBe(false)
     expect(unverified.isAuthFailure).toBe(false)
-    expect(apiErrorTitle(unverified)).toBe('Email not verified')
+    expect(apiErrorTitle(unverified, t)).toBe('Email not verified')
   })
 
   it('turns an unknown throw into a renderable error', () => {
@@ -111,26 +126,21 @@ describe('mapping a response body', () => {
   })
 
   it('names the origin it could not reach, and keeps a sentence without one', () => {
-    // A `network` error is raised by the client, not by the server, so its
-    // message is the user's sentence rather than a log line. It is the one code
-    // whose reason is not the fixed copy, and the reason is that the origin is
-    // the actionable part: a development build pointed at an origin nothing
-    // serves reads as an outage until the URL is on screen.
-    expect(networkReason('http://127.0.0.1:8099')).toBe(
-      'The server could not be reached at http://127.0.0.1:8099. Check your connection and try again.',
+    // A `network` error is raised by the client, not by the server. Its origin is
+    // the actionable part: "the server could not be reached" is the same sentence
+    // for three different situations (no API running, no network, a build pointed
+    // at an origin nothing serves), and only the origin tells them apart. It is
+    // carried as data rather than baked into the message, so the sentence is
+    // resolved in the language the reader is in.
+    const reached = new ApiError({ status: 0, code: 'network', message: '', origin: 'http://localhost:8080' })
+    expect(apiErrorReason(reached, t)).toBe(
+      'The server could not be reached at http://localhost:8080. Check your connection and try again.',
     )
 
-    const reached = new ApiError({
-      status: 0,
-      code: 'network',
-      message: networkReason('http://localhost:8080'),
-    })
-    expect(apiErrorReason(reached)).toContain('http://localhost:8080')
-
-    // An error built without a message still reads as something, which is what
+    // An error built without an origin still reads as something, which is what
     // the exhaustive table above guarantees.
     const bare = new ApiError({ status: 0, code: 'network', message: '' })
-    expect(apiErrorReason(bare)).toBe(
+    expect(apiErrorReason(bare, t)).toBe(
       'The server could not be reached. Check your connection and try again.',
     )
   })
@@ -141,8 +151,8 @@ describe('mapping a response body', () => {
     // `link_expired` shipped with no client mapping.
     for (const code of API_ERROR_CODES) {
       const error = new ApiError({ status: 0, code, message: '' })
-      expect(apiErrorTitle(error).length).toBeGreaterThan(0)
-      expect(apiErrorReason(error).length).toBeGreaterThan(0)
+      expect(apiErrorTitle(error, t).length).toBeGreaterThan(0)
+      expect(apiErrorReason(error, t).length).toBeGreaterThan(0)
     }
   })
 
@@ -198,7 +208,7 @@ describe('mapping a response body', () => {
     // `validation` would tell the user the request was malformed.
     const expired = apiErrorFromBody(410, { code: 'link_expired', message: 'expired' })
     expect(expired.code).toBe('link_expired')
-    expect(apiErrorReason(expired)).toContain('expired')
+    expect(apiErrorReason(expired, t)).toContain('expired')
 
     // A 410 with a body the client does not recognise still reads as expiry.
     const bare = apiErrorFromBody(410, null)
@@ -216,7 +226,7 @@ describe('the upgrade sentence', () => {
       used: 2,
     })
 
-    const sentence = planLimitMessage(error, 'workspaces')
+    const sentence = planLimitMessage(error, t, 'workspaces')
     expect(sentence).toContain('The Pro plan')
     expect(sentence).toContain('2')
     expect(sentence).toContain('Pro lifts this limit.')
@@ -224,16 +234,49 @@ describe('the upgrade sentence', () => {
 
   it('does not invent a number the server did not send', () => {
     const error = apiErrorFromBody(422, { code: 'limit_reached', min_plan: 'power' })
-    const sentence = planLimitMessage(error, 'sources')
+    const sentence = planLimitMessage(error, t, 'sources')
     expect(sentence).toContain('The Power plan')
     expect(sentence).not.toContain('The limit is')
   })
 
-  it('says which plan a locked feature belongs to', () => {
-    const error = apiErrorFromBody(403, { code: 'feature_locked', min_plan: 'pro' })
-    expect(planLimitMessage(error, 'web search')).toBe(
-      'Web search is not included in your current plan. It is part of Pro.',
+  it('says which plan includes a feature the plan does not have', () => {
+    const error = apiErrorFromBody(403, { code: 'plan_required', min_plan: 'pro' })
+    expect(planLimitMessage(error, t, 'pdf export')).toBe(
+      'Pdf export is not included in your current plan. It is part of Pro.',
     )
+  })
+
+  it('states a plan-required feature without naming a plan the server did not send', () => {
+    // `min_plan` is optional on `plan_required` (A140): a feature no plan in the
+    // matrix grants has no plan to name, and a fabricated one would send the user
+    // to a plans page that cannot fix it.
+    const error = apiErrorFromBody(403, { code: 'plan_required' })
+    expect(planLimitMessage(error, t, 'pdf export')).toBe(
+      'Pdf export is not included in your current plan.',
+    )
+  })
+
+  it('does not offer an upgrade for a locked feature, even when one is named', () => {
+    // A143 gives `feature_locked` exactly one meaning: locked, and no upgrade may
+    // be offered to this client. It therefore never names a plan, never claims a
+    // limit was reached — the code also covers a device that is over its plan's
+    // device count, where the plan is not the problem — and its sentence is
+    // different from the `plan_required` one above.
+    const error = apiErrorFromBody(403, { code: 'feature_locked', min_plan: 'pro' })
+    expect(planLimitMessage(error, t, 'web search')).toBe(
+      'Web search is not available on your current plan or device.',
+    )
+    expect(planLimitMessage(error, t, 'web search')).not.toContain('Pro')
+    expect(planLimitMessage(error, t, 'web search')).not.toContain('limit for')
+  })
+
+  it('does not describe a plan gate as a reached limit', () => {
+    // The two are different facts: `limit_reached` is "you are at the ceiling",
+    // `plan_required` is "this was never in your plan". Rendering the second as
+    // the first would tell a user to free up something they do not have.
+    const gate = apiErrorFromBody(403, { code: 'plan_required', min_plan: 'pro' })
+    expect(planLimitMessage(gate, t, 'pdf export')).not.toContain('has reached its limit')
+    expect(planLimitMessage(gate, t, 'pdf export')).not.toContain('lifts this limit')
   })
 
   it('prints a plan id the way the plans config names it', () => {
@@ -244,10 +287,110 @@ describe('the upgrade sentence', () => {
   })
 })
 
+describe('the refusals in Indonesian', () => {
+  /**
+   * The gap the i18n contract structurally cannot see.
+   *
+   * `i18n.test.ts` scans the source for `t('…')` calls, and these keys are built
+   * by interpolation (`error.${code}.reason`), so a missing entry would pass it
+   * and render the key itself to the user. The refusals a student actually hits —
+   * at a limit, behind a plan gate, at a locked feature, and out of credits — are
+   * asserted in Indonesian, because that is the language the audience reads and
+   * the language the copy used to be missing in.
+   */
+  const inIndonesian = async (run: () => void) => {
+    await i18n.changeLanguage('id')
+    try {
+      run()
+    } finally {
+      await i18n.changeLanguage('en')
+    }
+  }
+
+  it('reads the limit refusal in Indonesian', async () => {
+    const error = apiErrorFromBody(422, {
+      code: 'limit_reached',
+      min_plan: 'pro',
+      limit: 2,
+      used: 2,
+    })
+    await inIndonesian(() => {
+      expect(apiErrorTitle(error, t)).toBe('Batas paket tercapai')
+      const sentence = planLimitMessage(error, t, 'ruang belajar')
+      expect(sentence).toContain('Paket Pro')
+      expect(sentence).toContain('Batasnya 2 dan kamu sudah memakai 2.')
+      expect(sentence).toContain('Pro menaikkan batas ini.')
+      // Not one English word survives, which is the defect this test exists for.
+      expect(sentence).not.toContain('plan has reached')
+    })
+  })
+
+  it('reads the plan gate, the locked feature and the credit refusal in Indonesian', async () => {
+    await inIndonesian(() => {
+      const gate = apiErrorFromBody(403, { code: 'plan_required', min_plan: 'pro' })
+      expect(apiErrorTitle(gate, t)).toBe('Tidak ada di paketmu')
+      expect(planLimitMessage(gate, t, 'ekspor PDF')).toBe(
+        'Ekspor PDF tidak termasuk dalam paketmu saat ini. Fitur ini ada di Pro.',
+      )
+
+      const locked = apiErrorFromBody(403, { code: 'feature_locked' })
+      expect(apiErrorTitle(locked, t)).toBe('Tidak tersedia di paket atau perangkat ini')
+      expect(planLimitMessage(locked, t, 'ekspor PDF')).toBe(
+        'Ekspor PDF tidak tersedia di paket atau perangkatmu saat ini.',
+      )
+
+      const credits = apiErrorFromBody(402, { code: 'insufficient_credits' })
+      expect(apiErrorTitle(credits, t)).toBe('Kredit tidak cukup')
+      expect(apiErrorReason(credits, t)).toBe('Saldo kreditmu kurang dari biaya ini.')
+    })
+  })
+
+  it('resolves a key the client raises, in both languages', async () => {
+    // A condition the server's code set cannot express carries a key instead of a
+    // sentence, because a sentence here is English shown to an Indonesian user —
+    // the same gap the tables above had. The key is asserted in both languages and
+    // against the generic `network` sentence, since using that one for a
+    // mid-answer drop would claim the server was never reached when it was.
+    const dropped = new ApiError({
+      status: 0,
+      code: 'network',
+      message: '',
+      reasonKey: 'error.network.dropped',
+    })
+    expect(apiErrorReason(dropped, t)).toBe(
+      'The connection dropped before the answer finished. Ask again to get a complete one.',
+    )
+    expect(apiErrorReason(dropped, t)).not.toBe(apiErrorReason(new ApiError({ status: 0, code: 'network', message: '' }), t))
+
+    await inIndonesian(() => {
+      expect(apiErrorReason(dropped, t)).toBe(
+        'Koneksi terputus sebelum jawabannya selesai. Tanyakan lagi untuk jawaban yang utuh.',
+      )
+    })
+  })
+
+  it('has a title and a reason in both languages for every code', async () => {
+    // The exhaustive check, run in Indonesian as well as English: the tables are
+    // keys now, so a code whose copy exists in one file only would otherwise
+    // render the key itself to whoever reads the other language.
+    for (const language of ['en', 'id'] as const) {
+      await i18n.changeLanguage(language)
+      for (const code of API_ERROR_CODES) {
+        const error = new ApiError({ status: 0, code, message: '' })
+        for (const copy of [apiErrorTitle(error, t), apiErrorReason(error, t)]) {
+          expect(copy, `${language}: ${code}`).not.toContain('error.')
+          expect(copy.length, `${language}: ${code}`).toBeGreaterThan(0)
+        }
+      }
+    }
+    await i18n.changeLanguage('en')
+  })
+})
+
 describe('validation attribution', () => {
   it('uses the only candidate when there is one', () => {
     const error = apiErrorFromBody(400, { code: 'validation', message: 'must not be blank' })
-    expect(validationMessage(error, ['name'])).toEqual({
+    expect(validationMessage(error, t, ['name'])).toEqual({
       field: 'name',
       message: 'must not be blank',
     })
@@ -258,18 +401,18 @@ describe('validation attribution', () => {
       code: 'validation',
       message: 'password must be at least 12 characters',
     })
-    expect(validationMessage(error, ['email', 'password', 'device']).field).toBe('password')
+    expect(validationMessage(error, t, ['email', 'password', 'device']).field).toBe('password')
   })
 
   it('leaves the message at the form level when no field is identified', () => {
     const error = apiErrorFromBody(400, { code: 'validation', message: 'request rejected' })
-    expect(validationMessage(error, ['email', 'password']).field).toBeNull()
+    expect(validationMessage(error, t, ['email', 'password']).field).toBeNull()
   })
 
   it('falls back to a sentence of its own when the server sent none', () => {
     const error = apiErrorFromBody(400, { code: 'validation', message: '' })
-    const { message } = validationMessage(error, ['email'])
-    expect(message).toBe(apiErrorReason(error))
+    const { message } = validationMessage(error, t, ['email'])
+    expect(message).toBe(apiErrorReason(error, t))
     expect(message.length).toBeGreaterThan(0)
   })
 })

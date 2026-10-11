@@ -460,7 +460,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
   const uploadError = asApiError(upload.error)
   const validation =
     uploadError?.code === 'validation'
-      ? validationMessage(uploadError, ['file', 'text', 'url', 'title'])
+      ? validationMessage(uploadError, t, ['file', 'text', 'url', 'title'])
       : null
   const showNotice = uploadError !== null && (validation === null || validation.field === null)
 

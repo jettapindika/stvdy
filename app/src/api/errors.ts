@@ -8,9 +8,21 @@
  * exhaustive over `ApiErrorCode`, so adding a code without deciding what the user
  * is told is a type error rather than a blank error box.
  *
+ * **The sentences are translation keys, resolved through the `t` every accessor
+ * takes.** They used to be literals in this file, which is the one place the i18n
+ * contract structurally could not see: `i18n.test.ts` scans components for
+ * `t('…')` calls, so copy held in a `.ts` table passed every check while an
+ * Indonesian user read English refusals. Taking `t` rather than importing the
+ * i18n singleton keeps this module free of the app's i18n instance and lets a
+ * screen pass the reactive `t` it already has, so a language change re-renders
+ * the notice instead of freezing whichever language was current when the error
+ * was raised.
+ *
  * The codes are enumerated rather than left as `string` so a screen that forgets
  * to handle one cannot compile.
  */
+
+import type { TFunction } from 'i18next'
 
 export const API_ERROR_CODES = [
   'validation',
@@ -57,6 +69,32 @@ export class ApiError extends Error {
   readonly limit: number | null
   /** What the account has already used of it. */
   readonly used: number | null
+  /**
+   * The API origin a request never reached. Set only on the client's own
+   * `network` errors, which are raised before any server answered.
+   *
+   * The origin is the actionable half of that notice: "the server could not be
+   * reached" is the same sentence for three different situations (the API is not
+   * running, the machine has no network, the build points at an origin nothing
+   * serves any more), and only the origin tells them apart. It is carried as data
+   * rather than baked into `message` so the sentence is resolved by
+   * `apiErrorReason` in the language the user is reading, not the one that was
+   * current when the request failed.
+   */
+  readonly origin: string | null
+  /**
+   * A translation key for a condition the *client* distinguishes and the server's
+   * code set does not.
+   *
+   * `network` covers two situations with different sentences: the request never
+   * reached the server (a dropped connection, an API that is not running) and the
+   * connection dropped *mid-answer*, after the server had answered. Saying "the
+   * server could not be reached" for the second is untrue — it was reached — so
+   * the raiser names the key, and `apiErrorReason` resolves it in the reader's
+   * language. It is a key rather than a sentence for the same reason the rest of
+   * the copy is: a literal here is English shown to an Indonesian user.
+   */
+  readonly reasonKey: string | null
 
   constructor(init: {
     status: number
@@ -65,6 +103,8 @@ export class ApiError extends Error {
     minPlan?: string | null
     limit?: number | null
     used?: number | null
+    origin?: string | null
+    reasonKey?: string | null
   }) {
     super(init.message)
     this.name = 'ApiError'
@@ -73,6 +113,8 @@ export class ApiError extends Error {
     this.minPlan = init.minPlan ?? null
     this.limit = init.limit ?? null
     this.used = init.used ?? null
+    this.origin = init.origin ?? null
+    this.reasonKey = init.reasonKey ?? null
   }
 
   /** True when the session is over and the app must show the signed-out state. */
@@ -194,85 +236,44 @@ export function apiErrorFromBody(status: number, body: unknown): ApiError {
  *
  * None of these repeat the server's `message`, which is a log line. Each one says
  * what happened and what can be done about it, because "Something went wrong" is
- * a state that names neither (R-27).
+ * a state that names neither (R-27). The copy lives in `error.<code>.reason` in
+ * the locale files, so the mapping here is the *key* rather than the sentence and
+ * an Indonesian user reads Indonesian.
  */
-const REASON_BY_CODE: Record<ApiErrorCode, string> = {
-  validation: 'The server did not accept one of these values. Correct it and try again.',
-  unauthorized: 'Your session has ended. Sign in again to continue.',
-  token_expired: 'Your session has ended. Sign in again to continue.',
-  plan_required: 'This is not part of your current plan.',
-  feature_locked: 'This is not part of your current plan.',
-  email_not_verified: 'Verify your email address first. Check your inbox for the link.',
-  not_found: 'It is no longer there. It may have been deleted, or it belongs to another account.',
-  conflict: 'Something else changed this first. Reload and try again.',
-  limit_reached: 'Your plan has reached its limit for this.',
-  link_expired: 'This link has expired. Open the source again to get a fresh one.',
-  insufficient_credits: 'Your credit balance is short of what this costs.',
-  rate_limited: 'Too many attempts in a row. Wait a minute and try again.',
-  provider_error: 'A service this depends on is failing. Nothing was saved. Try again shortly.',
-  internal: 'The server failed on this request. Nothing was saved. Try again shortly.',
-  /** The fallback for a `network` error that carries no sentence of its own. */
-  network: 'The server could not be reached. Check your connection and try again.',
-}
-
-/**
- * The sentence for a request that never reached the server, naming the origin it
- * tried.
- *
- * The origin is the value of this sentence. Without it, the same notice covers
- * three different situations with three different fixes: the API is not running,
- * the machine has no network, and the app is pointed at an origin nothing serves
- * any more (a smoke server that has exited, a build made with an old
- * `VITE_API_BASE_URL`). Only the last two are about a connection at all, and the
- * third is the one that reads as an outage. Naming the origin makes it a glance
- * at a URL instead of an investigation.
- *
- * It is built here so the wording has one home, and the client passes the origin
- * because the client is what knows it.
- */
-export function networkReason(origin: string): string {
-  return `The server could not be reached at ${origin}. Check your connection and try again.`
-}
-
-export function apiErrorReason(error: ApiError): string {
-  // `network` is the only code this client raises itself, so its `message` is a
-  // sentence written for the user (`networkReason`) rather than the server's log
-  // line. Every other code discards the message for exactly that reason.
-  if (error.code === 'network' && error.message.length > 0) return error.message
-  return REASON_BY_CODE[error.code]
+export function apiErrorReason(error: ApiError, t: TFunction): string {
+  // `network` is the only code this client raises itself, and it is the only one
+  // whose sentence depends on something the envelope cannot carry: which origin
+  // was tried, or which of the two drops it was.
+  if (error.code === 'network') {
+    if (error.reasonKey !== null) return t(error.reasonKey)
+    return error.origin === null
+      ? t('error.network.reason')
+      : t('error.network.reasonAt', { origin: error.origin })
+  }
+  return t(`error.${error.code}.reason`)
 }
 
 /** The heading that goes with each code. Same contract as the reasons above. */
-const TITLE_BY_CODE: Record<ApiErrorCode, string> = {
-  validation: 'That was not accepted',
-  unauthorized: 'Signed out',
-  token_expired: 'Signed out',
-  plan_required: 'Not on your plan',
-  feature_locked: 'Not on your plan',
-  email_not_verified: 'Email not verified',
-  not_found: 'Not found',
-  conflict: 'Changed elsewhere',
-  limit_reached: 'Plan limit reached',
-  link_expired: 'Link expired',
-  insufficient_credits: 'Not enough credits',
-  rate_limited: 'Too many attempts',
-  provider_error: 'Service unavailable',
-  internal: 'Server error',
-  network: 'No connection',
+export function apiErrorTitle(error: ApiError, t: TFunction): string {
+  return t(`error.${error.code}.title`)
 }
 
-export function apiErrorTitle(error: ApiError): string {
-  return TITLE_BY_CODE[error.code]
-}
-
-/** A plan id as the user sees it. `min_plan` arrives as the id the config uses. */
+/**
+ * A plan id as the user sees it. `min_plan` arrives as the id the config uses.
+ *
+ * The three names are proper nouns and are the ones `config/plans.toml` declares
+ * under `[plans.<id>] name`, which is also what `LockedFeature`'s `minPlan` prop
+ * spells. They are not translated: "Pro" is the product's name for the plan in
+ * both languages, and a locale file that renamed it would make the locked copy
+ * disagree with the plan screen's own heading.
+ */
 export function planLabel(planId: string): string {
   const KNOWN_PLANS: Record<string, string> = { free: 'Free', pro: 'Pro', power: 'Power' }
   return KNOWN_PLANS[planId] ?? planId
 }
 
 /**
- * The precise upgrade sentence for an entitlement refusal.
+ * The precise sentence for an entitlement refusal.
  *
  * The point of this function is that the prompt names the *numbers*, not just the
  * plan: "Free allows 2 workspaces and you have 2, Pro lifts this" is actionable,
@@ -282,30 +283,52 @@ export function planLabel(planId: string): string {
  *
  * `noun` is what the limit counts ("workspaces", "sources", "MB per file"), and
  * the caller supplies it because the envelope does not carry it and the call site
- * always knows it.
+ * always knows it. It arrives already translated, from `errors.nouns.*`.
+ *
+ * **The three codes are three different facts and get three different sentences**,
+ * from `error.limit.*` and `error.locked.*` keys rather than from English
+ * fragments — this is the copy a refused user actually reads, so it is the one
+ * place an untranslated string is a refusal in the wrong language:
+ *
+ * - `limit_reached` — the account is at a ceiling. Names the plan and the numbers.
+ * - `plan_required` — the feature is not in this plan at all. Names the plan when
+ *   the server sent one, because a higher plan includes it and the notice beside
+ *   this sentence links to the plans screen.
+ * - `feature_locked` — locked, and no upgrade may be offered to this client
+ *   (A143): the platform may not sell, or no plan grants the feature. It names no
+ *   plan and no price, and it does not claim a limit was reached, because the code
+ *   also covers a device that is over its plan's device count — where the plan is
+ *   not the problem and the fix is to sign another device out.
  */
-export function planLimitMessage(error: ApiError, noun?: string): string {
+export function planLimitMessage(error: ApiError, t: TFunction, noun?: string): string {
   const thing = noun ?? 'this'
-  const Thing = thing.charAt(0).toUpperCase() + thing.slice(1)
   const plan = error.minPlan === null ? null : planLabel(error.minPlan)
+  // The feature name leads each sentence, so it is capitalised the way a sentence
+  // starts. The capital is added here rather than baked into the locale string
+  // because the value is a translated noun the caller chose.
+  const feature = thing.charAt(0).toUpperCase() + thing.slice(1)
+
+  if (error.code === 'feature_locked') {
+    return t('error.locked.unavailable', { feature })
+  }
+
+  if (error.code === 'plan_required') {
+    return plan === null
+      ? t('error.locked.notIncluded', { feature })
+      : t('error.locked.notIncludedIn', { feature, plan })
+  }
 
   const counts =
     error.limit !== null && error.used !== null
-      ? `The limit is ${String(error.limit)} and you have ${String(error.used)}.`
+      ? t('error.limit.countsBoth', { limit: error.limit, used: error.used })
       : error.limit !== null
-        ? `The limit is ${String(error.limit)}.`
+        ? t('error.limit.count', { limit: error.limit })
         : null
 
-  if (error.code === 'feature_locked') {
-    return plan === null
-      ? `${Thing} is not included in your current plan.`
-      : `${Thing} is not included in your current plan. It is part of ${plan}.`
-  }
+  const subject = plan === null ? t('error.limit.yourPlan') : t('error.limit.thePlan', { plan })
+  const upgrade = plan === null ? null : t('error.limit.lifts', { plan })
 
-  const subject = plan === null ? 'Your plan' : `The ${plan} plan`
-  const upgrade = plan === null ? null : `${plan} lifts this limit.`
-
-  return [`${subject} has reached its limit for ${thing}.`, counts, upgrade]
+  return [t('error.limit.reached', { subject, noun: thing }), counts, upgrade]
     .filter((part): part is string => part !== null)
     .join(' ')
 }
@@ -342,12 +365,17 @@ export function asApiError(error: unknown): ApiError | null {
  * The server's `message` is used here and nowhere else. It is written for logs,
  * but on a validation failure it is the only statement of what was rejected, and
  * a form that says only "one of these is wrong" is not usable.
+ *
+ * `t` is only consulted for the fallback, when the server sent no sentence: that
+ * fallback is the `validation` reason from the locale files, so a form whose
+ * failure had no message still says something in the user's language.
  */
 export function validationMessage(
   error: ApiError,
+  t: TFunction,
   candidates: readonly string[],
 ): { field: string | null; message: string } {
-  const message = error.message.length > 0 ? error.message : apiErrorReason(error)
+  const message = error.message.length > 0 ? error.message : apiErrorReason(error, t)
   const sentence = message.toLowerCase()
 
   const field =

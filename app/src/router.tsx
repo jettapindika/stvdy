@@ -8,6 +8,7 @@ import { GoogleCallbackRoute } from './features/auth/GoogleCallbackScreen'
 import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
+import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
 import { ReportScreen } from './features/reports/ReportScreen'
@@ -94,7 +95,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'billing',
-            element: <NotBuiltRoute titleKey="billing.planAndUsage" whatKey="routes.billing.what" />,
+            element: <PlanUsageScreen />,
           },
           {
             path: 'styleguide',

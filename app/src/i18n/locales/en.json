@@ -83,9 +83,6 @@
     "settings": {
       "what": "timezone and study hours, daily limits, reminder channels, connected calendars, and your signed-in devices"
     },
-    "billing": {
-      "what": "your current plan, when the prepaid period ends, and your remaining credits. Purchase screens live on the web and desktop builds only."
-    },
     "notFound": {
       "title": "Not found",
       "what": "nothing: this address does not match a screen"
@@ -94,6 +91,72 @@
   "billing": {
     "planAndUsage": "Plan and usage",
     "seePlans": "See plans"
+  },
+  "plan": {
+    "subtitle": "What your plan includes, what you have used this month, and what each action costs.",
+    "loading": "Loading your plan and usage",
+    "subscription": "Subscription",
+    "status": {
+      "none": "No subscription",
+      "active": "Active",
+      "grace": "Grace period",
+      "expired": "Expired",
+      "canceled": "Canceled"
+    },
+    "periodEnd": "Current period ends {{date}}",
+    "credits": "Credits",
+    "creditsMonthly": "Monthly grant",
+    "creditsPurchased": "Purchased",
+    "creditsTotal": "Total",
+    "limits": "Limits",
+    "limit": {
+      "workspaces": "Workspaces",
+      "sourcesTotal": "Sources",
+      "maxFileMb": "Largest file (MB)",
+      "storage": "Storage",
+      "storageUsed": "{{used}} bytes of {{limit}} MB",
+      "storageUsedNoLimit": "{{used}} bytes",
+      "devicesMax": "Devices",
+      "creditsPerMonth": "Credits per month",
+      "chatMsgsPerDay": "Chat messages per day",
+      "webSearchesPerDay": "Web searches per day",
+      "flashcardsPerMonth": "Flashcards per month",
+      "quizzesPerMonth": "Quizzes per month",
+      "reportsPerMonth": "Reports per month",
+      "syllabusImportsTotal": "Syllabus imports",
+      "googleAccountsMax": "Google accounts",
+      "usedOfLimit": "{{used}} of {{limit}}",
+      "unlimited": "Unlimited",
+      "atLimit": "At the limit"
+    },
+    "costs": "What each action costs",
+    "cost": {
+      "chatMessage": "Chat message",
+      "webSearch": "Web search",
+      "flashcards": "A batch of flashcards",
+      "quiz": "A set of quiz questions",
+      "reportOutline": "Report outline",
+      "reportSection": "Report section",
+      "taskBreakdown": "Task breakdown",
+      "syllabusImport": "Syllabus import",
+      "planGeneration": "Study plan",
+      "agentTurn": "Assistant step",
+      "longDoc_one": "Documents longer than {{tokens}} tokens cost {{count}} more credit for each thousand tokens after that.",
+      "longDoc_other": "Documents longer than {{tokens}} tokens cost {{count}} more credits for each thousand tokens after that."
+    },
+    "paused": "New generation is paused until {{date}}. This account has reached the ceiling its plan sets for provider costs this month.",
+    "formats": {
+      "title": "Export formats",
+      "included": "Included in your plan: {{formats}}",
+      "md": "Markdown",
+      "pdf": "PDF"
+    }
+  },
+  "meter": {
+    "total": "{{credits}} credits left",
+    "none": "No credits left",
+    "loading": "Checking credits",
+    "unavailable": "Credits unavailable"
   },
   "brand": {
     "illustration": {
@@ -328,6 +391,83 @@
     "retry": "Ask again",
     "turn": {
       "you": "You"
+    }
+  },
+  "error": {
+    "validation": {
+      "title": "That was not accepted",
+      "reason": "The server did not accept one of these values. Correct it and try again."
+    },
+    "unauthorized": {
+      "title": "Signed out",
+      "reason": "Your session has ended. Sign in again to continue."
+    },
+    "token_expired": {
+      "title": "Signed out",
+      "reason": "Your session has ended. Sign in again to continue."
+    },
+    "plan_required": {
+      "title": "Not on your plan",
+      "reason": "This is not part of your current plan. A higher plan includes it."
+    },
+    "feature_locked": {
+      "title": "Not available on this plan or device",
+      "reason": "This is not included in your current plan, or this device is over the plan's limit."
+    },
+    "email_not_verified": {
+      "title": "Email not verified",
+      "reason": "Verify your email address first. Check your inbox for the link."
+    },
+    "not_found": {
+      "title": "Not found",
+      "reason": "It is no longer there. It may have been deleted, or it belongs to another account."
+    },
+    "conflict": {
+      "title": "Changed elsewhere",
+      "reason": "Something else changed this first. Reload and try again."
+    },
+    "limit_reached": {
+      "title": "Plan limit reached",
+      "reason": "Your plan has reached its limit for this."
+    },
+    "link_expired": {
+      "title": "Link expired",
+      "reason": "This link has expired. Open the source again to get a fresh one."
+    },
+    "insufficient_credits": {
+      "title": "Not enough credits",
+      "reason": "Your credit balance is short of what this costs."
+    },
+    "rate_limited": {
+      "title": "Too many attempts",
+      "reason": "Too many attempts in a row. Wait a minute and try again."
+    },
+    "provider_error": {
+      "title": "Service unavailable",
+      "reason": "A service this depends on is failing. Nothing was saved. Try again shortly."
+    },
+    "internal": {
+      "title": "Server error",
+      "reason": "The server failed on this request. Nothing was saved. Try again shortly."
+    },
+    "network": {
+      "title": "No connection",
+      "reason": "The server could not be reached. Check your connection and try again.",
+      "reasonAt": "The server could not be reached at {{origin}}. Check your connection and try again.",
+      "dropped": "The connection dropped before the answer finished. Ask again to get a complete one."
+    },
+    "limit": {
+      "reached": "{{subject}} has reached its limit for {{noun}}.",
+      "yourPlan": "Your plan",
+      "thePlan": "The {{plan}} plan",
+      "countsBoth": "The limit is {{limit}} and you have {{used}}.",
+      "count": "The limit is {{limit}}.",
+      "lifts": "{{plan}} lifts this limit."
+    },
+    "locked": {
+      "unavailable": "{{feature}} is not available on your current plan or device.",
+      "notIncluded": "{{feature}} is not included in your current plan.",
+      "notIncludedIn": "{{feature}} is not included in your current plan. It is part of {{plan}}."
     }
   },
   "errors": {

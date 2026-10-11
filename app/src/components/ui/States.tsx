@@ -183,12 +183,16 @@ export function ApiErrorNotice({
             for content that changes on its own, and putting the link inside it
             would announce a control as part of a status message. */}
         <p className="font-medium" role="status">
-          {title ?? apiErrorTitle(error)}
+          {title ?? apiErrorTitle(error, t)}
         </p>
-        <p className="text-sm text-muted">{planLimitMessage(error, noun)}</p>
+        <p className="text-sm text-muted">{planLimitMessage(error, t, noun)}</p>
         {/* Mobile builds carry no purchase UI (SPEC § Pricing), so they get the
-            statement and no route to a checkout. */}
-        {!isMobile && (
+            statement and no route to a checkout. `feature_locked` gets none on any
+            platform: A143 gives it exactly one meaning — locked, and no upgrade
+            may be offered to this client — so the code also covers a device that
+            is over its plan's device count, where the remedy is to sign another
+            device out and a route to the plans page is the wrong fix. */}
+        {!isMobile && error.code !== 'feature_locked' && (
           <Link to="/billing" className="link inline-flex min-h-11 items-center text-sm">
             {t('billing.seePlans')}
           </Link>
@@ -202,11 +206,13 @@ export function ApiErrorNotice({
   // shows it on the field when the code implies one, and here at the top when it
   // does not.
   const fallback =
-    error.code === 'validation' && error.message.length > 0 ? error.message : apiErrorReason(error)
+    error.code === 'validation' && error.message.length > 0
+      ? error.message
+      : apiErrorReason(error, t)
 
   return (
     <ErrorState
-      title={title ?? apiErrorTitle(error)}
+      title={title ?? apiErrorTitle(error, t)}
       reason={reason ?? fallback}
       action={action}
     />

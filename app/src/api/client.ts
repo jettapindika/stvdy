@@ -1,4 +1,4 @@
-import { apiErrorFromBody, ApiError, networkReason } from './errors'
+import { apiErrorFromBody, ApiError } from './errors'
 import {
   clearSession,
   getAccessToken,
@@ -76,12 +76,15 @@ interface RefreshResponse {
 
 let refreshInFlight: Promise<boolean> | null = null
 
-function toApiError(error: unknown, sentence: string): ApiError {
+function toApiError(error: unknown, origin: string): ApiError {
   if (error instanceof ApiError) return error
-  // The sentence is the caller's, not the browser's. `fetch` rejects with "Failed
-  // to fetch" / "Load failed", which names neither the origin that was tried nor
-  // what can be done about it; the caller builds `sentence` from the origin.
-  return new ApiError({ status: 0, code: 'network', message: sentence })
+  // The origin is carried as data, not as a finished sentence. `fetch` rejects
+  // with "Failed to fetch" / "Load failed", which names neither the origin that
+  // was tried nor what can be done about it, and the notice has to say which
+  // origin it could not reach — a development build pointed at an origin nothing
+  // serves reads as an outage until the URL is on screen. `apiErrorReason` turns
+  // it into that sentence, in the language the user is reading when it renders.
+  return new ApiError({ status: 0, code: 'network', message: '', origin })
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -194,7 +197,7 @@ async function sendRaw(
       buildRequest(options, options.auth === false ? null : getAccessToken()),
     )
   } catch (error) {
-    throw toApiError(error, networkReason(API_BASE_URL))
+    throw toApiError(error, API_BASE_URL)
   }
 
   if (!response.ok) {

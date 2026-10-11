@@ -43,7 +43,7 @@ export function WorkspaceListScreen() {
   const createError = asApiError(create.error)
   const listError = asApiError(list.error)
   const validation =
-    createError?.code === 'validation' ? validationMessage(createError, ['name']) : null
+    createError?.code === 'validation' ? validationMessage(createError, t, ['name']) : null
   const showNotice = createError !== null && (validation === null || validation.field === null)
 
   return (

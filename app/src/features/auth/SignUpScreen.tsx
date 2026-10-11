@@ -33,7 +33,7 @@ export function SignUpScreen() {
   const signUp = useSignUp()
 
   const error = asApiError(signUp.error)
-  const validation = error?.code === 'validation' ? validationMessage(error, FIELDS) : null
+  const validation = error?.code === 'validation' ? validationMessage(error, t, FIELDS) : null
   const errorFor = (field: string) =>
     validation?.field === field ? validation.message : undefined
   const showNotice = error !== null && (validation === null || validation.field === null)

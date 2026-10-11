@@ -34,11 +34,13 @@ function workspace(over: Partial<Workspace> & { id: string; name: string }): Wor
 
 let workspaces: Workspace[] = []
 let refuseWithLimit = false
+let refuseWithLocked = false
 
 beforeEach(() => {
   installFakePlatform('macos')
   setAccessToken('access-1')
   refuseWithLimit = false
+  refuseWithLocked = false
   workspaces = [
     workspace({ id: 'w1', name: 'Data Structures', source_count: 2 }),
     workspace({ id: 'w2', name: 'Linear Algebra', source_count: 1 }),
@@ -57,6 +59,15 @@ function serve() {
     if (path === '/workspaces' && method === 'GET') return jsonResponse(200, { workspaces })
 
     if (path === '/workspaces' && method === 'POST') {
+      if (refuseWithLocked) {
+        return jsonResponse(403, {
+          code: 'feature_locked',
+          message: 'workspaces are not available on this device',
+          min_plan: null,
+          limit: null,
+          used: null,
+        })
+      }
       if (refuseWithLimit) {
         return jsonResponse(422, {
           code: 'limit_reached',
@@ -207,5 +218,26 @@ describe('the workspace list', () => {
 
     expect(screen.getByRole('link', { name: 'Data Structures' })).toBeInTheDocument()
     expect(calls.some((call) => call.init.method === 'DELETE')).toBe(false)
+  })
+
+  it('offers no upgrade route when the server says a feature is locked', async () => {
+    // `feature_locked` and `limit_reached` are not the same refusal (A143): the
+    // first means "locked, and no upgrade may be offered to this client", which
+    // also covers a device that is over its plan's device count. A "See plans"
+    // link there would send the user to a page that cannot fix their problem, so
+    // the notice states the fact and stops.
+    refuseWithLocked = true
+    serve()
+    const user = userEvent.setup()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    await user.type(await screen.findByLabelText('New workspace'), 'Third course')
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(
+      await screen.findByText('Not available on this plan or device'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/not available on your current plan or device/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'See plans' })).not.toBeInTheDocument()
   })
 })

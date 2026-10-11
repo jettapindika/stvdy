@@ -82,9 +82,6 @@
     "settings": {
       "what": "zona waktu dan jam belajar, batas harian, saluran pengingat, kalender yang terhubung, dan perangkat yang kamu pakai masuk"
     },
-    "billing": {
-      "what": "paketmu sekarang, kapan periode prabayar berakhir, dan sisa kreditmu. Layar pembelian hanya ada di versi web dan desktop."
-    },
     "notFound": {
       "title": "Tidak ditemukan",
       "what": "tidak ada: alamat ini tidak cocok dengan layar mana pun"
@@ -93,6 +90,71 @@
   "billing": {
     "planAndUsage": "Paket dan pemakaian",
     "seePlans": "Lihat paket"
+  },
+  "plan": {
+    "subtitle": "Isi paketmu, pemakaianmu bulan ini, dan biaya setiap tindakan.",
+    "loading": "Memuat paket dan pemakaianmu",
+    "subscription": "Langganan",
+    "status": {
+      "none": "Tanpa langganan",
+      "active": "Aktif",
+      "grace": "Masa tenggang",
+      "expired": "Kedaluwarsa",
+      "canceled": "Dibatalkan"
+    },
+    "periodEnd": "Periode saat ini berakhir {{date}}",
+    "credits": "Kredit",
+    "creditsMonthly": "Jatah bulanan",
+    "creditsPurchased": "Dibeli",
+    "creditsTotal": "Total",
+    "limits": "Batas",
+    "limit": {
+      "workspaces": "Ruang belajar",
+      "sourcesTotal": "Sumber",
+      "maxFileMb": "Ukuran file terbesar (MB)",
+      "storage": "Penyimpanan",
+      "storageUsed": "{{used}} byte dari {{limit}} MB",
+      "storageUsedNoLimit": "{{used}} byte",
+      "devicesMax": "Perangkat",
+      "creditsPerMonth": "Kredit per bulan",
+      "chatMsgsPerDay": "Pesan chat per hari",
+      "webSearchesPerDay": "Pencarian web per hari",
+      "flashcardsPerMonth": "Kartu per bulan",
+      "quizzesPerMonth": "Kuis per bulan",
+      "reportsPerMonth": "Laporan per bulan",
+      "syllabusImportsTotal": "Impor silabus",
+      "googleAccountsMax": "Akun Google",
+      "usedOfLimit": "{{used}} dari {{limit}}",
+      "unlimited": "Tanpa batas",
+      "atLimit": "Sudah di batas"
+    },
+    "costs": "Biaya setiap tindakan",
+    "cost": {
+      "chatMessage": "Pesan chat",
+      "webSearch": "Pencarian web",
+      "flashcards": "Satu batch kartu",
+      "quiz": "Satu set pertanyaan kuis",
+      "reportOutline": "Kerangka laporan",
+      "reportSection": "Bagian laporan",
+      "taskBreakdown": "Rincian tugas",
+      "syllabusImport": "Impor silabus",
+      "planGeneration": "Rencana belajar",
+      "agentTurn": "Langkah asisten",
+      "longDoc_other": "Dokumen lebih dari {{tokens}} token dikenai {{count}} kredit tambahan untuk setiap seribu token berikutnya."
+    },
+    "paused": "Pembuatan baru dijeda sampai {{date}}. Akun ini sudah mencapai batas biaya penyedia yang ditetapkan paketnya bulan ini.",
+    "formats": {
+      "title": "Format ekspor",
+      "included": "Termasuk di paketmu: {{formats}}",
+      "md": "Markdown",
+      "pdf": "PDF"
+    }
+  },
+  "meter": {
+    "total": "{{credits}} kredit tersisa",
+    "none": "Kredit habis",
+    "loading": "Memeriksa kredit",
+    "unavailable": "Kredit tidak tersedia"
   },
   "brand": {
     "illustration": {
@@ -324,6 +386,83 @@
     "retry": "Tanya lagi",
     "turn": {
       "you": "Kamu"
+    }
+  },
+  "error": {
+    "validation": {
+      "title": "Itu tidak diterima",
+      "reason": "Server tidak menerima salah satu nilai ini. Perbaiki lalu coba lagi."
+    },
+    "unauthorized": {
+      "title": "Sudah keluar",
+      "reason": "Sesi kamu sudah berakhir. Masuk lagi untuk melanjutkan."
+    },
+    "token_expired": {
+      "title": "Sudah keluar",
+      "reason": "Sesi kamu sudah berakhir. Masuk lagi untuk melanjutkan."
+    },
+    "plan_required": {
+      "title": "Tidak ada di paketmu",
+      "reason": "Ini tidak termasuk paketmu sekarang. Paket yang lebih tinggi menyertakannya."
+    },
+    "feature_locked": {
+      "title": "Tidak tersedia di paket atau perangkat ini",
+      "reason": "Ini tidak termasuk paketmu, atau perangkat ini sudah melewati batas paket."
+    },
+    "email_not_verified": {
+      "title": "Email belum diverifikasi",
+      "reason": "Verifikasi alamat emailmu dulu. Cek tautannya di kotak masukmu."
+    },
+    "not_found": {
+      "title": "Tidak ditemukan",
+      "reason": "Hal ini sudah tidak ada. Mungkin sudah dihapus, atau milik akun lain."
+    },
+    "conflict": {
+      "title": "Berubah di tempat lain",
+      "reason": "Ada yang mengubah ini lebih dulu. Muat ulang lalu coba lagi."
+    },
+    "limit_reached": {
+      "title": "Batas paket tercapai",
+      "reason": "Paketmu sudah mencapai batasnya untuk hal ini."
+    },
+    "link_expired": {
+      "title": "Tautan kedaluwarsa",
+      "reason": "Tautan ini sudah kedaluwarsa. Buka sumbernya lagi untuk mendapat tautan baru."
+    },
+    "insufficient_credits": {
+      "title": "Kredit tidak cukup",
+      "reason": "Saldo kreditmu kurang dari biaya ini."
+    },
+    "rate_limited": {
+      "title": "Terlalu banyak percobaan",
+      "reason": "Terlalu banyak percobaan berturut-turut. Tunggu sebentar lalu coba lagi."
+    },
+    "provider_error": {
+      "title": "Layanan tidak tersedia",
+      "reason": "Layanan yang dibutuhkan sedang bermasalah. Tidak ada yang tersimpan. Coba lagi nanti."
+    },
+    "internal": {
+      "title": "Kesalahan server",
+      "reason": "Server gagal memproses permintaan ini. Tidak ada yang tersimpan. Coba lagi nanti."
+    },
+    "network": {
+      "title": "Tidak ada koneksi",
+      "reason": "Server tidak dapat dihubungi. Periksa koneksimu lalu coba lagi.",
+      "reasonAt": "Server tidak dapat dihubungi di {{origin}}. Periksa koneksimu lalu coba lagi.",
+      "dropped": "Koneksi terputus sebelum jawabannya selesai. Tanyakan lagi untuk jawaban yang utuh."
+    },
+    "limit": {
+      "reached": "{{subject}} sudah mencapai batasnya untuk {{noun}}.",
+      "yourPlan": "Paketmu",
+      "thePlan": "Paket {{plan}}",
+      "countsBoth": "Batasnya {{limit}} dan kamu sudah memakai {{used}}.",
+      "count": "Batasnya {{limit}}.",
+      "lifts": "{{plan}} menaikkan batas ini."
+    },
+    "locked": {
+      "unavailable": "{{feature}} tidak tersedia di paket atau perangkatmu saat ini.",
+      "notIncluded": "{{feature}} tidak termasuk dalam paketmu saat ini.",
+      "notIncludedIn": "{{feature}} tidak termasuk dalam paketmu saat ini. Fitur ini ada di {{plan}}."
     }
   },
   "errors": {
