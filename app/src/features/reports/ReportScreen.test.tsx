@@ -236,6 +236,23 @@ describe('generating a section', () => {
     expect(calls.generated).toHaveLength(0)
   })
 
+  it('gives a section heading the whole row on a phone', async () => {
+    // The row carries three fixed-width siblings beside the heading — the status
+    // chip, the price and the button — so a `flex-1` heading has a flex basis of
+    // `0` and gets only what is left over. Measured in Chromium at 390px before
+    // this fix: "2. Perbandingan TCP dan UDP" rendered **29px wide over 10 lines**
+    // at 100% text scale, and 44px over 13 lines at 200%. jsdom does not lay out,
+    // so the assertion is on the classes that decide it: `w-full` gives the
+    // heading the line on a phone, `sm:flex-1` puts the row back together on a
+    // desktop. Removing either one brings the squeeze back.
+    serve()
+    renderReport()
+
+    const heading = await screen.findByRole('heading', { name: '2. Keamanan nirkabel' })
+    expect(heading.className).toContain('w-full')
+    expect(heading.className).toContain('sm:flex-1')
+  })
+
   it('shows a written section as written, and offers to replace it', async () => {
     const written = report({
       status: 'ready',

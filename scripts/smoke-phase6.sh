@@ -178,6 +178,12 @@ curl -fsS "$BASE/reports/$REPORT/export?format=md" -H "authorization: Bearer $AC
 grep -qi 'content-type: text/markdown' "$TMP/report-md-headers.txt" \
   || fail "the md export must be Markdown, not JSON: $(cat "$TMP/report-md-headers.txt")"
 grep -q 'three-way handshake' "$TMP/report.md" || fail "the exported document is not the report"
+# Gate 6, the data half: the document's own sentences are Indonesian, not just the
+# source's words. A prompt that dropped `output_language`, or a section composed from an
+# English template, leaves the student a report in the wrong language while every English
+# test stays green — which is the failure this gate exists for.
+grep -q 'UDP tidak memakai handshake sehingga lebih cepat' "$TMP/report.md" \
+  || fail "the exported report is not the Indonesian section the model wrote: $(head -c 300 "$TMP/report.md")"
 # The plan gate: free gets [md] only, so `pdf` is refused with the plan that has it.
 curl -sS "$BASE/reports/$REPORT/export?format=pdf" -H "authorization: Bearer $ACCESS" \
   -o "$TMP/report-pdf.json" -w '%{http_code}' > "$TMP/report-pdf-status.txt"
@@ -222,6 +228,35 @@ grep -qi 'content-type: text/html' "$TMP/sheet-html-headers.txt" \
 grep -q 'Cheatsheet UTS Jaringan Komputer' "$TMP/sheet.html" \
   || fail "the document does not carry its title"
 grep -q 'three-way handshake' "$TMP/sheet.html" || fail "the document does not carry its content"
+# Gate 6, the data half, on the document before the print: the cheatsheet's *own* text
+# (the model's words) and the template's chrome (the fixed labels the renderer writes) are
+# both Indonesian. The chrome is the half that catches a template rendered in the wrong
+# language — the student's document would say "Table of Contents" while the UI around it
+# stayed Indonesian. HTML comments are stripped first, because the template's own comments
+# are English prose about the template (`Chapter page break: chapters start on …`) and a
+# grep for the word would fail on a comment rather than on the document.
+python3 - "$TMP/sheet.html" <<'PY'
+import re, sys
+
+html = open(sys.argv[1], encoding="utf-8").read()
+document = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+for phrase in (
+    "Ringkasan materi ujian",   # the cover subtitle, from the model's JSON
+    "Daftar Isi",               # the template's table-of-contents heading
+    "Ukuran payload",           # the formula legend, from the model's JSON
+    "Efisiensi pengiriman",     # the formula's caption, from the model's JSON
+    "SYN dari klien",           # a bullet, from the model's JSON
+    "belum tercakup",           # the template's honesty note under the cover
+    "Halaman",                  # the running footer's own words
+):
+    assert phrase in document, f"the document is not Indonesian: {phrase!r} is missing"
+# The footer's page numbers are a CSS counter (`counter(pages)`) that only the print
+# resolves, so the HTML is asserted for the counter and the PDF for the number it became.
+assert "counter(pages)" in document, "the footer lost its page counter"
+for english in ("Table of Contents", "Page 1 of", "Summary"):
+    assert english not in document, f"the document carries English chrome: {english!r}"
+print("the HTML document's text and chrome are Indonesian")
+PY
 # The formula reached the page as LaTeX for KaTeX to render, and the template's own
 # markers are filled.
 grep -q 'frac' "$TMP/sheet.html" || fail "the formula is not on the page"
@@ -259,6 +294,14 @@ if [ "$PDF_STATUS" = "403" ]; then
   echo "the free plan is refused a PDF, as documented (403 plan_required, min_plan=pro)"
 
   # Upgrade this account in place, so the print itself is exercised rather than skipped.
+  #
+  # **Both rows, and the subscription is the one that matters.** `users.plan_id` alone
+  # grants nothing: the entitlements engine reads the plan only while the subscription is
+  # `active` or in grace (`crates/server/src/entitlements.rs::effective_plan`, A146), so an
+  # account whose `plan_id` was set without a live `subscriptions` row is free by that same
+  # rule. Writing only the first row left this script upgrading an account and then
+  # reporting the PDF route's 403 as a missing renderer — which is what it did until the
+  # gate re-ran it.
   if [ -n "$PSQL" ]; then
     if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
       DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | tail -1 | cut -d= -f2-)"
@@ -266,7 +309,11 @@ if [ "$PDF_STATUS" = "403" ]; then
     fi
     [ -n "${DATABASE_URL:-}" ] || fail "no DATABASE_URL: set one or provide it in .env"
     "$PSQL" "$DATABASE_URL" -tAc "update users set plan_id = 'pro' where email = '$EMAIL'" > /dev/null
-    echo "upgraded $EMAIL to pro so the print can be exercised"
+    "$PSQL" "$DATABASE_URL" -tAc "insert into subscriptions
+        (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+      select id, 'pro', 'active', 'monthly', now(), now() + interval '30 days'
+        from users where email = '$EMAIL'" > /dev/null
+    echo "upgraded $EMAIL to pro (plan_id + a live subscription row) so the print can be exercised"
   else
     fail "no psql on PATH, so the plan could not be raised and the print cannot be exercised"
   fi
@@ -314,7 +361,27 @@ assert "Cheatsheet UTS Jaringan Komputer" in text, f"the running header is missi
 # The assertion that matters. A broken KaTeX asset or an SRI mistake leaves the maths as
 # literal `$...$`: no error, a plausible-looking PDF, and the defect only visible on paper.
 assert "$" not in text, f"KaTeX did not render; the maths is literal text: {text[:600]}"
-print(f"extracted {len(text)} characters: the footer, the header, and no raw $")
+
+# Gate 6, the half that only the printed document can check. The UI can be Indonesian
+# while the document comes back in English — a prompt that dropped `output_language`, or a
+# template rendered with English chrome, produces exactly that, and the API's JSON looks
+# correct either way. So the assertions are on the *rendered* text: the model's own
+# sentences, the template's fixed labels, and the absence of their English counterparts.
+for phrase in (
+    "Ringkasan materi ujian",   # the cover subtitle, from the model's JSON
+    "Daftar Isi",               # the template's table-of-contents heading
+    "Ukuran payload",           # the formula legend, from the model's JSON
+    "Efisiensi pengiriman",     # the formula's caption, from the model's JSON
+    "SYN dari klien",           # a bullet, from the model's JSON
+    "belum tercakup",           # the template's honesty note under the cover
+):
+    assert phrase in text, f"the printed document is not Indonesian: {phrase!r} is missing"
+for english in ("Table of Contents", "Page 1 of", "Summary", "Chapter"):
+    assert english not in text, f"the printed document carries English chrome: {english!r}"
+print(
+    f"extracted {len(text)} characters: the footer, the header, no raw $, "
+    "and the document's own text and chrome are Indonesian"
+)
 PY
 else
   fail "pdftotext is not installed, so the PDF's text cannot be checked; install poppler"

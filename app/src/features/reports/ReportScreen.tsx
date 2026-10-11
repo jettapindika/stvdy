@@ -303,7 +303,15 @@ function Sections({ report }: { report: Report }) {
           return (
             <li key={index} className="panel flex flex-col gap-2 px-3 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <h3 className="min-w-0 flex-1 break-words font-medium">
+                {/* Same defect and the same fix as the report row in
+                    `ReportPanel`: with three fixed-width siblings on the line
+                    (a status chip, the price, a button), a `flex-1` heading has a
+                    flex basis of `0` and is left whatever is over. Measured in
+                    Chromium at 390px, "2. Perbandingan TCP dan UDP" rendered
+                    **29px wide over 10 lines** at 100% text and 44px over 13 lines
+                    at 200%. It takes the whole line on a phone instead, and goes
+                    back to `flex-1` from `sm` up. */}
+                <h3 className="w-full min-w-0 break-words font-medium sm:w-auto sm:flex-1">
                   {t('reports.sections.heading', {
                     position: index + 1,
                     heading: section.heading,

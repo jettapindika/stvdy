@@ -98,4 +98,28 @@ describe('the shell always offers navigation', () => {
     expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#main')
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main')
   })
+
+  /**
+   * The tab bar must be able to scroll sideways, and that is a 200%-text-scale
+   * defect rather than a style choice.
+   *
+   * Each item is `flex: 1` with the UA's `min-width: auto`, so it cannot shrink
+   * below its label. The five labels need 390px at 100% type (measured: 5 x 78px)
+   * but ~435px at 200%, and the bar is `position: fixed` — so with `overflow:
+   * visible` the fifth item, "More" (Settings and Billing), was painted 45px past
+   * the right edge of the viewport with nothing to scroll it into view. It was
+   * unreachable, and only for the reader who had enlarged their type.
+   *
+   * jsdom does not lay out, so this asserts the declaration that fixes it. Without
+   * `overflow-x-auto` the bar overflows again; `overscroll-x-contain` keeps a
+   * horizontal swipe on the bar from triggering the browser's back gesture.
+   */
+  it('lets the tab bar scroll sideways, so no item can be unreachable', () => {
+    mockViewport(390)
+    renderShell()
+
+    const bar = screen.getByRole('navigation', { name: 'Main' })
+    expect(bar.className).toContain('overflow-x-auto')
+    expect(bar.className).toContain('overscroll-x-contain')
+  })
 })

@@ -237,6 +237,29 @@ describe('the reports list', () => {
     expect(await screen.findByText('No reports yet')).toBeInTheDocument()
     expect(screen.getByText(/propose an outline/)).toBeInTheDocument()
   })
+
+  /**
+   * The row's title must claim the whole line on a phone, and this is the one
+   * place jsdom can see it.
+   *
+   * The three siblings on that row — a written count, a status chip and an "Open
+   * report" button — are all effectively fixed-width, so a `flex-1` title has a
+   * flex basis of `0` and is left whatever the three do not take. Measured in
+   * Chromium at 390px before this fix: the report's own name rendered **16px wide
+   * over 18 lines** (two characters per line), and 100px over 6 lines at 200% text
+   * scale. `w-full` pushes the other three onto the next line at phone width and
+   * `sm:flex-1` restores the single row on a desktop, where there is room for all
+   * four. Dropping either class brings the squeeze back, which is why both are
+   * asserted rather than the rendered text.
+   */
+  it('gives the report title the whole row on a phone', async () => {
+    serve([{ ...REPORT, title: 'Laporan Akhir Semester' }])
+    renderPanel()
+
+    const title = await screen.findByText('Laporan Akhir Semester')
+    expect(title.className).toContain('w-full')
+    expect(title.className).toContain('sm:flex-1')
+  })
 })
 
 describe('creating a cheatsheet', () => {

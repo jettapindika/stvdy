@@ -166,6 +166,46 @@ describe('the preview frame', () => {
     expect(screen.queryByText(/^\d+ pages?$/)).not.toBeInTheDocument()
     expect(screen.queryByText('The PDF is null pages long.')).not.toBeInTheDocument()
   })
+
+  /**
+   * The frame is a `Tab` stop — it is a scrollable region, and a keyboard user
+   * needs to land in it to scroll the document — but a focused `<iframe>` matches
+   * no focus pseudo-class, so the global `:focus-visible` ring in `styles.css`
+   * cannot reach it. Measured in Chromium: `document.activeElement` is the frame,
+   * and `frame.matches(':focus')`, `:focus-visible` and `:focus-within` are all
+   * false, so the stop had no visible ring at all.
+   *
+   * The ring is therefore driven by the one signal the browser does give, the
+   * window's own blur/focus pair, and this test pins that mechanism: without it
+   * (or with the `hasFocus()` guard dropped) the frame is a silent focus stop
+   * again, which is invisible in every other test on this screen.
+   */
+  it('rings the frame when focus is inside it, and not when the window merely lost focus', async () => {
+    serve()
+    renderSheet()
+
+    const frame = await screen.findByTitle('Preview')
+    expect(frame.className).not.toContain('outline-ring')
+
+    // Focus entering the frame blurs the window, with the frame as the document's
+    // active element and the document still focused. That is the pair the effect
+    // keys on.
+    frame.focus()
+    expect(document.activeElement).toBe(frame)
+    window.dispatchEvent(new Event('blur'))
+    expect((await screen.findByTitle('Preview')).className).toContain('outline-ring')
+
+    // Focus leaving the frame returns the window's focus, and the ring goes.
+    window.dispatchEvent(new Event('focus'))
+    expect((await screen.findByTitle('Preview')).className).not.toContain('outline-ring')
+
+    // An app switch also blurs the window, but the document is not focused then,
+    // so a ring must not be drawn on a frame nobody is using.
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    window.dispatchEvent(new Event('blur'))
+    expect((await screen.findByTitle('Preview')).className).not.toContain('outline-ring')
+    hasFocus.mockRestore()
+  })
 })
 
 describe('the PDF action, as the plan matrix allows it', () => {

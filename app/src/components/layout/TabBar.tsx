@@ -29,7 +29,17 @@ export function TabBar() {
   return (
     <nav
       aria-label={t('shell.nav.main')}
-      className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface pb-safe-bottom md:hidden"
+      // `overflow-x-auto` is load-bearing, and it is what the 200%-text-scale check
+      // found. Each item is `flex: 1` with the UA's `min-width: auto`, so it cannot
+      // shrink below its label; five labels at 0.75rem fit 390px (5 x 78px measured)
+      // but at 200% type scale they need ~435px. The bar is `position: fixed` with
+      // `overflow: visible`, so the fifth item was painted 45px past the right edge of
+      // the viewport with nothing to scroll: "More" (Settings and Billing) was simply
+      // unreachable, and it was the reader who enlarged their type who lost it. The bar
+      // now scrolls horizontally instead of overflowing, and at 100% nothing scrolls,
+      // so the visual is unchanged. A focused item is scrolled into view by the browser,
+      // which keeps it reachable by `Tab` as well as by swipe.
+      className="fixed inset-x-0 bottom-0 z-40 flex overflow-x-auto overscroll-x-contain border-t border-border bg-surface pb-safe-bottom md:hidden"
     >
       {items.map((item) => (
         <NavLink

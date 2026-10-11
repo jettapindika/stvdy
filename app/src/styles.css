@@ -501,11 +501,18 @@
     background-color: transparent;
   }
   /* The bar becomes a top rule, because the tab bar is at the bottom of the
-     screen: the marker points into the content from the edge it sits on. */
+     screen: the marker points into the content from the edge it sits on.
+     `top: 0` rather than `-1px`: the nav is a horizontal scroll container
+     (`overflow-x-auto`, so the fifth item stays reachable at 200% text scale), and a
+     scroll container clips at its padding box. The 1px that used to sit over the
+     nav's top border was clipped away, which would have left the marker 1px tall —
+     and that marker is the tab bar's *non-colour* signal for the current page, so
+     shrinking it is exactly the state-by-shape signal the accessibility gate checks
+     for. */
   .nav-item-tab[aria-current="page"]::before {
     left: 25%;
     right: 25%;
-    top: -1px;
+    top: 0;
     bottom: auto;
     width: auto;
     height: 2px;

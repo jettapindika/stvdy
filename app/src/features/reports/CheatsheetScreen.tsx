@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
@@ -128,6 +129,39 @@ function CheatsheetPreview({
   const { t } = useTranslation()
   const html = useCheatsheetHtml(cheatsheetId, true)
   const error = asApiError(html.error)
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [frameFocused, setFrameFocused] = useState(false)
+
+  // **The frame's focus ring has to be driven from JavaScript, and this is why.**
+  // The frame is a scrollable region: it is a `Tab` stop (measured in Chromium at
+  // 390px, the walk goes `… Download PDF > Re-render` through it), and a keyboard
+  // user needs to land in it to scroll the document with the arrow keys. But a
+  // focused `<iframe>` matches **no** focus pseudo-class — Chromium puts the focus
+  // on the frame's inner document, so `frame.matches(':focus')`,
+  // `:focus-visible` and even `:focus-within` on the frame and on its ancestors are
+  // all false, and the frame's `focus`/`focusin`/`blur` events do not fire either.
+  // The global `:focus-visible` rule in `styles.css` therefore cannot reach it, and
+  // the measured result was a `Tab` stop with no visible ring at all.
+  //
+  // The one signal the browser does give is the window's own blur/focus pair: focus
+  // entering the frame blurs the window (`document.activeElement` is then the frame,
+  // and `document.hasFocus()` is still true), and focus leaving the frame fires the
+  // window's focus event. `hasFocus()` is what keeps an app switch — which also
+  // blurs the window — from drawing a ring on a frame nobody is using.
+  useEffect(() => {
+    function onWindowBlur() {
+      if (document.activeElement === frame.current && document.hasFocus()) setFrameFocused(true)
+    }
+    function onWindowFocus() {
+      setFrameFocused(false)
+    }
+    window.addEventListener('blur', onWindowBlur)
+    window.addEventListener('focus', onWindowFocus)
+    return () => {
+      window.removeEventListener('blur', onWindowBlur)
+      window.removeEventListener('focus', onWindowFocus)
+    }
+  }, [])
 
   return (
     <section aria-labelledby="cheatsheet-preview-heading" className="flex flex-col gap-2">
@@ -161,13 +195,19 @@ function CheatsheetPreview({
 
       {html.data !== undefined && (
         <iframe
+          ref={frame}
           title={t('cheatsheet.preview.title')}
           // Empty, so the document gets an opaque origin and none of the
           // capabilities sandbox can withhold: no scripts, no forms, no
           // top-level navigation, no same-origin access to this app.
           sandbox=""
           srcDoc={html.data}
-          className="h-[32rem] w-full rounded-card border border-border bg-surface"
+          // The ring is the same 2px `--ring` treatment the global rule applies to
+          // every other control; only the way it is switched on differs (see the
+          // effect above).
+          className={`h-[32rem] w-full rounded-card border border-border bg-surface ${
+            frameFocused ? 'outline outline-2 outline-offset-2 outline-ring' : ''
+          }`}
         />
       )}
     </section>
