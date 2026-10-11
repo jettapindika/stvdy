@@ -182,7 +182,7 @@ crates/server/src/
   flashcards/{mod.rs,routes.rs,generate.rs}
   jobs/handlers/generate.rs
 crates/server/tests/flashcards.rs
-migrations/0020_flashcard_generation.sql
+migrations/0021_flashcard_generation.sql
 app/src/
   api/queries/flashcards.ts
   features/study/{StudyScreen.tsx,due.ts,due.test.ts}
@@ -1411,7 +1411,7 @@ git commit -m "feat(core): the flashcards JSON contract, parsed and label-resolv
 ## Task 4: Decks, the generation job, and the refund path
 
 **Files:**
-- Create: `migrations/0020_flashcard_generation.sql`
+- Create: `migrations/0021_flashcard_generation.sql`
 - Create: `crates/server/src/flashcards/{mod.rs,routes.rs,generate.rs}`
 - Create: `crates/server/src/jobs/handlers/generate.rs`
 - Modify: `crates/server/src/{lib.rs,routes/mod.rs,limits.rs,util.rs,credits.rs,chat/routes.rs,chat/prompt.rs,workspaces.rs}`
@@ -2820,7 +2820,7 @@ Expected: PASS (5 tests in this slice).
 - [ ] **Step 8: Commit**
 
 ```bash
-git add migrations/0020_flashcard_generation.sql crates/server/src crates/server/tests/flashcards.rs
+git add migrations/0021_flashcard_generation.sql crates/server/src crates/server/tests/flashcards.rs
 git commit -m "feat(server): decks, strict-JSON generation, and a refund for a failed job"
 ```
 
@@ -3726,11 +3726,14 @@ same name afterwards. `Composed`, `PromptChunk`, `ChatVars`, `ScriptedLlm`,
 **Known risks carried into execution.**
 1. The migration number collides with Phase 3's `0020_search_cache.sql` if that lands
    first; the rename is stated in the file-structure section.
-2. `credits::spend` and `record_provider_usage` are the Phase 2 shim; Phase 7
+2. `credits::spend` and `record_usage` are the Phase 2 shim; Phase 7
    generalises them. The job's refund path is a second write to `credit_ledger` and
    Phase 7 must keep it working when the spend moves behind `check`.
 3. The refund depends on `decks.credits_spent` being zeroed in the same statement as
-   the status change. A future refactor that splits those two writes can double-refund.
+   the status change, in **both** directions: the failure path zeroes it while marking
+   the deck `failed`, and the success path zeroes it while claiming the deck `ready`.
+   A refactor that splits either write, or drops the success-side zeroing, makes a
+   delivered deck refundable.
 4. `ScriptedLlm::new(vec![])` returns a provider error on the first call; the
    monthly-limit test relies on the limit refusing the request *before* any call, which
    is the property the test is actually asserting.
