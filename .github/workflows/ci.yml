@@ -56,6 +56,31 @@ jobs:
       - run: cargo sqlx prepare --workspace --check
       - run: cargo test --workspace
 
+  pdf:
+    name: pdf acceptance (Chromium)
+    # ubuntu-24.04's runner image ships Google Chrome stable at
+    # /usr/bin/google-chrome, which is what CHROME_PATH names. The phase's
+    # acceptance test is `#[ignore]`d so a laptop without a browser still gets a
+    # green `cargo test --workspace`; this is the job where it must actually run,
+    # because a test nobody runs is the same as not having one.
+    #
+    # No database: the acceptance test renders the template with sample blocks and
+    # prints it, so it needs a browser and nothing else. SQLX_OFFLINE keeps it from
+    # waiting on a Postgres that is not there.
+    runs-on: ubuntu-24.04
+    env:
+      SQLX_OFFLINE: "true"
+      CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Fail early if Chrome is not where the phase says it is
+        # Without this the test panics with "no Chromium found; set CHROME_PATH",
+        # which reads like a code problem rather than a runner-image change.
+        run: test -x "$CHROME_PATH" || { echo "no Chrome at $CHROME_PATH"; exit 1; }
+      - run: cargo test -p stvdy-server --test pdf -- --ignored
+
   shell:
     name: shell lint + test
     runs-on: macos-15

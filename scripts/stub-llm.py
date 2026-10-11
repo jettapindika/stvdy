@@ -11,6 +11,11 @@ Two modes:
     sent. The server must drop it. That is the citation-hallucination gate.
   * the answer text is configurable with --answer, and --broken makes the first
     token arrive and then the connection die mid-stream.
+
+A run that needs *different* answers per request (Phase 6's report outline, then a
+report section, then a cheatsheet) passes --answers-file with a JSON array. The
+answers are served in order and the last one repeats, so the count of calls the
+server makes is not something the stub has to be told in advance.
 """
 
 import argparse
@@ -23,6 +28,12 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     answer = "Mitochondria produce ATP through oxidative phosphorylation [1], and also [9]."
+    # The answers to serve, in order, one per request. The last one repeats once the
+    # list is exhausted, so a run that makes one more call than it planned does not
+    # fail with "no queued response left" and look like a server bug.
+    answers = None
+    # How many requests have been served, so the answer above advances.
+    served = 0
     broken = False
     # Every request body, appended as one JSON object per line. The smoke run reads
     # this to assert on the prompt the model actually received, which a
@@ -31,6 +42,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):  # noqa: ARG002
         """Quiet: the smoke script reports what matters, not the HTTP access log."""
+
+    def current_answer(self):
+        """The answer for this request: the next one in the list, or the fixed one."""
+        if Handler.answers is None:
+            return Handler.answer
+        index = min(Handler.served, len(Handler.answers) - 1)
+        return Handler.answers[index]
 
     def do_POST(self):
         length = int(self.headers.get("content-length", "0"))
@@ -52,10 +70,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(401, "no bearer")
             return
 
+        Handler.served += 1
+
         if not body.get("stream"):
             payload = json.dumps(
                 {
-                    "choices": [{"message": {"content": Handler.answer}}],
+                    "choices": [{"message": {"content": self.current_answer()}}],
                     "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.00042},
                 }
             ).encode()
@@ -75,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
         # Word by word, so the client has to concatenate rather than receive one
         # token: a server that buffered the whole answer would still pass a
         # single-token test.
-        words = Handler.answer.split(" ")
+        words = self.current_answer().split(" ")
         for index, word in enumerate(words):
             text = word if index == 0 else " " + word
             frame = {"choices": [{"delta": {"content": text}}]}
@@ -102,11 +122,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8100)
     parser.add_argument("--answer", default=Handler.answer)
+    parser.add_argument(
+        "--answers-file",
+        default="",
+        help="a JSON array of answers to serve in order; the last one repeats",
+    )
     parser.add_argument("--broken", action="store_true")
     parser.add_argument("--log", default="", help="append every request body as JSONL")
     args = parser.parse_args()
 
     Handler.answer = args.answer
+    if args.answers_file:
+        with open(args.answers_file, encoding="utf-8") as handle:
+            Handler.answers = json.load(handle)
+        if not Handler.answers:
+            parser.error("--answers-file must hold at least one answer")
     Handler.broken = args.broken
     Handler.log_path = args.log or None
 

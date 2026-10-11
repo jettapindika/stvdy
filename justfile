@@ -126,6 +126,23 @@ smoke-phase4:
 smoke-phase5:
     BASE=http://localhost:8099 bash scripts/smoke-phase5.sh
 
+# Phase 6's run. Same stub and server, but this one needs THREE answers in order — the
+# report outline, a report section, and the cheatsheet's blocks — so it passes an
+# --answers-file the script writes itself. The server also needs a browser for the PDF
+# half: CHROME_PATH must be set on BOTH the server (which renders) and the script (which
+# checks the print), and a run without one fails rather than skipping.
+smoke-llm-phase6:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-phase6-requests.jsonl \
+      --answers-file scripts/fixtures/phase6-answers.json
+
+smoke-server-phase6:
+    CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase6:
+    BASE=http://localhost:8099 bash scripts/smoke-phase6.sh
+
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
 # The academic tier is keyless and reachable from this machine, so the run gets
