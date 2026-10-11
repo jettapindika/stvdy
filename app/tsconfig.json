@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    // TypeScript 7 defaults `types` to [] and enables
+    // noUncheckedSideEffectImports, so vite/client must be listed explicitly or
+    // `import './styles.css'` is a hard type error.
+    "types": ["vite/client", "node", "vitest/globals"],
+    // TypeScript 7 removed `baseUrl`; paths resolve relative to this file.
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src", "vite.config.ts"]
+}

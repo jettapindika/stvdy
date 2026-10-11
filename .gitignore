@@ -22,3 +22,6 @@ var/
 
 # macOS
 .DS_Store
+
+# Vite preview / build scratch
+/app/.vite

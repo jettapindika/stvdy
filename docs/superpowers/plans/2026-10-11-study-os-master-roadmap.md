@@ -429,7 +429,7 @@ The security property that makes this safe: **the model produces structured JSON
 | 10 | ICS + Google Calendar | `/cal/:token.ics` validates; external ICS imported with recurrence; Google two-way sync incremental + 410 full resync |
 | 11 | Syllabus + planner | Syllabus → review screen → events/tasks/goals; planner proposal respects busy time, daily max, study hours, buffer |
 | 12 | Agent + reminders + dashboard | WRITE tool creates `pending_actions`, confirm on device B executes it; reminder dedupe across devices; dashboard metrics |
-| 13 | QRIS payments | Sandbox invoice → verified webhook → plan active on second device; duplicate/mismatch/late/expired cases tested; mobile checkout blocked |
+| 13 | QRIS payments | Sandbox invoice → verified webhook → plan active on second device; duplicate/mismatch/late/expired cases tested; mobile checkout blocked; **margin report shows free-tier and paid-tier provider cost separately, with free-tier utilization and conversion derived from it (A46)** |
 | 14 | Mobile | iOS + Android builds; no purchase UI anywhere in the mobile bundle; push tokens register; deep links round-trip |
 | 15 | Release | Signed+notarized macOS universal, signed Windows installer, updater with signed manifests, store checklists, server Docker image |
 
@@ -487,6 +487,8 @@ This phase is also where the security posture stops being a claim and becomes a 
 **Phase 12 — Agent, reminders, dashboard.** Tool definitions + read/write split, `pending_actions` confirm/reject cross-device, expiry, prompt-injection defense (retrieved text is data, never instructions), reminder engine with timezone + quiet hours + cross-device dedupe, APNs/FCM/desktop/in-app/email channels, local notifications from synced data, dashboard metrics.
 
 **Phase 13 — QRIS payments.** `PaymentProvider` + `qris_gateway` (blocked on B1 docs; env-driven mapping), checkout with discount/student pricing, QR screen with countdown, verified idempotent webhook (one transaction: mark paid → activate/extend → grant credits → record fee → notify), polling fallback + reconciliation, period extension/upgrade-proration/downgrade-at-period-end, credit packs, renewal reminders at 7/3/1/0, billing + pricing pages for web/desktop, billing_policy enforcement, BYOK, admin payment tools + margin report.
+
+**The margin report must break out free-tier provider cost separately** from paid-tier cost, per plan and per month. This is not cosmetic: A46 accepts the free tier at 60 credits with a stated break-even of ~28% utilization, and the tripwires that would trigger a revisit (utilization >30%, conversion <3%, free-tier spend >25% of revenue, a plan-level loss two months running) are all **uncomputable** from a single blended cost figure. Concretely the report needs, per month: revenue by plan, provider cost split `free` vs `paid` (join `usage_events` → `users.plan_id`), gateway fees, and the derived free-tier utilization and conversion rate. `usage_events` already carries `provider_cost_usd` (Phase 7), so this is a query and a page, not new plumbing — but if it ships as one blended number, the decision recorded in A46 becomes unevaluable and the tripwires become decoration.
 
 **Phase 14 — Mobile.** Tauri mobile builds, phone/tablet adaptive UI, read-only plan screen (no purchase UI), push plugins with token registration, universal links/app links, secure storage, file picker + share-sheet import, local notifications, TestFlight + Play internal testing, mobile test checklist + store-policy risk note in `docs/RELEASE.md`.
 
