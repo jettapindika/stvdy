@@ -3073,10 +3073,13 @@ async fn another_users_card_is_not_found(pool: PgPool) {
     assert_eq!(status, StatusCode::NOT_FOUND, "another account's workspace");
 }
 
-/// The test clock is `FixedClock::at(Utc::now())` (`crates/server/src/testing.rs`),
-/// not a date in the past, so every absolute `reviewed_at` above must be a time that
-/// has already happened, and every "is it due" assertion must hold against the real
-/// clock. A test that pins a future instant would depend on the day it runs.
+// The test clock is `FixedClock::at(Utc::now())` (`crates/server/src/testing.rs`),
+// not a date in the past, so every review timestamp must be derived from
+// `harness.clock.now()`: an absolute literal would make the gate fail on a machine
+// whose clock is behind, and the route refuses a `reviewed_at` more than 24 hours
+// ahead of the clock. Truncate to whole seconds, because `timestamptz` has
+// microsecond resolution and rounds.
+```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
