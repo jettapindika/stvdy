@@ -8,6 +8,7 @@ import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
+import { QuizScreen } from './features/quiz/QuizScreen'
 import { StudyScreen } from './features/study/StudyScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
           { path: 'workspaces', element: <WorkspaceListScreen /> },
           { path: 'workspaces/:workspaceId', element: <WorkspaceScreen /> },
           { path: 'study/:deckId', element: <StudyScreen /> },
+          { path: 'quiz/:quizId', element: <QuizScreen /> },
           {
             path: 'calendar',
             element: (

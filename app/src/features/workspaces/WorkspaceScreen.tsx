@@ -17,6 +17,7 @@ import { Field } from '@/components/ui/Field'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
+import { QuizPanel } from '@/features/studio/QuizPanel'
 
 /**
  * The workspace view: Sources, Chat, and Studio.
@@ -45,6 +46,13 @@ import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
  */
 
 type Panel = 'sources' | 'chat' | 'studio'
+
+type StudioSection = 'flashcards' | 'quiz'
+
+const STUDIO_SECTIONS: { id: StudioSection; label: string }[] = [
+  { id: 'flashcards', label: 'Flashcards' },
+  { id: 'quiz', label: 'Quiz' },
+]
 
 const PANELS: { id: Panel; label: string }[] = [
   { id: 'sources', label: 'Sources' },
@@ -158,13 +166,87 @@ export function WorkspaceScreen() {
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {panel.id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
                   {panel.id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
-                  {panel.id === 'studio' && <FlashcardsPanel workspaceId={workspaceId} />}
+                  {panel.id === 'studio' && <StudioPanel workspaceId={workspaceId} />}
                 </div>
               </section>
             ))}
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Studio: the generated study material for this workspace.
+ *
+ * The spec's workspace view has three panels and Studio holds three kinds of output
+ * (Flashcards, Quiz, Report), so the sub-tabs are the same roving-tabindex strip the
+ * outer tabs use: arrow keys move between them and only the active one is in the tab
+ * order. A second, different keyboard contract inside the same screen would be a second
+ * thing for a student to learn.
+ */
+function StudioPanel({ workspaceId }: { workspaceId: string }) {
+  const [section, setSection] = useState<StudioSection>('flashcards')
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const index = STUDIO_SECTIONS.findIndex((entry) => entry.id === section)
+    let next = index
+    if (event.key === 'ArrowRight') next = (index + 1) % STUDIO_SECTIONS.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + STUDIO_SECTIONS.length) % STUDIO_SECTIONS.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = STUDIO_SECTIONS.length - 1
+    else return
+
+    const target = STUDIO_SECTIONS[next]
+    if (target === undefined) return
+    event.preventDefault()
+    setSection(target.id)
+    tabRefs.current[target.id]?.focus()
+  }
+
+  return (
+    <div className="flex flex-col">
+      <div
+        role="tablist"
+        aria-label="Studio sections"
+        onKeyDown={onKeyDown}
+        className="mx-3 mt-3 flex gap-1 rounded-pill bg-surface-sunk p-1"
+      >
+        {STUDIO_SECTIONS.map((entry) => {
+          const selected = entry.id === section
+          return (
+            <button
+              key={entry.id}
+              ref={(node) => {
+                tabRefs.current[entry.id] = node
+              }}
+              id={`studio-tab-${entry.id}`}
+              role="tab"
+              type="button"
+              aria-selected={selected}
+              aria-controls={`studio-panel-${entry.id}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => {
+                setSection(entry.id)
+              }}
+              className={`btn flex-1 ${selected ? 'btn-secondary' : 'btn-quiet'}`}
+            >
+              {entry.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div
+        id={`studio-panel-${section}`}
+        role="tabpanel"
+        aria-labelledby={`studio-tab-${section}`}
+      >
+        {section === 'flashcards' && <FlashcardsPanel workspaceId={workspaceId} />}
+        {section === 'quiz' && <QuizPanel workspaceId={workspaceId} />}
+      </div>
     </div>
   )
 }

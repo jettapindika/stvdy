@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
-import { useChunk } from '@/api/queries/chat'
 import { useDeck, useDueCards, useReviewCard, type Rating } from '@/api/queries/flashcards'
 import { useSources } from '@/api/queries/sources'
+import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
 import { dueCards, type StudyCard } from './due'
 
@@ -273,7 +273,7 @@ export function StudyScreen() {
                       {sourceOpen ? 'Hide source' : 'Show source'}
                     </button>
                     {sourceOpen && (
-                      <SourcePanel
+                      <SourcePassage
                         chunkId={card.chunk_id}
                         sources={sources.data ?? []}
                       />
@@ -359,62 +359,6 @@ export function StudyScreen() {
         </div>
       )}
     </div>
-  )
-}
-
-/**
- * The passage a card came from.
- *
- * The card carries only `chunk_id`, so the source's title is looked up from the
- * workspace's source list by the chunk's `source_id`. Both queries are the ones
- * the chat screen already uses and are cached, so this adds no new API surface.
- */
-function SourcePanel({
-  chunkId,
-  sources,
-}: {
-  chunkId: string
-  sources: { id: string; title: string }[]
-}) {
-  const chunk = useChunk(chunkId)
-  const error = asApiError(chunk.error)
-  const title =
-    chunk.data !== undefined
-      ? (sources.find((source) => source.id === chunk.data.source_id)?.title ?? 'A source')
-      : null
-
-  return (
-    <section aria-label="Source passage" className="note flex flex-col gap-2">
-      {chunk.isPending && <p className="text-sm text-ink-muted">Loading the source passage</p>}
-
-      {error !== null && (
-        <ApiErrorNotice
-          error={error}
-          noun="this passage"
-          action={
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void chunk.refetch()}
-            >
-              Try again
-            </button>
-          }
-        />
-      )}
-
-      {chunk.data !== undefined && (
-        <>
-          <p className="meta">
-            {title}
-            {chunk.data.page !== null && ` page ${String(chunk.data.page)}`}
-          </p>
-          <p className="whitespace-pre-wrap break-words text-sm text-ink-muted">
-            {chunk.data.content}
-          </p>
-        </>
-      )}
-    </section>
   )
 }
 
