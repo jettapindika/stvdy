@@ -92,9 +92,17 @@ async fn load_deck(state: &AppState, deck_id: Uuid) -> Result<Option<DeckRow>, F
 
 /// Marks the deck failed and gives back exactly what was charged, once.
 ///
-/// The guard is the `credits_spent` zeroing in the same statement: a second call
-/// (a retried job, or the enqueue-failure path in the route) refunds nothing
-/// because there is nothing left to refund.
+/// The guard is `credits_spent > 0`, consumed by the claim that zeroes it: a
+/// second call (a retried job, the enqueue-failure path in the route, or the boot
+/// sweep) refunds nothing because there is nothing left to refund.
+///
+/// The deck is left terminal in every case. When the refund insert cannot be
+/// written — an infrastructure failure, not a business one — the charge is kept
+/// (`credits_spent > 0`, "charged and not delivered, refund pending") and the
+/// status change still commits, because this is only ever called on the final
+/// attempt: a rollback would leave the deck `generating` with no retry left to
+/// resolve it. `credits::refund_pending_decks` recovers the charge at the next
+/// boot.
 pub async fn fail_and_refund(
     state: &AppState,
     deck_id: Uuid,
@@ -141,13 +149,54 @@ pub async fn fail_and_refund(
     if claimed.is_some() {
         // The ledger row is issued inside the same transaction as the claim that
         // zeroed `credits_spent`, so a crash between the two cannot charge a user
-        // for a deck they never received with no retry left to fix it. A failure
-        // here rolls the claim back, leaving `credits_spent` in place so a later
-        // call can still refund.
+        // for a deck they never received with no retry left to fix it. The refund
+        // runs under a savepoint because Postgres aborts a transaction on any
+        // failed statement: without it the recovery below could not run, and the
+        // only way to close the transaction would be a rollback that also undid
+        // the status change.
+        if let Err(error) = sqlx::query("savepoint refund").execute(&mut *tx).await {
+            tracing::error!(%error, %deck_id, "could not open the refund savepoint");
+            return;
+        }
+
         if let Err(error) =
             crate::credits::refund_in(&mut tx, user_id, i64::from(credits), deck_id, "refund").await
         {
-            tracing::error!(%error, %deck_id, "could not refund a failed generation");
+            // A refund that cannot be written is an infrastructure failure, and the
+            // job that reached here has no retry left (`run` calls this only on the
+            // final attempt). Rolling the whole transaction back would leave the
+            // deck `generating` forever, charged, and polled by the client without
+            // end, so the status change is committed with `credits_spent` restored
+            // to the charged amount: the deck is terminal, and `refund_pending_decks`
+            // recovers the charge at the next boot.
+            tracing::error!(%error, %deck_id, "could not refund a failed generation; the charge stays pending for recovery");
+
+            // Undo only the failed insert attempt. The claim that marked the deck
+            // failed stands, and `credits_spent` is put back explicitly rather than
+            // by rolling the claim back: `credits_spent > 0` is then exactly
+            // "charged and not delivered, refund pending", which is what the boot
+            // sweep looks for.
+            if let Err(rollback_error) = sqlx::query("rollback to savepoint refund")
+                .execute(&mut *tx)
+                .await
+            {
+                tracing::error!(%rollback_error, %deck_id, "could not roll back the failed refund insert");
+                return;
+            }
+            if let Err(restore_error) =
+                sqlx::query("update decks set credits_spent = $2 where id = $1")
+                    .bind(deck_id)
+                    .bind(credits)
+                    .execute(&mut *tx)
+                    .await
+            {
+                tracing::error!(%restore_error, %deck_id, "could not restore the pending charge");
+                return;
+            }
+            if let Err(commit_error) = tx.commit().await {
+                tracing::error!(%commit_error, %deck_id, "could not commit the deck failure");
+                return;
+            }
             return;
         }
     }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use stvdy_server::integrations::Providers;
-use stvdy_server::{config::AppConfig, db, jobs, routes, state::AppState, telemetry};
+use stvdy_server::{config::AppConfig, credits, db, jobs, routes, state::AppState, telemetry};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,6 +37,18 @@ async fn main() -> anyhow::Result<()> {
     let requeued = jobs::requeue_orphans(&pool).await?;
     if requeued > 0 {
         tracing::warn!(requeued, "requeued jobs left running by a previous process");
+    }
+
+    // A refund that could not be written when a generation failed for good leaves
+    // the deck terminal with its charge still pending (see `fail_and_refund`).
+    // Nothing else resolves that state, so recover it here, before the worker can
+    // start charging new decks.
+    let refunded = credits::refund_pending_decks(&pool).await?;
+    if refunded > 0 {
+        tracing::warn!(
+            refunded,
+            "recovered charges left pending by a failed refund"
+        );
     }
 
     let bind_addr = config.bind_addr;

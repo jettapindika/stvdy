@@ -1189,16 +1189,23 @@ async fn a_deck_cannot_read_another_accounts_chunks(pool: PgPool) {
     );
 }
 
-/// The refund and the claim that zeroes `credits_spent` are one transaction, so a
-/// failure between them cannot charge a user for a deck they never received with
-/// nothing left for a retry to fix.
+/// A failed refund must leave a terminal deck, and the boot sweep must recover it.
+///
+/// CONTRACT CHANGE. This test used to pin the opposite: that a failed refund insert
+/// rolled the whole claim back, leaving the deck `generating` with its charge
+/// intact "so a later call could still refund". Nothing ever made that later call —
+/// `fail_and_refund` only runs on the final attempt, no retry is scheduled after it,
+/// and the SPA polls a `generating` deck every 1.5 s without end — so the rollback
+/// traded a visible failure for a silent, permanent one. The contract is now: the
+/// status change commits even when the refund cannot be written, `credits_spent`
+/// stays charged (the pending-refund marker), and `credits::refund_pending_decks`
+/// recovers it at the next boot, exactly once.
 ///
 /// The ledger insert is forced to fail with a `user_id` that violates
-/// `credit_ledger`'s foreign key; the point under test is the rollback, not the
-/// trigger. Without the atomic fix the claim has already committed and
-/// `credits_spent` is 0, which is exactly the unrecoverable state.
+/// `credit_ledger`'s foreign key: the failure is injected through the refund's own
+/// insert, which is the real infrastructure failure the recovery exists for.
 #[sqlx::test(migrations = "../../migrations")]
-async fn a_failed_refund_rolls_the_claim_back(pool: PgPool) {
+async fn a_failed_refund_leaves_a_terminal_deck_and_the_boot_sweep_recovers_it(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
@@ -1242,20 +1249,63 @@ async fn a_failed_refund_rolls_the_claim_back(pool: PgPool) {
             .await
             .unwrap();
     assert_eq!(
-        credits_spent, 4,
-        "a failed refund must leave the charge refundable, not zeroed"
+        status, "failed",
+        "a failed refund must still leave the deck terminal, never generating"
     );
     assert_eq!(
-        status, "generating",
-        "the claim must roll back with the refund it could not complete"
+        credits_spent, 4,
+        "the charge stays pending so the boot sweep can recover it"
     );
 
-    let refunds: i64 =
-        sqlx::query_scalar("select count(*)::bigint from credit_ledger where reason = 'refund'")
+    let refunds_before: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where reason = 'refund'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(refunds_before, 0, "the failed insert wrote no refund row");
+
+    // The next boot recovers the pending charge.
+    let recovered = stvdy_server::credits::refund_pending_decks(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered, 1,
+        "the sweep must recover exactly the pending charge"
+    );
+
+    let (status, credits_spent): (String, i32) =
+        sqlx::query_as("select status, credits_spent from decks where id = $1")
+            .bind(deck_id)
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
-    assert_eq!(refunds, 0, "no refund row was written");
+    assert_eq!(status, "failed", "recovery must not resurrect the deck");
+    assert_eq!(credits_spent, 0, "the sweep zeroes the charge it refunds");
+
+    let refunded: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where reason = 'refund'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(refunded, 4, "the user gets back exactly what was charged");
+
+    // Idempotent: a second boot must not refund the same deck twice.
+    let recovered_again = stvdy_server::credits::refund_pending_decks(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered_again, 0,
+        "a recovered charge is not refunded twice"
+    );
+    let refunded_again: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where reason = 'refund'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(refunded_again, 4, "the ledger moved exactly once");
 }
 
 /// The studio panel's cost copy and its `max` come from the plan matrix, not from

@@ -364,6 +364,95 @@ pub async fn refund_in(
     Ok(())
 }
 
+/// How many pending refunds one boot sweep will attempt.
+///
+/// Bounded so a pathological backlog cannot hold startup open indefinitely: the
+/// next boot (or a later pass) picks up the rest, and the sweep is idempotent.
+const REFUND_SWEEP_LIMIT: i64 = 1000;
+
+/// Refunds every deck whose charge is still pending, once.
+///
+/// The failure path in `jobs::handlers::generate::fail_and_refund` commits the deck
+/// as `failed` and leaves `credits_spent` in place when the ledger insert cannot be
+/// written, because the job that reached that point has no retry left. This is what
+/// makes that state recoverable instead of permanent: it runs at boot, before the
+/// worker, and is idempotent because the same statement zeroes the charge it
+/// refunds.
+///
+/// Returns how many charges it recovered.
+pub async fn refund_pending_decks(pool: &PgPool) -> AppResult<u64> {
+    let deck_ids: Vec<Uuid> = sqlx::query_scalar(
+        "select id from decks
+          where status = 'failed' and credits_spent > 0
+          order by updated_at
+          limit $1",
+    )
+    .bind(REFUND_SWEEP_LIMIT)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("listing decks awaiting a refund: {error}"))
+    })?;
+
+    let mut recovered = 0u64;
+    for deck_id in deck_ids {
+        match refund_one_pending(pool, deck_id).await {
+            Ok(true) => recovered += 1,
+            Ok(false) => {}
+            // One deck's failure must not abort the sweep: the rest are still
+            // recoverable, and the next boot retries this one.
+            Err(error) => {
+                tracing::error!(%error, %deck_id, "could not recover a pending refund");
+            }
+        }
+    }
+    Ok(recovered)
+}
+
+/// Refunds one deck's pending charge, if it still has one.
+///
+/// `false` when there was nothing left to do: another instance claimed the deck
+/// first (`for update skip locked`), or an earlier pass already zeroed the charge.
+/// The row lock and the `credits_spent > 0` predicate together make the refund
+/// once-only.
+async fn refund_one_pending(pool: &PgPool, deck_id: Uuid) -> AppResult<bool> {
+    let mut tx = pool.begin().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("starting a refund transaction: {error}"))
+    })?;
+
+    let pending: Option<(Uuid, i32)> = sqlx::query_as(
+        "select user_id, credits_spent
+           from decks
+          where id = $1 and status = 'failed' and credits_spent > 0
+            for update skip locked",
+    )
+    .bind(deck_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("claiming a pending refund: {error}")))?;
+
+    let Some((user_id, credits)) = pending else {
+        return Ok(false);
+    };
+
+    refund_in(&mut tx, user_id, i64::from(credits), deck_id, "refund").await?;
+
+    // Zeroing the charge in the same transaction as the ledger row is what makes a
+    // second pass a no-op: the guard and the refund move together.
+    sqlx::query("update decks set credits_spent = 0, updated_at = now() where id = $1")
+        .bind(deck_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("zeroing a recovered charge: {error}"))
+        })?;
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing a recovered refund: {error}"))
+    })?;
+    Ok(true)
+}
+
 /// The daily chat cap for a user, from their plan and their local day.
 ///
 /// Counted from `usage_events` rather than a counter column: a counter can drift
