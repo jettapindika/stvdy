@@ -37,8 +37,11 @@ export function useSession(): SessionState {
     queryKey: AUTH_ME_KEY,
     queryFn: async (): Promise<User | null> => {
       if (getAccessToken() === null && !(await ensureFreshSession())) return null
-      const body = await api.get<{ user: User }>('/auth/me')
-      return body.user
+      // `GET /auth/me` answers a bare `UserView`, not a `{user}` envelope. The
+      // envelope here used to be assumed from the client side alone, which made
+      // every cold start that restored a stored refresh token report `undefined`
+      // as the user and land on `/signin`.
+      return await api.get<User>('/auth/me')
     },
     // A refused session is an answer, not a transient failure: retrying it would
     // only repeat the same 401.

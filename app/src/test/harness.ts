@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 
-import { installPlatform, type PlatformKind, type SecureStore } from '@/platform'
+import { installPlatform, type DeepLinkIntent, type PlatformKind, type SecureStore } from '@/platform'
 import { webPlatform } from '@/platform/web'
 
 /**
@@ -23,7 +23,24 @@ export interface FakeSecureStore {
   deleted: string[]
 }
 
-export function installFakePlatform(kind: PlatformKind = 'web'): FakeSecureStore {
+/**
+ * A platform whose deep links can be driven by a test.
+ *
+ * `current()` answers the intent the shell was launched with, and `emit` calls
+ * every subscriber as a link arriving at a running app would. The app must
+ * handle both, so a test that only exercises one of them proves half of the
+ * contract.
+ */
+export interface FakeDeepLinks {
+  emit(intent: DeepLinkIntent): void
+  /** The intents `onOpen` handlers were registered for, for asserting teardown. */
+  subscribers: number
+}
+
+export function installFakePlatform(
+  kind: PlatformKind = 'web',
+  options: { current?: DeepLinkIntent | null; deepLinks?: boolean } = {},
+): FakeSecureStore & { deepLinks: FakeDeepLinks } {
   const values = new Map<string, string>()
   const deleted: string[] = []
 
@@ -40,8 +57,39 @@ export function installFakePlatform(kind: PlatformKind = 'web'): FakeSecureStore
     },
   }
 
-  installPlatform({ ...webPlatform(kind), secureStore })
-  return { values, deleted }
+  const handlers = new Set<(intent: DeepLinkIntent) => void>()
+  const deepLinks: FakeDeepLinks = {
+    emit(intent) {
+      // The shell's handler is typed to its own union; the fake's `emit` takes
+      // the wider pinned union so a test can deliver `auth_ticket` before that
+      // member lands in `platform/types.ts`.
+      for (const handler of handlers) handler(intent as DeepLinkIntent)
+    },
+    get subscribers() {
+      return handlers.size
+    },
+  }
+
+  installPlatform({
+    ...webPlatform(kind),
+    secureStore,
+    ...(options.deepLinks
+      ? {
+          deepLinks: {
+            async current() {
+              return (options.current ?? null) as DeepLinkIntent | null
+            },
+            async onOpen(handler: (intent: DeepLinkIntent) => void) {
+              handlers.add(handler)
+              return () => {
+                handlers.delete(handler)
+              }
+            },
+          },
+        }
+      : {}),
+  })
+  return { values, deleted, deepLinks }
 }
 
 /**

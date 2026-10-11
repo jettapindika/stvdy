@@ -17,24 +17,115 @@ pub struct FastembedEmbedder {
     model: Mutex<fastembed::TextEmbedding>,
     dim: usize,
     model_id: String,
+    /// The model's own tokenizer, for the chunker's budget.
+    ///
+    /// Loaded separately because `fastembed` keeps its tokenizer private and
+    /// exposes no accessor. `None` only when the cached file cannot be found, in
+    /// which case `token_count` falls back to the documented heuristic and says
+    /// so once in the log, because a silent fallback is how a chunk's tail
+    /// becomes unretrievable.
+    tokenizer: Option<tokenizers::Tokenizer>,
+}
+
+/// The models this build can load, by the name `EMBEDDER_MODEL` carries.
+///
+/// An explicit map rather than "whatever the config says": the name is written
+/// into `chunks.embedder` and used as the dedupe key, so it must be the identity
+/// of the model that actually produced the vector. Echoing an unsupported config
+/// string back would label one model's vectors as another's, which is the mixed
+/// vector space migration 0007's `embedder` column exists to prevent.
+fn model_for(name: &str) -> Option<(fastembed::EmbeddingModel, &'static str, usize)> {
+    match name {
+        "intfloat/multilingual-e5-base" => Some((
+            fastembed::EmbeddingModel::MultilingualE5Base,
+            "intfloat/multilingual-e5-base",
+            768,
+        )),
+        "intfloat/multilingual-e5-small" => Some((
+            fastembed::EmbeddingModel::MultilingualE5Small,
+            "intfloat/multilingual-e5-small",
+            384,
+        )),
+        "intfloat/multilingual-e5-large" => Some((
+            fastembed::EmbeddingModel::MultilingualE5Large,
+            "intfloat/multilingual-e5-large",
+            1024,
+        )),
+        _ => None,
+    }
 }
 
 impl FastembedEmbedder {
     pub fn new(cfg: &EmbedderConfig) -> anyhow::Result<Self> {
-        let options =
-            fastembed::TextInitOptions::new(fastembed::EmbeddingModel::MultilingualE5Base)
-                .with_cache_dir(cfg.cache_dir.clone())
-                .with_show_download_progress(false);
+        let (model, model_id, native_dim) = model_for(&cfg.model).ok_or_else(|| {
+            anyhow::anyhow!(
+                "EMBEDDER_MODEL={} is not a model this build can load; supported: \
+                 intfloat/multilingual-e5-base, intfloat/multilingual-e5-small, \
+                 intfloat/multilingual-e5-large",
+                cfg.model
+            )
+        })?;
 
-        let model = fastembed::TextEmbedding::try_new(options)
+        // The configured dimension is asserted against the model's own, so a
+        // config that says 768 for a 384-dimension model fails at boot rather
+        // than producing vectors the column cannot hold.
+        anyhow::ensure!(
+            native_dim == cfg.dim,
+            "EMBEDDER_MODEL={model_id} produces {native_dim} dims but EMBEDDING_DIM={}",
+            cfg.dim
+        );
+
+        let options = fastembed::TextInitOptions::new(model)
+            .with_cache_dir(cfg.cache_dir.clone())
+            .with_show_download_progress(false);
+
+        let loaded = fastembed::TextEmbedding::try_new(options)
             .map_err(|error| anyhow::anyhow!("loading the embedding model: {error}"))?;
 
+        let tokenizer = load_tokenizer(&cfg.cache_dir, &cfg.model);
+        if tokenizer.is_none() {
+            tracing::warn!(
+                model = %model_id,
+                "the model tokenizer was not found in the cache; the chunker will use the \
+                 character heuristic, which undercounts Indonesian and can let a chunk exceed \
+                 the model's max_length"
+            );
+        }
+
         Ok(Self {
-            model: Mutex::new(model),
-            dim: cfg.dim,
-            model_id: cfg.model.clone(),
+            model: Mutex::new(loaded),
+            dim: native_dim,
+            model_id: model_id.to_string(),
+            tokenizer,
         })
     }
+}
+
+/// Finds `tokenizer.json` under the fastembed cache for `repo`.
+///
+/// The cache layout is Hugging Face's: `models--<org>--<name>/snapshots/<rev>/`.
+/// Only the file name and the repo are needed, so this walks the one directory
+/// rather than pulling in an HF client for a single local read.
+fn load_tokenizer(cache_dir: &std::path::Path, repo: &str) -> Option<tokenizers::Tokenizer> {
+    let dir_name = format!("models--{}", repo.replace('/', "--"));
+    let snapshots = cache_dir.join(dir_name).join("snapshots");
+    let entries = std::fs::read_dir(snapshots).ok()?;
+
+    for entry in entries.flatten() {
+        let candidate = entry.path().join("tokenizer.json");
+        if candidate.is_file() {
+            match tokenizers::Tokenizer::from_file(&candidate) {
+                Ok(tokenizer) => {
+                    tracing::info!(path = %candidate.display(), "model tokenizer loaded");
+                    return Some(tokenizer);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, path = %candidate.display(), "the tokenizer failed to load");
+                }
+            }
+        }
+    }
+    None
 }
 
 /// E5 is trained with these prefixes; a query embedded without `query: ` lands
@@ -72,6 +163,21 @@ impl Embedder for FastembedEmbedder {
         guard
             .embed(prefixed, None)
             .map_err(|error| EmbedError::Provider(error.to_string()))
+    }
+
+    /// The model's own count. `encode` adds the special tokens (CLS/SEP) unless
+    /// they are disabled, and they count against `max_length`, so they are
+    /// included: the budget must cover everything the model sees.
+    fn token_count(&self, text: &str) -> usize {
+        let Some(tokenizer) = &self.tokenizer else {
+            return stvdy_core::chunk::heuristic_tokens(text);
+        };
+        match tokenizer.encode(text, true) {
+            Ok(encoding) => encoding.get_ids().len(),
+            // Encoding fails only on pathological input; the heuristic is a
+            // better answer than aborting an ingestion.
+            Err(_) => stvdy_core::chunk::heuristic_tokens(text),
+        }
     }
 }
 
@@ -191,6 +297,13 @@ impl Embedder for DimensionChecked {
         self.inner.model_id()
     }
 
+    /// Forwarded, not defaulted: the wrapper exists so a caller cannot bypass
+    /// the dimension check, and a default here would silently swap the real
+    /// tokenizer for the heuristic on the path that actually ingests.
+    fn token_count(&self, text: &str) -> usize {
+        self.inner.token_count(text)
+    }
+
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
         let vectors = self.inner.embed(texts).await?;
         for vector in &vectors {
@@ -239,4 +352,76 @@ pub async fn assert_dimensions(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every model this build accepts must declare the dimension the schema has.
+    /// The `chunks.embedding` column is `vector(768)`, so a model with a
+    /// different width is a migration, not a config change.
+    #[test]
+    fn the_supported_models_are_the_ones_the_schema_can_hold() {
+        let (_, base, base_dim) = model_for("intfloat/multilingual-e5-base").expect("e5-base");
+        assert_eq!(base, "intfloat/multilingual-e5-base");
+        assert_eq!(base_dim, 768, "the schema's vector(768)");
+
+        assert!(model_for("intfloat/multilingual-e5-small").is_some());
+        assert!(model_for("intfloat/multilingual-e5-large").is_some());
+        // An unsupported name must be refused, not echoed back: the name is
+        // written into `chunks.embedder` and used as the dedupe key, so echoing
+        // one model's name onto another's vectors is the mixed-vector-space
+        // corruption migration 0007 exists to prevent.
+        assert!(model_for("some/other-model").is_none());
+        assert!(model_for("").is_none());
+    }
+
+    /// The real tokenizer must be used where it exists, because the character
+    /// heuristic is unreliable in *both* directions and the chunker's budget is
+    /// the model's, not an estimate: an overcount wastes context, an undercount
+    /// lets a chunk exceed `max_length` and be truncated silently. Skips with a
+    /// reason when the cache is cold, so a CI job without the model still runs
+    /// this file.
+    #[test]
+    fn the_real_tokenizer_disagrees_with_the_heuristic() {
+        let cache = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.fastembed_cache")
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".fastembed_cache"));
+
+        let Some(tokenizer) = load_tokenizer(&cache, "intfloat/multilingual-e5-base") else {
+            eprintln!(
+                "skipped: no cached tokenizer under {} (run an ingest once, or set \
+                 FASTEMBED_CACHE_DIR)",
+                cache.display()
+            );
+            return;
+        };
+
+        // Measured on this machine: the tokenizer gives 25 for this Indonesian
+        // sentence where the heuristic gives 28, so the heuristic *overcounts*
+        // here. It undercounts on longer words elsewhere. Either direction is a
+        // reason not to budget with it, which is the property under test.
+        let indonesian = "Mahasiswa harus memahami konsep dasar termodinamika sebelum \
+                          mengerjakan soal-soal latihan yang diberikan oleh dosen pengampu.";
+        let real = tokenizer
+            .encode(indonesian, true)
+            .expect("the tokenizer encodes Indonesian")
+            .get_ids()
+            .len();
+        let heuristic = stvdy_core::chunk::heuristic_tokens(indonesian);
+
+        assert!(real > 0);
+        assert_ne!(
+            real, heuristic,
+            "the heuristic agreed by coincidence; it is still not a tokenizer, and the \
+             chunker must keep asking the embedder"
+        );
+        // And the budget must leave room inside the model's window.
+        assert!(
+            real < stvdy_core::chunk::ChunkConfig::default().max_tokens,
+            "the default target must fit inside the model's max_length: {real} tokens"
+        );
+    }
 }

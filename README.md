@@ -112,7 +112,7 @@ will not find it from `app/`.
 | Service | Needed for |
 |---|---|
 | Postgres + pgvector | everything (the API, migrations, tests) |
-| MinIO (`docker compose up -d minio minio-init`) | source uploads, Phase 1+ |
+| Object storage (`docker compose up -d minio`) | source uploads, Phase 1+. The server creates the bucket at boot, so there is no init sidecar. |
 | SearXNG (`just search-up`) | web search only, Phase 3+; needs `SEARXNG_SECRET` in `.env` |
 
 The `#[sqlx::test]` suites create a scratch database per test, so **Postgres must

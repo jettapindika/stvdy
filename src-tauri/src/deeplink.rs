@@ -6,8 +6,8 @@
 //! rejected in one place and a malformed URL can never reach a handler.
 //!
 //! This module is pure: no IO, no logging, no panics. A URL query string can
-//! carry an OAuth `code` (a credential), so nothing here writes a URL anywhere;
-//! callers log [`DeepLinkIntent::action`] only.
+//! carry an OAuth `code` or a login `ticket` (both credentials), so nothing here
+//! writes a URL anywhere; callers log [`DeepLinkIntent::action`] only.
 
 use std::collections::BTreeMap;
 
@@ -23,6 +23,11 @@ pub enum DeepLinkIntent {
     /// A login/OAuth callback. Carries the `code` and `state` the SPA exchanges
     /// for a token pair.
     AuthCallback(AuthCallback),
+    /// A Google sign-in return. Carries the single-use login `ticket` the SPA
+    /// exchanges for a token pair. Deliberately not a token pair: the server
+    /// never puts a long-lived credential in a URL the browser or OS handler
+    /// can see, only a ticket the app redeems once.
+    AuthTicket(AuthTicket),
     /// A calendar OAuth return. Carries the query parameters verbatim.
     Calendar(Calendar),
     /// Anything else, with the reason so the shell can log *why* without
@@ -35,6 +40,7 @@ impl DeepLinkIntent {
     pub fn action(&self) -> &'static str {
         match self {
             DeepLinkIntent::AuthCallback(_) => "auth_callback",
+            DeepLinkIntent::AuthTicket(_) => "auth_ticket",
             DeepLinkIntent::Calendar(_) => "calendar",
             DeepLinkIntent::Ignored(_) => "ignored",
         }
@@ -45,6 +51,11 @@ impl DeepLinkIntent {
 pub struct AuthCallback {
     pub code: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AuthTicket {
+    pub ticket: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -70,6 +81,9 @@ pub enum IgnoreReason {
     MissingCode,
     /// `auth/callback` with a missing or blank `state`.
     MissingState,
+    /// `auth/callback` with no usable credential: a blank `ticket`, or no
+    /// `ticket`/`code`/`state` parameter at all.
+    MissingTicket,
 }
 
 /// Classifies one incoming URL. Never panics: any input that is not a valid,
@@ -99,18 +113,39 @@ pub fn classify(raw: &str) -> DeepLinkIntent {
     }
 }
 
+/// Classifies the `auth/callback` route, which accepts either credential pair:
+/// a complete `code`+`state` (the Calendar OAuth return) or a `ticket` (the
+/// Google sign-in return). A complete `code`+`state` pair keeps precedence, so
+/// a URL that already classified as an OAuth callback still does.
 fn auth_callback(params: &BTreeMap<String, String>) -> DeepLinkIntent {
     let code = non_blank(params.get("code"));
     let state = non_blank(params.get("state"));
 
     match (code, state) {
         (Some(code), Some(state)) => DeepLinkIntent::AuthCallback(AuthCallback { code, state }),
-        (None, _) => DeepLinkIntent::Ignored(Ignored {
-            reason: IgnoreReason::MissingCode,
-        }),
-        (_, None) => DeepLinkIntent::Ignored(Ignored {
-            reason: IgnoreReason::MissingState,
-        }),
+        (code, _) => {
+            if let Some(ticket) = non_blank(params.get("ticket")) {
+                return DeepLinkIntent::AuthTicket(AuthTicket { ticket });
+            }
+
+            // No usable credential. Report the ticket reason only when the URL
+            // carried no OAuth parameters at all; otherwise preserve the
+            // incomplete-pair reason.
+            if !params.contains_key("code") && !params.contains_key("state") {
+                return DeepLinkIntent::Ignored(Ignored {
+                    reason: IgnoreReason::MissingTicket,
+                });
+            }
+
+            match code {
+                None => DeepLinkIntent::Ignored(Ignored {
+                    reason: IgnoreReason::MissingCode,
+                }),
+                Some(_) => DeepLinkIntent::Ignored(Ignored {
+                    reason: IgnoreReason::MissingState,
+                }),
+            }
+        }
     }
 }
 
@@ -212,6 +247,78 @@ mod tests {
     }
 
     #[test]
+    fn classifies_an_auth_ticket() {
+        let intent = classify("stvdy://auth/callback?ticket=one-time-ticket");
+        match intent {
+            DeepLinkIntent::AuthTicket(AuthTicket { ticket }) => {
+                assert_eq!(ticket, "one-time-ticket");
+            }
+            other => panic!("expected an auth ticket, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn percent_decodes_the_ticket() {
+        let intent = classify("stvdy://auth/callback?ticket=a%2Fb%2Bc");
+        match intent {
+            DeepLinkIntent::AuthTicket(AuthTicket { ticket }) => {
+                assert_eq!(ticket, "a/b+c");
+            }
+            other => panic!("expected an auth ticket, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blank_or_absent_ticket_is_ignored_with_a_reason() {
+        for url in [
+            "stvdy://auth/callback?ticket=",
+            "stvdy://auth/callback?ticket=%20",
+            "stvdy://auth/callback",
+        ] {
+            assert_eq!(
+                classify(url),
+                DeepLinkIntent::Ignored(Ignored {
+                    reason: IgnoreReason::MissingTicket
+                }),
+                "expected {url} to be ignored as a missing ticket"
+            );
+        }
+    }
+
+    #[test]
+    fn a_complete_code_and_state_pair_still_classifies_as_a_callback() {
+        // The Calendar OAuth return path must keep working unchanged, even with
+        // a stray blank ticket parameter alongside it.
+        let intent = classify("stvdy://auth/callback?code=abc123&state=xyz&ticket=");
+        match intent {
+            DeepLinkIntent::AuthCallback(AuthCallback { code, state }) => {
+                assert_eq!(code, "abc123");
+                assert_eq!(state, "xyz");
+            }
+            other => panic!("expected an auth callback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_ticket_never_reaches_the_loggable_action_label() {
+        let intent = classify("stvdy://auth/callback?ticket=SUPERSECRET");
+        // The label callers log carries no credential.
+        assert_eq!(intent.action(), "auth_ticket");
+        assert!(!intent.action().contains("SUPERSECRET"));
+
+        // The serialized intent carries the ticket only inside the payload, and
+        // the action label stays the fixed `auth_ticket` string.
+        let value = serde_json::to_value(&intent).expect("serializes");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "action": "auth_ticket",
+                "payload": { "ticket": "SUPERSECRET" }
+            })
+        );
+    }
+
+    #[test]
     fn classifies_a_calendar_return() {
         let intent = classify("stvdy://oauth/calendar?provider=google&state=abc");
         match intent {
@@ -291,6 +398,9 @@ mod tests {
             "stvdy://%",
             "stvdy://%zz",
             "stvdy://auth/callback?code=%",
+            "stvdy://auth/callback?ticket=%",
+            "stvdy://auth/callback?ticket",
+            "stvdy://auth/callback?ticket=%zz&ticket=b",
             "not a url at all",
             "::://%%%",
             "stvdy://auth/callback?code=%E2%82%AC&state=s",

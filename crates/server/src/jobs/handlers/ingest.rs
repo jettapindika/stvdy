@@ -154,11 +154,13 @@ async fn ingest(
     }
     tracing::info!(%source_id, pages = pages.len(), total_chars, "text extracted");
 
-    // Chunk with the model's real budget. The token count is the cheap
-    // approximation because a tokenizer per chunk would cost more than the
-    // chunking, and the 480/512 pair has headroom for the difference (A2).
+    // Chunk against the model's own tokenizer, not a character estimate: the
+    // 480/512 pair in A2 is the *model's* budget, and a heuristic that
+    // undercounts lets a chunk exceed `max_length`, at which point fastembed
+    // truncates it silently and the tail of the chunk becomes unretrievable.
+    // Indonesian is where that bites, because its words are longer.
     let cfg = stvdy_core::chunk::ChunkConfig::default();
-    let count = |text: &str| stvdy_core::chunk::heuristic_tokens(text);
+    let count = |text: &str| state.embedder.token_count(text);
 
     let mut pending: Vec<(Option<i32>, i32, String)> = Vec::new();
     for (page, text) in &pages {

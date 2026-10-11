@@ -34,6 +34,21 @@ import {
  * sign the user out of a session they still hold on another screen.
  */
 
+/**
+ * The API origin.
+ *
+ * `VITE_API_BASE_URL` is baked into the bundle at build time (Vite inlines
+ * `import.meta.env.*`), so it must be set in the environment the build runs in,
+ * not at runtime. It is not in any checked-in env file because it is a
+ * deployment value, but it is documented in `.env.example`; its origin must also
+ * be in the server's `WEB_ORIGIN` allowlist, or CORS blocks every request from
+ * the built SPA.
+ *
+ * The fallback is deliberate and only correct for local development: with no
+ * variable set, the build points at the dev server on `localhost:8080`. A
+ * production build that forgets to set it therefore points at the developer's
+ * own machine, which is a visible failure rather than a silent one.
+ */
 const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
 
 /** The API origin, without a trailing slash. Exported for Phase 2's stream reader. */

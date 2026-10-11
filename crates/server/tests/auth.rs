@@ -559,3 +559,107 @@ fn no_token_or_link_is_logged() {
         }
     }
 }
+
+/// The ordinary sequence sign up, sign out, sign in, sign out, sign in must not
+/// consume five device slots on one machine. Before device reuse it hit
+/// `devices_max = 2` on free with no explanation, which is a support ticket
+/// rather than a feature.
+#[sqlx::test(migrations = "../../migrations")]
+async fn re_signing_in_from_the_same_machine_reuses_its_device(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, first) = post(
+        &app,
+        "/auth/signup",
+        signup_body("again@example.test", "Laptop"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let first_device = first["device_id"].as_str().unwrap().to_string();
+
+    // Three more sign-ins from the same machine, each preceded by a sign-out,
+    // which is the shape that used to leak.
+    for round in 0..3 {
+        let (status, body) = post(
+            &app,
+            "/auth/login",
+            serde_json::json!({
+                "email": "again@example.test",
+                "password": "correct horse battery",
+                "device": { "name": "Laptop", "platform": "macos" }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "round {round}: {body}");
+        assert_eq!(
+            body["device_id"], first_device,
+            "round {round}: the same machine must reuse its device row"
+        );
+
+        let refresh = body["refresh_token"].as_str().unwrap().to_string();
+        let (status, _) = post(
+            &app,
+            "/auth/logout",
+            serde_json::json!({ "refresh_token": refresh }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    let devices: i64 = sqlx::query_scalar("select count(*) from devices where revoked_at is null")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(devices, 1, "four sign-ins from one machine are one device");
+}
+
+/// A *different* machine still consumes a slot, and the cap still trips: reuse
+/// must not have quietly disabled `devices_max`.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_new_machine_still_counts_against_the_limit(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let max = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .devices_max;
+
+    post(
+        &app,
+        "/auth/signup",
+        signup_body("machines@example.test", "Machine 1"),
+    )
+    .await;
+    for index in 2..=max {
+        let (status, body) = post(
+            &app,
+            "/auth/login",
+            serde_json::json!({
+                "email": "machines@example.test",
+                "password": "correct horse battery",
+                "device": { "name": format!("Machine {index}"), "platform": "macos" }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "machine {index}: {body}");
+    }
+
+    let (status, body) = post(
+        &app,
+        "/auth/login",
+        serde_json::json!({
+            "email": "machines@example.test",
+            "password": "correct horse battery",
+            "device": { "name": "Machine too many", "platform": "macos" }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "limit_reached");
+}

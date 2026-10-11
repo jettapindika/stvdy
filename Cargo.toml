@@ -85,6 +85,9 @@ fastembed = { version = "7.1.1", default-features = false, features = [
   "hf-hub-rustls-tls",
   "ort-download-binaries-rustls-tls",
 ] }
+# The model's own tokenizer, for the chunker's token budget (A2). The same
+# version fastembed already depends on, so it is not a second copy.
+tokenizers = { version = "0.23.2", default-features = false, features = ["onig"] }
 # Dynamic binding only: pdfium is loaded from PDFIUM_LIB_PATH at runtime, so the
 # build needs no pdfium binary and the Docker image supplies one (roadmap
 # Phase 6/1 risk note). Default features pull the `image` crate for rendering,

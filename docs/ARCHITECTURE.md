@@ -341,6 +341,54 @@ The bundle was produced by overriding the pre-build step on the command line
 minutes earlier, with no file change. This is reported, not fixed: `app/src/api`
 is outside this task's ownership.
 
+### Mobile capability spike (roadmap Phase 1: "do not defer to Phase 14")
+
+The roadmap requires the riskiest native pieces be prototyped in Phase 1, because
+their failure forces a Swift/Kotlin plugin or a framework change. Every probe is
+recorded here, pass and fail, with the prerequisite it is waiting on. Three of
+them need hardware this machine does not have, and that is a user-side
+prerequisite rather than a code change, so it is named rather than assumed.
+
+| Probe | Result | Prerequisite it needs |
+|---|---|---|
+| APNs token registration (iOS) | **NOT ATTEMPTED** | A device build. The iOS simulator runtime is absent (`xcrun simctl list runtimes` is empty), and APNs registration is not meaningful on a simulator anyway, so a physical device plus a signing identity is required |
+| FCM token registration (Android) | **NOT ATTEMPTED** | An Android SDK (`~/Library/Android/sdk` does not exist) plus a physical device; `google-services.json` and the Gradle plugin are unwired |
+| Foreground push receipt and tap-to-open (both) | **NOT ATTEMPTED** | The same device prerequisite. Note the recorded Phase 0 finding: the official notification plugin cannot receive remote push, so this probe is expected to need a custom plugin, and the spike exists to confirm that before Phase 14 |
+| iOS "Open in..." document intake | **NOT ATTEMPTED** | A device build. Cold-start delivery under the scene lifecycle is the specific risk |
+| iOS share-sheet row | **NOT ATTEMPTED** | A device build plus a Share Extension and an App Group, which are custom Swift and an entitlement path to confirm early |
+| Android `content://` share and import | **NOT ATTEMPTED** | An Android SDK and a device. The Phase 0 finding stands: `mimeType: "*/*"` never matches, so a concrete type is required |
+| Keychain round trip (macOS) | **PASS** | none (Phase 0, still green) |
+| `stvdy://` deep-link round trip (macOS, running instance) | **PASS** | none |
+| `stvdy://` deep-link round trip (macOS, cold start) | **PASS** | none |
+| Foreign scheme ignored, no credential logged | **PASS** | none |
+| Keychain adapter to command to OS keychain | **PARTIAL** | The live webview-to-Rust IPC hop needs a scriptable webview; both other hops are verified |
+| iOS simulator build | **BLOCKED** | An installed iOS simulator runtime (see Item 6 above) |
+
+**What is needed from the user:** an installed iOS simulator runtime plus a
+physical iOS device (or a Mac with a signing identity) and an Android SDK with a
+device, to answer the six NOT ATTEMPTED probes. Until then they are Phase 14
+prerequisites rather than verified capabilities, which is the escalation the
+roadmap's "or a framework change, which requires asking" anticipates.
+
+### Accessibility gate (roadmap gate 5)
+
+The SPA's screens for this phase (sign in, sign up, verify email, workspace list,
+workspace detail with the upload and the source list) were checked against the
+five requirements, in a real headless Chromium against the built bundle:
+
+| Requirement | Result |
+|---|---|
+| Every control reachable by keyboard, with a visible focus ring | PASS. Tab-only walks on `/signin` and `/workspaces/:id` reach every control; each stop has a visible 2px solid ring, measured with `getComputedStyle(document.activeElement)` after real key presses rather than asserted from the stylesheet. The tablist is one tab stop with ArrowRight/Home/End moving both selection and focus |
+| Contrast on the default dark **and** light themes | PASS for the screens above, at the token level: the design tokens are the single source of colour and were checked in both themes. The two defects this surfaced were fixed (a dark-mode card elevation and a citation hover contrast, commit 5ed5624) |
+| Interactive targets >= 44px at phone width | PASS. The 44px label rows light up as one target (`has-[:focus-visible]`), including the radio group |
+| No state conveyed by colour alone | PASS. Field errors carry `aria-invalid` plus `aria-describedby` text, and the upload's `pending`/`processing`/`ready`/`failed` states each render their own label rather than a colour swatch |
+| 200% text scale without clipping or overlap | PASS on these screens (no fixed heights on text containers) |
+
+Two further checks that this gate does not name but that the same walk exercised:
+the delete-workspace confirmation moves focus to the confirming button (so a
+keyboard user cannot confirm by accident), and cancelling it restores focus to the
+trigger.
+
 ## CORS origins
 
 `routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist

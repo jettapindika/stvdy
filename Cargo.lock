@@ -4480,6 +4480,7 @@ dependencies = [
  "stvdy-core",
  "stvdy-sync",
  "thiserror 2.0.21",
+ "tokenizers",
  "tokio",
  "tower",
  "tower-http 0.7.1",

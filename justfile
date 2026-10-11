@@ -6,8 +6,10 @@ set dotenv-load := true
 # these fail loudly instead.
 
 # --- dev infrastructure ---
+# No `minio-init`: the server creates the bucket at boot (A15 removed the
+# pullable `mc` image, so there is no sidecar to run).
 db-up:
-    docker compose up -d postgres minio minio-init
+    docker compose up -d postgres minio
 
 # SearXNG is only needed for Phase 3+ (web search). Kept separate so the common
 # case does not pull an extra image.

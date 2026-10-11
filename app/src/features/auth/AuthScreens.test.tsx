@@ -26,6 +26,7 @@ const SESSION = {
     email_verified_at: null,
     plan_id: 'free',
     timezone: 'Asia/Jakarta',
+    student_verified: false,
     created_at: '2026-10-11T08:00:00Z',
   },
   access_token: 'access-1',

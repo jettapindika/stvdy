@@ -50,6 +50,17 @@ impl Providers {
             };
         let mailer = mailer::from_config(&cfg.mailer)?;
 
+        // Cheap checks first, in this order on purpose. The embedding model is a
+        // 1.06 GB load (A2 pre-bakes it into the image precisely so a cold start
+        // does not fetch it), so a misconfigured bucket or a missing pdfium path
+        // must fail in seconds rather than after a multi-minute download. The
+        // Phase 1 smoke run paid that cost once and it is the cost CI would pay
+        // on every cold start.
+        if let Some(s3) = &s3 {
+            s3.ensure_bucket().await?;
+        }
+        documents::init(cfg.pdfium_lib_path.as_deref())?;
+
         let embedder: Arc<dyn Embedder> = match cfg.embedder.provider {
             EmbedderProvider::Fastembed => {
                 Arc::new(embedder::FastembedEmbedder::new(&cfg.embedder)?)
@@ -74,11 +85,6 @@ impl Providers {
             Arc::new(embedder::DimensionChecked::new(embedder.clone()));
 
         embedder::assert_dimensions(pool, embedder.as_ref(), cfg.embedder.dim).await?;
-
-        // Bound once per process: pdfium-render's bindings are process-wide, so
-        // a per-document bind succeeds for the first PDF and fails for every
-        // one after it. A configured-but-unloadable path is a boot failure.
-        documents::init(cfg.pdfium_lib_path.as_deref())?;
 
         Ok(Self {
             storage,

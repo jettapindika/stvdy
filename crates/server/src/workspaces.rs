@@ -229,6 +229,21 @@ pub async fn delete_one(
         return Err(AppError::NotFound);
     };
 
+    // Collect the source ids first so their chunks and objects can be reclaimed.
+    // Tombstoning the sources without this frees the user's storage *quota*
+    // (`enforce_storage` sums `file_size` over live sources) while the embeddings
+    // and the objects stay forever, which a delete loop could churn.
+    let source_ids: Vec<Uuid> =
+        sqlx::query_scalar("select id from sources where workspace_id = $1 and deleted_at is null")
+            .bind(deleted_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!(
+                    "listing a workspace's sources for deletion: {error}"
+                ))
+            })?;
+
     sqlx::query(
         "update sources set deleted_at = now(), updated_at = now()
           where workspace_id = $1 and deleted_at is null",
@@ -242,9 +257,20 @@ pub async fn delete_one(
         ))
     })?;
 
+    // Inside the transaction, so the chunk count and the quota cannot disagree.
+    let keys = crate::sources::routes::reclaim_chunks(&mut *tx, &source_ids)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("dropping a workspace's chunks: {error}"))
+        })?;
+
     tx.commit()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a delete: {error}")))?;
+
+    // After the commit: a storage failure must not roll back a deletion the user
+    // asked for.
+    crate::sources::routes::delete_objects(&state, &keys).await;
 
     Ok(StatusCode::NO_CONTENT)
 }

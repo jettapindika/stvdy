@@ -37,6 +37,8 @@ export interface SourceStatus {
   status: SourceStatusName
   chunk_count: number | null
   error: string | null
+  /** When the row last changed, as the server reports it. */
+  updated_at: string
 }
 
 export const sourceKeys = {

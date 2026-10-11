@@ -8,4 +8,4 @@ pub mod parse;
 pub mod routes;
 pub mod status;
 
-pub use routes::routes;
+pub use routes::{max_upload_bytes, routes};

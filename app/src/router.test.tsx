@@ -31,6 +31,7 @@ const ROUTES = [
   { path: '/signin', element: <SignInScreen /> },
   { path: '/signup', element: <SignUpScreen /> },
   { path: '/verify', element: <VerifyEmailScreen /> },
+  { path: '/verify-email', element: <VerifyEmailScreen /> },
   {
     path: '/',
     element: <App />,
@@ -88,6 +89,17 @@ describe('the auth routes are reachable without a session', () => {
     // The emailed link is usually opened on a device that never signed in.
     expect(await screen.findByText('Email verified')).toBeInTheDocument()
   })
+
+  it('opens the verification screen at the path the server actually mails', async () => {
+    const calls = mockFetch(() => jsonResponse(200, { verified: true }))
+
+    // `auth/email_verify.rs` builds the link as `{web_origin}/verify-email?token=`,
+    // so the SPA has to answer on that path and not only on the in-app `/verify`.
+    renderRoute('/verify-email?token=abc123')
+
+    expect(await screen.findByText('Email verified')).toBeInTheDocument()
+    expect(calls.filter((call) => call.url.endsWith('/auth/verify-email'))).toHaveLength(1)
+  })
 })
 
 describe('the signed-in routes are behind the gate', () => {
@@ -120,15 +132,14 @@ describe('the signed-in routes are behind the gate', () => {
       }
       if (url.endsWith('/auth/me')) {
         return jsonResponse(200, {
-          user: {
-            id: 'u1',
-            email: 'student@example.com',
-            email_verified: true,
-            email_verified_at: '2026-10-11T09:00:00Z',
-            plan_id: 'free',
-            timezone: 'Asia/Jakarta',
-            created_at: '2026-10-11T08:00:00Z',
-          },
+          id: 'u1',
+          email: 'student@example.com',
+          email_verified: true,
+          email_verified_at: '2026-10-11T09:00:00Z',
+          plan_id: 'free',
+          timezone: 'Asia/Jakarta',
+          student_verified: false,
+          created_at: '2026-10-11T08:00:00Z',
         })
       }
       return jsonResponse(200, { workspaces: [] })

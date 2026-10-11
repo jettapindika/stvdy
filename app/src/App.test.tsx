@@ -23,6 +23,7 @@ const USER = {
   email_verified_at: '2026-10-11T09:00:00Z',
   plan_id: 'free',
   timezone: 'Asia/Jakarta',
+  student_verified: false,
   created_at: '2026-10-11T08:00:00Z',
 }
 
@@ -68,7 +69,7 @@ describe('the session gate', () => {
           expires_at: '2026-10-11T10:00:00Z',
         })
       }
-      return jsonResponse(200, { user: USER })
+      return jsonResponse(200, USER)
     })
 
     await saveSession({ refreshToken: 'refresh-1', deviceId: 'device-1' })
@@ -93,7 +94,7 @@ describe('the session gate', () => {
           used: null,
         })
       }
-      return jsonResponse(200, { user: USER })
+      return jsonResponse(200, USER)
     })
 
     await saveSession({ refreshToken: 'refresh-1', deviceId: 'device-1' })

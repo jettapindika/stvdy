@@ -107,8 +107,20 @@ curl -fsS -X POST "$BASE/workspaces/$WS/sources" -H "authorization: Bearer $ACCE
   -F "file=@$TMP/notes.pdf;type=application/pdf" > "$TMP/source_pdf.json"
 SRC_PDF=$(field '["source"]["id"]' < "$TMP/source_pdf.json")
 
+say "second pdf in the same process"
+# The regression this pins: pdfium's bindings are process-wide, so a per-document
+# bind succeeds for the FIRST pdf and fails for every one after it. One upload
+# cannot catch that, which is why there are two.
+printf 'Second document. Oxidative phosphorylation across the inner membrane.' > "$TMP/second.txt"
+cupsfilter -m application/pdf "$TMP/second.txt" > "$TMP/second.pdf" 2>/dev/null \
+  || fail "cupsfilter could not produce a second PDF"
+curl -fsS -X POST "$BASE/workspaces/$WS/sources" -H "authorization: Bearer $ACCESS" \
+  -F kind=pdf -F title="Second PDF" \
+  -F "file=@$TMP/second.pdf;type=application/pdf" > "$TMP/source_pdf2.json"
+SRC_PDF2=$(field '["source"]["id"]' < "$TMP/source_pdf2.json")
+
 say "poll to ready"
-for src in "$SRC_TEXT" "$SRC_PDF"; do
+for src in "$SRC_TEXT" "$SRC_PDF" "$SRC_PDF2"; do
   STATUS=unknown
   for _ in $(seq 1 120); do
     curl -fsS "$BASE/sources/$src/status" -H "authorization: Bearer $ACCESS" > "$TMP/status.json"

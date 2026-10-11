@@ -681,3 +681,246 @@ async fn the_signed_file_url_works_without_a_bearer_token(pool: PgPool) {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+/// A43: ingestion is one of the four things an unverified account cannot do, and
+/// it is the first route in the project that spends provider money on embedding
+/// calls. The check must happen before anything is stored, or a scripted account
+/// can fill the bucket without ever confirming its address.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unverified_account_cannot_ingest(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    // Signup WITHOUT consuming the verification link, unlike `signed_up`.
+    let (status, body) = json(
+        &app,
+        "POST",
+        "/auth/signup",
+        "",
+        serde_json::json!({
+            "email": "unverified@example.test",
+            "password": "correct horse battery",
+            "device": { "name": "Laptop", "platform": "macos" }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let token = body["access_token"]
+        .as_str()
+        .expect("access token")
+        .to_string();
+
+    // Creating a workspace is allowed: only spending is gated.
+    let workspace = create_workspace(&app, &token, "Unverified").await;
+
+    let (content_type, body) = multipart(&[
+        ("kind", "text", None),
+        ("text", "This must never be embedded.", None),
+    ]);
+    let (status, rejected) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{rejected}");
+    assert_eq!(rejected["code"], "email_not_verified");
+
+    // Nothing was written: no source row, no chunks, no job, and the object
+    // store is untouched.
+    let sources: i64 = sqlx::query_scalar("select count(*) from sources")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    let chunks: i64 = sqlx::query_scalar("select count(*) from chunks")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    let jobs: i64 = sqlx::query_scalar("select count(*) from jobs")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!((sources, chunks, jobs), (0, 0, 0));
+}
+
+/// `sources_total` is a separate axis from `storage_mb`, and a text source is a
+/// few KB, so without this check one account could create unbounded sources while
+/// staying far under the storage cap.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_source_count_limit_is_enforced(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "many@example.test").await;
+    let workspace = create_workspace(&app, &token, "Many").await;
+
+    // Read the cap from the config, never a literal: retuning plans.toml must not
+    // leave a stale expectation behind.
+    let max = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .sources_total
+        .max()
+        .expect("the free plan caps sources");
+
+    for index in 0..max {
+        let (content_type, body) = multipart(&[
+            ("kind", "text", None),
+            ("text", &format!("Note number {index}."), None),
+        ]);
+        let (status, created) = send(
+            &app,
+            "POST",
+            &format!("/workspaces/{workspace}/sources"),
+            &token,
+            Some(&content_type),
+            body,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "source {index} of {max}: {created}"
+        );
+    }
+
+    let (content_type, body) =
+        multipart(&[("kind", "text", None), ("text", "One too many.", None)]);
+    let (status, rejected) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{rejected}");
+    assert_eq!(rejected["code"], "limit_reached");
+    assert_eq!(rejected["min_plan"], "pro");
+    assert_eq!(rejected["limit"], max as i64);
+    assert_eq!(rejected["used"], max as i64);
+
+    // Deleting one frees a slot, which is what the message implies.
+    let source_id: uuid::Uuid = sqlx::query_scalar(
+        "select id from sources where deleted_at is null order by created_at limit 1",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/sources/{source_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (content_type, body) = multipart(&[("kind", "text", None), ("text", "Fits now.", None)]);
+    let (status, created) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+}
+
+/// Deleting a workspace must reclaim exactly what deleting its sources would:
+/// the chunks and the stored objects. Otherwise it frees the user's storage
+/// *quota* (`enforce_storage` sums `file_size` over live sources) while the
+/// embeddings and the objects stay forever, and a create-delete loop keeps quota
+/// at zero with unbounded storage behind it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_a_workspace_reclaims_its_chunks_and_objects(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "churn@example.test").await;
+    let workspace = create_workspace(&app, &token, "Churn").await;
+
+    let (content_type, body) = multipart(&[
+        ("kind", "text", None),
+        ("text", "Content that must not survive its workspace.", None),
+    ]);
+    let (status, created) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let source_id = uuid::Uuid::parse_str(created["source"]["id"].as_str().unwrap()).unwrap();
+    drain_jobs(&harness).await;
+
+    let key: String = sqlx::query_scalar("select file_key from sources where id = $1")
+        .bind(source_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let before: i64 = sqlx::query_scalar("select count(*) from chunks where source_id = $1")
+        .bind(source_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        before > 0,
+        "the source ingested, so there is something to reclaim"
+    );
+
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/workspaces/{workspace}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let after: i64 = sqlx::query_scalar("select count(*) from chunks where source_id = $1")
+        .bind(source_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, 0, "a workspace delete must drop its chunks");
+
+    assert!(
+        stvdy_core::traits::storage::Storage::get(harness.storage.as_ref(), &key)
+            .await
+            .is_err(),
+        "a workspace delete must delete its stored objects"
+    );
+
+    // And the quota is genuinely free again: a new source fits.
+    let new_workspace = create_workspace(&app, &token, "After").await;
+    let (content_type, body) =
+        multipart(&[("kind", "text", None), ("text", "Fresh content.", None)]);
+    let (status, created) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{new_workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+}

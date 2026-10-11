@@ -105,7 +105,15 @@ function renderWorkspace() {
 describe('the sources panel', () => {
   it('lists the sources with their real status and chunk count', async () => {
     sources = [source({ id: 's1', title: 'Lecture 3' })]
-    statuses = { s1: { id: 's1', status: 'ready', chunk_count: 7, error: null } }
+    statuses = {
+      s1: {
+        id: 's1',
+        status: 'ready',
+        chunk_count: 7,
+        error: null,
+        updated_at: '2026-10-11T08:00:00Z',
+      },
+    }
     serve()
     renderWorkspace()
 
@@ -163,6 +171,7 @@ describe('the sources panel', () => {
         status: 'failed',
         chunk_count: null,
         error: 'No text layer found, so nothing could be extracted',
+        updated_at: '2026-10-11T08:00:00Z',
       },
     }
     serve()
@@ -229,7 +238,15 @@ describe('the sources panel', () => {
 
   it('removes a source only after the confirmation', async () => {
     sources = [source({ id: 's1', title: 'Lecture 3' })]
-    statuses = { s1: { id: 's1', status: 'ready', chunk_count: 7, error: null } }
+    statuses = {
+      s1: {
+        id: 's1',
+        status: 'ready',
+        chunk_count: 7,
+        error: null,
+        updated_at: '2026-10-11T08:00:00Z',
+      },
+    }
     const calls = serve((path, init) => {
       if (path === '/sources/s1' && init.method === 'DELETE') {
         sources = []

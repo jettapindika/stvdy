@@ -48,6 +48,7 @@ aws-config.workspace = true
 aws-sdk-s3.workspace = true
 fastembed.workspace = true
 pdfium-render.workspace = true
+tokenizers.workspace = true
 reqwest.workspace = true
 url.workspace = true
 oauth2.workspace = true

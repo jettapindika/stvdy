@@ -92,9 +92,12 @@ intake, results in `docs/ARCHITECTURE.md`.
     (it has no JWT/JWKS support), so verification is `jsonwebtoken` +
     `jsonwebtoken`-decoded JWKS fetched from `jwks_uri` with a cached, key-id
     keyed set.
-12. **Migrations stay append-only and `0017_sync_triggers.sql` stays last.** The
-    only new table is `email_verification_tokens` (not `+sync`), so it goes in
-    `0018_email_verification.sql` with no trigger and no sync columns.
+12. **Migrations stay append-only and `0017_sync_triggers.sql` stays last.** Two
+    new tables, both deliberately not `+sync` because both hold credentials a
+    client must never see or replay: `email_verification_tokens` (0018) and
+    `login_tickets` (0019, A48's single-use exchange ticket, added after the
+    Google flow was built). Neither gets a trigger or sync columns, and both are
+    listed as documented schema deviations in `docs/ASSUMPTIONS.md`.
 
 ---
 
@@ -357,8 +360,11 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
   registered), and expose `on_open_url` through the `platform` adapter so the
   SPA never touches a Tauri API directly (Phase 0's boundary test enforces this).
 - [ ] **Step 2: Token storage.** `secret_set/get/delete` already exist; add the
-  SPA-side `tokens.ts` that uses them on desktop/mobile and `localStorage` on web
-  with the documented caveat that the web build has no keychain.
+  SPA-side `tokens.ts` that uses them on desktop and mobile. The web build keeps
+  the access token in memory only and does **not** persist the refresh token
+  (superseded by A56: a browser has no keychain, and `localStorage` would put a
+  30-day credential where any XSS can read it, so a web reload requires a fresh
+  sign-in). The consequence is recorded rather than left implicit.
 - [ ] **Step 3: Prove it.** Run the debug shell, open `stvdy://auth/callback?…`,
   observe the event and the stored secret; record the exact command and output in
   `docs/ARCHITECTURE.md` § Native prototypes.
@@ -386,14 +392,14 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 
 ## Task 11: Docs and the phase gate
 
-- [ ] **Step 1: `docs/API.md`** — the real Phase 1 request/response shapes for
+- [ ] **Step 1: `docs/API.md`**: the real Phase 1 request/response shapes for
   auth, devices, workspaces, sources, chunks, Google login.
-- [ ] **Step 2: `docs/ARCHITECTURE.md`** — § Native prototypes Phase 1 results
+- [ ] **Step 2: `docs/ARCHITECTURE.md`**: § Native prototypes Phase 1 results
   (pass *and* fail), § Provider traits table rows that Phase 1 fills in.
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`** — record the Phase 1 decisions that are
+- [ ] **Step 3: `docs/ASSUMPTIONS.md`**: record the Phase 1 decisions that are
   not already rows (local storage backend for dev, pdfium load policy, the
   Phase 1 limit-reading shim that Phase 7 replaces, `email_verification_tokens`).
-- [ ] **Step 4: `docs/SYNC.md`** — only if a protocol/conflict rule changed
+- [ ] **Step 4: `docs/SYNC.md`**: only if a protocol/conflict rule changed
   (Phase 1 should not change one; state that explicitly if so).
 - [ ] **Step 5: Run the gate.** `cargo fmt --all -- --check`;
   `cargo clippy --workspace --all-targets -- -D warnings`;
@@ -515,19 +521,102 @@ written so the next phase can see what changed and why.
     That is the consequence of decision 1, and it is why the CI lint job can keep
     compiling without a database.
 
+### Review round: defects found after the first summary
+
+An aggregated review of the first Phase 1 summary produced findings that were
+checked against the tree rather than taken on faith. Ten were real and are fixed
+here; the rest were already handled or wrong (the pdfium `atttypmod` worry was
+explicitly retracted by its own author, and `pgvector` does store the bare
+dimension there, which the boot assertion proves every time the server starts).
+
+13. **The SPA's remembered-session path was dead.** `useSession` read
+    `(await api.get<{user}>('/auth/me')).user`, but the server answers a bare
+    `UserView`. Every cold start that restored a stored refresh token therefore
+    reported `undefined` and landed on `/signin`. It survived because the SPA's
+    fake API was written to the client's assumption instead of the server's
+    contract, so the suite was green either way. Fixed, the fakes corrected, and
+    the whole seam re-verified against the real server (below). This is the
+    lesson: a test double written from the same assumption as the code tests
+    nothing about the contract.
+14. **A second path mismatch in the same class.** The server mails
+    `{WEB_ORIGIN}/verify-email?token=…` but the SPA only routed `/verify`, so the
+    emailed link fell to the catch-all and landed on `/signin`. Observed in the
+    browser, not inferred.
+15. **Google sign-in never completed.** The callback redirects with a
+    `ticket`, and nothing called `/auth/google/exchange`. The shell now
+    classifies `auth_ticket`, the SPA exchanges it (guarded against a double
+    spend of a single-use ticket), and `/auth/callback` covers the web return.
+16. **`sources_total` was never enforced.** Only `max_file_mb` and `storage_mb`
+    were checked, so a text source (a few KB) let one account create unbounded
+    sources while staying far under the storage cap.
+17. **A workspace delete freed the quota but kept the embeddings.** It
+    tombstoned its sources without dropping their `chunks` or objects, while
+    `enforce_storage` sums `file_size` over *live* sources, so a create-delete
+    loop kept quota at zero with unbounded storage behind it. Both delete paths
+    now share one reclaim function.
+18. **Device slots leaked on re-login.** `insert_device` always inserted and the
+    limit counted every live row, so sign up, sign out, sign in, sign out, sign
+    in hit `devices_max = 2` on one machine. A sign-in now resolves the device by
+    `(user, platform, name)` and enforces the cap only when creating. The Google
+    exchange went through the insert directly and skipped the limit entirely,
+    which was an unlimited-device hole in A43's control; it now shares the
+    resolver.
+19. **Ingestion did not require a verified email.** It was the first route that
+    spends provider money, and A43 keeps ingestion locked until verification. It
+    now takes `VerifiedUser` and the suite asserts 403 with nothing written.
+20. **The chunker budgeted with a character heuristic.** A2's 480 target is the
+    *model's* budget against `max_length = 512`, and the heuristic disagrees in
+    both directions (measured: 28 where the tokenizer says 25 on an Indonesian
+    sentence), so a chunk could exceed 512 and be truncated silently, making its
+    tail unretrievable with no error. `Embedder::token_count` now carries the
+    model's own tokenizer, loaded from the same cache, with a logged fallback.
+21. **The embedding model name was echoed from config, not derived from the
+    model.** `chunks.embedder` is the dedupe key, so an unsupported
+    `EMBEDDER_MODEL` would have labelled one model's vectors as another's, which
+    is the mixed-vector-space corruption that column exists to prevent. The name
+    and the dimension now come from the constructed model, and an unsupported
+    value is refused at boot.
+22. **`max_upload_bytes` re-read `config/plans.toml` at the compile-time path**
+    with a 20 MB fallback, so a container image (which has no `config/` there)
+    would silently cap Pro and Power uploads at the free plan's limit. It is now
+    computed from the loaded `PlansFile` and passed into the router.
+23. **Boot order paid for the model before cheap failures.** `ensure_bucket` and
+    the pdfium bind now run before the 1.06 GB model load, so a misconfigured
+    deploy fails in seconds (A58).
+24. **The local backend's `presign_put` returned a signed GET**, a URL that does
+    not do what its name says. It now returns an explicit `Invalid` and points at
+    the multipart endpoint.
+25. **Compose and its callers disagreed.** `justfile db-up` and `README.md` still
+    named the deleted `minio-init` service, so `just db-up` was dead, and the
+    `mc ready` healthcheck belonged to the image A15 removed. Both fixed, and the
+    replacement probe is the one upstream declares in both of its Dockerfiles.
+26. **`VITE_API_BASE_URL` was undocumented**, so a deployed web build pointing it
+    at an origin the server does not allowlist would be blocked by CORS with no
+    hint. Recorded in `.env.example` and as A57.
+27. **The web session decision was implicit.** The web build cannot persist a
+    refresh token (no keychain, and `localStorage` would expose a 30-day
+    credential to XSS), so a reload requires signing in again. Recorded as A56
+    and the plan's stale `localStorage` instruction is superseded.
+
+Two findings were recorded as documentation gaps rather than code defects: the
+mobile probe table and the accessibility result belong in
+`docs/ARCHITECTURE.md` (the roadmap names that file, not the plan), and both are
+now there.
+
 ### Phase 1 verification (as executed)
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace` | **136 passing**, 0 failing |
-| `npm --prefix app test` | **85 passing** (15 files) |
+| `cargo test --workspace` | **143 passing**, 0 failing |
+| `npm --prefix app test` | **91 passing** (16 files) |
 | `npm --prefix app run build` | clean (399 kB / 124 kB gzip) |
-| `src-tauri` fmt + clippy + test | clean; **12 passing** (10 deep-link, 2 keychain) |
+| `src-tauri` fmt + clippy + test | clean; **17 passing** (15 deep-link, 2 keychain) |
 | `cargo sqlx prepare --workspace --check` (`SQLX_OFFLINE=true`) | exits 0, `.sqlx` empty |
 | Fresh DB `sqlx migrate run` | 18 migrations apply; **34** sync triggers; no trigger on the two new tables |
-| End-to-end smoke (`scripts/smoke-phase1.sh`) | PASS: signup, verification mail, second device, workspace, text source and a **real PDF** (cupsfilter) both `ready` with chunks, `GET /chunks/:id`, signed download byte-identical to the upload, tampered signature 403, cross-account 404, refresh rotation, reuse revocation |
+| End-to-end smoke (`scripts/smoke-phase1.sh`) | PASS: signup, verification mail, second device, workspace, a text source and **two real PDFs** (cupsfilter) in the same process all `ready` with chunks, `GET /chunks/:id`, signed download byte-identical to the upload, tampered signature 403, cross-account 404, refresh rotation, reuse revocation. The two PDFs are deliberate: one cannot catch the process-wide pdfium bind |
+| SPA against the real server (headless Chromium) | PASS: signup, the mailed link read from `var/mail`, verify, **reload lands signed-in** (the defect-13 regression), workspace created, pasted text reaches `ready` |
 | Native shell | `stvdy://` round trip **PASS** on macOS for a running instance and cold start; iOS simulator **BLOCKED** (missing simulator runtime); keychain webview-to-Rust hop **PARTIAL** |
 
 ### Mobile capability spike (roadmap Phase 1, do not defer to 14)

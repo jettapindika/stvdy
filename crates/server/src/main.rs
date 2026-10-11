@@ -25,13 +25,11 @@ async fn main() -> anyhow::Result<()> {
     db::migrate(&pool).await?;
     db::seed_plans(&pool, &config.plans).await?;
 
-    // Boot assertions that would otherwise fail silently at first use: the
-    // storage backend is reachable, the bucket exists, and the embedding
-    // dimension agrees with the database column (A2).
+    // Boot assertions that would otherwise fail silently at first use, ordered
+    // cheapest first inside: the storage backend is reachable, the bucket
+    // exists, pdfium binds, and the embedding dimension agrees with the database
+    // column (A2). The model load is last because it is the expensive one.
     let providers = Providers::build(&config, &pool).await?;
-    if let Some(storage) = providers.storage_as_s3() {
-        storage.ensure_bucket().await?;
-    }
 
     // A job left `running` by a killed process would otherwise sit there
     // forever, and the source it belongs to would stay `processing` with no way

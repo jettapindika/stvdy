@@ -68,8 +68,12 @@ async function storeSet(key: string, value: string): Promise<void> {
   try {
     await platform.secureStore.set(key, value)
   } catch {
-    // No keychain (the web build). The caller's session still works in memory,
-    // so this is not surfaced as a failure.
+    // No keychain (the web build). Decision (Phase 1): the refresh token is
+    // never put in `localStorage`, because anything a script can read is
+    // XSS-exfiltratable and the token is long-lived. The consequence is that on
+    // web the session lasts only as long as the tab: a reload forces a fresh
+    // sign-in. The caller's session still works in memory, so this is not
+    // surfaced as a failure.
   }
 }
 

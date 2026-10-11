@@ -28,6 +28,7 @@ export interface User {
   email_verified_at: string | null
   plan_id: string
   timezone: string
+  student_verified: boolean
   created_at: string
 }
 
@@ -109,6 +110,36 @@ export function useSignIn() {
       )
       return establishSession(response)
     },
+    onSuccess: (response) => {
+      queryClient.setQueryData(AUTH_ME_KEY, response.user)
+    },
+  })
+}
+
+/**
+ * Completes a Google sign-in from a single-use ticket.
+ *
+ * The server's OAuth callback redirects with `?ticket=...` and never with
+ * tokens, because a deep link lands in browser history and the OS URL handler
+ * and a credential placed there could not be revoked. This consumes the ticket
+ * and establishes the session the same way the password path does: the access
+ * token goes to memory, the rotating refresh token and device id go to the
+ * secure store. The device is created here, not in the callback, so a browser
+ * round trip cannot spend a device slot on its own.
+ */
+export async function completeGoogleSignIn(ticket: string): Promise<AuthResponse> {
+  const response = await api.post<AuthResponse>(
+    '/auth/google/exchange',
+    { ticket, device: currentDevice() },
+    { auth: false },
+  )
+  return establishSession(response)
+}
+
+export function useGoogleSignIn() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: completeGoogleSignIn,
     onSuccess: (response) => {
       queryClient.setQueryData(AUTH_ME_KEY, response.user)
     },

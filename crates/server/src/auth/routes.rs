@@ -119,6 +119,49 @@ pub(crate) fn validate_device(device: &DeviceInfo) -> AppResult<()> {
     Ok(())
 }
 
+/// Resolves the device a sign-in came from: an existing live row for the same
+/// `(platform, name)`, or a new one.
+///
+/// Reuse rather than always inserting, because the ordinary sequence sign up,
+/// sign out, sign in, sign out, sign in would otherwise create five rows on the
+/// user's single machine and hit `devices_max = 2` on free with no explanation.
+/// The limit is enforced only when a row is actually created, so a returning
+/// device never trips it. Revoked rows are not reused: the Devices screen is
+/// where a revoked device is meant to be replaced.
+pub(crate) async fn resolve_device(
+    state: &AppState,
+    user_id: Uuid,
+    plan_id: &str,
+    device: &DeviceInfo,
+) -> AppResult<Uuid> {
+    let name = device.name.trim();
+
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "update devices
+            set last_seen_at = now(), app_version = coalesce($4, app_version)
+          where id = (
+                select id from devices
+                 where user_id = $1 and platform = $2 and name = $3 and revoked_at is null
+                 order by last_seen_at desc nulls last
+                 limit 1)
+      returning id",
+    )
+    .bind(user_id)
+    .bind(&device.platform)
+    .bind(name)
+    .bind(&device.app_version)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("updating a device: {error}")))?;
+
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    enforce_device_limit(state, user_id, plan_id).await?;
+    insert_device(state, user_id, device).await
+}
+
 pub(crate) async fn insert_device(
     state: &AppState,
     user_id: Uuid,
@@ -141,7 +184,11 @@ pub(crate) async fn insert_device(
 
 /// Enforces `devices_max` for the user's plan. A revoked device does not count:
 /// that is what makes "sign out that old laptop" the remedy the error suggests.
-async fn enforce_device_limit(state: &AppState, user_id: Uuid, plan_id: &str) -> AppResult<()> {
+pub(crate) async fn enforce_device_limit(
+    state: &AppState,
+    user_id: Uuid,
+    plan_id: &str,
+) -> AppResult<()> {
     let plan = match plan_id {
         "pro" => stvdy_core::config::PlanId::Pro,
         "power" => stvdy_core::config::PlanId::Power,
@@ -239,7 +286,7 @@ pub async fn signup(
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a signup: {error}")))?;
 
-    let device_id = insert_device(&state, user_id, &body.device).await?;
+    let device_id = resolve_device(&state, user_id, "free", &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, user_id, device_id).await?;
 
     email_verify::send_verification(&state, user_id, &email).await?;
@@ -303,8 +350,7 @@ pub async fn login(
         return Err(AppError::Unauthorized);
     }
 
-    enforce_device_limit(&state, row.id, &row.plan_id).await?;
-    let device_id = insert_device(&state, row.id, &body.device).await?;
+    let device_id = resolve_device(&state, row.id, &row.plan_id, &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, row.id, device_id).await?;
 
     tracing::info!(user_id = %row.id, platform = %body.device.platform, "login");

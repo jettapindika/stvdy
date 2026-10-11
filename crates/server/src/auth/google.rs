@@ -304,7 +304,10 @@ pub async fn exchange(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the account: {error}")))?
     .ok_or(AppError::Unauthorized)?;
 
-    let device_id = super::routes::insert_device(state, user.id, &body.device).await?;
+    // Through the same resolver as a password login, so the Google path is not
+    // an unlimited-device backdoor around A43's `devices_max` control.
+    let device_id =
+        super::routes::resolve_device(state, user.id, &user.plan_id, &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, user.id, device_id).await?;
 
     Ok(super::routes::AuthResponse {

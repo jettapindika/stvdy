@@ -35,6 +35,9 @@ export interface FilesApi {
  */
 export type DeepLinkIntent =
   | { action: 'auth_callback'; payload: { code: string; state: string } }
+  // The Google login return: an opaque single-use ticket, never tokens, because
+  // a deep link lands in browser history and the OS URL handler (A48).
+  | { action: 'auth_ticket'; payload: { ticket: string } }
   | { action: 'calendar'; payload: { params: Record<string, string> } }
   | { action: 'ignored'; payload: { reason: string } }
 

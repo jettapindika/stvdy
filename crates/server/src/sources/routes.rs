@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::integrations::storage as storage_integration;
 use crate::state::AppState;
@@ -32,7 +32,7 @@ const SUPPORTED_KINDS: &[&str] = &["pdf", "text"];
 /// malicious client from streaming forever before the plan check runs.
 const HARD_MAX_BYTES: usize = 1024 * 1024 * 1024;
 
-pub fn routes() -> Router<AppState> {
+pub fn routes(body_limit_bytes: usize) -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/sources", get(list).post(create))
         .route("/sources/{id}/status", get(status))
@@ -45,32 +45,26 @@ pub fn routes() -> Router<AppState> {
         .route("/objects/{id}", get(download))
         // Axum's default body limit is 2 MB, which would reject an upload that
         // every plan allows and report it as a multipart parse error rather than
-        // as a plan limit. The cap here is the largest plan's `max_file_mb`, so
-        // the *plan* check is what produces the precise error; this only stops a
-        // body no plan could ever accept.
-        .layer(DefaultBodyLimit::max(max_upload_bytes()))
+        // as a plan limit. The cap is passed in by `routes::router`, which has
+        // the loaded config, so the *plan* check is what produces the precise
+        // error; this only stops a body no plan could ever accept.
+        .layer(DefaultBodyLimit::max(body_limit_bytes))
 }
 
 /// The largest file any plan accepts, plus multipart framing overhead.
-fn max_upload_bytes() -> usize {
-    // A static read of the shipped config, not of `AppState`: the body limit is
-    // applied by a layer, which cannot reach the state. The plan check in the
-    // handler is what enforces the per-plan value.
-    static LIMIT: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/plans.toml");
-        let largest = stvdy_core::config::load_plans(&path)
-            .map(|plans| {
-                stvdy_core::config::PlanId::ALL
-                    .iter()
-                    .map(|plan| plans.get(*plan).max_file_mb)
-                    .max()
-                    .unwrap_or(20)
-            })
-            .unwrap_or(20);
-        // 1 MiB of slack for the boundary and the other form fields.
-        largest as usize * 1024 * 1024 + 1024 * 1024
-    });
-    *LIMIT
+///
+/// Computed from the **loaded** `PlansFile` rather than by re-reading the file:
+/// a container image has no `config/` directory at the compile-time path, so a
+/// re-read would fall back to a default and silently cap a Pro or Power upload
+/// at the free plan's limit.
+pub fn max_upload_bytes(plans: &stvdy_core::config::PlansFile) -> usize {
+    let largest = stvdy_core::config::PlanId::ALL
+        .iter()
+        .map(|plan| plans.get(*plan).max_file_mb)
+        .max()
+        .unwrap_or(20);
+    // 1 MiB of slack for the boundary and the other form fields.
+    largest as usize * 1024 * 1024 + 1024 * 1024
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -229,9 +223,14 @@ pub async fn list(
 }
 
 /// `POST /workspaces/:id/sources` (multipart: `kind`, then `file` or `text`).
+///
+/// Takes `VerifiedUser`, not `AuthUser`: ingestion is one of the four things A43
+/// keeps locked until the address is confirmed ("chat, generation, search and
+/// ingestion stay locked until `email_verified`"), and it is the first route in
+/// the project that spends provider money on embedding calls.
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
@@ -336,6 +335,11 @@ pub async fn create(
 
     let size = body.len() as i64;
     crate::limits::enforce_max_file_mb(&state.config.plans, plan, size)?;
+    // The count check comes before the storage sum and before any byte is
+    // stored: `sources_total` is a separate axis from `storage_mb`, and a text
+    // source is a few KB, so without this one account could create unbounded
+    // sources while staying far under the storage cap.
+    enforce_source_count(&state, user.user_id, plan).await?;
     enforce_storage(&state, user.user_id, plan, size).await?;
 
     let source_id = Uuid::now_v7();
@@ -390,6 +394,30 @@ pub async fn create(
     ))
 }
 
+/// `sources_total` across the whole account, not per workspace: the plan matrix
+/// states one total, so a user with two workspaces gets the same cap as one.
+async fn enforce_source_count(
+    state: &AppState,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+) -> AppResult<()> {
+    let used: i64 = sqlx::query_scalar(
+        "select count(*) from sources where user_id = $1 and deleted_at is null",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting sources: {error}")))?;
+
+    crate::limits::enforce_count(
+        &state.config.plans,
+        plan,
+        state.config.plans.get(plan).sources_total,
+        used,
+        "sources",
+    )
+}
+
 /// Storage is a running total over live sources, which is why this is a sum
 /// rather than a counter column: a counter can drift, and the drift is invisible
 /// until a user is locked out of their own quota.
@@ -440,6 +468,52 @@ fn first_line_title(text: &str) -> String {
     }
 }
 
+/// Drops the chunks of the given sources and deletes their stored objects.
+///
+/// Shared by `DELETE /sources/:id` and `DELETE /workspaces/:id`, because the two
+/// paths must reclaim identically: `enforce_storage` sums `file_size` over live
+/// sources, so a path that tombstones a source without dropping its chunks frees
+/// the user's *quota* while the embeddings (roughly 6 KiB per chunk, A47) and the
+/// object stay forever. That is churnable: two workspaces and a delete loop would
+/// keep quota at zero and storage unbounded.
+///
+/// The chunks are deleted in the caller's transaction so the count and the quota
+/// cannot disagree; the objects are deleted afterwards, outside it, because a
+/// storage failure must not roll back a deletion the user asked for.
+pub(crate) async fn reclaim_chunks<'e, E>(
+    executor: E,
+    source_ids: &[Uuid],
+) -> Result<Vec<String>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    if source_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let keys: Vec<String> = sqlx::query_scalar(
+        "delete from chunks where source_id = any($1)
+      returning (select file_key from sources where id = source_id)",
+    )
+    .bind(source_ids)
+    .fetch_all(executor)
+    .await?;
+
+    Ok(keys.into_iter().filter(|key| !key.is_empty()).collect())
+}
+
+/// Deletes stored objects, logging rather than failing.
+///
+/// A leftover object is a cleanup job's problem, not a failed request: the row
+/// is already gone from the user's view.
+pub(crate) async fn delete_objects(state: &AppState, keys: &[String]) {
+    for key in keys {
+        if let Err(error) = state.storage.delete(key).await {
+            tracing::warn!(%error, %key, "deleting a stored object failed");
+        }
+    }
+}
+
 /// `DELETE /sources/:id`: tombstone, drop the chunks, and delete the object.
 ///
 /// The object is deleted after the row is tombstoned, so a storage failure
@@ -450,6 +524,12 @@ pub async fn remove(
     user: AuthUser,
     Path(source_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a delete: {error}")))?;
+
     let row = sqlx::query_as::<_, (Option<String>,)>(
         "update sources set deleted_at = now()
           where id = $1 and user_id = $2 and deleted_at is null
@@ -457,7 +537,7 @@ pub async fn remove(
     )
     .bind(source_id)
     .bind(user.user_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting a source: {error}")))?;
 
@@ -465,19 +545,16 @@ pub async fn remove(
         return Err(AppError::NotFound);
     };
 
-    sqlx::query("delete from chunks where source_id = $1")
-        .bind(source_id)
-        .execute(&state.pool)
+    reclaim_chunks(&mut *tx, &[source_id])
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("dropping chunks: {error}")))?;
 
-    if let Some(key) = file_key
-        && let Err(error) = state.storage.delete(&key).await
-    {
-        // Not fatal: the row is gone from the user's view, and a leftover object
-        // is a cleanup job's problem, not a failed request.
-        tracing::warn!(%error, %source_id, "deleting the stored object failed");
-    }
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a delete: {error}")))?;
+
+    let keys: Vec<String> = file_key.into_iter().collect();
+    delete_objects(&state, &keys).await;
 
     Ok(StatusCode::NO_CONTENT)
 }

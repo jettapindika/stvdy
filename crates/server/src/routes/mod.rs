@@ -113,7 +113,9 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(devices::routes())
         .merge(workspaces::routes())
         .merge(chunks::routes())
-        .merge(sources::routes());
+        .merge(sources::routes(sources::max_upload_bytes(
+            &state.config.plans,
+        )));
 
     let router = Router::new()
         .merge(public_routes)

@@ -27,11 +27,16 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     ports: ["9000:9000", "9001:9001"]
     volumes: ["miniodata:/data"]
+    # The binary's own probe, which is what upstream declares in both of its
+    # Dockerfiles (`HEALTHCHECK ... CMD ["/usr/bin/silo", "healthcheck", "ready"]`).
+    # The old `mc ready local` belonged to the `minio/mc` image that 404s (A15),
+    # and a `curl` probe would work on the goreleaser tag but not on the
+    # distroless one, which ships neither shell nor curl.
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      test: ["CMD", "/usr/bin/silo", "healthcheck", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   # Search tier 2 (A3): the self-hosted general-web provider behind
   # SearchProvider. Internal only. Nothing outside the server calls it, and it

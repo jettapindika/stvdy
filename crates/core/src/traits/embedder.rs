@@ -24,4 +24,17 @@ pub trait Embedder: Send + Sync {
     fn model_id(&self) -> &str;
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError>;
+
+    /// How many tokens this model's tokenizer produces for `text`, excluding
+    /// any special tokens.
+    ///
+    /// This belongs on the trait because the chunker's token budget is the
+    /// *model's* budget (A2: 480 against the model's 512 `max_length`), and an
+    /// approximation that undercounts makes the tail of a chunk unretrievable
+    /// with no error: `fastembed` truncates silently. The default is the
+    /// character heuristic, which is documented as undercounting; an
+    /// implementation with a real tokenizer must override it.
+    fn token_count(&self, text: &str) -> usize {
+        crate::chunk::heuristic_tokens(text)
+    }
 }

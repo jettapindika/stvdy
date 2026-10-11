@@ -23,6 +23,7 @@ const USER = {
   email_verified_at: null,
   plan_id: 'free',
   timezone: 'Asia/Jakarta',
+  student_verified: false,
   created_at: '2026-10-11T08:00:00Z',
 }
 
@@ -95,7 +96,7 @@ describe('the verification page', () => {
           expires_at: '2026-10-11T10:00:00Z',
         })
       }
-      if (url.endsWith('/auth/me')) return jsonResponse(200, { user: USER })
+      if (url.endsWith('/auth/me')) return jsonResponse(200, USER)
       if (url.endsWith('/auth/resend-verification')) return jsonResponse(204)
       return jsonResponse(400, {
         code: 'validation',

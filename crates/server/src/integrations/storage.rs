@@ -195,11 +195,18 @@ impl Storage for LocalStorage {
     }
 
     async fn presign_put(&self, key: &str, ttl: Duration) -> Result<String, StorageError> {
-        // Uploads go through this server's own endpoint (multipart), so a PUT
-        // URL has no local equivalent. Returning a signed GET keeps the shape
-        // honest instead of inventing a second local protocol.
-        let _ = self.path_for(key)?;
-        local_signed_url(&self.base_url, &self.sign_key, key, ttl)
+        // Uploads go through this server's multipart endpoint, so there is no PUT
+        // route to point at. Returning a signed GET here would be a URL that does
+        // not do what its name says: a caller that trusted it would issue a PUT
+        // and fail opaquely, and the local backend is the dev default, so it
+        // would fail in dev first. Saying so is the honest answer, and the caller
+        // falls back to multipart.
+        let _ = (key, ttl);
+        Err(StorageError::Invalid(
+            "presign_put is not supported by the local storage backend; upload through \
+             POST /workspaces/:id/sources"
+                .to_string(),
+        ))
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
