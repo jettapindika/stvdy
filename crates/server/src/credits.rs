@@ -280,9 +280,10 @@ pub async fn latest_usage_event(
 /// `prompt_version` is mandatory: every model call must be attributable to a prompt
 /// version, or a quality regression cannot be traced (the roadmap's rule).
 ///
-/// `in_tokens`/`out_tokens` are `Option<u32>`: a failed generation records no tokens
-/// rather than a zero, because zero would read as "the model returned nothing" in a
-/// cost report.
+/// `in_tokens`/`out_tokens` are `Option<u32>`: a failed generation records what the
+/// provider reported, because the call happened and was billed. `Some(0)` is a real
+/// zero from a provider that reported nothing; `None` means the value is unknown,
+/// which is a different thing and must not be collapsed into a zero.
 pub async fn record_usage(
     pool: &PgPool,
     usage_event_id: Option<Uuid>,

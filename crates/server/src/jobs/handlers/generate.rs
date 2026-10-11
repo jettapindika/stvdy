@@ -171,8 +171,17 @@ async fn insert_cards(
     // The status flip is the claim: it is the only thing that decides whether this
     // job writes cards, so two claims for one deck cannot both write. The predicate
     // is what makes it a claim rather than an assignment.
+    //
+    // Zeroing `credits_spent` here is what makes `credits_spent > 0` mean "charged
+    // and not yet delivered" for the refund guard. Without it a deck that was paid
+    // for and delivered still carries its charge, so the loser of a claim race — a
+    // second worker that loaded the deck while it was `generating`, called the
+    // model, and then failed for its own reason — would satisfy the guard on the
+    // winner's charge and flip a `ready`, card-bearing deck to `failed` and refund
+    // a generation the user received.
     let claimed: Option<Uuid> = sqlx::query_scalar(
-        "update decks set status = 'ready', error = null, updated_at = now()
+        "update decks
+            set status = 'ready', error = null, credits_spent = 0, updated_at = now()
           where id = $1 and status = 'generating'
          returning id",
     )

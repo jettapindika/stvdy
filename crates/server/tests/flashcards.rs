@@ -12,6 +12,7 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::testing::TestState;
+use uuid::Uuid;
 
 mod common;
 use common::{drain_jobs, json, signed_up, workspace_with_text};
@@ -412,6 +413,104 @@ async fn a_second_job_for_a_finished_deck_writes_no_more_cards(pool: PgPool) {
         "a re-claimed deck must not be written twice: {deck}"
     );
     assert_eq!(deck["cards"].as_array().unwrap().len(), 1, "{deck}");
+}
+
+/// A delivered deck must not be refundable.
+///
+/// The refund guard is `credits_spent > 0`, and `insert_cards` zeroes it as part of
+/// the claim. Without that, a second worker that loaded the deck while it was still
+/// `generating`, called the model, and then failed could flip an already-`ready`,
+/// card-bearing deck to `failed` and refund a generation the user received.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_delivered_deck_cannot_be_refunded(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply(
+        "Apa itu TCP?",
+        "Protokol.",
+        1,
+    )]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "delivered@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 5).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    let (_, deck) = json(
+        &app,
+        "GET",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(deck["deck"]["status"], "ready", "{deck}");
+    assert_eq!(deck["deck"]["card_count"], 1, "{deck}");
+
+    let deck_uuid = Uuid::parse_str(&deck_id).unwrap();
+    let user_id: Uuid =
+        sqlx::query_scalar("select id from users where email = 'delivered@example.test'")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+
+    let ledger_before: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // Exactly what the loser of a claim race reaches: it loaded the deck while it
+    // was `generating`, called the model, failed for its own reason, and still
+    // carries the charge it read.
+    stvdy_server::jobs::handlers::generate::fail_and_refund(
+        &harness.state,
+        deck_uuid,
+        user_id,
+        4,
+        "the loser of a claim race failed for its own reason",
+    )
+    .await;
+
+    let (_, deck) = json(
+        &app,
+        "GET",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        deck["deck"]["status"], "ready",
+        "a delivered deck must not be flipped to failed: {deck}"
+    );
+    assert_eq!(deck["deck"]["card_count"], 1, "{deck}");
+
+    let ledger_after: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        ledger_after, ledger_before,
+        "a delivered generation must not be refunded"
+    );
+
+    let credits_spent: i32 = sqlx::query_scalar("select credits_spent from decks where id = $1")
+        .bind(deck_uuid)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(credits_spent, 0, "the charge stays consumed");
 }
 
 #[sqlx::test(migrations = "../../migrations")]
