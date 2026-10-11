@@ -34,10 +34,13 @@ purchased. Counters are **derived** from `usage_events` at read time through
 `chrono-tz` rather than materialised, so "how many chat messages today" has exactly one
 answer and the answer is the same one the existing daily cap counts.
 
-**Tech Stack:** Rust (core + server; no new crates — `zip` 9.0.1 and `quick-xml` 0.42
-are already pinned for DOCX/PPTX per the crate-list deviations, and `chrono-tz` is
-already a dependency), Postgres/sqlx, React + Vite + TypeScript + Tailwind, TanStack
-Query.
+**Tech Stack:** Rust (core + server), Postgres/sqlx, React + Vite + TypeScript + Tailwind,
+TanStack Query. **One dependency change, in Task 8:** `zip` 9.0.1 (`default-features =
+false, features = ["deflate"]`) and `quick-xml` 0.42 are *pinned in
+`docs/ASSUMPTIONS.md`'s crate-list deviations but not yet in any `Cargo.toml`* — verified:
+`grep -n 'zip\|quick-xml' Cargo.toml crates/*/Cargo.toml` returns nothing. DOCX/PPTX
+ingestion is what needs them, so Task 8 adds them at the versions the assumptions table
+already records, rather than picking a version in the same change as the code.
 
 **Exit gate (observable, from the roadmap):** every route goes through `check`; plan
 matrix test; `crates/server/tests/tamper.rs` rejects every row of
@@ -49,15 +52,22 @@ spend with a clear error; manual plan switch via admin.
 **This phase's real risk, and the defence.**
 
 > **The sweep is where a bypass hides.** "Every handler calls `check`" is a property of
-> 33 route registrations, four of which are registered inside another module's
-> `routes()` and two of which are written across two source lines. A review cannot see
-> the one that was missed; a test can. So the sweep is not a task you finish by
-> reading: it is two tests that fail when a route is added without a decision.
+> **35 `.route(` call sites registering 34 paths across eight files** (`routes/mod.rs`
+> 12, `sources/routes.rs` 5, `flashcards/routes.rs` 4, `quizzes/routes.rs` 4,
+> `devices.rs` 3, `workspaces.rs` 2, `chat/routes.rs` 2, `chunks.rs` 1), seven of which
+> are pulled in by a `.merge(...)` in `routes/mod.rs`, and three of which are written
+> across two source lines (`routes/mod.rs:106-109` `/auth/resend-verification`,
+> `routes/mod.rs:110-113` `/auth/google/set-password`, `quizzes/routes.rs:61-64`). A
+> review cannot see the one that was missed; a test can. So the sweep is not a task you
+> finish by reading: it is two tests that fail when a route is added without a decision.
 > `crates/server/tests/route_sweep.rs::every_registered_route_is_classified` extracts
 > every `.route(` from `crates/server/src/**/*.rs` and asserts each one is in the
 > plan's classification table; `every_swept_route_refuses_an_exhausted_account` drives
 > each one with an account whose limits are all used and asserts the exact entitlement
 > code, so a route that calls nothing cannot pass by being classified.
+>
+> The extractor must read whole files, not lines, for exactly the three multi-line
+> sites above — a line-oriented regex silently classifies 32 of 34 paths and passes.
 >
 > **Two secondary risks, each with a mechanical defence.** (1) *A ceiling that is
 > configured but not enforced is worse than none, because it looks like a control*
@@ -162,7 +172,9 @@ change.** `crates/server/src/limits.rs`:
   (`sources_total`), `sources/routes.rs:446` (storage), `flashcards/routes.rs:191`
   (`flashcards_per_month`), `quizzes/routes.rs:225` (`quizzes_per_month`). Phase 7
   replaces those seven call sites with `entitlements::require` and the bodies do not
-  change (A52 says exactly this).
+  change (A52 says exactly this). An **eighth** call site stays where it is:
+  `credits.rs:188` (`enforce_count` inside `spend_in`'s daily-cap loop), because a
+  credit spend's cap check must be inside the spend's own transaction.
 
 **The credit spend already exists, at the roadmap's § 3 shape.**
 `crates/server/src/credits.rs`:
@@ -295,22 +307,35 @@ are not `t()` keys, so `app/src/i18n/i18n.test.ts` (key parity + placeholder par
 A104/A118) passes while an Indonesian user reads English error copy. Phase 7 owns the
 entitlement copy, so it moves these into the locale files.
 
-**The SPA's plan surface is a placeholder.** `app/src/router.tsx:89` renders
+**The SPA's plan surface is a placeholder.** `app/src/router.tsx:96-97` renders
 `/billing` as `NotBuiltRoute` with `titleKey="billing.planAndUsage"`.
 `app/src/features/billing/` holds only `policy.ts` and `policy.test.ts` — the
 `billing_policy` reader (`parsePolicy`, `DENY`, `lockedFeaturePolicy`) and
 `app/src/components/ui/LockedFeature.tsx` (`whatKey`, `minPlan: 'Pro' | 'Power'`,
 `reasonKey`), which already renders the two platform variants A106/A116 require.
 
-**Phase 6 (reports, cheatsheet, PDF) has not landed in this tree and lands first.**
-There is no `crates/server/src/reports.rs`, no `crates/core/src/render/`, no
-`generate_cheatsheet`/`render_cheatsheet_pdf` handler, and no Phase 6 plan file; but
-`prompts/report_outline.v1.md`, `prompts/report_section.v1.md`,
-`templates/cheatsheet.v1.html`, `migrations/0011_reports.sql` and
-`migrations/0016_cheatsheets.sql` all exist. Phase 7's sweep table therefore includes
-Phase 6's routes (`POST /workspaces/:id/reports/outline`, `POST /reports/:id/generate`,
-`PATCH /reports/:id`, `GET /reports/:id/export`, the four cheatsheet routes) as rows the
-sweep test will demand, and Task 3 sweeps whatever Phase 6 actually registered.
+**Phase 6 (reports, cheatsheet, PDF) is landing in this tree right now, and it lands
+first.** Its plan file exists
+(`docs/superpowers/plans/2026-10-11-phase-6-reports-cheatsheets.md`) and its **core half
+is merged**: `crates/core/src/render/{mod,blocks,svg}.rs`,
+`crates/core/src/generation/{report,cheatsheet}.rs`, the three prompt modules, and
+`crates/server/src/render/{mod,chrome.rs}` (the pooled Chromium renderer and the six-page
+acceptance test in `crates/server/tests/pdf.rs`). What is not in the tree yet is the
+**server half**: `crates/server/src/reports/`, `crates/server/src/cheatsheets/`, the
+three job handlers, and the migration `0023_report_generation.sql` — a parallel slice is
+writing them now.
+
+Two consequences for this phase:
+
+1. **Migration numbers.** Phase 6 takes `0023` and `0024`; this phase's migrations are
+   therefore `0025_entitlements_limits.sql` and `0026_ingestion_formats.sql`, not the
+   `0023`/`0024` an earlier draft of this plan used. `0017_sync_triggers.sql` still stays
+   the last trigger-attaching migration.
+2. **Phase 7's sweep table includes Phase 6's routes** (`POST
+   /workspaces/:id/reports/outline`, `POST /reports/:id/generate`, `PATCH /reports/:id`,
+   `GET /reports/:id`, `GET /reports/:id/export`, and the four cheatsheet routes) as rows
+   the sweep test will demand, and Task 3 sweeps whatever Phase 6 actually registered —
+   read the routes rather than trusting this list.
 
 **MISSING, and created by this phase:** `crates/core/src/entitlements/` (all four
 files), `crates/core/tests/entitlements_matrix.rs`, `crates/server/src/entitlements.rs`,
@@ -469,10 +494,10 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
 ## File structure (new this phase)
 
 ```
-migrations/0023_entitlements_limits.sql       # workspaces.read_only, devices.read_only,
+migrations/0025_entitlements_limits.sql       # workspaces.read_only, devices.read_only,
                                               # credit_ledger.period_key + unique index,
                                               # signup_attempts
-migrations/0024_ingestion_formats.sql         # sources.preview_key
+migrations/0026_ingestion_formats.sql         # sources.preview_key
 config/plans.toml                             # + [credits] monthly_rollover = false
 crates/core/src/entitlements/mod.rs           # NEW — module root, re-exports
 crates/core/src/entitlements/feature.rs       # NEW — Feature, Feature::ALL
@@ -1306,7 +1331,7 @@ git commit -m "feat(server): enforce the provider cost ceiling, and prove the sp
 ## Task 5: The period — counters, `monthly_grant`, `reset_counters`, grace
 
 **Files:**
-- Create: `migrations/0023_entitlements_limits.sql`,
+- Create: `migrations/0025_entitlements_limits.sql`,
   `crates/server/src/jobs/handlers/{grants,counters}.rs`,
   `crates/server/src/jobs/schedule.rs`
 - Modify: `crates/server/src/jobs/{mod.rs,worker.rs,handlers/mod.rs}`,
@@ -1452,7 +1477,7 @@ spec's DDL does not have.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/0023_entitlements_limits.sql crates/server/src/jobs \
+git add migrations/0025_entitlements_limits.sql crates/server/src/jobs \
         crates/server/src/credits.rs crates/server/src/util.rs \
         crates/server/tests/{limits_periods.rs,schema.rs} .sqlx
 git commit -m "feat(server): timezone-aware period rollover, and a grant that cannot double"
@@ -1626,7 +1651,7 @@ git commit -m "feat(server): the A43 abuse controls, database-backed and logged"
 ## Task 8: PPTX, DOCX and URL ingestion
 
 **Files:**
-- Create: `migrations/0024_ingestion_formats.sql`
+- Create: `migrations/0026_ingestion_formats.sql`
 - Modify: `crates/server/src/sources/parse.rs`, `crates/server/src/sources/routes.rs`,
   `crates/server/src/jobs/handlers/ingest.rs`, `crates/server/src/state.rs`,
   `crates/server/src/integrations/mod.rs`, `crates/server/src/routes/mod.rs`,
@@ -1727,7 +1752,7 @@ strings in `id.json`, and gate 7(a)/(b) are `n/a` because the form shows no numb
 - [ ] **Step 7: Commit**
 
 ```bash
-git add migrations/0024_ingestion_formats.sql crates/server/src app/src .sqlx
+git add migrations/0026_ingestion_formats.sql crates/server/src app/src .sqlx
 git commit -m "feat(server): DOCX, PPTX and URL ingestion, and save-to-workspace"
 ```
 
