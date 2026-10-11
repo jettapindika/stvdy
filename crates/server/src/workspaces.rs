@@ -275,6 +275,24 @@ pub async fn delete_one(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The workspace's name, or 404 when it is not this user's.
+///
+/// Every workspace-scoped route needs this, and a second copy is how one of them
+/// eventually forgets the `user_id` predicate, which is a cross-tenant read.
+pub async fn owned_name(state: &AppState, user_id: Uuid, workspace_id: Uuid) -> AppResult<String> {
+    let name: Option<String> = sqlx::query_scalar(
+        "select name from workspaces
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the workspace: {error}")))?;
+
+    name.ok_or(AppError::NotFound)
+}
+
 async fn fetch_workspace(state: &AppState, user_id: Uuid, id: Uuid) -> AppResult<WorkspaceRow> {
     // The same correlated-subquery shape as `list`, so a freshly created or
     // renamed workspace reports the same `source_count` the list does.

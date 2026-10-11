@@ -30,6 +30,17 @@ impl PlanId {
             other => other,
         }
     }
+
+    /// The plan a stored `users.plan_id` names. An unrecognised value is `Free`,
+    /// which is the safe direction: a corrupt or future plan string must not grant
+    /// more than the free tier.
+    pub fn parse(raw: &str) -> PlanId {
+        match raw {
+            "pro" => PlanId::Pro,
+            "power" => PlanId::Power,
+            _ => PlanId::Free,
+        }
+    }
 }
 
 impl std::fmt::Display for PlanId {

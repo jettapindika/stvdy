@@ -8,6 +8,7 @@ pub mod credits;
 pub mod db;
 pub mod devices;
 pub mod error;
+pub mod flashcards;
 pub mod integrations;
 pub mod jobs;
 pub mod limits;

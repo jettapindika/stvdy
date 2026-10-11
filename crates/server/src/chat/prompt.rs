@@ -30,38 +30,15 @@ pub fn compose(
     use_web: bool,
     study_mode: bool,
 ) -> AppResult<Composed> {
-    let plan = user.plan();
-    let plan_config = state.config.plans.get(plan);
-
-    let now_local = state
-        .clock
-        .now()
-        .with_timezone(&user.timezone.parse().unwrap_or(chrono_tz::UTC));
-
-    let vars = ChatVars {
-        assistant_name: ASSISTANT_NAME.to_string(),
-        app_name: APP_NAME.to_string(),
-        now: now_local.format("%Y-%m-%d %H:%M %Z").to_string(),
-        timezone: user.timezone.clone(),
-        // The prompt tells the model to keep phone replies short, so this has to
-        // be the real platform rather than a guess.
-        platform: "unknown".to_string(),
-        plan_name: plan_config.name.clone(),
-        study_mode: if study_mode { "on" } else { "off" }.to_string(),
-        study_hours_summary: "not set".to_string(),
-        use_web: if use_web { "on" } else { "off" }.to_string(),
-        // The billing policy decides whether an upgrade hint is allowed at all,
-        // and it is per platform. `web` is the permissive default here because
-        // the request has not yet carried its platform; the Phase 3+ client sends
-        // it, and `billing_policy.validate()` is what stops a mobile build from
-        // being permissive in the first place.
-        allow_upgrade_hint: state
-            .config
-            .billing_policy
-            .purchase_allowed(stvdy_core::config::Platform::Web),
-        user_name: user.email.clone(),
-        workspace_name: workspace_name.to_string(),
-    };
+    let vars = base_vars(
+        state,
+        &user.email,
+        &user.timezone,
+        user.plan(),
+        study_mode,
+        use_web,
+        workspace_name,
+    );
 
     // The label is the index plus one, which is what the composer writes into the
     // prompt and what the citation resolver maps back. The ids ride along so
@@ -81,6 +58,57 @@ pub fn compose(
 
     compose_chat(&vars, &prompt_chunks, web)
         .map_err(|error| AppError::Internal(anyhow::anyhow!("composing the prompt: {error}")))
+}
+
+/// The base-prompt variables for one request.
+///
+/// Extracted because a task prompt is composed on the same trimmed base, and two
+/// builders would eventually disagree about `{{platform}}` or `{{plan_name}}`. The
+/// disagreement would show up as a prompt describing the wrong app, which is not
+/// something a test would catch.
+///
+/// It takes the individual values rather than an `AuthUser` because the generation
+/// job has no `AuthUser`: it has a row. Fabricating one (with a device id and a
+/// session id it does not have) would be a lie in the type system.
+pub fn base_vars(
+    state: &AppState,
+    email: &str,
+    timezone: &str,
+    plan: stvdy_core::config::PlanId,
+    study_mode: bool,
+    use_web: bool,
+    workspace_name: &str,
+) -> ChatVars {
+    let plan_config = state.config.plans.get(plan);
+    let now_local = state
+        .clock
+        .now()
+        .with_timezone(&timezone.parse().unwrap_or(chrono_tz::UTC));
+
+    ChatVars {
+        assistant_name: ASSISTANT_NAME.to_string(),
+        app_name: APP_NAME.to_string(),
+        now: now_local.format("%Y-%m-%d %H:%M %Z").to_string(),
+        timezone: timezone.to_string(),
+        // The prompt tells the model to keep phone replies short, so this has to be
+        // the real platform rather than a guess.
+        platform: "unknown".to_string(),
+        plan_name: plan_config.name.clone(),
+        study_mode: if study_mode { "on" } else { "off" }.to_string(),
+        study_hours_summary: "not set".to_string(),
+        use_web: if use_web { "on" } else { "off" }.to_string(),
+        // The billing policy decides whether an upgrade hint is allowed at all,
+        // and it is per platform. `web` is the permissive default here because
+        // the request has not yet carried its platform; the Phase 3+ client sends
+        // it, and `billing_policy.validate()` is what stops a mobile build from
+        // being permissive in the first place.
+        allow_upgrade_hint: state
+            .config
+            .billing_policy
+            .purchase_allowed(stvdy_core::config::Platform::Web),
+        user_name: email.to_string(),
+        workspace_name: workspace_name.to_string(),
+    }
 }
 
 #[cfg(test)]

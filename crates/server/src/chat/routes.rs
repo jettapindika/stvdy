@@ -85,7 +85,7 @@ pub async fn chat(
         ));
     }
 
-    let workspace_name = owned_workspace_name(&state, user.user_id, workspace_id).await?;
+    let workspace_name = crate::workspaces::owned_name(&state, user.user_id, workspace_id).await?;
 
     // Every check that can fail runs before the spend and before anything is
     // written, so a refused request leaves no credit spent and no message behind.
@@ -251,11 +251,11 @@ pub async fn chat(
         }
 
         if let Some(reported) = &usage
-            && let Err(error) = credits::record_provider_usage(
+            && let Err(error) = credits::record_usage(
                 &state_for_stream.pool,
-                usage_event_id,
-                reported.in_tokens,
-                reported.out_tokens,
+                Some(usage_event_id),
+                Some(reported.in_tokens),
+                Some(reported.out_tokens),
                 reported.provider_cost_usd,
                 &prompt_version_for_stream,
             )
@@ -304,25 +304,6 @@ pub async fn chat(
     };
 
     Ok(Sse::new(events))
-}
-
-/// Confirms the workspace belongs to the caller and returns its name.
-async fn owned_workspace_name(
-    state: &AppState,
-    user_id: Uuid,
-    workspace_id: Uuid,
-) -> AppResult<String> {
-    let name: Option<String> = sqlx::query_scalar(
-        "select name from workspaces
-          where id = $1 and user_id = $2 and deleted_at is null",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the workspace: {error}")))?;
-
-    name.ok_or(AppError::NotFound)
 }
 
 pub(crate) async fn insert_message(
@@ -391,7 +372,7 @@ pub async fn list_messages(
     // The workspace check is separate from the message query so that a workspace
     // id from another account is a 404 rather than an empty list, which would
     // leak that the id exists but has no messages.
-    owned_workspace_name(&state, user.user_id, workspace_id).await?;
+    crate::workspaces::owned_name(&state, user.user_id, workspace_id).await?;
 
     let rows = sqlx::query_as::<_, MessageRow>(
         "select id, workspace_id, role, content, citations, used_web, created_at

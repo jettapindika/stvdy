@@ -23,6 +23,7 @@ use crate::chat;
 use crate::chunks;
 use crate::config::AppConfig;
 use crate::devices;
+use crate::flashcards;
 use crate::sources;
 use crate::state::AppState;
 use crate::workspaces;
@@ -115,6 +116,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(workspaces::routes())
         .merge(chunks::routes())
         .merge(chat::routes())
+        .merge(flashcards::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )));

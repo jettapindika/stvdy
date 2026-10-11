@@ -54,6 +54,32 @@ pub fn enforce_count(
     Err(limit_reached(plan, limit, i64::from(used), feature))
 }
 
+/// A countable limit where more than one is requested at a time.
+///
+/// `enforce_count` asks "is there room for one more", which is the right question
+/// for a workspace or a device. A deck asks for `count` cards in one request, and
+/// checking them one at a time would let 30 requests of 30 cards each through.
+pub fn enforce_batch(
+    plans: &PlansFile,
+    plan: PlanId,
+    limit: Limit,
+    used: i64,
+    requested: i64,
+    feature: &'static str,
+) -> Result<(), AppError> {
+    let _ = plans;
+    match limit.max() {
+        None => Ok(()),
+        Some(max) => {
+            if used + requested <= i64::from(max) {
+                Ok(())
+            } else {
+                Err(limit_reached(plan, limit, used, feature))
+            }
+        }
+    }
+}
+
 /// A file-size limit. `max_file_mb` is a `u32` rather than a `Limit` because no
 /// plan offers unlimited uploads.
 pub fn enforce_max_file_mb(
@@ -171,6 +197,24 @@ mod tests {
             Err(AppError::Entitlement { min_plan, .. }) => assert_eq!(min_plan, None),
             other => panic!("expected an entitlement error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_batch_checks_the_whole_request_not_one_at_a_time() {
+        let plans = plans();
+        let limit = plans.get(PlanId::Free).flashcards_per_month;
+        let max = i64::from(limit.max().expect("free cards are limited"));
+
+        // 29 used plus 1 requested fits; 30 used plus 1 does not, because the
+        // limit is a ceiling on the total, not on each request.
+        assert!(enforce_batch(&plans, PlanId::Free, limit, max - 1, 1, "flashcards").is_ok());
+        assert!(enforce_batch(&plans, PlanId::Free, limit, max, 1, "flashcards").is_err());
+
+        // A single request larger than the whole allowance is refused outright.
+        let error = enforce_batch(&plans, PlanId::Free, limit, 0, max + 1, "flashcards")
+            .expect_err("a request over the monthly allowance is refused");
+        assert_eq!(error.code(), "limit_reached");
+        assert_eq!(error.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[test]

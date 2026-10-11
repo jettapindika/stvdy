@@ -84,6 +84,7 @@ async fn run_one(state: &AppState, job: ClaimedJob) {
 async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failure> {
     match job.kind.as_str() {
         "ingest_source" => crate::jobs::handlers::ingest::run(state, job).await,
+        "generate_flashcards" => crate::jobs::handlers::generate::run(state, job).await,
         // Permanent: no retry will invent a handler for a kind this binary does
         // not know, which is what an old row from a newer version looks like.
         other => Err(jobs::Failure::permanent(format!(

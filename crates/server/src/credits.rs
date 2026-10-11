@@ -243,34 +243,102 @@ pub async fn spend(
     })
 }
 
-/// Attaches the provider's cost, token counts and prompt version to the usage row
-/// recent `usage_events` row for this action.
+/// The `usage_events` row a spend just created, for a caller that has to look it up
+/// later (a job, which has no access to the route's `Spent`).
 ///
-/// Written after the stream because the token counts only exist then, and the
-/// row is created before it because the credit must be spent whether or not the
-/// provider answers. `None` cost stays `None`: recording zero would understate
-/// spend in the margin report (A41).
-pub async fn record_provider_usage(
+/// `(user_id, action, created_at)` is unique in practice: `spend` writes exactly one
+/// row per action per transaction, and the `created_at` is the spend's. The caller
+/// that already has a `usage_event_id` passes it instead.
+pub async fn latest_usage_event(
     pool: &PgPool,
-    usage_event_id: Uuid,
-    in_tokens: u32,
-    out_tokens: u32,
+    user_id: Uuid,
+    action: &str,
+    since: DateTime<Utc>,
+) -> AppResult<Option<Uuid>> {
+    let id: Option<Uuid> = sqlx::query_scalar(
+        "select id from usage_events
+          where user_id = $1 and action = $2 and created_at >= $3
+          order by created_at desc
+          limit 1",
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(since)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("looking up a usage event: {error}")))?;
+    Ok(id)
+}
+
+/// Attaches token counts, the provider's cost and the prompt version to a usage row.
+///
+/// `usage_event_id: Option<Uuid>` because the generation job has no id: the row was
+/// written by `spend`, and the job finds it with `latest_usage_event`. A `None` id is
+/// a no-op rather than an error: a usage row that cannot be found is a reporting gap,
+/// not a reason to fail a job whose cards are already stored and paid for.
+///
+/// `prompt_version` is mandatory: every model call must be attributable to a prompt
+/// version, or a quality regression cannot be traced (the roadmap's rule).
+///
+/// `in_tokens`/`out_tokens` are `Option<u32>`: a failed generation records no tokens
+/// rather than a zero, because zero would read as "the model returned nothing" in a
+/// cost report.
+pub async fn record_usage(
+    pool: &PgPool,
+    usage_event_id: Option<Uuid>,
+    in_tokens: Option<u32>,
+    out_tokens: Option<u32>,
     provider_cost_usd: Option<f64>,
     prompt_version: &str,
 ) -> AppResult<()> {
+    let Some(usage_event_id) = usage_event_id else {
+        return Ok(());
+    };
+
     sqlx::query(
         "update usage_events
             set tokens_in = $2, tokens_out = $3, provider_cost_usd = $4, prompt_version = $5
           where id = $1",
     )
     .bind(usage_event_id)
-    .bind(i32::try_from(in_tokens).unwrap_or(i32::MAX))
-    .bind(i32::try_from(out_tokens).unwrap_or(i32::MAX))
+    .bind(in_tokens.map(|n| i32::try_from(n).unwrap_or(i32::MAX)))
+    .bind(out_tokens.map(|n| i32::try_from(n).unwrap_or(i32::MAX)))
     .bind(provider_cost_usd)
     .bind(prompt_version)
     .execute(pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("recording provider usage: {error}")))?;
+    Ok(())
+}
+
+/// Reverses a spend that could not be delivered.
+///
+/// A generation that fails for good has already charged the user and bought
+/// nothing. The row is a positive `credit_ledger` entry with the documented
+/// `refund` reason and `ref_id` naming what failed, so the ledger explains itself
+/// to the admin margin report instead of showing an unexplained balance change.
+/// `monthly` is the bucket because that is the one `spend` consumes first.
+pub async fn refund(
+    pool: &PgPool,
+    user_id: Uuid,
+    credits: i64,
+    ref_id: Uuid,
+    reason: &str,
+) -> AppResult<()> {
+    if credits <= 0 {
+        return Ok(());
+    }
+    sqlx::query(
+        "insert into credit_ledger (user_id, delta, bucket, reason, ref_id)
+         values ($1, $2, 'monthly', $3, $4)",
+    )
+    .bind(user_id)
+    .bind(credits)
+    .bind(reason)
+    .bind(ref_id)
+    .execute(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("refunding credits: {error}")))?;
     Ok(())
 }
 

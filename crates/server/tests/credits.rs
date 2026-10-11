@@ -180,11 +180,11 @@ async fn a_provider_cost_lands_on_its_own_usage_row(pool: PgPool) {
 
     // The *first* request finishes last and records its cost. With a
     // newest-row lookup that cost would land on the second row.
-    credits::record_provider_usage(
+    credits::record_usage(
         &harness.state.pool,
-        first.usage_event_id,
-        111,
-        22,
+        Some(first.usage_event_id),
+        Some(111),
+        Some(22),
         Some(0.00119),
         "base.v1",
     )

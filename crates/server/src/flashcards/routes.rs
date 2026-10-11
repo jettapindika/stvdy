@@ -1,0 +1,505 @@
+//! `POST|GET /workspaces/:id/decks`, `GET /decks/:id`, `GET /decks/:id/due`,
+//! `POST /flashcards/:id/review`.
+//!
+//! The order of operations in `create_deck` is the contract: verified email, owned
+//! workspace, owned and ready sources, monthly card limit, credit spend, insert the
+//! deck, enqueue the job. Every check that can fail runs before the spend, so a
+//! refused request costs nothing.
+
+use axum::Json;
+use axum::Router;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+// `Row` is required for `row.get::<T, _>("column")`; a trait object's methods resolve
+// without an import, but a `PgRow`'s do not.
+use sqlx::Row;
+use uuid::Uuid;
+
+use stvdy_core::sm2::{CardState, Rating, Review, replay};
+
+use crate::auth::extract::{AuthUser, VerifiedUser};
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
+use crate::{credits, jobs, limits, util, workspaces};
+
+/// The action name in `usage_events` and the ledger, so a cost report can separate
+/// generation from chat.
+pub(crate) const GENERATE_ACTION: &str = "generate_flashcards";
+
+/// The most cards one request may ask for.
+///
+/// The credit cost is quoted from the requested count, so accepting more than the
+/// generator will produce would overcharge. A larger request is refused rather
+/// than truncated.
+pub const MAX_REQUESTED_CARDS: u32 = 50;
+
+/// The most sources one deck may draw on. A deck from twenty sources is a topic,
+/// not a deck, and the prompt has a chunk budget.
+const MAX_SOURCES: usize = 20;
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/workspaces/{id}/decks", post(create_deck).get(list_decks))
+        .route("/decks/{id}", get(get_deck))
+        .route("/decks/{id}/due", get(due_cards))
+        .route("/flashcards/{id}/review", post(review_card))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateDeckBody {
+    pub title: String,
+    pub source_ids: Vec<Uuid>,
+    /// How many cards to ask for. The generator may return fewer; it is told never
+    /// to pad.
+    pub count: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct DeckJson {
+    id: Uuid,
+    workspace_id: Uuid,
+    title: String,
+    source_ids: Vec<Uuid>,
+    status: String,
+    error: Option<String>,
+    requested_count: i32,
+    card_count: i64,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct CardJson {
+    id: Uuid,
+    deck_id: Uuid,
+    front: String,
+    back: String,
+    chunk_id: Option<Uuid>,
+    ease: f32,
+    interval_days: i32,
+    due_at: DateTime<Utc>,
+}
+
+/// `POST /workspaces/:id/decks`. 201 with the deck in status `generating`.
+pub async fn create_deck(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(workspace_id): Path<Uuid>,
+    Json(body): Json<CreateDeckBody>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() || title.chars().count() > 120 {
+        return Err(AppError::Validation(
+            "the deck title must be between 1 and 120 characters".to_string(),
+        ));
+    }
+    if body.count == 0 || body.count > MAX_REQUESTED_CARDS {
+        return Err(AppError::Validation(format!(
+            "count must be between 1 and {MAX_REQUESTED_CARDS}"
+        )));
+    }
+    if body.source_ids.is_empty() || body.source_ids.len() > MAX_SOURCES {
+        return Err(AppError::Validation(format!(
+            "a deck is generated from between 1 and {MAX_SOURCES} sources"
+        )));
+    }
+
+    workspaces::owned_name(&state, user.user_id, workspace_id).await?;
+
+    // Every source must be this user's, in this workspace, and finished ingesting:
+    // generating from a source whose chunks do not exist yet would produce a deck
+    // with no cards and no explanation.
+    let ready: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from sources
+          where id = any($1) and workspace_id = $2 and user_id = $3
+            and status = 'ready' and deleted_at is null",
+    )
+    .bind(&body.source_ids)
+    .bind(workspace_id)
+    .bind(user.user_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("checking the deck's sources: {error}")))?;
+    if ready != body.source_ids.len() as i64 {
+        return Err(AppError::Validation(
+            "every source must be one of this workspace's, and finished indexing".to_string(),
+        ));
+    }
+
+    let plan = user.plan();
+    let month_start = util::local_month_start(&user.timezone, state.clock.as_ref());
+    let used: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from flashcards
+          where user_id = $1 and deleted_at is null and created_at >= $2",
+    )
+    .bind(user.user_id)
+    .bind(month_start)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting this month's cards: {error}")))?;
+
+    limits::enforce_batch(
+        &state.config.plans,
+        plan,
+        state.config.plans.get(plan).flashcards_per_month,
+        used,
+        i64::from(body.count),
+        "flashcards",
+    )?;
+
+    // The cost is per ten cards, from the config: `flashcard_batch_10 = 4` is a
+    // batch price, and asking for 21 cards is three batches.
+    // `i64::div_ceil` is still unstable, and `count` is positive here, so this is
+    // an exact ceiling division.
+    let batches = (i64::from(body.count) + 9) / 10;
+    let cost = batches * state.config.plans.credits.flashcard_batch_10;
+    let spent = credits::spend(&state, user.user_id, plan, GENERATE_ACTION, cost, None).await?;
+
+    let deck_id: Uuid = sqlx::query_scalar(
+        "insert into decks
+            (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent, usage_event_id)
+         values ($1, $2, $3, $4, 'generating', $5, $6, $7)
+         returning id",
+    )
+    .bind(user.user_id)
+    .bind(workspace_id)
+    .bind(&title)
+    .bind(&body.source_ids)
+    .bind(body.count as i32)
+    .bind(cost as i32)
+    .bind(spent.usage_event_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("creating the deck: {error}")))?;
+
+    // The job is enqueued after the spend and after the row exists, so a failure
+    // here leaves a deck the user can see failing rather than a charge with no
+    // trace. The refund happens because a deck that will never generate must not
+    // keep the credits.
+    if let Err(error) = jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        GENERATE_ACTION,
+        serde_json::json!({ "deck_id": deck_id }),
+        None,
+    )
+    .await
+    {
+        crate::jobs::handlers::generate::fail_and_refund(
+            &state,
+            deck_id,
+            user.user_id,
+            cost as i32,
+            "the generation job could not be queued",
+        )
+        .await;
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "enqueueing the generation job: {error}"
+        )));
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "deck": {
+                "id": deck_id,
+                "workspace_id": workspace_id,
+                "title": title,
+                "source_ids": body.source_ids,
+                "status": "generating",
+                "error": serde_json::Value::Null,
+                "requested_count": body.count,
+                "card_count": 0,
+            }
+        })),
+    ))
+}
+
+/// `GET /workspaces/:id/decks`, newest first, tombstones excluded.
+///
+/// Added beyond the spec's route list: without it a deck is unreachable after a
+/// page reload, which makes the phase's own exit gate untestable by hand (A75).
+pub async fn list_decks(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(workspace_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    workspaces::owned_name(&state, user.user_id, workspace_id).await?;
+    let rows = sqlx::query(
+        "select d.id, d.workspace_id, d.title, d.source_ids, d.status, d.error,
+                d.requested_count, d.created_at,
+                (select count(*) from flashcards f
+                  where f.deck_id = d.id and f.deleted_at is null) as card_count
+           from decks d
+          where d.user_id = $1 and d.workspace_id = $2 and d.deleted_at is null
+          order by d.created_at desc, d.id",
+    )
+    .bind(user.user_id)
+    .bind(workspace_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing decks: {error}")))?;
+
+    let decks: Vec<DeckJson> = rows.iter().map(deck_from_row).collect();
+    Ok(Json(serde_json::json!({ "decks": decks })))
+}
+
+/// `GET /decks/:id`: the deck, its cards, and its generation state.
+pub async fn get_deck(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(deck_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let deck = owned_deck(&state, user.user_id, deck_id).await?;
+    let cards = sqlx::query(
+        "select id, deck_id, front, back, chunk_id, ease, interval_days, due_at
+           from flashcards
+          where deck_id = $1 and deleted_at is null
+          order by created_at, id",
+    )
+    .bind(deck_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the deck's cards: {error}")))?;
+
+    let cards: Vec<CardJson> = cards.iter().map(card_from_row).collect();
+    let mut deck = deck;
+    deck.card_count = cards.len() as i64;
+    Ok(Json(serde_json::json!({ "deck": deck, "cards": cards })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DueQuery {
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// `GET /decks/:id/due`: the study queue, soonest first.
+///
+/// Ordered by `(due_at, id)` so a refetch cannot reshuffle the queue under the
+/// student's finger, and capped so a deck that has never been studied does not
+/// return a thousand cards in one response.
+pub async fn due_cards(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(deck_id): Path<Uuid>,
+    Query(query): Query<DueQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    owned_deck(&state, user.user_id, deck_id).await?;
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let now = state.clock.now();
+
+    let cards = sqlx::query(
+        "select f.id, f.deck_id, f.front, f.back, f.chunk_id, f.ease, f.interval_days, f.due_at
+           from flashcards f
+          where f.deck_id = $1 and f.deleted_at is null and f.due_at <= $2
+          order by f.due_at asc, f.id asc
+          limit $3",
+    )
+    .bind(deck_id)
+    .bind(now)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading due cards: {error}")))?;
+
+    let cards: Vec<CardJson> = cards.iter().map(card_from_row).collect();
+    Ok(Json(serde_json::json!({ "cards": cards, "now": now })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReviewBody {
+    /// Client-generated, so a retry after a lost response cannot apply twice.
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub rating: String,
+    /// The device's clock. Absent means the server's, which is what an online
+    /// review uses.
+    #[serde(default)]
+    pub reviewed_at: Option<DateTime<Utc>>,
+}
+
+/// A review further in the future than this is refused: a device with a wrong
+/// clock would otherwise pin a card out of the queue for months.
+const FUTURE_REVIEW_TOLERANCE_SECS: i64 = 24 * 60 * 60;
+
+/// `POST /flashcards/:id/review`.
+///
+/// The whole point of the phase: the review is inserted, the card's state is
+/// replayed from *every* review in `(reviewed_at, id)` order, and the result is
+/// written back. Two devices therefore converge on one state rather than on
+/// whichever wrote last.
+pub async fn review_card(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(card_id): Path<Uuid>,
+    Json(body): Json<ReviewBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    let rating =
+        Rating::parse(&body.rating).map_err(|error| AppError::Validation(error.to_string()))?;
+    let now = state.clock.now();
+    let reviewed_at = body.reviewed_at.unwrap_or(now);
+    if reviewed_at > now + chrono::Duration::seconds(FUTURE_REVIEW_TOLERANCE_SECS) {
+        return Err(AppError::Validation(
+            "the review's timestamp is in the future; check the device clock".to_string(),
+        ));
+    }
+    let review_id = body.id.unwrap_or_else(Uuid::new_v4);
+
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a review: {error}")))?;
+
+    // The same advisory lock the spend and the sync triggers take, and the same
+    // reason: two devices reviewing one card concurrently would each replay only
+    // their own review, and the second `update` would silently drop the other.
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(user.user_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the review lock: {error}")))?;
+
+    let card = sqlx::query(
+        "select f.id, f.created_at
+           from flashcards f
+           join decks d on d.id = f.deck_id
+          where f.id = $1 and d.user_id = $2 and f.deleted_at is null and d.deleted_at is null",
+    )
+    .bind(card_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the card: {error}")))?
+    .ok_or(AppError::NotFound)?;
+
+    let created_at: DateTime<Utc> = card.get("created_at");
+
+    let inserted = sqlx::query(
+        "insert into flashcard_reviews (id, user_id, flashcard_id, rating, reviewed_at, device_id)
+         values ($1, $2, $3, $4, $5, $6)
+         on conflict (id) do nothing",
+    )
+    .bind(review_id)
+    .bind(user.user_id)
+    .bind(card_id)
+    .bind(rating.as_str())
+    .bind(reviewed_at)
+    .bind(user.device_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("writing the review: {error}")))?
+    .rows_affected()
+        > 0;
+
+    // Replayed from the full history, inside the lock, so the stored state is a
+    // function of the rows and not of this request's arrival order.
+    let rows = sqlx::query(
+        "select id, rating, reviewed_at from flashcard_reviews
+          where flashcard_id = $1 order by reviewed_at asc, id asc",
+    )
+    .bind(card_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the reviews: {error}")))?;
+
+    let mut reviews = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let raw: String = row.get("rating");
+        // A stored rating the enum cannot read is a data defect, not a user error.
+        // Skipping it would silently change the schedule, so this fails loudly.
+        let rating = Rating::parse(&raw).map_err(|_| {
+            AppError::Internal(anyhow::anyhow!(
+                "stored review rating {raw:?} is not one of again/hard/good/easy"
+            ))
+        })?;
+        reviews.push(Review {
+            id: row.get("id"),
+            rating,
+            reviewed_at: row.get("reviewed_at"),
+        });
+    }
+
+    let CardState {
+        ease,
+        interval_days,
+        due_at,
+    } = replay(created_at, &reviews);
+
+    sqlx::query(
+        "update flashcards
+            set ease = $2, interval_days = $3, due_at = $4, updated_at = now()
+          where id = $1",
+    )
+    .bind(card_id)
+    .bind(ease)
+    .bind(interval_days)
+    .bind(due_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("updating the card: {error}")))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a review: {error}")))?;
+
+    Ok(Json(serde_json::json!({
+        "applied": inserted,
+        "card": {
+            "id": card_id,
+            "ease": ease,
+            "interval_days": interval_days,
+            "due_at": due_at,
+        }
+    })))
+}
+
+/// The deck, or 404 when it is not this user's. Tombstones are excluded, so a
+/// deleted deck is indistinguishable from one that never existed.
+async fn owned_deck(state: &AppState, user_id: Uuid, deck_id: Uuid) -> AppResult<DeckJson> {
+    let row = sqlx::query(
+        "select d.id, d.workspace_id, d.title, d.source_ids, d.status, d.error,
+                d.requested_count, d.created_at,
+                (select count(*) from flashcards f
+                  where f.deck_id = d.id and f.deleted_at is null) as card_count
+           from decks d
+          where d.id = $1 and d.user_id = $2 and d.deleted_at is null",
+    )
+    .bind(deck_id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the deck: {error}")))?;
+
+    row.as_ref().map(deck_from_row).ok_or(AppError::NotFound)
+}
+
+fn deck_from_row(row: &sqlx::postgres::PgRow) -> DeckJson {
+    DeckJson {
+        id: row.get("id"),
+        workspace_id: row.get("workspace_id"),
+        title: row.get("title"),
+        source_ids: row.get("source_ids"),
+        status: row.get("status"),
+        error: row.get("error"),
+        requested_count: row.get("requested_count"),
+        card_count: row.get("card_count"),
+        created_at: row.get("created_at"),
+    }
+}
+
+fn card_from_row(row: &sqlx::postgres::PgRow) -> CardJson {
+    CardJson {
+        id: row.get("id"),
+        deck_id: row.get("deck_id"),
+        front: row.get("front"),
+        back: row.get("back"),
+        chunk_id: row.get("chunk_id"),
+        ease: row.get("ease"),
+        interval_days: row.get("interval_days"),
+        due_at: row.get("due_at"),
+    }
+}

@@ -27,6 +27,28 @@ pub fn local_day_start(timezone: &str, clock: &dyn Clock) -> DateTime<Utc> {
     midnight.with_timezone(&Utc)
 }
 
+/// Midnight on the first of the user's current local month, as UTC.
+///
+/// The monthly counters (`flashcards_per_month`, and Phase 7's others) reset on a
+/// local calendar boundary, never a rolling 30-day window: "30 cards a month" means
+/// the month the student is in, and a rolling window would let a student who waits
+/// two days get 60. `chrono-tz`, never a fixed offset (A6).
+pub fn local_month_start(timezone: &str, clock: &dyn Clock) -> DateTime<Utc> {
+    let tz: Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
+    let now_local = clock.now().with_timezone(&tz);
+
+    use chrono::{Datelike, TimeZone};
+    let first = now_local
+        .date_naive()
+        .with_day(1)
+        .unwrap_or(now_local.date_naive())
+        .and_hms_opt(0, 0, 0)
+        .and_then(|naive| tz.from_local_datetime(&naive).earliest())
+        .unwrap_or(now_local);
+
+    first.with_timezone(&Utc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +79,24 @@ mod tests {
             local_day_start("Not/AZone", &clock).to_rfc3339(),
             "2026-10-11T00:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn the_local_month_starts_at_local_midnight_on_the_first() {
+        // 2026-10-11T02:00Z is 09:00 in Jakarta (UTC+7) on the 11th, so the month
+        // began at 2026-10-01T00:00+07:00, which is 2026-09-30T17:00Z.
+        let clock = FixedClock::at("2026-10-11T02:00:00Z".parse().expect("a valid timestamp"));
+        let start = local_month_start("Asia/Jakarta", &clock);
+        assert_eq!(start.to_rfc3339(), "2026-09-30T17:00:00+00:00");
+    }
+
+    #[test]
+    fn a_month_start_across_a_dst_change_uses_the_offset_in_force_then() {
+        // Europe/Berlin springs forward on 2026-03-29, but the month began on
+        // 2026-03-01, still CET (UTC+1): 2026-02-28T23:00Z. Using the offset in
+        // force *now* would give 22:00Z and shift the boundary by an hour.
+        let clock = FixedClock::at("2026-03-29T12:00:00Z".parse().expect("a valid timestamp"));
+        let start = local_month_start("Europe/Berlin", &clock);
+        assert_eq!(start.to_rfc3339(), "2026-02-28T23:00:00+00:00");
     }
 }

@@ -33,11 +33,7 @@ impl AuthUser {
     /// `plans.toml` cannot happen through the API, but it must not panic here:
     /// the caller gets the free plan's limits, which is the safe direction.
     pub fn plan(&self) -> stvdy_core::config::PlanId {
-        match self.plan_id.as_str() {
-            "pro" => stvdy_core::config::PlanId::Pro,
-            "power" => stvdy_core::config::PlanId::Power,
-            _ => stvdy_core::config::PlanId::Free,
-        }
+        stvdy_core::config::PlanId::parse(&self.plan_id)
     }
 }
 
