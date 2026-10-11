@@ -21,7 +21,7 @@ export function TodayScreen() {
       />
 
       <Section title="Study blocks">
-        <div className="panel">
+        <div className="card">
           <EmptyState
             title="No study blocks scheduled"
             reason="Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class."
@@ -30,7 +30,7 @@ export function TodayScreen() {
       </Section>
 
       <Section title="Due flashcards">
-        <div className="panel">
+        <div className="card">
           <EmptyState
             title="No cards due"
             reason="Review cards appear here when their interval elapses. Generate a deck from a source and Stvdy schedules the reviews."
@@ -39,7 +39,7 @@ export function TodayScreen() {
       </Section>
 
       <Section title="Tasks">
-        <div className="panel">
+        <div className="card">
           <EmptyState
             title="Nothing due"
             reason="Tasks from a workspace, a syllabus import, or a quick capture land here, ordered by due date."
@@ -48,7 +48,7 @@ export function TodayScreen() {
       </Section>
 
       <Section title="Upcoming exams">
-        <div className="panel">
+        <div className="card">
           <EmptyState
             title="No exams tracked"
             reason="Add an exam as a goal and it becomes the anchor the planner schedules against."

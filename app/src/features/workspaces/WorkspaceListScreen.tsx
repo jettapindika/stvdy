@@ -1,8 +1,14 @@
 import { PageHeader, Section } from '@/components/layout/Section'
+import { BrandIllustration } from '@/components/ui/BrandIllustration'
 import { EmptyState } from '@/components/ui/States'
 
 /**
- * The workspace list.
+ * The workspace list, and the first-run entry surface.
+ *
+ * This is where the brand illustration belongs: the design uses it on the entry
+ * page, and an empty first-run screen is the app's equivalent moment. It is not
+ * repeated on every screen, which is what keeps it a brand asset rather than a
+ * sticker.
  *
  * A workspace is one course or subject, and the point of it is that many sources
  * live together so retrieval can cross them (the product's first differentiator).
@@ -14,15 +20,18 @@ export function WorkspaceListScreen() {
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader
         title="Workspaces"
-        subtitle="One workspace per course. Everything inside it, chat, flashcards, quizzes, and reports, reads across all of its sources."
+        subtitle="One workspace per course. Everything inside it reads across all of its sources."
       />
 
       <Section title="Your workspaces">
-        <div className="panel">
-          <EmptyState
-            title="No workspaces yet"
-            reason="Create one per course, then add its material: a PDF, slide deck, document, or link. Answers will cite the page they came from, and the sources stay searchable together rather than in separate notebooks."
-          />
+        <div className="card px-5 py-6">
+          <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
+            <BrandIllustration className="w-44 shrink-0 sm:w-52" />
+            <EmptyState
+              title="No workspaces yet"
+              reason="Create one per course, then add its material: a PDF, slide deck, document, or link. Answers will cite the page they came from, and the sources stay searchable together rather than in separate notebooks."
+            />
+          </div>
         </div>
       </Section>
     </div>

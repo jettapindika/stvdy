@@ -1,4 +1,4 @@
-import { Citation, CitationList } from '@/components/ui/Citation'
+import { CitationList } from '@/components/ui/Citation'
 import { EmptyState, ErrorState, LoadingState, SkeletonRows } from '@/components/ui/States'
 import { PageHeader, Section } from '@/components/layout/Section'
 
@@ -17,16 +17,16 @@ import { PageHeader, Section } from '@/components/layout/Section'
 
 const SWATCHES: { token: string; className: string; role: string }[] = [
   { token: 'paper', className: 'bg-paper', role: 'page ground' },
-  { token: 'surface', className: 'bg-surface', role: 'raised panels' },
-  { token: 'surface-sunk', className: 'bg-surface-sunk', role: 'inputs, insets' },
+  { token: 'card', className: 'bg-card', role: 'panels that float' },
+  { token: 'surface-sunk', className: 'bg-surface-sunk', role: 'fields, insets' },
   { token: 'rule', className: 'bg-rule', role: 'hairlines' },
   { token: 'rule-strong', className: 'bg-rule-strong', role: 'control borders' },
-  { token: 'mark', className: 'bg-mark', role: 'the accent: citations, primary action' },
-  { token: 'ochre', className: 'bg-ochre', role: 'accent as text or icon' },
-  { token: 'ink', className: 'bg-ink', role: 'body text' },
+  { token: 'accent', className: 'bg-accent', role: 'identity: wordmark, links, illustration' },
+  { token: 'accent-text', className: 'bg-accent-text', role: 'the same hue, for body text' },
+  { token: 'success', className: 'bg-success', role: 'the checkmark teal' },
+  { token: 'ink', className: 'bg-ink', role: 'body text and the action fill' },
   { token: 'ink-muted', className: 'bg-ink-muted', role: 'metadata' },
   { token: 'danger', className: 'bg-danger', role: 'errors' },
-  { token: 'success', className: 'bg-success', role: 'confirmations' },
 ]
 
 export function StyleguideScreen() {
@@ -68,6 +68,10 @@ export function StyleguideScreen() {
             mostly made of.
           </p>
           <p className="meta">Monospace metadata: page 12, 24 min, 2026-10-11</p>
+          <p>
+            A <a className="link" href="#palette">link in body copy</a> uses the darkened
+            azure, because the raw brand blue is only AA at 18px and above.
+          </p>
         </div>
       </Section>
 
@@ -87,33 +91,38 @@ export function StyleguideScreen() {
             . An outside result is marked separately <CitationList citations={[{ type: 'web', label: 'W1', url: 'https://example.com', title: 'Web result' }]} />.
           </p>
           <p className="text-sm">
-            Interactive form:{' '}
-            <Citation
-              citation={{ type: 'chunk', label: 4, sourceTitle: 'Source title', page: 7 }}
-              onOpen={() => undefined}
-            />
+            The interactive form is shown above as a web citation, which has a real
+            destination. A chunk citation becomes a button only when a caller
+            passes a handler; with none it renders as text rather than a control
+            that swallows clicks.
           </p>
         </div>
       </Section>
 
       <Section title="Controls">
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="btn btn-primary">
+        <p className="max-w-prose text-sm text-ink-muted">
+          Appearance only. These are inert samples, not controls: they carry
+          <code> aria-disabled</code> and are outside the tab order, because a
+          button that does nothing is a defect rather than a demo (R-26). A real
+          screen wires each one to its own action.
+        </p>
+        <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
+          <button type="button" className="btn btn-primary" aria-disabled="true" tabIndex={-1}>
             Primary action
           </button>
-          <button type="button" className="btn btn-secondary">
+          <button type="button" className="btn btn-secondary" aria-disabled="true" tabIndex={-1}>
             Secondary
           </button>
-          <button type="button" className="btn btn-quiet">
+          <button type="button" className="btn btn-quiet" aria-disabled="true" tabIndex={-1}>
             Quiet
           </button>
           <button type="button" className="btn btn-primary" disabled>
             Disabled
           </button>
         </div>
-        <label className="flex max-w-sm flex-col gap-1">
+        <label className="flex max-w-sm flex-col gap-1" aria-hidden="true">
           <span className="label">Field label</span>
-          <input className="field" placeholder="Placeholder text" />
+          <input className="field" placeholder="Placeholder text" tabIndex={-1} readOnly />
         </label>
       </Section>
 

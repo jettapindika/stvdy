@@ -3,88 +3,109 @@
 /* ==========================================================================
    Stvdy design tokens
    --------------------------------------------------------------------------
-   Two cores plus one accent (DESIGN.md, R-29). Neutrals carry the layout; the
-   accent is rationed to the provenance layer and the primary action.
+   Transcribed from the user's Figma design (DESIGN.md records the source and
+   the sampled values). Two cores plus two functional colours, per R-29.
 
-   Light and dark are both designed. Dark is warm charcoal, not black: the
-   product is read at night, and pure black against light text vibrates.
+   The load-bearing decision from that design: BLUE IS THE IDENTITY, BLACK IS THE
+   ACTION. The brand azure carries the wordmark, links, and the illustration; the
+   primary button is near-black. A blue button would be the generic choice, and
+   the design deliberately avoids it.
 
-   `@theme inline` makes the generated utilities reference these variables
-   instead of copying their values, which is what lets the dark overrides below
-   work without a second set of utility classes.
+   Both themes are designed. Dark maps the same hues onto a cool near-black ground
+   and inverts only the action fill, so every pair stays above AA.
+
+   `@theme inline` makes utilities reference these variables rather than copying
+   their values, which is what lets the dark overrides work without a second set
+   of utility classes.
    ========================================================================== */
 
 :root {
   /* ground */
-  --paper: #fbf9f6;
-  --surface: #f4f0eb;
-  --surface-sunk: #efeae3;
+  --paper: #f5f7fb;
+  --card: #ffffff;
+  --surface-sunk: #eef1f7;
   /* text */
-  --ink: #241f1c;
-  --ink-muted: #6b625b;
-  /* structure. Deliberately low contrast: a border is structure, not content. */
-  --rule: #e2dcd4;
-  --rule-strong: #cfc6bb;
-  /* the one accent: highlighter amber, for citation marks and the primary action */
-  --mark: #f5c451;
-  --mark-ink: #3a2708;
-  --ochre: #8a5a12;
-  /* semantics */
-  --danger: #a02c2c;
-  --danger-surface: #fbeeec;
-  --success: #2f6b3f;
-  --success-surface: #eef7f0;
-  --info-surface: #eef2f7;
+  --ink: #101010;
+  --ink-muted: #5f6b7a;
+  /* structure */
+  --rule: #dfe4ee;
+  --rule-strong: #c6cede;
+  /* identity: the sampled brand azure, plus a darkened form for body text.
+     The raw azure is 3.56:1 on paper (AA-large only), so links use the dark one. */
+  --accent: #3588c8;
+  --accent-text: #1a6aa8;
+  --accent-soft: #e8f2fa;
+  /* the sampled checkmark teal, plus a darkened form for body text */
+  --success: #0e9080;
+  --success-text: #0c7f71;
+  --success-soft: #e4f4f1;
+  /* functional */
+  --danger: #b3261e;
+  --danger-soft: #fdeceb;
+  /* the action fill. Black in light mode, inverted in dark. */
+  --action: #101010;
+  --on-action: #ffffff;
+  /* elevation, used only where something genuinely floats above the ground */
+  --shadow-card: 0 1px 2px rgb(16 16 16 / 0.04), 0 8px 24px -12px rgb(16 16 16 / 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #1c1917;
-    --surface: #262220;
-    --surface-sunk: #171412;
-    --ink: #f2ede7;
-    --ink-muted: #a99f96;
-    --rule: #3a3431;
-    --rule-strong: #4c4541;
-    --mark: #f0b849;
-    --mark-ink: #241a06;
-    --ochre: #e8b45c;
-    --danger: #e88a8a;
-    --danger-surface: #2e1d1c;
-    --success: #7fc08c;
-    --success-surface: #1a2620;
-    --info-surface: #1e2228;
+    --paper: #12141a;
+    --card: #1a1d24;
+    --surface-sunk: #0e1015;
+    --ink: #f2f4f8;
+    --ink-muted: #9aa5b8;
+    --rule: #2b3038;
+    --rule-strong: #3d434e;
+    --accent: #6db4e8;
+    --accent-text: #6db4e8;
+    --accent-soft: #16232f;
+    --success: #3fbfae;
+    --success-text: #3fbfae;
+    --success-soft: #12251f;
+    --danger: #f2b8b5;
+    --danger-soft: #2a1a19;
+    /* Inverted, not recoloured: a light fill with dark text keeps the same
+       "highest contrast wins the action" logic as light mode. */
+    --action: #f2f4f8;
+    --on-action: #12141a;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.5);
   }
 }
 
 @theme inline {
   --color-paper: var(--paper);
-  --color-surface: var(--surface);
+  --color-card: var(--card);
   --color-surface-sunk: var(--surface-sunk);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
   --color-rule: var(--rule);
   --color-rule-strong: var(--rule-strong);
-  --color-mark: var(--mark);
-  --color-mark-ink: var(--mark-ink);
-  --color-ochre: var(--ochre);
-  --color-danger: var(--danger);
-  --color-danger-surface: var(--danger-surface);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
   --color-success: var(--success);
-  --color-success-surface: var(--success-surface);
-  --color-info-surface: var(--info-surface);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-action: var(--action);
+  --color-on-action: var(--on-action);
 
-  /* Type. Plex Sans for prose (complete Latin-Extended coverage, which matters
-     for Indonesian); Plex Mono for the evidence layer, so a student can tell a
-     pointer from an explanation without reading. */
+  /* Type. The design's typeface could not be read from the render (DESIGN.md
+     says so); Plex is chosen for Latin-Extended coverage, which Indonesian
+     source material needs, and for narrower forms in dense reading views. */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* A small set, so shape carries meaning: controls are square-ish, panels are
-     gently rounded, and 999px is reserved for citation marks and counts. A pill
-     is never a button. */
-  --radius-control: 4px;
-  --radius-panel: 8px;
+  /* Shape carries meaning: pill means action or count, 14px means a panel that
+     floats, 8px means a field. */
+  --radius-pill: 999px;
+  --radius-card: 14px;
+  --radius-field: 8px;
+
+  --shadow-card: var(--shadow-card);
 
   /* Safe-area insets as spacing tokens -> pt-safe-top / pb-safe-bottom. */
   --spacing-safe-top: env(safe-area-inset-top, 0px);
@@ -105,7 +126,7 @@
     background-color: var(--paper);
     color: var(--ink);
     font-family: var(--font-sans);
-    /* 15px, not 16: the reading views are dense, and 16 pushes line length past
+    /* 15px: the reading views are dense, and 16 pushes line length past
        comfortable at this column width. */
     font-size: 0.9375rem;
     line-height: 1.6;
@@ -117,17 +138,17 @@
     min-height: 100dvh;
   }
 
-  /* Headings carry hierarchy by weight and space, not by size alone, and never
-     by the accent: the accent belongs to provenance. */
+  /* The design's headline treatment: large, tight leading, balanced wrapping.
+     Hierarchy comes from size and space, never from colour. */
   h1, h2, h3 {
     color: var(--ink);
     font-weight: 600;
-    letter-spacing: -0.011em;
+    letter-spacing: -0.02em;
     text-wrap: balance;
   }
-  h1 { font-size: 1.5rem; line-height: 1.25; }
-  h2 { font-size: 1.125rem; line-height: 1.3; }
-  h3 { font-size: 1rem; }
+  h1 { font-size: 1.5rem; line-height: 1.2; }
+  h2 { font-size: 1.125rem; line-height: 1.3; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; letter-spacing: -0.005em; }
 
   p { text-wrap: pretty; }
 
@@ -136,110 +157,84 @@
     font-size: 0.875em;
   }
 
-  /* One focus treatment, applied by the browser's own semantics so it works for
-     every control without per-component effort. `focus-visible` only, so a mouse
-     click does not leave a ring behind. */
+  /* One focus treatment, on the browser's own semantics so it works for every
+     control without per-component effort. `focus-visible` only, so a mouse click
+     does not leave a ring behind. */
   :focus-visible {
-    outline: 2px solid var(--ochre);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
-    border-radius: var(--radius-control);
+    border-radius: var(--radius-field);
   }
 
   ::selection {
-    background-color: var(--mark);
-    color: var(--mark-ink);
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
   }
 }
 
 @layer components {
-  /* --- Structure ---------------------------------------------------------- */
+  /* --- Surfaces ----------------------------------------------------------- */
 
-  /* A panel is separated by tone and a hairline, not by a shadow. Elevation is
-     reserved for things that genuinely float above the page (menus, dialogs), so
-     flatness here is the deliberate default rather than an omission. */
+  /* The design's card: white on the tinted ground, with a shadow doing the
+     elevation rather than a hard border. The shadow has a stated reason (the card
+     genuinely floats above the page), which is what R-12 asks for. */
+  .card {
+    background-color: var(--card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* A flat region: no elevation, no shadow, separated by a hairline. Used for
+     panels that are part of the page rather than floating above it. */
   .panel {
-    background-color: var(--surface);
+    background-color: var(--card);
     border: 1px solid var(--rule);
-    border-radius: var(--radius-panel);
+    border-radius: var(--radius-card);
   }
 
-  .hairline {
-    border-color: var(--rule);
-  }
-
-  /* --- The identity motif: a citation mark -------------------------------- */
-
-  /* The bracket label is the product's core mechanic, so it gets the accent and
-     the one place a pill is correct. Monospace keeps it distinct from prose: a
-     student sees "pointer" not "sentence". */
-  .cite {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 1.25rem;
-    padding: 0 0.3rem;
-    border-radius: 999px;
-    background-color: var(--mark);
-    color: var(--mark-ink);
-    font-family: var(--font-mono);
-    font-size: 0.75em;
-    font-weight: 500;
-    line-height: 1.4;
-    vertical-align: 0.05em;
-    white-space: nowrap;
-  }
-
-  /* A citation that resolves to a source is interactive; a bare label is not.
-     Only the interactive form gets hover treatment, so the visual difference
-     tracks the real difference in behaviour. */
-  a.cite:hover,
-  button.cite:hover {
-    background-color: var(--ochre);
-    color: var(--paper);
-  }
-
-  /* --- Controls ----------------------------------------------------------- */
+  /* --- Buttons: pills ----------------------------------------------------- */
 
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    border-radius: var(--radius-control);
+    gap: 0.5rem;
+    border-radius: var(--radius-pill);
     border: 1px solid transparent;
-    padding: 0.45rem 0.8rem;
+    padding: 0.5rem 1.1rem;
     font-size: 0.875rem;
     font-weight: 500;
     line-height: 1.2;
     /* 44px minimum touch target (R-03). */
-    min-height: 2.25rem;
+    min-height: 2.75rem;
     cursor: pointer;
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease,
+      opacity 140ms ease;
   }
   .btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
-  /* The single primary action per screen gets the accent. */
+  /* The action fill. Black in light mode, inverted in dark: never the brand blue,
+     which is the design's most distinctive decision (DESIGN.md). */
   .btn-primary {
-    background-color: var(--mark);
-    color: var(--mark-ink);
-    border-color: var(--mark);
+    background-color: var(--action);
+    color: var(--on-action);
+    border-color: var(--action);
   }
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--ochre);
-    border-color: var(--ochre);
-    color: var(--paper);
+    opacity: 0.88;
   }
 
+  /* The design's "Continue with Google" treatment: white pill, hairline border. */
   .btn-secondary {
-    background-color: transparent;
+    background-color: var(--card);
     color: var(--ink);
     border-color: var(--rule-strong);
   }
   .btn-secondary:hover:not(:disabled) {
-    background-color: var(--surface);
+    border-color: var(--ink-muted);
   }
 
   .btn-quiet {
@@ -249,66 +244,152 @@
   }
   .btn-quiet:hover:not(:disabled) {
     color: var(--ink);
-    background-color: var(--surface);
+    background-color: var(--surface-sunk);
   }
+
+  /* --- Fields ------------------------------------------------------------- */
 
   .field {
     width: 100%;
-    min-height: 2.25rem;
-    padding: 0.45rem 0.65rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 0.9rem;
     background-color: var(--surface-sunk);
     color: var(--ink);
     border: 1px solid var(--rule);
-    border-radius: var(--radius-control);
+    border-radius: var(--radius-field);
     font-size: 0.875rem;
   }
   .field::placeholder {
     color: var(--ink-muted);
   }
   .field:focus {
-    border-color: var(--ochre);
+    border-color: var(--accent);
     outline: none;
   }
   .field:focus-visible {
-    outline: 2px solid var(--ochre);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
   /* --- Navigation --------------------------------------------------------- */
 
-  /* Sidebar and tab-bar items share one treatment so the two shells cannot drift
-     apart. The active item is marked by a solid ink bar and weight, not by the
-     accent: the accent is rationed (DESIGN.md). */
+  /* Sidebar items. The active item is marked by weight and an ink bar, never by
+     the accent: the accent is the identity colour, and spending it on navigation
+     state would leave nothing for the wordmark and links. */
   .nav-item {
     position: relative;
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    border-radius: var(--radius-control);
-    padding: 0.5rem 0.65rem;
+    border-radius: var(--radius-field);
+    padding: 0.55rem 0.7rem;
     font-size: 0.875rem;
     color: var(--ink-muted);
     text-decoration: none;
-    min-height: 2.25rem;
+    min-height: 2.5rem;
   }
   .nav-item:hover {
-    background-color: var(--surface);
+    background-color: var(--surface-sunk);
     color: var(--ink);
   }
   .nav-item[aria-current="page"] {
-    background-color: var(--surface);
+    background-color: var(--surface-sunk);
     color: var(--ink);
     font-weight: 500;
   }
   .nav-item[aria-current="page"]::before {
     content: "";
     position: absolute;
-    left: -0.55rem;
-    top: 0.35rem;
-    bottom: 0.35rem;
-    width: 2px;
-    border-radius: 2px;
-    background-color: var(--ink);
+    left: -0.6rem;
+    top: 0.4rem;
+    bottom: 0.4rem;
+    width: 3px;
+    border-radius: var(--radius-pill);
+    background-color: var(--accent);
+  }
+
+  /* Tab-bar items share the base rule with `.nav-item` above but differ in
+     direction, so they extend it rather than duplicating it. Changing the base
+     treatment therefore reaches both navs, which is what stops them drifting. */
+  .nav-item-tab {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.15rem;
+    border-radius: 0;
+    padding: 0.4rem 0.25rem;
+    /* 44px minimum touch target (R-03). */
+    min-height: 2.75rem;
+    flex: 1;
+    font-size: 0.6875rem;
+    text-align: center;
+  }
+  .nav-item-tab:hover {
+    background-color: transparent;
+  }
+  .nav-item-tab[aria-current="page"] {
+    background-color: transparent;
+  }
+  /* The bar becomes a top rule, because the tab bar is at the bottom of the
+     screen: the marker points into the content from the edge it sits on. */
+  .nav-item-tab[aria-current="page"]::before {
+    left: 25%;
+    right: 25%;
+    top: -1px;
+    bottom: auto;
+    width: auto;
+    height: 2px;
+    border-radius: 0;
+  }
+
+  /* --- Shell -------------------------------------------------------------- */
+
+  /* `main` is a flex column so a screen can fill the space it is *given* rather
+     than the viewport. A screen that sizes itself with `100dvh` ignores the
+     shell's own chrome (the tab bar and its safe-area inset) and produces an
+     outer page scroll around panels that already scroll internally. */
+  .shell-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Reserves room for the fixed tab bar. Computed from the bar's own height plus
+     the inset rather than a magic number, so the two cannot disagree when either
+     changes. */
+  .shell-main-phone {
+    padding-bottom: calc(2.75rem + 1px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* --- Identity: the citation mark ---------------------------------------- */
+
+  /* The product's core mechanic: a bracket label pointing back at a page in the
+     student's own material. It carries the brand azure, which is the identity
+     colour, and the one place a chip shape is right. Monospace keeps it visually
+     distinct from prose, so a pointer reads differently from a sentence. */
+  .cite {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.375rem;
+    padding: 0 0.35rem;
+    border-radius: var(--radius-pill);
+    background-color: var(--accent-soft);
+    color: var(--accent-text);
+    font-family: var(--font-mono);
+    font-size: 0.75em;
+    font-weight: 500;
+    line-height: 1.45;
+    vertical-align: 0.05em;
+    white-space: nowrap;
+  }
+
+  /* Only the interactive form gets hover treatment, so the visual difference
+     tracks the real difference in behaviour (R-26). */
+  a.cite:hover,
+  button.cite:hover {
+    background-color: var(--accent);
+    color: var(--card);
   }
 
   /* --- Labels and state --------------------------------------------------- */
@@ -329,22 +410,33 @@
     color: var(--ink-muted);
   }
 
+  /* A link in body copy uses the darkened azure, because the raw brand blue is
+     only AA at large sizes (DESIGN.md). */
+  .link {
+    color: var(--accent-text);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in oklab, var(--accent-text) 35%, transparent);
+  }
+  .link:hover {
+    border-bottom-color: var(--accent-text);
+  }
+
   .note {
-    border-radius: var(--radius-control);
-    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-field);
+    padding: 0.7rem 0.9rem;
     font-size: 0.875rem;
     border: 1px solid var(--rule);
-    background-color: var(--surface);
+    background-color: var(--surface-sunk);
   }
   .note-danger {
-    background-color: var(--danger-surface);
+    background-color: var(--danger-soft);
     border-color: color-mix(in oklab, var(--danger) 30%, transparent);
     color: var(--danger);
   }
   .note-success {
-    background-color: var(--success-surface);
+    background-color: var(--success-soft);
     border-color: color-mix(in oklab, var(--success) 30%, transparent);
-    color: var(--success);
+    color: var(--success-text);
   }
 }
 

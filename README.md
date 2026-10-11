@@ -24,6 +24,11 @@ every device.
 External capabilities (LLM, embeddings, search, payments, push, storage) sit
 behind traits, so a provider is configuration rather than code.
 
+**Trust boundary:** the client is untrusted and the server is the only
+enforcement point. A client contributes authenticated intent; whether it is
+permitted, affordable, or well-formed is decided server-side, per handler and per
+sync mutation. See `docs/THREAT_MODEL.md` for the normative statement.
+
 ## Prerequisites
 
 - Rust 1.94.1 (`rust-toolchain.toml` pins it; sqlx 0.9 needs ≥1.94.0)
@@ -188,18 +193,25 @@ crates/server    Axum API + job worker
 app/             the shared SPA (web + Tauri frontend)
 src-tauri/       native shell
 config/          plans.toml, billing_policy.toml
+DESIGN.md        the design direction (palette sampled from the Figma design)
 prompts/         versioned prompt modules
 templates/       print templates (cheatsheet PDF)
 migrations/      sqlx migrations; 0017 attaches sync triggers and must stay last
-docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md, RELEASE.md
+docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md,
+                 RELEASE.md, THREAT_MODEL.md
 ```
 
 ## Documentation
 
 - `docs/SPEC.md`. The requirement document of record.
 - `docs/ASSUMPTIONS.md`. Every decision the spec left open, plus blockers.
-- `docs/ARCHITECTURE.md`. Layers, provider traits, native capability matrix,
-  prototype results.
+- `docs/ARCHITECTURE.md`. Layers, provider traits, trust boundary, native
+  capability matrix, prototype results.
 - `docs/API.md`. Routes, conventions, SSE event shapes.
 - `docs/SYNC.md`. Cursor model, push allowlist, conflict rules, offline scope.
+- `docs/THREAT_MODEL.md`. The normative trust boundary: assets, attacker
+  classes, what a modified client can and cannot do, residual risks, and the
+  per-phase verification obligations that follow.
+- `DESIGN.md`. The design direction: palette sampled from the Figma design,
+  type, shape, dials, and the rules it commits to.
 - `docs/superpowers/plans/`. The master roadmap and per-phase plans.

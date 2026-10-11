@@ -11,9 +11,10 @@ import { TabBar } from './TabBar'
  * native iOS build want the same layout. `useFormFactor` owns that decision and
  * its breakpoints match the CSS ones (768px for the sidebar/tab-bar swap).
  *
- * Composition differs by form factor on purpose (RHYTHM 2): tablet and desktop
- * get a persistent sidebar, phones get a bottom tab bar. That is a real
- * difference in how the screen is used, not decoration.
+ * `main` is a flex column (`.shell-main`) so a screen fills the space it is
+ * *given*. A screen that sizes itself with `100dvh` instead ignores the tab bar
+ * and its safe-area inset, which produces an outer page scroll around panels that
+ * already scroll internally, plus a last row hidden behind the bar.
  *
  * The skip link is not optional (R-32): a keyboard user should not have to tab
  * through the whole nav to reach content, and `<main>` is the landmark to skip to.
@@ -32,9 +33,10 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {!isPhone && <Sidebar />}
 
-      {/* Bottom padding on phones reserves room for the fixed tab bar, so the
-          last row of content is never hidden behind it. */}
-      <main id="main" className={`min-w-0 flex-1 pt-safe-top ${isPhone ? 'pb-20' : ''}`}>
+      <main
+        id="main"
+        className={`shell-main pt-safe-top ${isPhone ? 'shell-main-phone' : ''}`}
+      >
         {children}
       </main>
 

@@ -44,6 +44,22 @@ phase adds its first implementation.
   rejects a mobile entry that enables purchase UI, prices, or a CTA, so the file
   cannot be edited into an app-store policy violation.
 
+## Trust boundary
+
+**The client is untrusted; the server is the only enforcement point.** Everything
+left of the API, the Tauri shell, the web SPA, and a scripted client holding a
+valid token, is assumed hostile and possibly patched. The only thing a client
+contributes is *authenticated intent* ("this user wants to send this message in
+this workspace"); whether that intent is permitted, affordable, or well-formed is
+decided on the server, per handler and per sync mutation.
+
+`docs/THREAT_MODEL.md` is the normative statement of this boundary: the assets, the
+attacker classes, what a modified client can and cannot do, the accepted residual
+risks, tamper resistance by platform, and the per-phase verification obligations
+that follow from it. It is linked here and from `README.md` so it cannot drift out
+of the document set, and the phases that implement against it are Phases 7
+(`tamper.rs`), 8 (cross-tenant isolation) and 13 (payment trust).
+
 ## Native capability matrix
 
 See `docs/research/2026-10-11-tauri-2-capability-matrix.md` for the verified
