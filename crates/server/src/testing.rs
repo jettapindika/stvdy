@@ -157,6 +157,17 @@ impl TestState {
         self
     }
 
+    /// The same state with the clock pinned to an instant.
+    ///
+    /// The local-boundary tests need this: "the counter rolls at the user's own midnight"
+    /// is a statement about an instant, and `FixedClock::at(now)` cannot make one. Both
+    /// handles move together, so a test cannot read a different time than the state does.
+    pub fn with_clock(mut self, clock: Arc<FixedClock>) -> Self {
+        self.state.clock = clock.clone();
+        self.clock = clock;
+        self
+    }
+
     /// The same state with a different embedder.
     ///
     /// Needed by the Indonesian gate: the harness's `HashEmbedder` treats a query

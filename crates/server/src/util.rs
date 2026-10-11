@@ -74,6 +74,18 @@ pub fn next_local_month_start(timezone: &str, clock: &dyn Clock) -> DateTime<Utc
     first.with_timezone(&Utc)
 }
 
+/// The user's local calendar month, as `YYYY-MM`.
+///
+/// The one place the month *string* is produced, because two things have to agree on it:
+/// the ledger's `period_key` (which is what makes a grant once-per-period) and the
+/// scheduler's `dedupe_key` (which is what makes it once-per-schedule). Formatting the
+/// instant in UTC instead would name the previous month for every zone east of Greenwich,
+/// which is where most of this product's users are.
+pub fn local_month_key(timezone: &str, at: DateTime<Utc>) -> String {
+    let tz: Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
+    at.with_timezone(&tz).format("%Y-%m").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +163,18 @@ mod tests {
         let clock = FixedClock::at("2026-12-20T02:00:00Z".parse().expect("a valid timestamp"));
         let start = next_local_month_start("Asia/Jakarta", &clock);
         assert_eq!(start.to_rfc3339(), "2026-12-31T17:00:00+00:00");
+    }
+
+    #[test]
+    fn the_month_key_is_the_users_own_month_not_utcs() {
+        // 2026-10-31T18:00Z is already November in Jakarta (UTC+7) and still October in
+        // UTC. Formatting the instant in UTC would stamp the ledger with the wrong month,
+        // and the grant's `period_key` is what makes it once-per-period.
+        let november = "2026-10-31T18:00:00Z".parse().expect("a valid timestamp");
+        assert_eq!(local_month_key("Asia/Jakarta", november), "2026-11");
+        assert_eq!(local_month_key("UTC", november), "2026-10");
+
+        let october = "2026-10-31T16:00:00Z".parse().expect("a valid timestamp");
+        assert_eq!(local_month_key("Asia/Jakarta", october), "2026-10");
     }
 }

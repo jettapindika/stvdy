@@ -22,8 +22,8 @@
 
 use std::future::Future;
 
-use sqlx::PgConnection;
-use stvdy_core::config::{PlanId, PlansFile};
+use sqlx::{PgConnection, PgPool};
+use stvdy_core::config::{Limit, PlanId, PlansFile};
 use stvdy_core::entitlements::{
     Credits, EntitlementError, Feature, PlanFacts, SubStatus, UsageSnapshot, check_with,
 };
@@ -101,7 +101,14 @@ pub async fn snapshot_for(state: &AppState, user_id: Uuid) -> AppResult<UsageSna
     let status = subscription_status(raw_status.as_deref(), user_id);
     let plan = effective_plan(&plan_id, status);
     let mut conn = acquire(state).await?;
-    counters(&mut conn, state, user_id, &timezone, plan, status).await
+    // No device: the caller has no session, so there is no device row to read a flag from.
+    // The only features this serves are `DeviceLogin` (checked where the device is written)
+    // and a job's own re-check.
+    Ok(
+        counters(&mut conn, state, user_id, &timezone, plan, status, None)
+            .await?
+            .snapshot,
+    )
 }
 
 /// The snapshot read on a caller's own connection, so a count a decision depends on can
@@ -112,15 +119,17 @@ pub async fn snapshot_in(
     user: &AuthUser,
 ) -> AppResult<UsageSnapshot> {
     let plan = user.effective_plan();
-    counters(
+    Ok(counters(
         conn,
         state,
         user.user_id,
         &user.timezone,
         plan,
         user.subscription_status,
+        Some(user.device_id),
     )
-    .await
+    .await?
+    .snapshot)
 }
 
 /// The one decision every handler makes.
@@ -128,9 +137,32 @@ pub async fn snapshot_in(
 /// Returns `AppError` so a handler writes `entitlements::require(&state, &user,
 /// Feature::ChatMessage).await?;` and nothing else. A refusal is logged with the plan and
 /// the feature, because it is the only trace an abuse attempt leaves.
+///
+/// A **read-only device** refuses here, before the feature is even considered: the spec
+/// flags a device over the new plan's `devices_max` read-only rather than revoking it, so
+/// the device keeps its session and its reads but may not spend — the remedy is to sign
+/// another device out, not to buy, which is `FeatureLocked`'s rule (A143). The flag comes
+/// from the device row in the same statement as the counters, so the decision is one point
+/// in time and one round trip.
 pub async fn require(state: &AppState, user: &AuthUser, feature: Feature) -> AppResult<()> {
-    let snapshot = snapshot(state, user).await?;
-    decide(state, &snapshot, &facts(state, user), feature)
+    let mut conn = acquire(state).await?;
+    let counters = counters(
+        &mut conn,
+        state,
+        user.user_id,
+        &user.timezone,
+        user.effective_plan(),
+        user.subscription_status,
+        Some(user.device_id),
+    )
+    .await?;
+
+    if counters.device_read_only {
+        tracing::info!(user_id = %user.user_id, device_id = %user.device_id, ?feature, "read-only device refused");
+        return Err(device_read_only(Some(feature)));
+    }
+
+    decide(state, &counters.snapshot, &facts(state, user), feature)
 }
 
 /// [`require`] for a caller that has no `AuthUser` yet.
@@ -191,9 +223,30 @@ where
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the reserve lock: {error}")))?;
 
+    // The device check is here, and **before** the `feature` branch, because it applies
+    // whether or not the action is counted: a cheatsheet and a report section spend credits
+    // and consume no monthly allowance, and a read-only device may not spend either of them
+    // (the spec flags a device over `devices_max` read-only rather than revoking it). Without
+    // this the flag would be enforced on the routes that call `require` and not on the four
+    // that reserve — a control with a hole in it.
+    let counters = counters(
+        &mut *conn,
+        state,
+        user.user_id,
+        &user.timezone,
+        user.effective_plan(),
+        user.subscription_status,
+        Some(user.device_id),
+    )
+    .await?;
+
+    if counters.device_read_only {
+        tracing::info!(user_id = %user.user_id, device_id = %user.device_id, "read-only device refused a reservation");
+        return Err(device_read_only(feature));
+    }
+
     if let Some(feature) = feature {
-        let snapshot = snapshot_in(&mut *conn, state, user).await?;
-        decide(state, &snapshot, &facts(state, user), feature)?;
+        decide(state, &counters.snapshot, &facts(state, user), feature)?;
     }
 
     let spent = crate::credits::spend_in(
@@ -210,6 +263,381 @@ where
     let reserved = reserve(conn, spent.usage_event_id).await?;
 
     Ok((spent, reserved))
+}
+
+/// How many rows a read-only recompute left flagged, per table.
+///
+/// The count of rows that **are** read-only after the call, not of rows it changed: the
+/// recompute is idempotent, so a caller can log this on every pass and read it as the
+/// account's state rather than as an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReadOnlyReport {
+    pub workspaces: u64,
+    pub sources: u64,
+    pub devices: u64,
+}
+
+/// The three tables a downgrade can put over a limit.
+///
+/// The statements are literals in one arm per table rather than a `format!`ed query, the
+/// same shape `credits::RefundTarget` uses and for the same reason: a table name is
+/// exactly the kind of value that should never be interpolated into SQL, and `sqlx`
+/// refuses a dynamically built statement so the choice is not left to a reviewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadOnlyAxis {
+    Workspaces,
+    Sources,
+    Devices,
+}
+
+impl ReadOnlyAxis {
+    /// The plan's limit for this axis.
+    fn limit(self, cfg: &stvdy_core::config::PlanConfig) -> Limit {
+        match self {
+            Self::Workspaces => cfg.workspaces,
+            Self::Sources => cfg.sources_total,
+            // Only live devices count: a revoked one is signed out, and counting it would
+            // make the remedy the refusal names ("sign another device out") do nothing.
+            Self::Devices => Limit::Max(cfg.devices_max),
+        }
+    }
+
+    /// Ranks the live rows oldest-first, flags the ones past `$2`, and returns how many
+    /// are over the limit.
+    ///
+    /// `target` carries **every** row of the account, with a non-live row ranked `0` so its
+    /// flag clears. That makes `read_only = true` mean exactly "this live row is over the
+    /// limit": a tombstoned or revoked row left holding a stale `true` would be a claim a
+    /// later reader — an admin view, a support query — has no way to tell from the real
+    /// thing. The `update` runs inside a CTE (a data-modifying CTE always executes to
+    /// completion), and the outer `select` counts the same ranking, so the flags and the
+    /// number cannot describe two different states. `read_only <> …` keeps a no-op update
+    /// from firing the sync trigger on every pass.
+    fn flag_sql(self) -> &'static str {
+        match self {
+            Self::Workspaces => {
+                "with ranked as (
+                   select id, row_number() over (order by created_at, id) as rn
+                     from workspaces
+                    where user_id = $1 and deleted_at is null),
+                 target as (
+                   select w.id, coalesce(r.rn, 0) as rn
+                     from workspaces w
+                     left join ranked r on r.id = w.id
+                    where w.user_id = $1),
+                 flagged as (
+                   update workspaces t set read_only = (g.rn > $2)
+                     from target g
+                    where t.id = g.id and t.read_only <> (g.rn > $2)
+                   returning t.id)
+                 select count(*)::bigint from ranked where rn > $2"
+            }
+            Self::Sources => {
+                "with ranked as (
+                   select id, row_number() over (order by created_at, id) as rn
+                     from sources
+                    where user_id = $1 and deleted_at is null),
+                 target as (
+                   select s.id, coalesce(r.rn, 0) as rn
+                     from sources s
+                     left join ranked r on r.id = s.id
+                    where s.user_id = $1),
+                 flagged as (
+                   update sources t set read_only = (g.rn > $2)
+                     from target g
+                    where t.id = g.id and t.read_only <> (g.rn > $2)
+                   returning t.id)
+                 select count(*)::bigint from ranked where rn > $2"
+            }
+            Self::Devices => {
+                "with ranked as (
+                   select id, row_number() over (order by created_at, id) as rn
+                     from devices
+                    where user_id = $1 and revoked_at is null),
+                 target as (
+                   select d.id, coalesce(r.rn, 0) as rn
+                     from devices d
+                     left join ranked r on r.id = d.id
+                    where d.user_id = $1),
+                 flagged as (
+                   update devices t set read_only = (g.rn > $2)
+                     from target g
+                    where t.id = g.id and t.read_only <> (g.rn > $2)
+                   returning t.id)
+                 select count(*)::bigint from ranked where rn > $2"
+            }
+        }
+    }
+
+    /// Clears every flag on an axis no plan limits, so an upgrade lifts the restriction.
+    fn clear_sql(self) -> &'static str {
+        match self {
+            Self::Workspaces => {
+                "update workspaces set read_only = false
+                  where user_id = $1 and read_only"
+            }
+            Self::Sources => {
+                "update sources set read_only = false
+                  where user_id = $1 and read_only"
+            }
+            Self::Devices => {
+                "update devices set read_only = false
+                  where user_id = $1 and read_only"
+            }
+        }
+    }
+
+    fn into_report(self, count: u64, report: &mut ReadOnlyReport) {
+        match self {
+            Self::Workspaces => report.workspaces = count,
+            Self::Sources => report.sources = count,
+            Self::Devices => report.devices = count,
+        }
+    }
+
+    /// The name a log line or an error uses for this axis.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Workspaces => "workspaces",
+            Self::Sources => "sources",
+            Self::Devices => "devices",
+        }
+    }
+}
+
+/// Recomputes the read-only flags for one account, from its effective plan.
+///
+/// Idempotent, and called from the rollover job and after a plan change, because the two
+/// events that can put an account over a limit are a downgrade and a plan switch. A
+/// downgrade never deletes: the over-limit rows keep every column and every byte, they
+/// stay readable and exportable (A149), and what they lose is writability — which is what
+/// the write paths consult the flag for.
+///
+/// Ordering is deliberate: rows are ranked oldest-first, so the *oldest* stay writable and
+/// the newest are flagged, which is the reading a user expects when they are told to
+/// delete something.
+pub async fn recompute_read_only(
+    pool: &PgPool,
+    plans: &PlansFile,
+    user_id: Uuid,
+) -> AppResult<ReadOnlyReport> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "select u.plan_id,
+                (select sub.status
+                   from subscriptions sub
+                  where sub.user_id = u.id
+                  order by (sub.status in ('active', 'grace')) desc,
+                           sub.current_period_end desc
+                  limit 1) as subscription_status
+           from users u
+          where u.id = $1 and u.deleted_at is null",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the account: {error}")))?;
+
+    let Some((plan_id, raw_status)) = row else {
+        return Ok(ReadOnlyReport::default());
+    };
+    let status = subscription_status(raw_status.as_deref(), user_id);
+    let plan = effective_plan(&plan_id, status);
+    let cfg = plans.get(plan);
+
+    let mut report = ReadOnlyReport::default();
+    for axis in [
+        ReadOnlyAxis::Workspaces,
+        ReadOnlyAxis::Sources,
+        ReadOnlyAxis::Devices,
+    ] {
+        let count = flag_over_limit(pool, axis, axis.limit(cfg), user_id).await?;
+        axis.into_report(count, &mut report);
+    }
+    Ok(report)
+}
+
+/// Flags one axis' over-limit rows read-only, and clears the ones that are back within it.
+///
+/// Returns how many rows are over the limit, so a caller can log the account's state.
+async fn flag_over_limit(
+    pool: &PgPool,
+    axis: ReadOnlyAxis,
+    limit: Limit,
+    user_id: Uuid,
+) -> AppResult<u64> {
+    let Some(max) = limit.max() else {
+        // Unlimited: nothing on this axis can be over the limit, so every flag clears —
+        // which is what makes an upgrade lift the restriction rather than leave it behind.
+        sqlx::query(axis.clear_sql())
+            .bind(user_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!("clearing {} flags: {error}", axis.name()))
+            })?;
+        return Ok(0);
+    };
+
+    let count: i64 = sqlx::query_scalar(axis.flag_sql())
+        .bind(user_id)
+        .bind(i64::from(max))
+        .fetch_one(pool)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!(
+                "flagging {} read-only: {error}",
+                axis.name()
+            ))
+        })?;
+
+    Ok(u64::try_from(count).unwrap_or(0))
+}
+
+/// The account's storage, in bytes: the originals of its live sources (A157).
+///
+/// The same sum the `UploadSource` decision reads, from the same place, so the number a
+/// user is shown and the number their next upload is checked against cannot differ.
+pub async fn storage_bytes(pool: &PgPool, user_id: Uuid) -> AppResult<i64> {
+    let bytes: i64 = sqlx::query_scalar(
+        "select coalesce(sum(file_size), 0)::bigint from sources
+          where user_id = $1 and deleted_at is null",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("summing storage: {error}")))?;
+    Ok(bytes)
+}
+
+/// A row a write is addressed to, for the read-only check.
+///
+/// Two kinds, because those are the two the recompute flags: a workspace (whose refusal
+/// reaches the uploads inside it) and a device (whose refusal reaches the spending the
+/// device asks for). A source has no write path of its own — it is created into a
+/// workspace and deleted, and deleting is the remedy the refusal names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyRow {
+    Workspace,
+    Device,
+}
+
+impl ReadOnlyRow {
+    /// What a refusal calls it, and the plan field its limit comes from.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::Device => "device",
+        }
+    }
+}
+
+/// Refuses a write into a row the account's plan has put over a limit.
+///
+/// The spec's downgrade rule is "never delete user data": the over-limit rows keep every
+/// column and every byte and stay readable and exportable (A149), and what they lose is
+/// writability. This is that refusal, and it is a real one on the write path rather than a
+/// UI affordance — a client that skipped the UI would meet it here.
+///
+/// **Replacing the ownership check, not sitting beside it**, on the write paths that use
+/// it: one statement decides both, so a foreign row cannot be read-only *for this caller*
+/// and the 404 that hides its existence is the same 404 the route already gives.
+///
+/// Deleting is deliberately not refused anywhere. It is the remedy both this refusal and
+/// the engine's count refusal name, and a read-only row that could not be deleted would
+/// leave the account permanently over its limit with nothing it could do.
+pub async fn require_writable_row(
+    state: &AppState,
+    user: &AuthUser,
+    row: ReadOnlyRow,
+    id: Uuid,
+) -> AppResult<()> {
+    let plan = user.effective_plan();
+    let cfg = state.config.plans.get(plan);
+
+    let found: Option<(bool, i64)> = match row {
+        ReadOnlyRow::Workspace => {
+            sqlx::query_as(
+                "select w.read_only,
+                        (select count(*)::bigint from workspaces
+                          where user_id = $1 and deleted_at is null) as used
+                   from workspaces w
+                  where w.id = $2 and w.user_id = $1 and w.deleted_at is null",
+            )
+            .bind(user.user_id)
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+        }
+        ReadOnlyRow::Device => {
+            sqlx::query_as(
+                "select d.read_only,
+                        (select count(*)::bigint from devices
+                          where user_id = $1 and revoked_at is null) as used
+                   from devices d
+                  where d.id = $2 and d.user_id = $1 and d.revoked_at is null",
+            )
+            .bind(user.user_id)
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+        }
+    }
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "reading the {} read-only flag: {error}",
+            row.label()
+        ))
+    })?;
+
+    let Some((read_only, used)) = found else {
+        return Err(AppError::NotFound);
+    };
+    if !read_only {
+        return Ok(());
+    }
+
+    let limit = match row {
+        ReadOnlyRow::Workspace => cfg.workspaces,
+        ReadOnlyRow::Device => Limit::Max(cfg.devices_max),
+    };
+    // An unlimited plan cannot have a flagged row (the recompute clears them), so this is
+    // the honest "no maximum" rather than a zero that reads as a real cap.
+    let limit = limit.max().map_or(i64::MAX, i64::from);
+
+    tracing::info!(user_id = %user.user_id, row = row.label(), %id, plan = %plan, "read-only row refused a write");
+    Err(entitlement(
+        "limit_reached",
+        format!(
+            "this {} is read-only after your plan change: your plan allows {limit} and you have {used}",
+            row.label()
+        ),
+        plan_for_more_credits(plan),
+        Some(limit),
+        Some(used),
+    ))
+}
+
+/// The refusal for a device over the plan's `devices_max` (A143).
+///
+/// `FeatureLocked`, not `PlanRequired`: the remedy is to sign another device out, and
+/// selling an upgrade to a device that is already over its plan's device count would be
+/// offering the wrong fix. `limit`/`used` stay null because this refuses before the
+/// feature's own numbers mean anything.
+///
+/// `None` is the reserve path, where the action is priced but not counted (a cheatsheet, a
+/// report section) and there is no `Feature` to name.
+fn device_read_only(feature: Option<Feature>) -> AppError {
+    entitlement(
+        "feature_locked",
+        format!(
+            "this device is over your plan's device limit, so {} is unavailable here; \
+             sign another device out to use it",
+            feature.map_or("this action", label)
+        ),
+        None,
+        None,
+        None,
+    )
 }
 
 /// The plan's limits and features, as the plan/usage screen needs them.
@@ -441,7 +869,8 @@ async fn counters(
     timezone: &str,
     plan: PlanId,
     subscription_status: SubStatus,
-) -> AppResult<UsageSnapshot> {
+    device_id: Option<Uuid>,
+) -> AppResult<CallerCounters> {
     let day_start = crate::util::local_day_start(timezone, state.clock.as_ref());
     let month_start = crate::util::local_month_start(timezone, state.clock.as_ref());
 
@@ -478,33 +907,55 @@ async fn counters(
              where user_id = $1 and deleted_at is null and created_at >= $3
                and status in ('draft', 'generating', 'ready')) as reports_this_month,
            (select count(*)::bigint from sources
-             where user_id = $1 and deleted_at is null and kind = 'syllabus') as syllabus_imports",
+             where user_id = $1 and deleted_at is null and kind = 'syllabus') as syllabus_imports,
+           -- The one fact about the calling *device* rather than the account: the spec
+           -- flags a device over the plan's `devices_max` read-only instead of revoking it.
+           -- The coalesce is *outside* the subselect: with no matching row the subselect is
+           -- null, and `coalesce` inside it would only cover a null column. A null `$4` (a
+           -- caller with no device row, e.g. a job) therefore reads false.
+           coalesce((select read_only from devices where id = $4), false) as device_read_only",
     )
     .bind(user_id)
     .bind(day_start)
     .bind(month_start)
+    .bind(device_id)
     .fetch_one(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the usage snapshot: {error}")))?;
 
-    Ok(UsageSnapshot {
-        plan,
-        subscription_status,
-        credits: Credits {
-            monthly: row.credits_monthly,
-            purchased: row.credits_purchased,
+    Ok(CallerCounters {
+        snapshot: UsageSnapshot {
+            plan,
+            subscription_status,
+            credits: Credits {
+                monthly: row.credits_monthly,
+                purchased: row.credits_purchased,
+            },
+            storage_bytes: row.storage_bytes,
+            workspaces: row.workspaces,
+            sources: row.sources,
+            devices: row.devices,
+            chat_msgs_today: row.chat_msgs_today,
+            web_searches_today: row.web_searches_today,
+            flashcards_this_month: row.flashcards_this_month,
+            quizzes_this_month: row.quizzes_this_month,
+            reports_this_month: row.reports_this_month,
+            syllabus_imports: row.syllabus_imports,
         },
-        storage_bytes: row.storage_bytes,
-        workspaces: row.workspaces,
-        sources: row.sources,
-        devices: row.devices,
-        chat_msgs_today: row.chat_msgs_today,
-        web_searches_today: row.web_searches_today,
-        flashcards_this_month: row.flashcards_this_month,
-        quizzes_this_month: row.quizzes_this_month,
-        reports_this_month: row.reports_this_month,
-        syllabus_imports: row.syllabus_imports,
+        device_read_only: row.device_read_only,
     })
+}
+
+/// The counters, plus the one fact that is about the calling device rather than the
+/// account.
+///
+/// Returned together because they are read in one statement: the read-only flag has to
+/// come from the same instant as the counters it is decided beside, or a plan change
+/// between two queries would produce a decision that never existed.
+struct CallerCounters {
+    snapshot: UsageSnapshot,
+    /// The calling device is over the plan's device limit: it may read, not spend.
+    device_read_only: bool,
 }
 
 /// The snapshot's wire shape, so the twelve subselects decode in one pass.
@@ -522,6 +973,7 @@ struct SnapshotRow {
     quizzes_this_month: i64,
     reports_this_month: i64,
     syllabus_imports: i64,
+    device_read_only: bool,
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 //! process that dies mid-job (the boot sweep requeues anything left `running`).
 
 pub mod handlers;
+pub mod schedule;
 pub mod worker;
 
 use std::sync::Arc;
@@ -68,12 +69,29 @@ pub async fn enqueue(
     payload: Value,
     dedupe_key: Option<&str>,
 ) -> sqlx::Result<uuid::Uuid> {
+    enqueue_at(pool, queue, kind, payload, dedupe_key, chrono::Utc::now()).await
+}
+
+/// [`enqueue`] with an explicit `run_at`, for the one producer that schedules rather than
+/// reacts: `jobs::schedule` runs an account's boundary job at its next local month start.
+///
+/// A conflict on `dedupe_key` updates the payload and leaves `run_at` alone. The run time
+/// of a job that is already scheduled is a fact about the period it was scheduled for;
+/// moving it out on every pass would be a job that never runs.
+pub async fn enqueue_at(
+    pool: &PgPool,
+    queue: &Queue,
+    kind: &str,
+    payload: Value,
+    dedupe_key: Option<&str>,
+    run_at: chrono::DateTime<chrono::Utc>,
+) -> sqlx::Result<uuid::Uuid> {
     let id: uuid::Uuid = sqlx::query_scalar(
         // The `where` clause is required: the unique index on `dedupe_key` is
         // partial (`where dedupe_key is not null`), and Postgres will not infer
         // a partial index as a conflict target without the same predicate.
-        "insert into jobs (kind, payload, dedupe_key)
-         values ($1, $2, $3)
+        "insert into jobs (kind, payload, dedupe_key, run_at)
+         values ($1, $2, $3, $4)
          on conflict (dedupe_key) where dedupe_key is not null
            do update set payload = excluded.payload
          returning id",
@@ -81,6 +99,7 @@ pub async fn enqueue(
     .bind(kind)
     .bind(payload)
     .bind(dedupe_key)
+    .bind(run_at)
     .fetch_one(pool)
     .await?;
 
@@ -134,6 +153,20 @@ pub struct ClaimedJob {
     pub kind: String,
     pub payload: Value,
     pub attempts: i32,
+}
+
+impl ClaimedJob {
+    /// The `user_id` a per-account job carries.
+    ///
+    /// A payload without one is a *permanent* failure: no retry invents a user id, and a
+    /// handler that guessed would grant a period to the wrong account.
+    pub fn user_id(&self) -> Result<uuid::Uuid, Failure> {
+        self.payload
+            .get("user_id")
+            .and_then(|value| value.as_str())
+            .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+            .ok_or_else(|| Failure::permanent("payload has no valid user_id"))
+    }
 }
 
 /// Claims one due job, if any. `SKIP LOCKED` is what lets several workers (or

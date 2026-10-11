@@ -2,8 +2,10 @@
 //! caller.
 
 pub mod cheatsheet;
+pub mod counters;
 pub mod generate;
 pub mod generate_quiz;
+pub mod grants;
 pub mod ingest;
 pub mod render_pdf;
 pub mod report;

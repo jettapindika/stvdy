@@ -288,6 +288,10 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // Phase 3. A server-side cost control with no client-visible entity, so
         // it is deliberately not a `+sync` table (A40).
         "search_cache",
+        // Phase 7. A43's signup limiter is database-backed on purpose: an in-process
+        // bucket resets on restart, which is exactly what a signup farm waits for. It
+        // holds IPs and email domains, so it is not a `+sync` table (A154).
+        "signup_attempts",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES

@@ -60,6 +60,10 @@ pub struct AppConfig {
     /// The chat and generation model. `None` means no provider is configured.
     pub llm: Option<LlmConfig>,
     pub search: SearchConfig,
+    /// How long a subscription keeps its paid limits past `current_period_end`
+    /// before the rollover expires it (the spec's "3-day grace period
+    /// (configurable)"). Read by `jobs::handlers::counters`.
+    pub grace_period_days: i64,
 }
 
 /// Token lifetimes and the verification-link window.
@@ -299,6 +303,7 @@ impl AppConfig {
             google_login: google_login_config(&get)?,
             llm: llm_config(&get_or, &get),
             search: search_config(&get, &get_or)?,
+            grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
         })
     }
 }

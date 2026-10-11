@@ -69,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let worker = jobs::worker::spawn(state.clone());
+    // The only time-based producer: it enqueues each account's local period-boundary jobs
+    // and the worker runs them. Separate tasks because they fail differently — a scheduler
+    // pass that fails is retried by the next tick, while a claimed job has its own retries.
+    let scheduler = jobs::schedule::spawn(state.clone());
     let app = routes::router(state)?;
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
@@ -83,9 +87,10 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(shutdown_signal());
 
     let result = server.await.context("server error");
-    // The worker owns no state that needs flushing, but stopping it explicitly
-    // keeps a shutdown from looking like a hang while it finishes a job.
+    // Neither owns state that needs flushing, but stopping them explicitly keeps a
+    // shutdown from looking like a hang while one finishes a job.
     worker.abort();
+    scheduler.abort();
     result
 }
 

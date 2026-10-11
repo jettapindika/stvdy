@@ -29,27 +29,29 @@ const BUCKETS: [&str; 2] = ["monthly", "purchased"];
 /// fresh account has a zero balance and cannot send a single message, which is
 /// what the chat suite caught: every chat test was a 402.
 ///
-/// Phase 7 adds the recurring `monthly_grant` job on top for renewals; the
-/// signup grant is not that job's work, because a job that runs at period start
-/// cannot help the account whose period starts at signup.
+/// The recurring `monthly_grant` job is the same grant with the same `period_key`, so
+/// whichever of the two runs first is the one that grants and the other is a no-op
+/// (A152). The key is the account's **own** local month, read from the row that was just
+/// written rather than assumed: a user who signs up on the last evening of a month is in
+/// the next month in their own zone before UTC is.
 pub async fn grant_monthly(pool: &PgPool, user_id: Uuid, credits: i64) -> AppResult<()> {
-    if credits <= 0 {
-        // A plan with no monthly allowance grants nothing rather than writing a
-        // zero row that would confuse a later sum.
+    let row: Option<(String, String)> =
+        sqlx::query_as("select plan_id, timezone from users where id = $1 and deleted_at is null")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the account: {error}")))?;
+
+    let Some((plan_id, timezone)) = row else {
         return Ok(());
-    }
+    };
 
-    sqlx::query(
-        "insert into credit_ledger (user_id, delta, bucket, reason)
-         values ($1, $2, 'monthly', 'monthly_grant')",
-    )
-    .bind(user_id)
-    .bind(credits)
-    .execute(pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("granting monthly credits: {error}")))?;
-
-    tracing::info!(%user_id, credits, "monthly credit grant");
+    let plan = stvdy_core::config::PlanId::parse(&plan_id);
+    let period_key = format!(
+        "monthly:{}",
+        crate::util::local_month_key(&timezone, chrono::Utc::now())
+    );
+    grant(pool, user_id, plan, &period_key, credits).await?;
     Ok(())
 }
 

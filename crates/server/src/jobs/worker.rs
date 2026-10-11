@@ -90,6 +90,11 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // route (the roadmap's job table has no outline kind), so only the section is here.
         "generate_report_section" => crate::jobs::handlers::report::run(state, job).await,
         "generate_cheatsheet" => crate::jobs::handlers::cheatsheet::run(state, job).await,
+        // The period's allowance, and the rollover that precedes it. Separate kinds
+        // because they fail differently: a grant that cannot be written is retryable,
+        // while the rollover is idempotent and cheap to repeat.
+        "monthly_grant" => crate::jobs::handlers::grants::run(state, job).await,
+        "reset_counters" => crate::jobs::handlers::counters::run(state, job).await,
         // Separate from `generate_cheatsheet` so a failed print cannot discard a
         // successfully generated document: the blocks are the document, and a print is
         // retryable and free.
