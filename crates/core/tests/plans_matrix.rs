@@ -332,3 +332,40 @@ fn scratch_dir() -> std::path::PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
+
+#[test]
+fn model_tier_never_gets_cheaper_as_the_plan_rises() {
+    // A41: free is served by the cheapest model, pro by cheap, power by best.
+    // `ModelTier` derives Ord precisely so this is a comparison rather than an
+    // enumerated pair check that could silently miss a case.
+    use stvdy_core::config::ModelTier;
+
+    let plans = shipped();
+    let free = plans.plans[&PlanId::Free].model_tier;
+    let pro = plans.plans[&PlanId::Pro].model_tier;
+    let power = plans.plans[&PlanId::Power].model_tier;
+
+    assert_eq!(free, ModelTier::Cheapest);
+    assert_eq!(pro, ModelTier::Cheap);
+    assert_eq!(power, ModelTier::Best);
+    assert!(free <= pro && pro <= power);
+    assert!(ModelTier::Cheapest < ModelTier::Cheap);
+    assert!(ModelTier::Cheap < ModelTier::Best);
+}
+
+#[test]
+fn a_cheaper_model_on_a_higher_plan_is_rejected() {
+    let shipped = std::fs::read_to_string(PLANS_PATH).unwrap();
+    // power downgraded below pro.
+    let mutated = shipped.replace("model_tier = \"best\"", "model_tier = \"cheapest\"");
+    assert_ne!(mutated, shipped);
+
+    let dir = scratch_dir();
+    let path = dir.join("plans.toml");
+    std::fs::write(&path, mutated).unwrap();
+
+    match load_plans(&path).unwrap_err() {
+        CoreError::ConfigInvalid(msg) => assert!(msg.contains("model_tier"), "got: {msg}"),
+        other => panic!("expected ConfigInvalid, got {other:?}"),
+    }
+}

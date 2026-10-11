@@ -46,7 +46,7 @@ syllabus_imports_total = 1
 planner = "manual"
 agent_actions = false
 reminder_channels = ["web", "push"]
-model_tier = "cheap"
+model_tier = "cheapest"
 byok = false
 advanced_analytics = false
 

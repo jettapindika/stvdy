@@ -1339,7 +1339,12 @@ git commit -m "feat(core): billing_policy loader that structurally forbids mobil
 
 - `0001_extensions.sql`: the two `create extension if not exists` statements.
 - `0002_plans.sql`: the `plans` table.
-- `0003_users.sql`: the `users` table **plus** `is_admin boolean not null default false` after `student_verified`.
+- `0003_users.sql`: the `users` table **plus** (a) `is_admin boolean not null default false` after `student_verified`, and (b) the A48 deltas for Google login: **`password_hash` must be nullable** (the spec says `not null`; a Google-only user has no password), plus
+  ```sql
+  google_sub text unique,             -- stable Google identifier; the ONLY safe link key
+  email_verified_at timestamptz,      -- when verification happened (A43 needs a timestamp)
+  create unique index on users (lower(email));
+  ```
 - `0004_devices_auth_push.sql`: `devices`, `auth_sessions`, `push_tokens` **plus**:
   ```sql
   create index on auth_sessions (refresh_token_hash);
@@ -2288,13 +2293,32 @@ BIND_ADDR=127.0.0.1:8080
 RUST_LOG=info,stvdy_server=debug,tower_http=debug
 
 # --- database / storage ---
+# Dev: either the compose postgres (below) or Supabase. If Supabase, use the
+# TRANSACTION POOLER (port 6543) and note that db.rs must set
+# statement_cache_capacity(0) — see A47. Production must NOT be Supabase free
+# (500 MB cannot hold a pgvector workload; ~7 paying users would fill it).
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy
+# Supabase example (pooler, transaction mode):
+# DATABASE_URL=postgres://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres
+
+# --- object storage (A15: minio/* images were REMOVED from Docker Hub) ---
+# Dev: the compose service uses pgsty/minio (community mirror, same S3 API).
+# Prod: Cloudflare R2 free tier — 10 GB storage, 1M Class A / 10M Class B ops, $0 egress.
 S3_ENDPOINT=http://localhost:9000
 S3_REGION=us-east-1
 S3_BUCKET=stvdy-sources
 S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
 S3_FORCE_PATH_STYLE=true
+# R2 example (S3_FORCE_PATH_STYLE stays true):
+# S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+
+# --- auth (A48: Google login is server-side OIDC; NOT Supabase Auth) ---
+# Google Cloud console -> Credentials -> OAuth client (Web application).
+# Register the redirect URI per environment; never ship the secret to a client.
+GOOGLE_LOGIN_CLIENT_ID=
+GOOGLE_LOGIN_CLIENT_SECRET=
+GOOGLE_LOGIN_REDIRECT_URI=http://localhost:8080/auth/google/callback
 
 # --- secrets (dev values only; generate real ones for prod) ---
 JWT_SECRET=dev-only-change-me

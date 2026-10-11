@@ -50,6 +50,49 @@ npm --prefix app run dev             # web on localhost:5173
 If you already run Postgres locally on 5432, point `DATABASE_URL` at it (it must
 have pgvector available) or stop it before `docker compose up`.
 
+## Supabase dev database
+
+Dev and early staging can run against a hosted Supabase Postgres instead of the
+compose one — project `stvdy` (`kugefzknygvjmgwanjkk`, `ap-southeast-1`, org
+Jetta). Per A47 this is **never** the production database: the free tier's 500 MB
+cannot hold this pgvector workload.
+
+```bash
+supabase login
+supabase link --project-ref kugefzknygvjmgwanjkk   # prompts for the DB password
+cp .env.supabase.example .env.supabase             # paste the same password
+just migrate-supabase                              # 17 migrations
+just server-supabase                               # API against Supabase
+```
+
+`.env.supabase` is gitignored and `just check` never reads it, so the local
+docker Postgres keeps owning the `#[sqlx::test]` suites. The connection string
+uses the **session pooler** on 5432, because sqlx prepares statements (the
+transaction pooler on 6543 does not carry them across statements) and the direct
+host `db.<ref>.supabase.co` is IPv6-only.
+
+Migrations are sqlx's, and `supabase db push` cannot see them — it only reads
+`supabase/migrations/`, which does not exist here, so it reports "Remote database
+is up to date" while pushing nothing. Use `just migrate-supabase` (or start the
+server, which migrates on boot). The CLI's `db query`, `db dump`, `db lint` and
+`db advisors` all work against the linked project and are useful as-is.
+
+`crates/server` connects as `postgres` and does its own auth, so nothing here
+uses the PostgREST Data API — but Supabase grants `anon` and `authenticated` full
+access to every table in `public` and enables RLS on none of them, which would
+expose all 36 tables over HTTPS to anyone holding the project's anon key. A
+recreated or restored project re-applies those grants, so after any such change
+run this once, which also covers tables added later:
+
+```sql
+revoke all on all tables in schema public from anon, authenticated;
+revoke all on all sequences in schema public from anon, authenticated;
+revoke all on all functions in schema public from anon, authenticated;
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;
+alter default privileges in schema public revoke all on functions from anon, authenticated;
+```
+
 ## Quality gates
 
 ```bash

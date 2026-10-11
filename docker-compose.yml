@@ -40,6 +40,23 @@ services:
       echo 'bucket ready'
       "
 
+  # Search tier 2 (A3): the self-hosted general-web provider behind
+  # SearchProvider. Internal only — nothing outside the server calls it, and it
+  # is not exposed on a public interface.
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_SECRET: dev-only-change-me
+      SEARXNG_BASE_URL: http://localhost:8088/
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports: ["8088:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
   miniodata:

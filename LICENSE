@@ -1,0 +1,39 @@
+Copyright (c) 2026. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL.
+
+This software and its source code, documentation, design assets, and any
+associated materials (together, "the Software") are proprietary. No licence,
+express or implied, is granted except as stated in a written agreement with the
+copyright holder.
+
+Without a written agreement from the copyright holder, you may NOT:
+
+1. copy, reproduce, or distribute the Software or any part of it;
+2. modify, adapt, translate, or create derivative works from the Software;
+3. sublicense, sell, rent, lease, or otherwise make the Software available to
+   any third party;
+4. reverse engineer, decompile, or disassemble the Software, except to the
+   extent such restriction is prohibited by applicable law;
+5. circumvent, disable, or otherwise interfere with any entitlement, credit,
+   rate-limit, licensing, or access-control mechanism in the Software, or use
+   the Software in a way that avoids paying for the service it provides;
+6. remove or alter this notice or any other proprietary marking.
+
+USE OF THE HOSTED SERVICE is governed separately by the terms of service. Where
+the hosted service and this notice differ, the terms of service control.
+
+ACCESS TO THE SERVICE IS CONTROLLED BY THE SERVER. Client applications are not
+authoritative: entitlements, credits, plan limits, and permissions are decided
+by the server on every request, and no local modification to a client changes
+what the server permits.
+
+Third-party components are listed in THIRD_PARTY_NOTICES.md, and remain under
+their own licences.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

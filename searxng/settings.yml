@@ -1,0 +1,47 @@
+# SearXNG configuration for the search tier (A3).
+#
+# Only what we must override is here; SearXNG merges this over its own defaults,
+# so an incomplete file is expected rather than a problem.
+#
+# The two settings that matter for programmatic use:
+#   formats: [html, json]  — the JSON output is what SearchProvider consumes.
+#     It is NOT enabled by default, and without it the API returns HTML.
+#   limiter: false         — the bot-detection limiter would reject our
+#     server-side requests, since they are not a browser session.
+#
+# This service is internal-only: it is reached over the compose network, and
+# nothing outside the server should call it.
+
+use_default_settings: true
+
+general:
+  instance_name: "stvdy-search"
+  # No analytics, no public instance metadata.
+  enable_metrics: false
+
+server:
+  # Overridden by SEARXNG_SECRET in the compose environment.
+  secret_key: "change-me-in-compose"
+  limiter: false
+  image_proxy: false
+  # Reachable only from the compose network and localhost.
+  bind_address: "0.0.0.0:8080"
+
+search:
+  # `json` is required for the API; `html` is kept for manual debugging.
+  formats:
+    - html
+    - json
+  # Keep result pages small: we only need the top hits, and the server
+  # truncates and caches them anyway (A40).
+  max_page: 1
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+
+ui:
+  static_use_hash: true
+
+# Engines are left at SearXNG's defaults; the composite provider picks the
+# academic APIs directly (OpenAlex, Crossref, arXiv, ...) and uses SearXNG as
+# the general-web tier.

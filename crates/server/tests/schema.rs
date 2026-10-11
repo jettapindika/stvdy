@@ -734,3 +734,47 @@ async fn chunks_dedupe_index_is_not_unique_across_tenants(pool: PgPool) {
             .unwrap();
     assert_eq!(count, 2, "both tenants' chunks must exist");
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn users_supports_oidc_only_accounts(pool: PgPool) {
+    // A48: a Google sign-in creates an account with no password. If
+    // `password_hash` were still `not null`, OIDC signup would fail at the
+    // insert, and `google_sub` is the stable link key (an email can be
+    // reassigned, a sub cannot).
+    let columns: Vec<(String, String)> = sqlx::query_as(
+        "select column_name, is_nullable from information_schema.columns
+         where table_schema = 'public' and table_name = 'users'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query columns");
+
+    let nullable = |name: &str| {
+        columns
+            .iter()
+            .find(|(c, _)| c == name)
+            .map(|(_, n)| n == "YES")
+    };
+
+    assert_eq!(
+        nullable("password_hash"),
+        Some(true),
+        "OIDC users have no password"
+    );
+    assert_eq!(nullable("google_sub"), Some(true));
+    assert_eq!(nullable("email_verified_at"), Some(true));
+    // The entitlement boolean stays non-null: A43 gates AI actions on it.
+    assert_eq!(nullable("email_verified"), Some(false));
+
+    // A passwordless account is insertable, and a duplicate google_sub is not.
+    sqlx::query("insert into users (email, google_sub) values ('oidc@example.test', 'sub-1')")
+        .execute(&pool)
+        .await
+        .expect("an OIDC-only user must be insertable");
+
+    let duplicate =
+        sqlx::query("insert into users (email, google_sub) values ('other@example.test', 'sub-1')")
+            .execute(&pool)
+            .await;
+    assert!(duplicate.is_err(), "google_sub must be unique");
+}

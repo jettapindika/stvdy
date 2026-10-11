@@ -129,9 +129,13 @@ pub enum ReminderChannel {
     Discord,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+/// Model tiers, ordered cheapest to best. The `Ord` derive is load-bearing: the
+/// plan-matrix check asserts that a higher plan never gets a *cheaper* model by
+/// comparing these values, rather than by enumerating pairs (A41).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelTier {
+    Cheapest,
     Cheap,
     Best,
 }
@@ -500,6 +504,17 @@ impl PlansFile {
             return Err(CoreError::ConfigInvalid(
                 "google_calendar must be off on free and on for pro and power".into(),
             ));
+        }
+
+        // A higher plan must never be served by a cheaper model. This is why
+        // ModelTier derives Ord: the comparison replaces an enumerated pair check,
+        // so adding a tier later cannot silently skip a case (A41).
+        if !(free.model_tier <= pro.model_tier && pro.model_tier <= power.model_tier) {
+            return Err(CoreError::ConfigInvalid(format!(
+                "model_tier must not get cheaper as the plan rises \
+                 (free={:?}, pro={:?}, power={:?})",
+                free.model_tier, pro.model_tier, power.model_tier
+            )));
         }
 
         Ok(())

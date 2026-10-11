@@ -19,8 +19,12 @@
 # tracked.
 .env*
 !.env.example
+!.env.supabase.example
 var/
 .fastembed_cache/
+
+# Supabase CLI link state (project ref, cached API versions): machine-local.
+supabase/.temp/
 
 # macOS
 .DS_Store

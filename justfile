@@ -9,15 +9,39 @@ set dotenv-load := true
 db-up:
     docker compose up -d postgres minio minio-init
 
+# SearXNG is only needed for Phase 3+ (web search). Kept separate so the common
+# case does not pull an extra image.
+search-up:
+    docker compose up -d searxng
+
 db-down:
     docker compose down
 
 migrate:
     sqlx migrate run
 
+# --- Supabase dev/staging database (see README § Supabase dev database) ---
+#
+# These source `.env.supabase` instead of `.env`, so `DATABASE_URL` points at the
+# hosted project rather than the local docker Postgres. That separation is
+# deliberate: `#[sqlx::test]` creates and drops a scratch database per test, so
+# pointing `just check` at a hosted instance would churn databases on it and
+# spend the 500 MB quota (A47).
+#
+# `set -a` exports what the file defines, and the sourcing has to happen in the
+# same shell as the command because each recipe line is its own shell.
+
+migrate-supabase:
+    @test -f .env.supabase || { echo "missing .env.supabase — cp .env.supabase.example .env.supabase and fill in the database password"; exit 1; }
+    @set -a; . ./.env.supabase; set +a; sqlx migrate run
+
 # --- run ---
 server:
     cargo run -p stvdy-server
+
+server-supabase:
+    @test -f .env.supabase || { echo "missing .env.supabase — cp .env.supabase.example .env.supabase and fill in the database password"; exit 1; }
+    @set -a; . ./.env.supabase; set +a; cargo run -p stvdy-server
 
 web:
     npm --prefix app run dev

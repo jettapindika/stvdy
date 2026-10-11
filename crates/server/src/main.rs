@@ -5,6 +5,12 @@ use stvdy_server::{config::AppConfig, db, routes, state::AppState, telemetry};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load `.env` for local development so the documented quickstart
+    // (`cp .env.example .env && cargo run -p stvdy-server`) actually works.
+    // dotenvy never overrides variables that are already set, so a real
+    // deployment's environment (and CI) always wins over a stray file.
+    let _ = dotenvy::dotenv();
+
     // Load and validate configuration before binding anything: a broken
     // plans.toml must be a startup failure, not a 500 on the first request.
     let config = AppConfig::from_env()?;
