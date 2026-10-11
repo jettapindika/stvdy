@@ -203,7 +203,15 @@ fn render_chapters(
                     section_index + 1,
                     block_index + 1
                 );
-                match render_block(block, labels, block_index + 1) {
+                // The SVG id prefix is the document path, not the block index: two
+                // sections that each hold a diagram at position 1 would both be `b1`.
+                let prefix = format!(
+                    "b{}-{}-{}",
+                    chapter_index + 1,
+                    section_index + 1,
+                    block_index + 1
+                );
+                match render_block(block, labels, &prefix) {
                     Ok(markup) => out.push_str(&markup),
                     Err(reason) => dropped.push(DroppedBlock {
                         path,
@@ -232,9 +240,13 @@ fn citations(labels: &[u32], map: &ContextLabels) -> String {
     out
 }
 
-/// One block's markup. `index` is the block's position in its section, used as the SVG id
-/// prefix and therefore unique within the document.
-fn render_block(block: &Block, labels: &ContextLabels, index: usize) -> Result<String, String> {
+/// One block's markup.
+///
+/// `prefix` is the block's path through the document (`b1-2-3`), used as the SVG id prefix.
+/// It has to be the whole path rather than the block's index within its section, because
+/// that index restarts per section and two sections holding a diagram at the same position
+/// would emit the same ids.
+fn render_block(block: &Block, labels: &ContextLabels, prefix: &str) -> Result<String, String> {
     let cited = |block_labels: &[u32]| citations(block_labels, labels);
     Ok(match block {
         Block::Text(block) => {
@@ -382,13 +394,8 @@ fn render_block(block: &Block, labels: &ContextLabels, index: usize) -> Result<S
             out
         }
         Block::Svg(block) => {
-            // The prefix is the block's index within its section, and the chapter and
-            // section are in the anchor ids, so `b{index}` is unique per document only if
-            // no two sections share an index. Prefixing with the *path* is what makes it
-            // unambiguous.
-            let prefix = format!("b{index}");
             let svg =
-                svg::check_and_prefix(&block.svg, &prefix).map_err(|rejection| rejection.reason)?;
+                svg::check_and_prefix(&block.svg, prefix).map_err(|rejection| rejection.reason)?;
             let mut out = format!("  <figure>\n    {svg}\n");
             if let Some(caption) = &block.caption {
                 out.push_str(&format!(

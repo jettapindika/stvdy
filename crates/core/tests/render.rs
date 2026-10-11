@@ -47,6 +47,21 @@ fn cover() -> Cover {
     }
 }
 
+/// Every SVG marker id in the rendered document, in document order.
+///
+/// Read out of the HTML rather than asserted against a spelling: the property under test is
+/// that the ids are distinct and that each reference resolves, not what the prefix looks
+/// like.
+fn marker_ids(html: &str) -> Vec<String> {
+    html.match_indices("id=\"")
+        .map(|(at, marker)| {
+            let rest = &html[at + marker.len()..];
+            rest[..rest.find('"').expect("a closed attribute")].to_string()
+        })
+        .filter(|id| id.contains("arrowhead"))
+        .collect()
+}
+
 /// A document with one of each interesting kind.
 ///
 /// Generic over the item type so a call site can pass either a literal or a built
@@ -168,10 +183,13 @@ fn a_disallowed_svg_attribute_is_refused() {
     }
 }
 
-/// Two diagrams that both define `arrowhead` collide unless ids are prefixed per block. The
-/// symptom is the wrong marker or a missing one, which reads as a CSS problem.
+/// Two diagrams in one section must not collide either.
+///
+/// Asserted on the *property* (distinct ids, each reference resolving to its own
+/// definition) rather than on the prefix's spelling, so a future change to how the prefix is
+/// built does not make this a test of the naming.
 #[test]
-fn svg_ids_are_prefixed_per_block_so_two_diagrams_cannot_collide() {
+fn two_diagrams_in_one_section_do_not_share_element_ids() {
     let svg = r#"<svg viewBox="0 0 10 10"><defs><marker id="arrowhead"/></defs><line x1="0" y1="0" x2="1" y2="1" marker-end="url(#arrowhead)"/></svg>"#;
     let blocks = parse_blocks(&document(&[
         format!(r#"{{"kind":"svg","svg":{svg:?},"labels":[1]}}"#),
@@ -182,18 +200,15 @@ fn svg_ids_are_prefixed_per_block_so_two_diagrams_cannot_collide() {
         .unwrap()
         .html;
 
-    assert!(
-        html.contains("id=\"b1-arrowhead\""),
-        "the first block's id is prefixed: {html}"
-    );
-    assert!(
-        html.contains("id=\"b2-arrowhead\""),
-        "and the second's differently: {html}"
-    );
-    assert!(
-        html.contains("url(#b1-arrowhead)"),
-        "the reference is rewritten with it: {html}"
-    );
+    let ids = marker_ids(&html);
+    assert_eq!(ids.len(), 2, "both diagrams emitted a marker: {ids:?}");
+    assert_ne!(ids[0], ids[1], "the two ids must differ: {ids:?}");
+    for id in &ids {
+        assert!(
+            html.contains(&format!("url(#{id})")),
+            "the reference for {id} must resolve to it"
+        );
+    }
     assert!(
         !html.contains("id=\"arrowhead\""),
         "no unprefixed id may remain: {html}"
@@ -389,4 +404,51 @@ fn an_unknown_field_or_kind_is_refused() {
         parse_blocks(&document(&[r#"{"kind":"essay","text":"x","labels":[]}"#])).unwrap_err();
     let message = unknown_kind.to_string();
     assert!(message.contains("essay"), "{message}");
+}
+
+/// Two sections that each contain a diagram at the same block position must not collide.
+///
+/// This is the case the earlier per-block test could not see: `document()` puts every block
+/// in one section, so its two diagrams landed at block indices 1 and 2 and were distinct
+/// whatever the prefix was. The real document has one diagram in section 1 and another in
+/// section 2, where the block index restarts, so a prefix built from the block index alone
+/// emits `b1` twice: the second diagram's `url(#b1-arrow)` then resolves to the first's
+/// marker and the arrow comes out the wrong colour, with no error anywhere. The PDF
+/// acceptance test cannot see it either, because it asserts page count, header, footer and
+/// no raw `$`, none of which observe marker identity.
+#[test]
+fn two_sections_with_a_diagram_each_do_not_share_element_ids() {
+    let svg = r#"<svg viewBox="0 0 10 10"><defs><marker id="arrowhead"/></defs><line x1="0" y1="0" x2="1" y2="1" marker-end="url(#arrowhead)"/></svg>"#;
+    let raw = format!(
+        r#"{{"title":"T","subtitle":"S","chapters":[{{"title":"Bab","sections":[
+             {{"title":"Satu","blocks":[{{"kind":"svg","svg":{svg:?},"labels":[]}}]}},
+             {{"title":"Dua","blocks":[{{"kind":"svg","svg":{svg:?},"labels":[]}}]}}]}}]}}"#
+    );
+    let blocks = parse_blocks(&raw).unwrap();
+    let html = render_html(&blocks, &cheatsheet_v1(), &labels(), &cover())
+        .unwrap()
+        .html;
+
+    let ids: Vec<&str> = html
+        .match_indices("id=\"")
+        .map(|(at, marker)| {
+            let rest = &html[at + marker.len()..];
+            &rest[..rest.find('"').expect("a closed attribute")]
+        })
+        .filter(|id| id.contains("arrowhead"))
+        .collect();
+
+    assert_eq!(ids.len(), 2, "both diagrams emitted their marker: {ids:?}");
+    assert_ne!(
+        ids[0], ids[1],
+        "two diagrams in different sections must not share an id: {ids:?}"
+    );
+    // And each reference resolves to its own definition, which is the property that
+    // actually matters: a marker defined once and referenced twice draws the same arrow.
+    for id in &ids {
+        assert!(
+            html.contains(&format!("url(#{id})")),
+            "the reference for {id} must resolve to it: {html}"
+        );
+    }
 }
