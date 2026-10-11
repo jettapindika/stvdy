@@ -464,6 +464,71 @@ that runs at period start cannot help the account whose period starts at signup,
 and without the signup grant a new account has a zero balance and cannot send a
 single message. The chat suite caught exactly that.
 
+## Flashcards (Phase 4)
+
+Two properties hold this phase together, and both are the kind of thing a later
+refactor breaks silently.
+
+### The schedule is derived, never authored
+
+`flashcards.ease`, `interval_days` and `due_at` are a pure function of the card's
+`flashcard_reviews` rows: `crates/core/src/sm2.rs` replays the whole history in
+`(reviewed_at, id)` order from the schema's initial state (`ease 2.5`,
+`interval_days 0`, `due_at = created_at`). A review is an append-only fact, so two
+devices that saw different reviews still converge on one state **by construction
+rather than by conflict resolution**. That is why `sm2.rs` has no clock and no IO,
+and why the review route replays the *full* history instead of applying one
+increment to the stored values: an incremental update would make the result depend
+on which reviews the writing device had seen, which is the exact bug the
+append-only design exists to prevent.
+
+The grade map and the interval rule are the algorithm's contract, not a tuning
+knob (A76):
+
+| rating | quality |
+|---|---|
+| `again` | 0 |
+| `hard` | 3 |
+| `good` | 4 |
+| `easy` | 5 |
+
+`quality < 3` resets repetitions to 0 and sets the interval to 1 day; otherwise
+the interval is 1 (repetition 1), 6 (repetition 2), and
+`round(interval × ease).max(1)` after that. Ease is updated on **every** review,
+including a failure, as
+`ease = (ease + 0.1 − (5−q) × (0.08 + (5−q) × 0.02)).max(1.3)`: a card that never
+loses ease would grow without bound. `due_at` is `reviewed_at + interval_days`,
+where `reviewed_at` is the last review in `(reviewed_at, id)` order.
+
+Two devices reviewing one card at once would each replay only their own review,
+and the second write would silently drop the other. So
+`POST /flashcards/:id/review` takes `pg_advisory_xact_lock(hashtext(user_id))` as
+the first statement of its transaction, before reading the card — the same lock
+and the same reason as the spend above.
+
+### A failed generation refunds the spend, once
+
+Generation is one `generate_flashcards` job: strict-JSON prompt composition
+(`compose_task` over the trimmed `base.v1.md` + `json_contract.v1.md` +
+`flashcards.v1.md`), **one retry on a parse failure** with a corrective message,
+low temperature, `json_mode`, and a label map that drops unknown labels (A17). The
+job is idempotent: the guarded status flip from `generating` to `ready` is the
+claim, so a duplicate claim writes no cards.
+
+A generation that fails **for good** — a `Failure::permanent`, or a transient
+failure on the last allowed attempt — marks the deck `failed`, records what the
+provider already cost on the usage row (A41), and refunds the credits exactly
+once. The once-only guard is `decks.credits_spent`, zeroed in the same statement
+as the status change in **both** directions: the failure path zeroes it while
+marking the deck failed, and the success path zeroes it while claiming the deck
+ready. So "charged and not yet delivered" is exactly `credits_spent > 0`, and a
+delivered deck can never be refunded (A81). A refactor that splits either write,
+or drops the success-side zeroing, reopens that hole.
+
+Constants: `MAX_REQUESTED_CARDS = 50`, `MAX_SOURCES = 20`,
+`MAX_CARDS_PER_REPLY = 60`, `GENERATION_CHUNK_LIMIT = 40` chunks ordered
+`(source_id, idx)`.
+
 ## Build environment note: the server's release binary is blocked here
 
 **What ships to users builds fine.** `tauri build --no-bundle` and the full

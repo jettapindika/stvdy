@@ -340,8 +340,78 @@ visible on the account's other devices. Another account's workspace is a 404.
 
 ## Flashcards (Phase 4)
 
-`POST /workspaces/:id/decks`, `GET /decks/:id`, `GET /decks/:id/due`,
-`POST /flashcards/:id/review`.
+Generation is asynchronous: `POST /workspaces/:id/decks` returns 201 immediately
+with a deck in status `generating`, and the client polls `GET /decks/:id` until
+the status settles to `ready` or `failed`. The card's schedule is the server's,
+derived from the review rows (see `docs/ARCHITECTURE.md`); the client never
+authors `ease`, `interval_days` or `due_at`.
+
+`Flashcard = {"id", "deck_id", "front", "back", "chunk_id", "ease",
+"interval_days", "due_at"}`. `chunk_id` is null when the model cited a label that
+was not in the prompt's context: the card is kept and only its link is lost (A17).
+
+### `POST /workspaces/:id/decks`
+
+Auth, and the email must be verified: generation is one of the four actions A43
+keeps locked until then, so an unverified account gets 403 `email_not_verified`.
+
+Body: `{"title": string, "source_ids": [uuid], "count": number}`. `count` is how
+many cards to ask for; the generator may return fewer and is told never to pad.
+
+201 `{"deck": {"id", "workspace_id", "title", "source_ids", "status":
+"generating", "error": null, "requested_count", "card_count": 0}}`.
+
+- 400 `validation` when the title is empty or over 120 characters, `count` is
+  outside `1..=50`, `source_ids` is empty or longer than 20, or a source is not
+  this workspace's, not this user's, or not `ready`.
+- 402 `insufficient_credits` when the cost exceeds the balance. The cost is
+  `ceil(count / 10) × flashcard_batch_10`, i.e. **4 credits per 10 requested
+  cards** (21 cards is three batches). It is quoted from the *requested* count; a
+  request larger than the generator will produce is refused rather than truncated,
+  so the quote can never overcharge (A78).
+- 422 `limit_reached` when the request would cross the plan's
+  `flashcards_per_month`, counted over the user's **local calendar month** (A79).
+  The body carries `limit` and `used`.
+- 403 `email_not_verified`.
+
+Every check that can fail runs before the credit is spent, so a refused request
+costs nothing.
+
+### `GET /workspaces/:id/decks`
+
+Auth. 200 `{"decks": [Deck]}`, newest first, tombstones excluded. **This route is
+a deliberate addition beyond the spec's route list** (A75): without it a deck is
+unreachable after a page reload, which makes the phase's own exit gate untestable
+by hand.
+
+### `GET /decks/:id`
+
+Auth. 200 `{"deck": Deck, "cards": [Flashcard]}`, cards ordered `(created_at,
+id)`. Another account's deck is 404. `Deck.status` is `generating | ready |
+failed`; a `failed` deck carries a readable `error` and its credits are refunded
+(A81).
+
+### `GET /decks/:id/due?limit=N`
+
+Auth. 200 `{"cards": [Flashcard], "now": <RFC3339>}`. `limit` defaults to 20 and
+is clamped to `1..=100`; cards are ordered `(due_at, id)` so a refetch cannot
+reshuffle the queue under the student's finger. Another account's deck is 404.
+
+### `POST /flashcards/:id/review`
+
+Auth. Body `{"id"?: uuid, "rating": "again"|"hard"|"good"|"easy",
+"reviewed_at"?: RFC3339}`. `id` is client-generated so a retry after a lost
+response cannot apply twice; `reviewed_at` defaults to the server's clock.
+
+200 `{"applied": bool, "card": {"id", "ease", "interval_days", "due_at"}}`.
+`applied: false` means the review id had already been applied, so the call is
+idempotent. The card's state is the replay of its whole review history, so two
+devices converge on one schedule rather than on whichever wrote last (A76).
+
+- 400 `validation` for an unknown rating or a `reviewed_at` more than 24 hours in
+  the future: a device with a wrong clock would otherwise pin a card out of the
+  queue for months.
+- 404 for another account's card.
 
 ## Quiz (Phase 5)
 
