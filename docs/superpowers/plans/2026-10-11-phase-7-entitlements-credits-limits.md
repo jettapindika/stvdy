@@ -354,7 +354,7 @@ the SPA's plan/usage screen and credit meter, and `scripts/smoke-phase7.sh`.
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A140–A160** in the same commits as the code.
+`docs/ASSUMPTIONS.md` as rows **A140–A163** in the same commits as the code.
 
 1. **A140 — `EntitlementError::LimitReached.min_plan` is `Option<PlanId>`, not the
    contract's `PlanId`.** `crates/server/src/limits.rs::upgrade_from` already returns
@@ -488,6 +488,27 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     need the retention/purge machinery (`purge_deleted_accounts`) that belongs with the
     release prerequisites. The heading is re-tagged in Task 13 and the item is recorded
     in the Self-Review's open items.
+22. **A161 — The spend cap's route list is a subset of the sweep's `Swept` rows, not a
+    second table.** `route_sweep.rs` asserts every entry in `ratelimit::spending_routes()`
+    is also a `Swept` row, so the entitlement decision stays the one place that decides
+    whether an action is allowed while the cap only decides how fast. Two independent
+    lists of "the routes that spend" would drift, and the drift has exactly one shape: a
+    capped route the sweep forgets, or a swept route the cap forgets — and the second is
+    an unbounded ceiling overshoot, which is the thing A155 exists to bound.
+23. **A162 — A `url` source is fetched by the ingest job; a `web` source is fetched by
+    the upload request.** A `url` is a link the user typed and is not expected to exist
+    yet, so the request must not block on someone else's server, and the SSRF refusal
+    belongs on `sources.error`, which the client already renders. A `web` source is "save
+    to workspace" from a search hit, and saving means preserving *what was saved*: the
+    text that was on the page when the student saved it, not whatever is there when a
+    retry happens to run. Both go through `AppState.fetcher` and never a second
+    `reqwest` call, so the `--block-private-networks` guarantee is one implementation.
+24. **A163 — A `web` source stores the fetched text as its object and therefore charges
+    storage; a `url` source stores nothing and charges zero.** A157 counts
+    `sum(sources.file_size)`: a saved page is a snapshot we chose to keep, so it is bytes
+    we hold and it counts; a URL source's bytes exist only in `chunks`. A `url` source is
+    bounded only by `sources_total`, which is the reason that axis exists separately from
+    storage.
 
 ---
 
@@ -2111,7 +2132,7 @@ logged) and R6/R1 are unchanged. § 9: the verification table's Phase 7 rows poi
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
-Append A140–A160 as rows. Add `signup_attempts` to "Schema deviations from the spec"
+Append A140–A163 as rows. Add `signup_attempts` to "Schema deviations from the spec"
 with its one-line reason, and note the two column additions
 (`workspaces.read_only`, `devices.read_only`, `credit_ledger.period_key`,
 `sources.preview_key`) and the new `[credits] monthly_rollover` key.

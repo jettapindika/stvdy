@@ -66,7 +66,7 @@ records the measured result.
   last_sync_at`, the outbox length, the last attempt's outcome); "Last synced …" never
   renders a locally invented time; a rejected mutation is shown with the server's
   `code` and the row is marked "Not saved" rather than counted as synced; and the
-  status never reads "Synced" while the outbox is non-empty (A184).
+  status never reads "Synced" while the outbox is non-empty (A187).
 
 ---
 
@@ -147,7 +147,7 @@ records the measured result.
   references users on delete cascade, device_id uuid references devices on delete set
   null, result jsonb not null, created_at timestamptz default now())` with `index on
   mutation_log (user_id, created_at)` (`:31`). **`mutation_id` is a global primary
-  key**, which is why A169 below is a rule and not a preference.
+  key**, which is why A172 below is a rule and not a preference.
 - `migrations/0006_sync_functions.sql` (114 lines) is the single source of truth for the
   trigger bodies: `touch_updated_at` (`:44`), `log_change` (`:52`, reads only
   `user_id`/`id`/`deleted_at`, takes `pg_advisory_xact_lock(hashtext(uid::text))`
@@ -197,7 +197,7 @@ What *does* exist on the server side today, and is reused verbatim:
 - `crates/server/src/routes/mod.rs:105-128` — the authenticated router merges one
   `routes()` per feature module; `devices::routes()` is already registered (`:118`).
 - `crates/server/src/ratelimit.rs` exists (3,391 bytes) with an auth layer; Phase 7 adds
-  `signup_limiter()` and `spend_layer()`. This phase adds a sync layer (A182).
+  `signup_limiter()` and `spend_layer()`. This phase adds a sync layer (A185).
 - `crates/server/src/jobs/mod.rs` — `Queue`, `enqueue(pool, queue, kind, payload,
   dedupe_key)`, `Failure::{transient, permanent}`, `MAX_ATTEMPTS`, `POLL_INTERVAL`;
   `jobs/worker.rs:86-96` dispatches by `kind`; `migrations/0015_jobs.sql:11` already
@@ -254,16 +254,16 @@ What *does* exist on the server side today, and is reused verbatim:
   cross-tenant row whose enforcement names "Phase 8 test"; §6 R2 is the accepted local-
   cache risk.
 - `docs/ASSUMPTIONS.md` highest row **A131** (Phase 6 wrote A119–A131; its plan reserved
-  to A139, and Phase 7's plan reserves A140–A160). **This phase pins A161 onward.**
+  to A139, and Phase 7's plan reserves A140–A163). **This phase pins A164 onward.**
 
 ---
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A161–A186** in the same commits as the code.
+`docs/ASSUMPTIONS.md` as rows **A164–A189** in the same commits as the code.
 
-1. **A161 — The initial pass is snapshot-anchored.** `GET /sync/pull?cursor=0` returns
+1. **A164 — The initial pass is snapshot-anchored.** `GET /sync/pull?cursor=0` returns
    the first page ordered by `(dependency_rank, seq)` and sets `next_cursor` to the
    user's `max(seq)` **at the moment the pass began** (the *anchor*). Later pages of the
    same pass send `cursor=<anchor>&offset=<n>`, and every row of the pass satisfies
@@ -274,22 +274,22 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    permanent loss. The anchor makes the pass set immutable, and anything committed
    during the pass has `seq > anchor` and arrives on the next incremental pull. A client
    interrupted mid-pass may restart it from offset 0; the pass is idempotent (upserts).
-2. **A162 — Staleness is `cursor > 0 && cursor < min_retained_seq`, where
+2. **A165 — Staleness is `cursor > 0 && cursor < min_retained_seq`, where
    `min_retained_seq` is a per-user watermark row written by compaction.** Comparing
    against `min(seq)` instead would be wrong in a way that breaks new users: `seq` comes
    from a global sequence, so a brand-new account's first change can be seq 500, and a
    device at cursor 0 would be told to resync on its very first request. A cursor of 0
    is never stale, so a full resync is always available.
-3. **A163 — The 410 uses the existing `AppError::ResyncRequired`.** No new error
+3. **A166 — The 410 uses the existing `AppError::ResyncRequired`.** No new error
    variant: `crates/server/src/error.rs:47` already maps to 410 `resync_required`, which
    is the contract's row. The client's reaction is `wipe() → cursor = 0 → full pull`,
    and it is not surfaced as an error to the user (the spec: "the client does a full
    resync").
-4. **A164 — `PullResponse` gains no field.** The only wire addition is an optional
+4. **A167 — `PullResponse` gains no field.** The only wire addition is an optional
    `offset` **query parameter**, legal only when `cursor=0`. The DTO the contract spells
    stays byte-identical, and a client that never sends `offset` still works (it just
    re-requests offset 0, which is idempotent).
-5. **A165 — The pull ships a per-entity column allowlist, and it excludes `user_id`,
+5. **A168 — The pull ships a per-entity column allowlist, and it excludes `user_id`,
    `sources.file_key` and `sources.preview_key`.** `user_id` is the caller's own and
    redundant on every row; `file_key`/`preview_key` are internal object-storage keys
    whose client-facing form is a signed URL (`GET /sources/:id/file`), so shipping them
@@ -297,93 +297,93 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    `deleted_at` are included, because the client needs them for tombstone handling and
    for the "Last synced" display. The list lives in `crates/sync` so both ends read one
    copy.
-6. **A166 — An unrecognised `change_log.entity` is a 500 `internal`, not a skipped
+6. **A169 — An unrecognised `change_log.entity` is a 500 `internal`, not a skipped
    row.** It can only mean the trigger array and `Entity::ALL` have drifted, and a
    silent skip would be permanent loss on every device. `crates/server/tests/schema.rs:87`
    makes the drift impossible, so this is a backstop rather than a policy.
-7. **A167 — One transaction per push batch, with a SAVEPOINT per mutation.**
+7. **A170 — One transaction per push batch, with a SAVEPOINT per mutation.**
    `select pg_advisory_xact_lock(hashtext($1::text))` is the first statement,
    `select set_config('app.device_id', $1, true)` the second, then one savepoint per
    mutation so an apply failure rolls back that mutation alone. The roadmap fixes the
    lock ordering; the savepoints are what makes "a rejected mutation does not abort the
    batch" true for an apply failure as well as for a decision refusal.
-8. **A168 — The request's `device_id` must equal the authenticated device.** A mismatch
+8. **A171 — The request's `device_id` must equal the authenticated device.** A mismatch
    is 403 `forbidden`. `origin_device_id` exists to attribute a change to the device
    that caused it, and a body free to claim any device id makes that attribution
    worthless.
-9. **A169 — The idempotency key is global.** A `mutation_id` already recorded for a
+9. **A172 — The idempotency key is global.** A `mutation_id` already recorded for a
    *different* user is `Rejected{code: "conflict"}`, never applied and never answered
    with that user's stored result. `mutation_log.mutation_id` is a primary key, so the
    collision is otherwise unrepresentable, and returning another account's stored result
    would be a cross-tenant read on the one route this phase is most worried about.
-10. **A170 — Ownership is checked in the same statement that writes.** Every apply is
+10. **A173 — Ownership is checked in the same statement that writes.** Every apply is
     `insert … / update … where id = $1 and user_id = $2`; a mutation whose id belongs to
     another user is `Rejected{code: "not_found"}` and logged with both ids. A separate
     `select` before the write is a check-then-act that a second device can interleave.
-11. **A171 — Append-only entities are `on conflict (id) do nothing`, and a no-op replay
+11. **A174 — Append-only entities are `on conflict (id) do nothing`, and a no-op replay
     reports the row's existing `seq`.** A retried review therefore does not read as a new
     change, and the client's cursor does not move for a write that changed nothing.
-12. **A172 — The conflict table is data, in `crates/sync/src/client/conflict.rs`, and the
+12. **A175 — The conflict table is data, in `crates/sync/src/client/conflict.rs`, and the
     server's apply reads it.** One copy of `append_only | lww | field_merge |
     tombstone_wins` per entity, so the client and the server cannot disagree about the
     rule. The *decision* stays the server's (A150); the client only reacts to
     `MutationResult`.
-13. **A173 — `tasks` and `events` mutations carry a patch plus the base row**
+13. **A176 — `tasks` and `events` mutations carry a patch plus the base row**
     (`payload = {"patch": {…}, "base": {…}|null}`); every other pushable entity carries
     the full row. Disjointness cannot be computed from one side: the server has no
     per-field history, so it needs both the client's changed keys (`patch`) and the row
     the client edited from (`base`). `base: null` means create. The wire type is
     unchanged — `payload` is `Option<Value>` and its shape is ours.
-14. **A174 — The merge rule for `tasks`/`events`.** The other writer's changed set is
+14. **A177 — The merge rule for `tasks`/`events`.** The other writer's changed set is
     `{k : stored[k] != base[k]}`; the client's is `keys(patch)`. If they are disjoint the
     patch is applied to the stored row, `updated_at` is touched by the trigger, and the
     result is `Applied`. If they overlap, the whole incoming patch wins (record-level LWW
     on server receive time), because a per-field tie-break would need a per-field clock
     the schema does not have and inventing one would make two devices disagree about
     which write won.
-15. **A175 — A tombstone wins, and the loser is told.** An edit against a tombstoned row
+15. **A178 — A tombstone wins, and the loser is told.** An edit against a tombstoned row
     is `MutationResult::Conflict { winner: <the stored row, including its deleted_at> }`,
     which is the contract's conflict shape and the exit gate's "tombstone vs edit" case.
     The one exception is the explicit restore the contract names: a patch (or row) whose
     `deleted_at` is present and `null` restores the row and logs an `upsert`.
-16. **A176 — `user_settings` is keyed by `user_id`.** Its mutation's `id` is ignored on
+16. **A179 — `user_settings` is keyed by `user_id`.** Its mutation's `id` is ignored on
     apply (the row is the caller's), and the response echoes the caller's user id as the
     entity id, matching what `log_change_by_user` writes into `change_log.entity_id`.
     `Op::Delete` never reaches the apply: `Entity::accepts_push_op` already refuses it.
-17. **A177 — `devices.last_sync_at` is written by pull and by push, in the same
+17. **A180 — `devices.last_sync_at` is written by pull and by push, in the same
     transaction as the work, and it is the only source of "Last synced".** Nothing writes
     that column today; without this the Devices screen would have to invent a time from
     the client's clock, which gate 7(a) forbids.
-18. **A178 — The sync stream is a per-connection poll of `max(seq)` every 2 seconds with
+18. **A181 — The sync stream is a per-connection poll of `max(seq)` every 2 seconds with
     a 15-second heartbeat comment, emitting `event: seq`, `data: {"seq":N}`.** No
     `LISTEN/NOTIFY` and no cross-instance bus, which is what makes it correct behind more
     than one server instance. It sends the current `max(seq)` immediately on connect, so
     a device that reconnects after a gap pulls at once instead of waiting for the next
     change. The event name is additive to the roadmap §4 list, which covers the chat
     stream; `docs/SYNC.md` and `docs/API.md` both record it.
-19. **A179 — `crates/sync`'s client engine is generic over a `LocalStore` trait and a
+19. **A182 — `crates/sync`'s client engine is generic over a `LocalStore` trait and a
     `Transport` trait; `rusqlite` and `reqwest` live in `src-tauri`.** The engine must
     compile into the server's test binaries (which must not link a C SQLite) and into the
     shell, and the roadmap's crate note says `crates/sync` is shared by both. The
     in-memory store and the router-backed transport used by the convergence suite are
     test implementations of those two traits, so the engine is exercised against the real
     routes rather than a mock.
-20. **A180 — The web build has no local cache and no outbox.** Its `Platform.sync` is
+20. **A183 — The web build has no local cache and no outbox.** Its `Platform.sync` is
     online-only: `status()` is a constant `synced`, writes go through the REST routes,
     and `reset()` is a no-op. `docs/ARCHITECTURE.md` § Local cache already states the web
     build has no local database, and the spec scopes the cache to "native clients".
-21. **A181 — Compaction's retention is two windows.** Upsert rows older than
+21. **A184 — Compaction's retention is two windows.** Upsert rows older than
     `CHANGE_LOG_RETENTION_DAYS` (default **90**) are deleted; tombstone (`delete`) rows
     are kept for `CHANGE_LOG_TOMBSTONE_RETENTION_DAYS` (default **180**, i.e. at least
     the retention window), because a device that has been offline for three months must
     still be told that a row was removed rather than silently keep it. The job writes the
     per-user watermark in the same transaction and runs daily under
     `dedupe_key = "compact_change_log:<UTC date>"`.
-22. **A182 — The sync routes are rate-limited per account at 600 requests/minute.** The
+22. **A185 — The sync routes are rate-limited per account at 600 requests/minute.** The
     spec requires sync to be rate-limited; the limit is deliberately far above a real
     device's rate (a pull per change plus a reconnect) so that a legitimate burst is
     never the thing that trips it, and a stream reconnect is not abuse.
-23. **A183 — A revoked device is wiped, not merely refused.** Any authenticated sync
+23. **A186 — A revoked device is wiped, not merely refused.** Any authenticated sync
     route answers 401 for a revoked device (its sessions are revoked in the same
     transaction as the device, `devices.rs:167-183`, so this is the existing behaviour).
     The engine treats a 401 on its own device as `Revoked`, emits
@@ -391,19 +391,19 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     keychain token, and the SPA signs out with the spec's copy. The outbox matters: a
     pending offline write from a revoked device must not be replayed by the next account
     that signs in on that machine.
-24. **A184 — Sync status is derived from stored facts only.** `synced` = the outbox is
+24. **A187 — Sync status is derived from stored facts only.** `synced` = the outbox is
     empty **and** the last pull and push succeeded **and** `last_synced_at` is known;
     `syncing` = a pass is in flight; `offline` = the transport failed with a network
     error; `needs_attention` = the last pass left a rejected mutation, shown with the
     server's `code`. "Last synced …" renders from `devices.last_sync_at`. No status ever
     reads "Synced" while the outbox is non-empty.
-25. **A185 — An `upsert` change whose row is gone is emitted as `data: null`, and the
+25. **A188 — An `upsert` change whose row is gone is emitted as `data: null`, and the
     client applies `data: null` as a delete regardless of `op`.** A row a device cannot
     see must never be created on that device. This is also what makes the payload
     loader's `user_id` scoping safe in the pathological case: a `change_log` row whose
     `entity_id` belongs to another account loads no payload at all, so the worst outcome
     is a spurious local delete, never a cross-tenant read.
-26. **A186 — Devices is reached from the sync status control, which the shell renders in
+26. **A189 — Devices is reached from the sync status control, which the shell renders in
     both form factors.** `/settings` is still a `NotBuiltRoute` (`app/src/router.tsx:92`)
     and Settings is Phase 9's (`docs/API.md` § Settings is tagged Phase 9), so there is
     no Settings screen to link from and inventing one here would be Phase 9 work under a
@@ -563,7 +563,7 @@ fn an_offset_is_only_legal_on_the_initial_pass() {
 
 /// A new device must never be told to resync: `seq` comes from a global sequence, so an
 /// account's first change can be seq 500 and a watermark comparison against `min(seq)`
-/// would 410 the very first request (A162).
+/// would 410 the very first request (A165).
 #[test]
 fn a_cursor_of_zero_is_never_stale_and_a_cursor_below_the_watermark_is() {
     assert!(!is_stale(0, 500));
@@ -573,7 +573,7 @@ fn a_cursor_of_zero_is_never_stale_and_a_cursor_below_the_watermark_is() {
 }
 
 /// The payload allowlist is the leak surface: `user_id` is the caller's own and
-/// redundant, and the two storage keys are internal (A165).
+/// redundant, and the two storage keys are internal (A168).
 #[test]
 fn the_payload_allowlist_excludes_the_identity_and_the_storage_keys() {
     for entity in Entity::ALL {
@@ -634,7 +634,7 @@ pub enum CursorError {
 }
 
 /// What a cursor asks for. The two arms are different queries, not two spellings of
-/// one: `Initial` is a snapshot pass over a rank-ordered stream (A161), `Incremental`
+/// one: `Initial` is a snapshot pass over a rank-ordered stream (A164), `Incremental`
 /// is a walk up the seq clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorKind {
@@ -648,7 +648,7 @@ impl PullQuery {
     pub fn kind(&self) -> CursorKind;
 }
 
-/// A cursor older than retained history must resync (A162). `min_retained_seq` is the
+/// A cursor older than retained history must resync (A165). `min_retained_seq` is the
 /// per-user watermark compaction writes; 0 means nothing has ever been compacted.
 pub fn is_stale(cursor: i64, min_retained_seq: i64) -> bool {
     cursor > 0 && cursor < min_retained_seq
@@ -696,14 +696,14 @@ table to the `documented` array (`:283`):
 
 ```rust
     // Phase 8. Compaction's per-user watermark: the seq below which this account's
-    // history is gone, which is what a cursor is compared against for 410 (A162).
+    // history is gone, which is what a cursor is compared against for 410 (A165).
     // Not a `+sync` table: it is a server-side cursor fact with no client entity, and
     // a device that learned it would learn nothing it could act on.
     "change_log_watermark",
 ```
 
 ```rust
-/// A table with no client entity must never be able to reach one (A162/A181): no
+/// A table with no client entity must never be able to reach one (A165/A184): no
 /// triggers, and a primary key that is the user id rather than a row id.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_watermark_is_server_side_only(pool: PgPool) {
@@ -740,7 +740,7 @@ does not exist yet; the row added in Step 1 is what keeps it passing after Step 
 -- A cursor is compared against `min_retained_seq` to decide 410 resync_required
 -- (docs/SYNC.md). It cannot be compared against `min(seq)`: seq is a bigserial, so a
 -- brand-new account's first change can be seq 500 and a device at cursor 0 would be
--- told to resync on its first request (A162).
+-- told to resync on its first request (A165).
 --
 -- Not a `+sync` table, so it must not appear in 0017_sync_triggers.sql's array. 0017
 -- stays the last trigger-attaching migration: this file creates no triggers.
@@ -758,7 +758,7 @@ create table change_log_watermark (
 - [ ] **Step 5: Record the deviation**
 
 Add to `docs/ASSUMPTIONS.md` § "Schema deviations from the spec": `change_log_watermark`
-(A162/A181). It is one of the rows of A161–A186 and lands with this commit.
+(A165/A184). It is one of the rows of A164–A189 and lands with this commit.
 
 - [ ] **Step 6: Commit**
 
@@ -795,7 +795,7 @@ git commit -m "feat(server): a per-user compaction watermark, so a cursor can be
 
 ```rust
 /// The order the roadmap fixes: an initial pass is dependency rank first, then seq, so
-/// a client's cache has every parent before its children (A161).
+/// a client's cache has every parent before its children (A164).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_initial_pass_is_rank_ordered(pool: PgPool) { … }
 
@@ -814,12 +814,12 @@ async fn a_pull_never_contains_another_accounts_seq(pool: PgPool) { … }
 
 /// The same risk one layer down: a planted `change_log` row for A whose entity_id is
 /// B's task must not produce B's row. It produces `data: null`, which the client
-/// applies as a delete (A185), never a cross-tenant read.
+/// applies as a delete (A188), never a cross-tenant read.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_payload_loader_cannot_be_pointed_at_another_users_row(pool: PgPool) { … }
 
 /// `410 resync_required` is the contract's code and it is already the error's mapping
-/// (A163): no new variant, no new body shape.
+/// (A166): no new variant, no new body shape.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_cursor_below_the_watermark_is_410_resync_required(pool: PgPool) { … }
 
@@ -833,13 +833,13 @@ async fn a_tombstone_carries_no_payload(pool: PgPool) { … }
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_page_is_limited_and_has_more_says_whether_to_ask_again(pool: PgPool) { … }
 
-/// Pulling writes `devices.last_sync_at` (A177), which is the only source of the
+/// Pulling writes `devices.last_sync_at` (A180), which is the only source of the
 /// Devices screen's "Last synced".
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_pull_records_when_this_device_last_synced(pool: PgPool) { … }
 
 /// A `user_settings` change is keyed by the user id, because that is what
-/// `log_change_by_user` writes into `entity_id` (A176).
+/// `log_change_by_user` writes into `entity_id` (A179).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_settings_change_is_keyed_by_the_user_id(pool: PgPool) { … }
 
@@ -887,7 +887,7 @@ pub fn routes() -> Router<AppState> {
 /// Records that this device just talked to the server.
 ///
 /// The Devices screen's "Last synced" reads `devices.last_sync_at`, and nothing wrote
-/// it before this phase (A177). A locally invented time would be a number the app did
+/// it before this phase (A180). A locally invented time would be a number the app did
 /// not compute, which is what roadmap gate 7(a) forbids.
 pub async fn touch_last_sync(pool: &PgPool, device_id: Uuid) -> sqlx::Result<()> {
     sqlx::query("update devices set last_sync_at = now(), last_seen_at = now() where id = $1")
@@ -904,15 +904,15 @@ pub async fn touch_last_sync(pool: &PgPool, device_id: Uuid) -> sqlx::Result<()>
 /// The page of `change_log` rows this cursor asks for.
 ///
 /// `Initial` anchors at the user's `max(seq)` so the pass set cannot change under it
-/// (A161); `Incremental` walks `seq > cursor` ascending. Both are scoped by `user_id`
+/// (A164); `Incremental` walks `seq > cursor` ascending. Both are scoped by `user_id`
 /// in the same statement — never filtered afterwards — because that is this phase's
 /// named risk.
 pub async fn load_page(conn: &mut PgConnection, user_id: Uuid, q: &PullQuery) -> AppResult<Page>;
 
-/// The current row for each id, restricted to the entity's payload allowlist (A165).
+/// The current row for each id, restricted to the entity's payload allowlist (A168).
 ///
 /// `where user_id = $1 and id = any($2)` is the whole defence: an id that belongs to
-/// another account loads nothing, and the caller emits `data: null` (A185).
+/// another account loads nothing, and the caller emits `data: null` (A188).
 pub async fn load_payload(conn: &mut PgConnection, user_id: Uuid, entity: Entity, ids: &[Uuid])
     -> AppResult<HashMap<Uuid, Value>>;
 ```
@@ -943,7 +943,7 @@ in one `tracing::info!` (the roadmap requires sync pull latency to be logged).
 ```
 
 - `crates/server/src/ratelimit.rs` gains `sync_layer()` keyed per account at 600
-  requests/minute (A182), applied to the `/sync` routes in `routes()`.
+  requests/minute (A185), applied to the `/sync` routes in `routes()`.
 
 - [ ] **Step 5: Run the tests**
 
@@ -1016,22 +1016,22 @@ async fn a_derived_flashcard_field_is_refused_and_a_review_is_not(pool: PgPool) 
 async fn two_devices_editing_overlapping_rows_both_succeed(pool: PgPool) { … }
 
 /// A mutation whose id belongs to another account is `not_found`, and the other
-/// account's row is untouched (A170).
+/// account's row is untouched (A173).
 #[sqlx::test(migrations = "../../migrations")]
 async fn another_accounts_row_is_not_found_and_never_written(pool: PgPool) { … }
 
 /// A `mutation_id` already recorded for a different account is a conflict, and the
-/// first account's stored result is not returned (A169).
+/// first account's stored result is not returned (A172).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_mutation_id_belonging_to_another_account_is_a_conflict(pool: PgPool) { … }
 
-/// A body claiming another device's id is 403 (A168): `origin_device_id` is only worth
+/// A body claiming another device's id is 403 (A171): `origin_device_id` is only worth
 /// recording if the claim is checkable.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_body_cannot_claim_another_device(pool: PgPool) { … }
 
 /// A duplicate append-only id is ignored and reports the row's existing seq, so a
-/// retried review does not read as a new change (A171).
+/// retried review does not read as a new change (A174).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_duplicate_review_is_ignored_and_reports_the_existing_seq(pool: PgPool) { … }
 
@@ -1040,7 +1040,7 @@ async fn a_duplicate_review_is_ignored_and_reports_the_existing_seq(pool: PgPool
 #[sqlx::test(migrations = "../../migrations")]
 async fn indonesian_text_round_trips_byte_exact(pool: PgPool) { … }
 
-/// A push writes `devices.last_sync_at` (A177) and sets `origin_device_id` to the
+/// A push writes `devices.last_sync_at` (A180) and sets `origin_device_id` to the
 /// pushing device.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_push_records_the_device_and_the_origin(pool: PgPool) { … }
@@ -1063,7 +1063,7 @@ async fn a_push_records_the_device_and_the_origin(pool: PgPool) { … }
 ///      populated without a device column on every table.
 ///   3. Per mutation: a SAVEPOINT, the replay lookup, `decide`, the apply, the
 ///      `mutation_log` insert, then release. A failed apply rolls back to its savepoint
-///      and the batch continues (A167).
+///      and the batch continues (A170).
 pub async fn apply_batch(state: &AppState, user: &AuthUser, body: &PushRequest)
     -> AppResult<PushResponse>;
 ```
@@ -1129,7 +1129,7 @@ byte-exact through push and pull); the copy half lands in Task 10. 7 — no UI c
   `stvdy_sync::client::conflict::{Rule, rule_for}`.
 
 The conflict table lands in `crates/sync` here rather than in Task 8, because the
-server's apply is its first reader and A172's whole point is that there is one copy.
+server's apply is its first reader and A175's whole point is that there is one copy.
 `crates/sync/src/client/mod.rs` is created with `pub mod conflict;` and its re-exports;
 Task 8 adds the remaining modules to it.
 
@@ -1140,7 +1140,7 @@ Append to `crates/server/tests/sync_push.rs`:
 ```rust
 /// Two devices edit disjoint fields of one task and both edits survive — the
 /// field-level merge the conflict table promises, computed from the patch and the base
-/// the client sent (A173/A174).
+/// the client sent (A176/A177).
 #[sqlx::test(migrations = "../../migrations")]
 async fn disjoint_task_edits_both_survive(pool: PgPool) { … }
 
@@ -1160,12 +1160,12 @@ async fn a_tombstone_beats_a_concurrent_edit(pool: PgPool) { … }
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_explicit_restore_wins_and_logs_an_upsert(pool: PgPool) { … }
 
-/// A patch that omits `deleted_at` does not resurrect a tombstone (A175).
+/// A patch that omits `deleted_at` does not resurrect a tombstone (A178).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_patch_that_omits_deleted_at_does_not_resurrect(pool: PgPool) { … }
 
 /// A settings push upserts the caller's single row and echoes the user id as the
-/// entity id, matching what `log_change_by_user` writes (A176).
+/// entity id, matching what `log_change_by_user` writes (A179).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_settings_push_upserts_the_callers_row(pool: PgPool) { … }
 ```
@@ -1179,14 +1179,14 @@ is lost).
 - [ ] **Step 3: Implement, with the conflict table in `crates/sync`**
 
 `crates/sync/src/client/conflict.rs` is created here rather than in Task 8, because the
-server's apply is its first reader and A172's whole point is that there is one copy:
+server's apply is its first reader and A175's whole point is that there is one copy:
 
 ```rust
 /// What the conflict rules say about one entity, as data.
 ///
 /// The roadmap's table is normative and this is its single encoding: the server's apply
 /// reads it, the client's reaction reads it, and neither can drift into a second
-/// convention (A172). The *decision* is still the server's (A150).
+/// convention (A175). The *decision* is still the server's (A150).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
     /// Insert; a duplicate id is ignored. `flashcard_reviews`, `quiz_attempts`,
@@ -1222,10 +1222,10 @@ pub enum Merge {
 ```
 
 `apply_one` dispatches on `rule_for(entity)` and, for `Task`/`Event`, on
-`Entity::payload_shape() == PatchWithBase` (A173). Every write is
-`where id = $1 and user_id = $2` in the statement itself (A170). An append-only insert
+`Entity::payload_shape() == PatchWithBase` (A176). Every write is
+`where id = $1 and user_id = $2` in the statement itself (A173). An append-only insert
 is `on conflict (id) do nothing`, and when nothing was inserted the seq is read from
-`change_log` so the response reports the existing change (A171).
+`change_log` so the response reports the existing change (A174).
 
 - [ ] **Step 4: Run the tests**
 
@@ -1263,7 +1263,7 @@ change.
 
 ```rust
 /// The hint's first frame is the current `max(seq)`, so a device that reconnects after
-/// a gap pulls at once instead of waiting for the next change (A178).
+/// a gap pulls at once instead of waiting for the next change (A181).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_stream_opens_with_the_current_seq(pool: PgPool) { … }
 
@@ -1291,7 +1291,7 @@ An `async_stream::stream!` loop: emit the current `max(seq)` immediately, then e
 `POLL_INTERVAL` (2s) re-read `max(seq)` and emit only when it advanced, interleaved with
 the 15s heartbeat comment. It is a per-connection poll rather than `LISTEN/NOTIFY`
 because that is what makes it correct with more than one server instance and needs no
-cross-instance bus (A178). The stream ends when the client disconnects; nothing else
+cross-instance bus (A181). The stream ends when the client disconnects; nothing else
 terminates it. The handler logs connection open and close with the user id and the
 reason, and it is classified `ReadOnly` in `route_sweep.rs` ("an SSE hint; it reads the
 caller's own clock").
@@ -1333,12 +1333,12 @@ git commit -m "feat(server): GET /sync/stream, a poll of max(seq) that works beh
 ```rust
 /// Upserts older than the retention window go; tombstones younger than the tombstone
 /// window stay, because a device that has been offline for three months must be told
-/// that a row was removed rather than silently keep it (A181).
+/// that a row was removed rather than silently keep it (A184).
 #[sqlx::test(migrations = "../../migrations")]
 async fn compaction_keeps_tombstones_longer_than_it_keeps_upserts(pool: PgPool) { … }
 
 /// The watermark is the highest seq the job actually removed, so a cursor at or above
-/// it is still servable and a cursor below it is 410 (A162).
+/// it is still servable and a cursor below it is 410 (A165).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_watermark_is_the_first_seq_that_survived(pool: PgPool) { … }
 
@@ -1373,7 +1373,7 @@ One transaction per user: delete `op = 'upsert'` rows older than
 `CHANGE_LOG_RETENTION_DAYS`, delete `op = 'delete'` rows older than
 `CHANGE_LOG_TOMBSTONE_RETENTION_DAYS`, then write
 `change_log_watermark.min_retained_seq = coalesce(min(seq) over the account's remaining
-rows, 0)`. The two config keys default to `90` and `180` (A181) and join the explicit
+rows, 0)`. The two config keys default to `90` and `180` (A184) and join the explicit
 key list in `crates/server/src/config.rs` and `.env.example`, because
 `AppConfig::from_env_at` falls back to the process environment for anything not listed
 and a developer's `.env` must not silently set a retention window.
@@ -1445,7 +1445,7 @@ async fn a_410_resyncs_from_zero_without_surfacing_an_error() { … }
 
 /// A 401 on this device is `Revoked`: the store is wiped including the outbox, because
 /// a pending offline write from a revoked device must not be replayed by the next
-/// account that signs in on this machine (A183).
+/// account that signs in on this machine (A186).
 #[tokio::test]
 async fn a_401_wipes_the_cache_and_the_outbox() { … }
 
@@ -1466,13 +1466,13 @@ async fn the_outbox_drains_in_order_and_a_rejection_does_not_stop_it() { … }
 async fn retry_backoff_is_monotonic_and_capped() { … }
 
 /// Status is derived, never asserted: `synced` requires an empty outbox, a successful
-/// pull and a known `last_synced_at` (A184). This is gate 7(b) as a test — a status
+/// pull and a known `last_synced_at` (A187). This is gate 7(b) as a test — a status
 /// the app cannot compute must not be shown.
 #[tokio::test]
 async fn synced_requires_an_empty_outbox_and_a_successful_pass() { … }
 
 /// `data: null` on an `upsert` is applied as a delete, because a row this device
-/// cannot see must never be created on it (A185).
+/// cannot see must never be created on it (A188).
 #[tokio::test]
 async fn a_null_payload_is_applied_as_a_delete() { … }
 ```
@@ -1485,7 +1485,7 @@ async fn a_null_payload_is_applied_as_a_delete() { … }
 
 ```rust
 /// Everything the engine needs from a local database, so the engine has no idea
-/// whether it is talking to SQLite or to a `HashMap` (A179).
+/// whether it is talking to SQLite or to a `HashMap` (A182).
 pub trait LocalStore: Send {
     fn cursor(&self) -> Result<i64, StoreError>;
     fn set_cursor(&mut self, cursor: i64) -> Result<(), StoreError>;
@@ -1514,9 +1514,9 @@ pub trait Transport: Send + Sync {
 pub enum TransportError {
     /// Nothing was reached: keep the outbox, retry with backoff, status `offline`.
     Network(String),
-    /// This device's session is gone (A183).
+    /// This device's session is gone (A186).
     Revoked,
-    /// The cursor is older than retained history: wipe and resync (A163).
+    /// The cursor is older than retained history: wipe and resync (A166).
     Stale,
     Server { status: u16, code: String },
 }
@@ -1591,7 +1591,7 @@ fn a_deferred_row_survives_a_restart_and_is_retried() { … }
 fn the_outbox_survives_a_restart_in_order() { … }
 
 /// The wipe removes the cache AND the outbox, and leaves no row behind that the next
-/// account could read (A183).
+/// account could read (A186).
 #[test]
 fn a_wipe_removes_the_cache_and_the_outbox() { … }
 
@@ -1628,7 +1628,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 `bundled` is deliberate: it is what `docs/ARCHITECTURE.md` § Local cache already states,
 and it removes a system SQLite from the platform matrix. `rusqlite` and `reqwest` live
 here and not in `crates/sync`, so the server's test binaries never link a C SQLite
-(A179). The shell has no HTTP client today (verified), so `reqwest` is new here.
+(A182). The shell has no HTTP client today (verified), so `reqwest` is new here.
 
 `cache/schema.rs` creates one table per `Entity` (columns from the same allowlist the
 pull uses, plus `seq`), the outbox (`mutation_id`, `entity`, `op`, `id`, `payload`,
@@ -1708,7 +1708,7 @@ it('offers "Reset local data and resync" and says what it deletes', …)
 
 - `types.ts`: `SyncStatus` gains `'needs_attention'` (the spec's four states; the union
   already had three) and `Platform` gains `sync: SyncApi`.
-- `web.ts`: the online-only implementation (A180) — `status()` returns
+- `web.ts`: the online-only implementation (A183) — `status()` returns
   `{ state: 'synced', lastSyncedAt: null, outbox: 0 }`, `write`/`tombstone` throw with a
   message that names the REST path, `reset()` is a no-op.
 - `desktop.ts`/`mobile.ts`: the IPC-backed implementation, plus the
@@ -1717,12 +1717,12 @@ it('offers "Reset local data and resync" and says what it deletes', …)
   mutation was rejected, the server's code. `Shell` renders it in both form factors
   (sidebar foot on desktop, a chip in the tab bar row on phone), because the phone has
   no sidebar and `/settings` is still a `NotBuiltRoute` (`router.tsx:92`) — Settings is
-  Phase 9's (A186).
+  Phase 9's (A189).
 - `DevicesScreen.tsx` at `/devices`, reached from the status control: the device list
   with platform and last-synced time, rename, revoke with confirmation, and "Reset local
   data and resync" with the copy saying what it deletes (the cache **and** the outbox,
-  A183). No sixth nav item: the sidebar and the tab bar are both built from the same five
-  labels (A186).
+  A186). No sixth nav item: the sidebar and the tab bar are both built from the same five
+  labels (A189).
 - `app/src/api/sse.ts` gains a `streamSync(...)` sibling to `streamChat`: same reader and
   same parser, a GET instead of a POST, and one event (`seq`).
 - Both locale files gain `sync.*` and `devices.*`; `app/src/i18n/i18n.test.ts` enforces
@@ -1860,17 +1860,17 @@ the pull/push shapes, the allowlist, the conflict table, the offline scope, the 
 contents and the compaction paragraph. This task adds, in the same voice:
 
 - The **initial-pass anchor** and the `offset` parameter, with the failure it prevents
-  (A161) — including the sentence that an interrupted pass may restart at offset 0.
-- The **watermark table** and the exact staleness rule (A162), replacing the current
+  (A164) — including the sentence that an interrupted pass may restart at offset 0.
+- The **watermark table** and the exact staleness rule (A165), replacing the current
   prose "A cursor older than retained history returns 410" with the predicate.
-- The **payload allowlist** and what it excludes (A165), and the `data: null` rule
-  (A185).
-- The **payload shapes** per entity (A173) with one worked example of the disjoint-field
-  merge and one of the overlap (A174).
-- The **retention windows** (A181) as two numbers rather than "default 90 days".
-- The **stream frame** (A178): `event: seq`, `data: {"seq":N}`, a 2s poll, a 15s
+- The **payload allowlist** and what it excludes (A168), and the `data: null` rule
+  (A188).
+- The **payload shapes** per entity (A176) with one worked example of the disjoint-field
+  merge and one of the overlap (A177).
+- The **retention windows** (A184) as two numbers rather than "default 90 days".
+- The **stream frame** (A181): `event: seq`, `data: {"seq":N}`, a 2s poll, a 15s
   heartbeat.
-- The **outbox, retry and status** (A184), and the **revoked wipe** (A183) with the
+- The **outbox, retry and status** (A187), and the **revoked wipe** (A186) with the
   sentence that the outbox is deleted too and why.
 - The **isolation rule** as a contract line: every sync read is scoped by `user_id` in
   the statement that reads it, and a `change_log` row whose `entity_id` is not this
@@ -1889,13 +1889,13 @@ in the `### SSE` section that `event: seq` is the sync stream's event.
 Extend § Local cache (`:841`) with the cache/outbox design: the table set, the
 `defer_foreign_keys` apply and the two mechanisms that make out-of-order arrival land
 (in-page deferral, cross-pull retry), the outbox's ordering and backoff, the wipe, and
-why `rusqlite` and `reqwest` live in the shell rather than in `crates/sync` (A179). Add
+why `rusqlite` and `reqwest` live in the shell rather than in `crates/sync` (A182). Add
 one section on the seq clock: why the advisory lock makes `seq` order equal commit
 order, and why the push route takes the lock first.
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
-Append A161–A186 (§ "Pinned decisions"), add `change_log_watermark` to § "Schema
+Append A164–A189 (§ "Pinned decisions"), add `change_log_watermark` to § "Schema
 deviations from the spec", and record the two new config keys.
 
 - [ ] **Step 5: The three roadmap gates, measured**
@@ -2044,7 +2044,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
    untouched.
 3. **Do not add a sixth nav item.** The sidebar and the phone tab bar are both built
    from the same five labels; Devices is reached from the sync status control, which
-   `Shell` renders in both form factors (A186). `/settings` stays a `NotBuiltRoute`:
+   `Shell` renders in both form factors (A189). `/settings` stays a `NotBuiltRoute`:
    Settings is Phase 9's.
 4. **`crates/sync` must stay free of `rusqlite`, `reqwest` and `sqlx`.** The server's
    test binaries link it, and a C SQLite in that graph is a build problem on every
@@ -2054,7 +2054,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
    `where user_id = $1` in the same statement. A `select` followed by a filter in Rust
    is a defect even when it returns the right rows, because the next edit is what makes
    it wrong.
-6. **`data: null` is a delete.** Both ends implement it (A185). It is what keeps a
+6. **`data: null` is a delete.** Both ends implement it (A188). It is what keeps a
    pathological `change_log` row from becoming a cross-tenant read, and it is why the
    client's apply does not dispatch on `op` alone.
 7. **Log the latency.** The roadmap's constraint names sync pull/push explicitly; one
@@ -2081,7 +2081,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
   clients": the synced entities only, no chunks or embeddings, plus "Reset local data and
   resync" (Tasks 9/10). § "Auth across devices": a revoked device gets 401 and wipes its
   cache on next contact, and the Devices screen lists, renames and revokes (Task 10;
-  the spec's IA nests Devices under settings, and A186 records why it hangs off the
+  the spec's IA nests Devices under settings, and A189 records why it hangs off the
   status control until Phase 9 builds that screen).
   § "Entitlements engine": "including sync push mutations" (Task 4, via `decide`).
   § "AUTH AND SECURITY": every query scoped to the authenticated user including sync
@@ -2090,7 +2090,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
   row each gain their Phase 8 case.
 - **Placeholders:** none. Every task names its files, its exact test names, its run
   command and its commit. The choices the spec and the roadmap leave open are pinned as
-  A161–A186 rather than waved at, and each names the failure it prevents.
+  A164–A189 rather than waved at, and each names the failure it prevents.
 - **Type consistency.** `PullQuery`, `CursorError`, `CursorKind`, `is_stale`,
   `PayloadShape`, `payload_columns`, `LocalStore`, `ApplyReport`, `Transport`,
   `TransportError`, `SyncState`, `Rule`, `Merge`, `Outcome`, `Page`, `apply_batch`,
@@ -2106,12 +2106,12 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
   row's `updated_at` and the `change_log` count, not the response shape. A third is
   written down because it is silent: the unanchored initial pass, which loses a row per
   mid-pass insert and only on a device that is syncing for the first time.
-- **Deviations from the contract, each recorded:** A161 (the anchor and the `offset`
-  parameter, an addition the contract's single-integer cursor cannot express), A165 (a
-  payload allowlist the contract does not spell), A173 (the patch+base payload shape),
-  A178 (`event: seq`, which is not in the roadmap §4 list because that list covers the
-  chat stream), A181 (two retention windows where the contract says one), A185 (`data:
-  null` on an `upsert`), A186 (Devices hangs off the status control rather than a
+- **Deviations from the contract, each recorded:** A164 (the anchor and the `offset`
+  parameter, an addition the contract's single-integer cursor cannot express), A168 (a
+  payload allowlist the contract does not spell), A176 (the patch+base payload shape),
+  A181 (`event: seq`, which is not in the roadmap §4 list because that list covers the
+  chat stream), A184 (two retention windows where the contract says one), A188 (`data:
+  null` on an `upsert`), A189 (Devices hangs off the status control rather than a
   Settings screen, which does not exist yet).
 - **Open items.**
   1. **The scale-out path in `change_log` is not taken.** `docs/SYNC.md` names the
@@ -2125,7 +2125,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
      permits today.
   3. **The client's conflict table is data, but its *application* is only the server's.**
      A device that goes offline for a week and reconnects replays a queue the server may
-     refuse row by row; the client shows the refusals (A184) but has no per-row "keep
+     refuse row by row; the client shows the refusals (A187) but has no per-row "keep
      mine" override. The spec does not ask for one, and adding it would be a second
      conflict resolver.
   4. **The web build has no offline reads.** `docs/SPEC.md` scopes the cache to native

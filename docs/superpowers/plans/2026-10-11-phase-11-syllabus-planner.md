@@ -77,7 +77,7 @@ and the buffer.
 > extraction gets written without the student noticing.** The model returns a `confidence`
 > per item, and the honesty rules forbid showing a confidence score — so a screen that
 > rendered it as a percentage would be both a copy violation and a false assurance. The
-> decision (A238) is that the number is used to **order** the list and to flag "needs a
+> decision (A241) is that the number is used to **order** the list and to flag "needs a
 > check", and the screen shows the **evidence quote** instead: the exact source line the
 > item was read from. The mechanical defence is
 > `crates/server/tests/syllabus.rs::nothing_is_written_until_the_student_confirms`, which
@@ -146,7 +146,7 @@ spend nothing beyond the generation already charged.
 `crates/core/src/entitlements/check.rs:88` reads `cfg.syllabus_imports_total` for
 `SyllabusImport`, and `:159` reads `Feature::PlanGeneration => cfg.planner !=
 PlannerMode::Manual`. That one line is why the free plan's refusal is a `plan_required`
-with a real `min_plan`, and why A234 needs no second rule.
+with a real `min_plan`, and why A237 needs no second rule.
 
 ---
 
@@ -185,19 +185,19 @@ does not exist.**
   workspace_id, title, target_date timestamptz not null, source_ids uuid[], created_at,
   updated_at, deleted_at)` with `index on (user_id, target_date)`. **No `topics` column**
   — the topics come from `source_ids` plus the effort estimate, and are stored on the
-  proposal (A229). **`created_at` is nullable-by-default but always set** (`default
+  proposal (A232). **`created_at` is nullable-by-default but always set** (`default
   now()`), which is what makes the tie-break in step 5 of the algorithm total.
   `tasks (…, due_at, estimate_min, priority, status, …)` and `study_sessions` are there
   too, and `user_settings` carries `study_start_hour default 8`, `study_end_hour default
   22`, `max_study_min_per_day default 240`, `block_len_min default 50`, `break_min default
-  10` — **the three settings the planner needs are already stored** (A233).
+  10` — **the three settings the planner needs are already stored** (A236).
 - `migrations/0013_calendar_events.sql`: `events (id, user_id, workspace_id, kind, title,
   starts_at, ends_at, external_id, etag, connection_id, source default 'app', task_id,
   created_at, updated_at, deleted_at)`, `index on (user_id, starts_at)`, `index on
   (task_id)`, `unique index on (connection_id, external_id) where external_id is not
   null`. `kind` is free text documented as `class | exam | study_block | deadline |
   external` — **the planner's `busy` filter and its output kind both already exist**.
-  **There is no `goal_id`** — see A240.
+  **There is no `goal_id`** — see A243.
 - `migrations/0017_sync_triggers.sql:14-18`: `id_tables` already carries `workspaces,
   sources, messages, decks, flashcards, flashcard_reviews, quizzes, quiz_questions,
   quiz_attempts, reports, cheatsheets, tasks, goals, events, study_sessions,
@@ -205,7 +205,7 @@ does not exist.**
   asserts exactly those tables carry both triggers. **This phase adds no `+sync` table and
   changes no trigger array**, so that file stays the last one that attaches a trigger and
   needs no edit — which is precisely why `syllabus_drafts` and `plan_proposals` are
-  deliberately **not** `+sync` (A228, A229). The precedent is `0021`–`0023`, each of which
+  deliberately **not** `+sync` (A231, A232). The precedent is `0021`–`0023`, each of which
   says so in its own header comment.
 - `migrations/0007_workspaces_sources_chunks.sql:16`: `sources.kind` is documented as
   `pdf | pptx | docx | url | text | web | syllabus` — **`syllabus` is already a legal
@@ -257,7 +257,7 @@ does not exist.**
   only; `other => Failure::permanent(format!("unsupported source kind {other}"))`. And
   `crates/server/src/sources/routes.rs:31` `SUPPORTED_KINDS` is `["pdf", "text"]` — so the
   generic upload route refuses `syllabus`, which is why this phase's own route writes the
-  row (A227).
+  row (A230).
 - `crates/server/src/integrations/clock.rs` is `SystemClock`; `crates/core/src/traits/testing.rs:30`
   is `FixedClock::at(ts)`. Both already exist, which is what makes the planner's `now`
   injectable end to end.
@@ -287,7 +287,7 @@ does not exist.**
 **Docs that must move in the same commits:** `docs/API.md:786-793` (the reserved
 `## Goals and planner (Phase 11)` and `## Syllabus (Phase 11)` sections become real),
 `docs/ARCHITECTURE.md` (a new `## Planner (Phase 11)` section after `## Quiz (Phase 5)`),
-`docs/ASSUMPTIONS.md` (A227–A246, plus two schema-deviation rows), `docs/SYNC.md` (the
+`docs/ASSUMPTIONS.md` (A230–A249, plus two schema-deviation rows), `docs/SYNC.md` (the
 `events.goal_id` payload note).
 
 ---
@@ -302,23 +302,23 @@ this file is the bug.
 |---|---|
 | `crates/server/src/tasks.rs` and `crates/server/src/events.rs` — the sync-native CRUD, the server-owned fields, `GET /events?from=&to=` | The syllabus confirm writes `tasks` and `events` through the same table shapes; the planner reads `events` for `busy` and `tasks` for the due-date demand. Neither file is edited. |
 | `events.kind` values (`class | exam | study_block | deadline | external`) and `events.source default 'app'` | The planner's output is `kind='study_block'`, `source='app'`. The `busy` filter is `kind <> 'study_block'`. No new kind is invented. |
-| `crates/server/src/settings.rs` and `user_settings`' `study_start_hour`, `study_end_hour`, `max_study_min_per_day`, `block_len_min`, `break_min` | `StudySettings` and half of `PlannerConfig` are read from the user's own settings row (A233). No second settings surface. |
-| `crates/server/src/study.rs` — `study_sessions`, and the reads the Today view needs | Replan treats a goal's already-started `study_block` events as elapsed time (A242). Nothing here re-reads sessions. |
+| `crates/server/src/settings.rs` and `user_settings`' `study_start_hour`, `study_end_hour`, `max_study_min_per_day`, `block_len_min`, `break_min` | `StudySettings` and half of `PlannerConfig` are read from the user's own settings row (A236). No second settings surface. |
+| `crates/server/src/study.rs` — `study_sessions`, and the reads the Today view needs | Replan treats a goal's already-started `study_block` events as elapsed time (A245). Nothing here re-reads sessions. |
 | Phase 10's `crates/core/src/calendar/expand.rs` — the pure, bounded recurrence expansion (`all(limit)` + check `limited`, per the roadmap's risk register) — and its **expand-on-write** rule: every occurrence is a row in `events`, and `events` gains no `rrule` column | A confirmed class meeting carries an RFC 5545 `RRULE`; the confirm path expands it with `calendar::expand` and writes one `events` row per occurrence, exactly as Phase 10's ICS import does. Phase 10's plan already states why: storing the series and expanding on read "would need a second recurrence engine in the planner, in the SPA's week grid and in the ICS feed". This plan adds no second engine and does not re-open that decision. |
 | Phase 10's `GET /cal/:token.ics` and the calendar UI at `/calendar` | The planner screen links to it and does not replace it. This phase adds `/planner`, not `/calendar`. |
 | Phase 9's `route_sweep.rs` rows, and Phase 10's | This phase adds only its own thirteen. |
-| `Platform.sync` and the `src-tauri` SQLite cache (Phase 8) | The one synced-shape change this phase makes is `events.goal_id` (A240); the cache's `schema.rs` gains that column in the same task. |
+| `Platform.sync` and the `src-tauri` SQLite cache (Phase 8) | The one synced-shape change this phase makes is `events.goal_id` (A243); the cache's `schema.rs` gains that column in the same task. |
 
 ---
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A227–A246** in the same commits as the code. Phase 6 wrote
-A119–A131 (reserved to A139), Phase 7 holds A140–A160, Phase 8 holds A161–A186, Phase 9
-holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
+`docs/ASSUMPTIONS.md` as rows **A230–A249** in the same commits as the code. Phase 6 wrote
+A119–A131 (reserved to A139), Phase 7 holds A140–A163, Phase 8 holds A164–A189, Phase 9
+holds A190–A209 and Phase 10 holds A210–A229, so this block starts at A230.
 
-1. **A227 — The syllabus extraction rides `ingest_source`; no new job kind is added.**
+1. **A230 — The syllabus extraction rides `ingest_source`; no new job kind is added.**
    The roadmap § 8 list is fixed and has no syllabus kind, so `sources.kind='syllabus'`
    gets a parse arm (pdf or text, by `mime`) and then one extra step: compose
    `syllabus.v1.md`, call the model, write `syllabus_drafts`. A parse failure is
@@ -329,28 +329,28 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
    over selected chunks, and a syllabus is a whole document, which the spec requires be
    async with visible progress.
 
-2. **A228 — `syllabus_drafts` is a new table and deliberately NOT `+sync`.** A draft is
+2. **A231 — `syllabus_drafts` is a new table and deliberately NOT `+sync`.** A draft is
    server-owned: the model produced it, the student confirms it, and it has no client
    identity. There is no `Entity` variant for it, and adding one would mean attaching a
    trigger from `0017_sync_triggers.sql`, which must stay the last trigger-attaching
    migration. It therefore gets a `documented` row in `crates/server/tests/schema.rs` and
    a row in `docs/ASSUMPTIONS.md` § Schema deviations — the `search_cache` precedent.
 
-3. **A229 — `plan_proposals` is a new table and deliberately NOT `+sync`.** The roadmap's
+3. **A232 — `plan_proposals` is a new table and deliberately NOT `+sync`.** The roadmap's
    conflict table names "planner output" among the server-owned entities that are
    "read-only for clients except via their dedicated endpoints", which is exactly what
    `GET /plans/:id` is. The accepted blocks reach every device the way the spec says they
    do — as `events` — and the proposal itself never syncs. Same `documented` row and
-   deviations row as A228.
+   deviations row as A231.
 
-4. **A230 — Planning is a job, not a route.** The effort estimate is a model call, so
+4. **A233 — Planning is a job, not a route.** The effort estimate is a model call, so
    `POST /goals/:id/plan` reserves the 2 credits, creates the `plan_proposals` row in
    status `planning`, enqueues `plan_goal` and answers **202** with `{ "proposal_id": … }`;
    `GET /plans/:id` is how the client polls. The contrast with `create_outline` is
-   deliberate and is the same distinction A227 draws: one short call may run in a route,
+   deliberate and is the same distinction A230 draws: one short call may run in a route,
    a whole-document call may not.
 
-5. **A231 — `semester_context` joins `UNTRUSTED_VARIABLES` and both modules gain a
+5. **A234 — `semester_context` joins `UNTRUSTED_VARIABLES` and both modules gain a
    `<user_context_data>` block.** `semester_context` is free text a student types, so it
    is data, not a setting — the same argument `prompts/README.md` makes for `{{style}}`
    and `{{length}}`. `planner_effort.v1.md` wraps `{{goal_title}}`, which is already
@@ -359,7 +359,7 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
    recorded as A112 and this plan does not re-open it, because renaming changes
    `usage_events.prompt_version` for every future turn.
 
-6. **A232 — The planner's non-user tunables live in `config/plans.toml` under a new
+6. **A235 — The planner's non-user tunables live in `config/plans.toml` under a new
    `[planner]` table.** `deadline_buffer_min = 120`, `revisit_days = 3`,
    `spread_k = 1.5`, `max_horizon_days = 120`. They are loaded into a new
    `PlannerTunables` struct on `PlansFile` (`crates/core/src/config/plans.rs`), beside
@@ -369,13 +369,13 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
    otherwise make the day loop unbounded, which the roadmap's own risk register calls "a
    real server hang".
 
-7. **A233 — `block_len_min`, `break_min` and `max_study_min_per_day` come from
+7. **A236 — `block_len_min`, `break_min` and `max_study_min_per_day` come from
    `user_settings`, not from the plan.** They are the student's own choices and are
    already stored (`0012`); duplicating them in `plans.toml` would create two answers to
    one question. `PlannerConfig` is composed by the server from `user_settings` +
    `[planner]` + the plan's `PlannerMode`, and the pure planner never reads config.
 
-8. **A234 — `PlannerMode` maps to `PlannerConfig` in exactly one place.** `Manual` never
+8. **A237 — `PlannerMode` maps to `PlannerConfig` in exactly one place.** `Manual` never
    reaches the planner, because `Feature::PlanGeneration` is already `planner != manual`
    and the route refuses with 403 `plan_required`/`min_plan: pro`. `Auto` ⇒
    `balancer_enabled = false, spread_k = 0.0`. `AutoBalancerWeaknessBlocks` ⇒
@@ -384,37 +384,37 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
    get wrong, and it is why a free account cannot get a balanced plan by calling the route
    directly.
 
-9. **A235 — Topic weight is `1 + spread_k × (1 − accuracy)`, and a topic with no quiz
+9. **A238 — Topic weight is `1 + spread_k × (1 − accuracy)`, and a topic with no quiz
    attempts weighs 1.** `accuracy` is `Option<f64>`: the goal's topic accuracy over the
    last 14 days, `None` when there are no attempts. `None` weighs as if accurate, because
    the app must not invent a weakness out of missing data — the same honesty rule that
    makes the prep-progress card say "no quizzes yet" instead of 0%.
 
-10. **A236 — `overload_pct` is a documented constant, not a `PlannerConfig` field.**
+10. **A239 — `overload_pct` is a documented constant, not a `PlannerConfig` field.**
     `balance::OVERLOAD_PCT: f64 = 0.9`, with its own doc comment. Contract § 6 fixes
     `PlannerConfig`'s six fields, and adding a seventh would be a contract change made by a
     phase plan.
 
-11. **A237 — `due_review_min = due_cards × DUE_CARD_MIN`, with `DUE_CARD_MIN: i64 = 1`.**
+11. **A240 — `due_review_min = due_cards × DUE_CARD_MIN`, with `DUE_CARD_MIN: i64 = 1`.**
     A flashcard is a sub-minute item and a minute is the smallest unit every other number
     in the planner uses, so one minute per card is the honest rounding. It is a documented
     constant with a test, and the workload meter's "planned minutes" therefore traces to
     `due_cards × 1`, which is a number the app computes.
 
-12. **A238 — The extraction's `confidence` is never rendered as a number.** The review
+12. **A241 — The extraction's `confidence` is never rendered as a number.** The review
     screen orders its list by confidence ascending (lowest first, so the items most likely
     to be wrong are at the top) and marks an item below `REVIEW_FLAG_CONFIDENCE = 0.6` as
     needing a check. What the screen shows is the **evidence quote** — the exact source
     line — because the spec's honesty rules forbid showing confidence scores, and because
     a quoted line is what actually lets a student verify the item.
 
-13. **A239 — `PlanWarning` has exactly two variants, and the enum is closed.**
+13. **A242 — `PlanWarning` has exactly two variants, and the enum is closed.**
     `Overloaded { days: Vec<NaiveDate> }` (the contract's own variant, from step 6) and
     `PastDeadline { goal_id: Uuid }` (a goal whose `target_date` is at or before `now`;
     it is reported rather than dropped, and it does not stop the other goals). A third
     variant is a contract change.
 
-14. **A240 — `events` gains `goal_id uuid references goals(id) on delete set null`.**
+14. **A243 — `events` gains `goal_id uuid references goals(id) on delete set null`.**
     A planned block must be attributable to the goal it was planned for: replan needs it,
     the workload meter groups by it, and the timeline shows it. It is the same argument
     `0013` already made for `task_id` — a link without a FK drifts — and the same
@@ -422,30 +422,30 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
     task, and a `docs/SYNC.md` payload note. The `+sync` triggers are unaffected, because
     `log_change()` logs the whole row.
 
-15. **A241 — `POST /plans/accept` re-validates the client's adjusted blocks and refuses
+15. **A244 — `POST /plans/accept` re-validates the client's adjusted blocks and refuses
     the whole batch or none of it.** The client may drag a block; the server still checks
     the merged result against busy time, the study window and `max_study_min_per_day`, and
     answers 400 `validation` naming the offending block rather than writing part of a
     plan. Drag-adjust must not be able to produce the overlap the planner's own invariants
     forbid. Accept spends nothing: the 2 credits were charged at `POST /goals/:id/plan`.
 
-16. **A242 — Replan splits the goal's existing blocks into `pinned` and `busy`.** A block
+16. **A245 — Replan splits the goal's existing blocks into `pinned` and `busy`.** A block
     that starts after `now` is `pinned` and is kept exactly. A block that has already
     started is added to `busy`, because contract step 2 subtracts `busy ∪ pinned` and
     does **not** subtract `kind='study_block'` rows by default — without this, replan
     would cheerfully schedule new material over a session the student is sitting in.
 
-17. **A243 — `PlanProposal` serializes in a fixed order.** Blocks by `(starts_at,
+17. **A246 — `PlanProposal` serializes in a fixed order.** Blocks by `(starts_at,
     goal_id, topic)`, `day_load` by date ascending, `warnings` by variant order then by
     payload. Determinism is asserted on `serde_json::to_vec`, byte for byte, which is why
     the order is a decision rather than an implementation detail.
 
-18. **A244 — The horizon ends at `max(target_date).local_date() + 1 day`**, so the
+18. **A247 — The horizon ends at `max(target_date).local_date() + 1 day`**, so the
     deadline day is inside it and a block can be placed on the day of the exam if the
     student's window allows. The horizon is additionally clipped to
-    `[today, today + max_horizon_days]` (A232).
+    `[today, today + max_horizon_days]` (A235).
 
-19. **A245 — The balancer moves the latest movable block to the least-loaded day, bounded
+19. **A248 — The balancer moves the latest movable block to the least-loaded day, bounded
     to 100 iterations.** Movable means: not pinned, and not a review-reserved block (the
     review pass of step 4 outranks the balancer). The target is the least-loaded day in
     the horizon that has a free slot of the block's length. The loop is
@@ -453,22 +453,22 @@ holds A187–A206 and Phase 10 holds A207–A226, so this block starts at A227.
     iterations < MAX_ITERATIONS`, and the count is returned so a test can assert the bound
     was respected rather than merely not exceeded by luck.
 
-20. **A246 — The confirm mapping is fixed and lives in `generation::syllabus`.** A kept
+20. **A249 — The confirm mapping is fixed and lives in `generation::syllabus`.** A kept
     meeting → one `events` row per expanded occurrence (`kind='class'`, `source='app'`,
     expanded with Phase 10's `crates/core/src/calendar/expand.rs` and its expand-on-write
     rule, capped at `MAX_OCCURRENCES = 60`). A kept deadline → one `tasks` row (`due_at`
     set, `priority` 1, `estimate_min` null). A kept exam → one `goals` row (`target_date`
     set, `source_ids` the workspace sources the student selected for it). Review-reserved
     blocks are emitted as `BlockKind::Review` so the accept path writes them with a title
-    that says "Review", and the balancer can tell them apart (A245).
+    that says "Review", and the balancer can tell them apart (A248).
 
 ---
 
 ## File structure (new this phase)
 
 ```
-migrations/0030_syllabus_drafts.sql                 # new table; not +sync (A228)
-migrations/0031_plan_proposals.sql                  # new table + events.goal_id (A229/A240)
+migrations/0030_syllabus_drafts.sql                 # new table; not +sync (A231)
+migrations/0031_plan_proposals.sql                  # new table + events.goal_id (A232/A243)
 crates/core/src/generation/syllabus.rs              # the extraction contract + review items
 crates/core/src/generation/effort.rs                # the effort contract + reconcile
 crates/core/src/planner/mod.rs                      # PlannerInput, PlanProposal, propose()
@@ -709,7 +709,7 @@ pub const MAX_EXAMS: usize = 20;
 pub const MAX_NOTES: usize = 20;
 /// The module says "under 15 words"; this is what makes it enforceable.
 pub const MAX_EVIDENCE_WORDS: usize = 15;
-/// Below this, the review screen marks the item as needing a check (A238). The number
+/// Below this, the review screen marks the item as needing a check (A241). The number
 /// never reaches the screen.
 pub const REVIEW_FLAG_CONFIDENCE: f64 = 0.6;
 
@@ -814,7 +814,7 @@ pub fn reconcile(estimate: &EffortFile, requested: &[String]) -> Result<Vec<(Str
 ```sql
 -- Syllabus extraction drafts.
 --
--- Server-owned, and deliberately NOT a `+sync` table (A228): the model produced
+-- Server-owned, and deliberately NOT a `+sync` table (A231): the model produced
 -- the extraction, the student confirms it, and only the confirmed items become
 -- events, tasks and goals. There is no `Entity` variant for a draft, and adding
 -- one would mean attaching a trigger from `0017_sync_triggers.sql`, which must
@@ -841,7 +841,7 @@ create index on syllabus_drafts (user_id, status);
 ```
 
 - [ ] **Step 3: `crates/server/tests/schema.rs`.** Append `"syllabus_drafts"` to
-      `documented`, with the one-line comment the list's style uses, naming A228.
+      `documented`, with the one-line comment the list's style uses, naming A231.
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md` § Schema deviations.** One row: new table
       `syllabus_drafts`, why it is not `+sync`, and why it is keyed uniquely on
@@ -930,7 +930,7 @@ status is `extracting`, and 422 `conflict`-free failure detail when it is `faile
       chunks are written, one extra step:
 
 ```rust
-/// The extraction step, for `kind = 'syllabus'` only (A227).
+/// The extraction step, for `kind = 'syllabus'` only (A230).
 ///
 /// It rides `ingest_source` because the roadmap's job-kind list is fixed and has no
 /// syllabus kind, and it runs here rather than in the route because a whole document is
@@ -1025,7 +1025,7 @@ pub async fn confirm(
 ```
 
 One transaction. The draft must be `ready` and the caller's; the status becomes
-`confirmed`; the mapping is A246, and the expansion of a meeting's `rrule` calls **Phase
+`confirmed`; the mapping is A249, and the expansion of a meeting's `rrule` calls **Phase
 10's** `crates/core/src/calendar/expand.rs` — pure, bounded, expand-on-write — so a
 meeting becomes one `events` row per occurrence and there is still exactly one recurrence
 engine in the product. A draft that is already `confirmed` answers 409 `conflict` rather
@@ -1147,7 +1147,7 @@ pub struct Topic {
     pub source_id: Option<Uuid>,
     pub name: String,
     pub remaining_min: i64,
-    /// `None` when the topic has no quiz attempts in the last 14 days (A235).
+    /// `None` when the topic has no quiz attempts in the last 14 days (A238).
     pub accuracy: Option<f64>,
 }
 
@@ -1179,7 +1179,7 @@ pub struct ProposedBlock {
     pub goal_id: Uuid,
     pub topic: String,
     pub kind: BlockKind,
-    /// True for a block that came in through `PlannerInput::pinned` (A242).
+    /// True for a block that came in through `PlannerInput::pinned` (A245).
     pub pinned: bool,
 }
 
@@ -1198,7 +1198,7 @@ pub enum PlanWarning {
 
 `PlanProposal` derives `Serialize` but not `Deserialize`: the proposal is produced by the
 server and read by a client, and the accept path validates the **blocks the client sends**
-against the invariants rather than trusting a round-tripped `PlanProposal` (A241).
+against the invariants rather than trusting a round-tripped `PlanProposal` (A244).
 
 - [ ] **Step 3: `crates/core/src/planner/slots.rs`.** Steps 1 and 2 of the algorithm.
 
@@ -1236,7 +1236,7 @@ boundary a student can reason about.
 //! The deterministic planner. Contract § 6 of the master roadmap, implemented.
 //!
 //! Pure: no database, no clock, no IO, no network. `now` is a field of `PlannerInput`.
-//! Same input ⇒ byte-identical output (A243), which `tests/planner.rs` asserts rather than
+//! Same input ⇒ byte-identical output (A246), which `tests/planner.rs` asserts rather than
 //! assumes.
 
 mod allocate;
@@ -1281,7 +1281,7 @@ fn weak_topics_weigh_more_than_strong_ones() {
 
 #[test]
 fn a_topic_with_no_attempts_weighs_the_same_as_a_perfect_one() {
-    // A235: missing data is not evidence of weakness.
+    // A238: missing data is not evidence of weakness.
 }
 
 #[test]
@@ -1301,7 +1301,7 @@ fn the_deadline_buffer_is_left_free_of_new_material() {
 #[test]
 fn the_review_pass_reserves_one_block_per_day_before_the_exam() {
     // One `BlockKind::Review` block on each of the last `revisit_days` local dates before
-    // `target_date`, for each goal (A246 / contract step 4).
+    // `target_date`, for each goal (A249 / contract step 4).
 }
 
 #[test]
@@ -1325,7 +1325,7 @@ fn a_deadline_before_now_is_a_warning_not_a_panic() {
 /// Step 3. `D = Σ_topic remaining_min × weight(topic) + due_review_min`.
 pub(crate) fn demand(input: &PlannerInput) -> i64;
 
-/// `1 + spread_k × (1 − accuracy)`, and `1` when `accuracy` is `None` (A235).
+/// `1 + spread_k × (1 − accuracy)`, and `1` when `accuracy` is `None` (A238).
 pub(crate) fn weight(topic: &Topic, spread_k: f64) -> f64;
 
 /// Step 4. Consumes the slots it reserves, and returns the review blocks.
@@ -1394,10 +1394,10 @@ fn the_balancer_never_moves_a_pinned_block() {
 /// The share of `max_study_min_per_day` above which a day counts as overloaded.
 ///
 /// A constant rather than a `PlannerConfig` field, because contract § 6 fixes that struct's
-/// six fields and a seventh is a contract change (A236).
+/// six fields and a seventh is a contract change (A239).
 pub(crate) const OVERLOAD_PCT: f64 = 0.9;
 
-/// The termination bound (A245). The loop cannot spin: it either moves a block, which
+/// The termination bound (A248). The loop cannot spin: it either moves a block, which
 /// strictly decreases the overloaded day's load, or it stops.
 pub(crate) const MAX_ITERATIONS: usize = 100;
 
@@ -1410,12 +1410,12 @@ pub(crate) fn rebalance(
 ) -> usize;
 ```
 
-A block is movable iff `!block.pinned && block.kind == BlockKind::NewMaterial` (A245).
+A block is movable iff `!block.pinned && block.kind == BlockKind::NewMaterial` (A248).
 After a move, `day_load` is recomputed from `blocks` rather than patched, so the two can
 never disagree.
 
 - [ ] **Step 3: Wire step 7 in `propose`,** gated on `input.config.balancer_enabled`, which
-      the server sets from `PlannerMode` (A234).
+      the server sets from `PlannerMode` (A237).
 
 - [ ] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_purity`
 
@@ -1466,7 +1466,7 @@ fn prep_progress_has_no_composite_score() {
 ```rust
 /// `propose`, with `PlannerInput::pinned` emitted first as blocks with `pinned: true` and
 /// never moved. Everything else is identical: replan is not a second algorithm, it is the
-/// same one with more of its input already decided (A242).
+/// same one with more of its input already decided (A245).
 pub fn replan(input: &PlannerInput) -> PlanProposal;
 ```
 
@@ -1493,7 +1493,7 @@ pub struct TopicAttempts { pub topic: String, pub attempts: i64, pub correct: i6
 ```
 
 `weak_topics` is the topics whose accuracy is below `WEAK_TOPIC_ACCURACY = 0.6`, ordered
-by accuracy ascending then by name — the same ordering rule A243 uses, for the same reason.
+by accuracy ascending then by name — the same ordering rule A246 uses, for the same reason.
 
 - [ ] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_progress`
 
@@ -1522,7 +1522,7 @@ by accuracy ascending then by name — the same ordering rule A243 uses, for the
 -- Server-owned: the roadmap's conflict table lists "planner output" among the
 -- entities that are "read-only for clients except via their dedicated endpoints",
 -- which is what `GET /plans/:id` is. Not a `+sync` table, for the same reason as
--- `syllabus_drafts` (A229). The accepted blocks reach every device the way the
+-- `syllabus_drafts` (A232). The accepted blocks reach every device the way the
 -- spec says planner results do — as `events`.
 --
 -- `proposal` holds the serialized `PlanProposal`; `deficit_min` and `warnings` are
@@ -1543,7 +1543,7 @@ create table plan_proposals (
 );
 create index on plan_proposals (user_id, goal_id, created_at desc);
 
--- A planned block belongs to the goal it was planned for (A240). The same argument
+-- A planned block belongs to the goal it was planned for (A243). The same argument
 -- `0013` already made for `task_id`: a link without a FK drifts, and a replan or a
 -- workload meter that reads a dangling id is a bug that only shows up later.
 --
@@ -1582,7 +1582,7 @@ create index on events (goal_id);
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
 async fn planning_a_goal_on_the_free_plan_is_refused_with_plan_required(pool: PgPool) {
-    // 403 plan_required, min_plan "pro". This is A234's structural claim, asserted rather
+    // 403 plan_required, min_plan "pro". This is A237's structural claim, asserted rather
     // than described: the free plan's `planner = "manual"` is the whole rule.
 }
 
@@ -1597,7 +1597,7 @@ async fn another_accounts_proposal_is_not_found(pool: PgPool) { /* 404 */ }
 ```
 
 - [ ] **Step 2: `config/plans.toml` and `crates/core/src/config/plans.rs`.** Add the
-      `[planner]` table (A232) and a `PlannerTunables` struct on `PlansFile` with
+      `[planner]` table (A235) and a `PlannerTunables` struct on `PlansFile` with
       `validate()` requiring it, beside `provider_cost_ceiling_usd`. A missing table is a
       config error, not a silent default.
 
@@ -1609,7 +1609,7 @@ async fn another_accounts_proposal_is_not_found(pool: PgPool) { /* 404 */ }
       `quiz_accuracy_pct: null` when there are none.
 
 - [ ] **Step 4: `crates/server/src/planner/mod.rs`.** The only place a `PlannerInput` is
-      built and the only place `PlannerMode` becomes a `PlannerConfig` (A234):
+      built and the only place `PlannerMode` becomes a `PlannerConfig` (A237):
 
 ```rust
 pub fn config_from(settings: &StudySettingsRow, mode: PlannerMode, t: &PlannerTunables) -> PlannerConfig;
@@ -1618,8 +1618,8 @@ pub fn busy_from(events: &[EventRow], tasks: &[TaskRow]) -> Vec<Interval>;
 ```
 
 `busy_from` is `kind <> 'study_block'` events plus tasks with a `due_at`, merged, plus the
-goal's already-started `study_block` events (A242). `due_review_min` is `due_cards ×
-DUE_CARD_MIN` (A237), read from the same due computation the study screen uses.
+goal's already-started `study_block` events (A245). `due_review_min` is `due_cards ×
+DUE_CARD_MIN` (A240), read from the same due computation the study screen uses.
 
 - [ ] **Step 5: `crates/server/src/planner/routes.rs`.** Four routes, exact paths from the
       spec's API list:
@@ -1639,7 +1639,7 @@ carries both rows.
 - [ ] **Step 6: `crates/server/src/planner/apply.rs`.**
 
 ```rust
-/// Validates the client's blocks and writes them, or writes none of them (A241).
+/// Validates the client's blocks and writes them, or writes none of them (A244).
 ///
 /// The client may drag; the server still checks. A block that overlaps `busy`, leaves the
 /// study window, or pushes its day past `max_study_min_per_day` is a 400 naming the index —
@@ -1759,7 +1759,7 @@ async fn the_accepted_plan_respects_busy_time_study_hours_the_daily_max_and_the_
 async fn replan_keeps_the_pinned_blocks_and_leaves_the_started_one_alone(pool: PgPool) {
     // After the first accept: move one block to the past, replan, and assert the past block
     // is untouched, the future ones are exactly where they were, and the new proposal does
-    // not overlap either (A242).
+    // not overlap either (A245).
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1796,7 +1796,7 @@ async fn an_accepted_proposal_cannot_be_accepted_twice(pool: PgPool) {
 // app/src/features/planner/preview.test.ts
 it('refuses a drag that would overlap a class before the request is sent', () => {
   // The grid knows the busy intervals it was given, so the refusal is local and immediate.
-  // The server checks again (A241) — this is the courtesy, not the control.
+  // The server checks again (A244) — this is the courtesy, not the control.
 });
 
 it('the workload meter counts minutes, not blocks', () => {
@@ -1811,7 +1811,7 @@ it('an unconfirmed item is never in the confirm payload', () => {
 });
 
 it('the review list is ordered by confidence ascending and shows the evidence', () => {
-  // A238: the number orders the list, the quote is what is rendered.
+  // A241: the number orders the list, the quote is what is rendered.
 });
 ```
 
@@ -1832,7 +1832,7 @@ it('the review list is ordered by confidence ascending and shows the evidence', 
 - [ ] **Step 4: `SyllabusReviewScreen.tsx`.** One row per `ReviewItem`, each showing the
   parsed value and **the evidence quote**, with a checkbox to keep and inline edits for
   title, time and topics. Items below `REVIEW_FLAG_CONFIDENCE` render first with the
-  "needs a check" mark and **no number** (A238). `honesty.nothingAddedYet` is the header
+  "needs a check" mark and **no number** (A241). `honesty.nothingAddedYet` is the header
   line: nothing is written until Confirm.
 
 - [ ] **Step 5: `app/src/features/billing/plans.ts`.** `parsePlans` also reads
@@ -1886,11 +1886,11 @@ exist, which is why it is written here rather than with the server tests.
 
 - [ ] **Step 3: `docs/ARCHITECTURE.md`.** A `## Planner (Phase 11)` section after
       `## Quiz (Phase 5)`: the pure/impure split, the seven steps and the order they run
-      in, why the extraction rides `ingest_source` (A227), why the proposal is not synced
-      (A229) and why the accepted blocks are (as `events`), and the determinism defence
+      in, why the extraction rides `ingest_source` (A230), why the proposal is not synced
+      (A232) and why the accepted blocks are (as `events`), and the determinism defence
       with the three tests that carry it.
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`.** A227–A246 in the "Pinned decisions" table, plus the
+- [ ] **Step 4: `docs/ASSUMPTIONS.md`.** A230–A249 in the "Pinned decisions" table, plus the
       two schema-deviation rows from Tasks 3 and 10. Row numbers are the plan's; the table
       is the record.
 
@@ -1911,7 +1911,7 @@ exist, which is why it is written here rather than with the server tests.
 
 - [ ] **Step 8: Gate 7 (honesty), measured.** State which rules this phase touched: the
   "Suggested plan" label on the proposal (`honesty.suggested`); no confidence number
-  anywhere (A238, asserted by a grep test over the two feature directories); the credit
+  anywhere (A241, asserted by a grep test over the two feature directories); the credit
   cost shown before both generative actions (Task 14 Step 5); every number on the screens
   traces to `prep_progress` or `day_load`; and no composite readiness or grade anywhere
   (Task 9's exhaustive destructure).
@@ -1963,7 +1963,7 @@ JSON … each with evidence and confidence" → Tasks 1–2; "Show a REVIEW scre
 edits/accepts items" → Tasks 5 and 14; "only then create events, tasks, and goals" →
 Task 5, asserted by `nothing_is_written_until_the_student_confirms`. § Planner: "Input:
 goals …, quiz weakness data, due flashcards, existing events (busy time), tasks with
-estimates, user_settings" → Task 11's `input_for`/`busy_from` and A233; "work backward from
+estimates, user_settings" → Task 11's `input_for`/`busy_from` and A236; "work backward from
 each goal date … weight weak topics higher … respecting max minutes/day, block length,
 breaks, and never overlapping busy time" → Tasks 6–7; "spread evenly with
 spaced-repetition-style revisits before the exam" → Task 7's spread cap and review pass;
@@ -1974,8 +1974,8 @@ text; "Output a SUGGESTED plan the user previews, tweaks, and accepts (then writ
 "Prep progress for a goal (`GET /goals/:id/progress`) … No composite score and no grade
 prediction" → Task 9's `progress.rs` and Task 11; "Workload meter: planned minutes today vs
 the user's daily limit" → Task 14's `WorkloadMeter`; "Workload balancer … Weak-topic auto
-review blocks (Power)" → Task 8 and A234; § Plans' `planner = "manual" | "auto" |
-"auto+balancer+weakness_blocks"` → A234 and the values table; § Credit costs'
+review blocks (Power)" → Task 8 and A237; § Plans' `planner = "manual" | "auto" |
+"auto+balancer+weakness_blocks"` → A237 and the values table; § Credit costs'
 `syllabus_import=8, plan_generation=2` → the values table and Tasks 4, 11; § unit tests'
 "planner (no overlap with busy time, respects daily max and study hours, deadline buffer,
 weak-topic weighting, timezone/DST-safe), prep-progress calculation" → Tasks 6–9; § Screens
@@ -1985,14 +1985,14 @@ and are listed by name in the exit checklist.
 **Placeholders.** None. Every type, function, test name, route, path, migration and
 command above is concrete. The two things a reader might expect and will not find are
 deliberate and are recorded as decisions rather than left implicit: `syllabus_drafts` and
-`plan_proposals` are not `+sync` (A228, A229), and no new job kind is added (A227).
+`plan_proposals` are not `+sync` (A231, A232), and no new job kind is added (A230).
 
 **Type consistency.** `PlannerInput`, `PlanProposal`, `ProposedBlock`, `DayLoad`,
 `PlanWarning`, `Interval`, `GoalInput`, `Topic`, `StudySettings` and `PlannerConfig` are
 defined once, in `crates/core/src/planner/model.rs`, in the field order contract § 6 writes
 them, and referenced by name everywhere else — including in this document's later tasks.
 `ReviewItem`/`ReviewKind` are defined once, in `generation/syllabus.rs`. `BlockKind` is the
-one addition to the contract's own vocabulary, and A246 says why. The contract's
+one addition to the contract's own vocabulary, and A249 says why. The contract's
 `PlanProposal`/`PlanWarning` are the roadmap's names, not new ones.
 
 **Two things this plan knowingly leaves to the phase that lands first.** Phase 10's

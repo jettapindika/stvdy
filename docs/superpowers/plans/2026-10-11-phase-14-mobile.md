@@ -108,7 +108,7 @@ component is not the proof; inspecting the bytes that ship is.
   (`simple` tsvector config + multilingual embeddings).
 - **Docs updated in the same phase:** `docs/RELEASE.md` (store policy + the mobile test
   checklist), `docs/ARCHITECTURE.md` (§ Native shims chosen), `docs/ASSUMPTIONS.md`
-  (A287+).
+  (A290+).
 
 ---
 
@@ -221,7 +221,7 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
-1. **A287 — Push receive is a pinned community plugin, with a vendored fallback path.**
+1. **A290 — Push receive is a pinned community plugin, with a vendored fallback path.**
    There is no official APNs/FCM receive plugin, and the official
    `tauri-plugin-notification` **provably cannot receive remote push** (its iOS delegate
    skips `UNPushNotificationTrigger`; its Android manifest registers no
@@ -230,15 +230,15 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
    the fallback in `docs/ARCHITECTURE.md`: if it regresses before submission, the same
    task's seam (a `PushToken` command + an `onNotification` event) is served by a custom
    plugin, which the capability matrix budgets for regardless.
-2. **A288 — The background scheduler and Android share intake are ONE custom plugin,
+2. **A291 — The background scheduler and Android share intake are ONE custom plugin,
    `src-tauri/plugins/mobile/`.** The capability matrix's "one native-work package" is
    split only where the *platform mechanism* differs: the iOS Share Extension is an
-   app-extension **target** and cannot be a plugin (A289), so it is hand-wired; push is
-   a crate (A287); everything else native — `BGTaskScheduler` registration, the
+   app-extension **target** and cannot be a plugin (A292), so it is hand-wired; push is
+   a crate (A290); everything else native — `BGTaskScheduler` registration, the
    `WorkManager` worker, the FCM service seam, the Android `ACTION_SEND`/`ACTION_VIEW`
    intake — is this one plugin, because they share a `setup()` hook and a Rust entry
    point. Three separate plugins would be three copies of the same lifecycle code.
-3. **A289 — The iOS Share Extension is a hand-wired target plus an App Group, added via
+3. **A292 — The iOS Share Extension is a hand-wired target plus an App Group, added via
    `bundle.iOS.template`.** A Share Extension cannot launch its host app
    (`NSExtensionContext.open(_:)` is supported only by the Today and iMessage extension
    points), so the extension writes the shared file/URL into an **App Group** shared
@@ -247,99 +247,99 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
    `project.yml` (`bundle.iOS.template`, confirmed present in the schema) over the
    generated one. The App Group identifier is `group.app.stvdy` and is the *only*
    shared-container name in the tree.
-4. **A290 — File intake has three channels, and each platform uses the ones it has.**
+4. **A293 — File intake has three channels, and each platform uses the ones it has.**
    (a) iOS "Open in…" document associations (`bundle.fileAssociations[]` →
    `CFBundleDocumentTypes`) deliver via `RunEvent::Opened`; (b) the iOS Share Extension
-   (A289) writes to the App Group; (c) Android `bundle.fileAssociations[]` with a
+   (A292) writes to the App Group; (c) Android `bundle.fileAssociations[]` with a
    **concrete** `mimeType` injects `SEND`/`VIEW` intent filters and delivers a
    `content://` URI. A share cannot be expressed as a deep link, so a deep-link-only
    "share" flow is not built.
-5. **A291 — An Android picked or shared file is copied into app storage immediately.**
+5. **A294 — An Android picked or shared file is copied into app storage immediately.**
    `ACTION_GET_CONTENT` grants are transient and the dialog plugin never calls
    `takePersistableUriPermission`, so the grant dies when the receiving activity
    finishes. The intake reads the `content://` URI with the URL-based fs API and copies
    it before returning; the copied path is what the upload queue holds.
-6. **A292 — The background sync seam calls Rust, never the webview.** `BGAppRefreshTask`
+6. **A295 — The background sync seam calls Rust, never the webview.** `BGAppRefreshTask`
    (≤30s) and `BGProcessingTask` on iOS, one unique periodic `WorkManager` job (≥15 min)
    on Android, each call `stvdy_shell_lib::sync::sync_once` directly. JS observes the
    result on the next foreground via the Phase 8 sync-status surface. A test asserts the
    seam module does not reference `tauri::WebviewWindow` or emit a frontend event.
-7. **A293 — Push delivery is treated as an opportunistic hint, never a schedule.** iOS
+7. **A296 — Push delivery is treated as an opportunistic hint, never a schedule.** iOS
    does not guarantee silent-push delivery, throttles it to roughly 2–3 per hour, keeps
    only the newest held notification and discards it on force-quit; Android defers work
    in Doze and caps standby-bucket quotas. So the app **always re-syncs on foreground**
    and never relies on a background execution window for correctness. Tap-to-open
    (including cold-start buffering) is the only guaranteed JS surface.
-8. **A294 — The scheduler is best-effort and its inaccuracy is documented, not hidden.**
+8. **A297 — The scheduler is best-effort and its inaccuracy is documented, not hidden.**
    `BGTaskScheduler` scheduling is discretionary ("the system decides the best time");
    Android periodic work is inexact and ≥15 min. The mobile test checklist states what
    degrades to a simulator (everything except APNs/FCM token registration and the Share
    Extension row, which need a physical device) and what the user sees when a background
    window never fires (the next foreground sync, with the honest "Last synced …" line
    Phase 8 already renders).
-9. **A295 — `SCHEDULE_EXACT_ALARM` is added only if a reminder needs minute accuracy,
+9. **A298 — `SCHEDULE_EXACT_ALARM` is added only if a reminder needs minute accuracy,
    and the design assumes it is not granted.** The official notification plugin falls
    back to inexact `setAndAllowWhileIdle` on API 31+ and declares no
    `SCHEDULE_EXACT_ALARM`. Phase 14 declares it in the mobile plugin's manifest (it is
    user-grantable and revocable) but designs every reminder so inexact delivery is
    acceptable, because a reminder that must be exact is a reminder that is wrong on a
    phone that denies the permission.
-10. **A296 — Secure storage is the Phase 1 keyring path, verified on device, with an
+10. **A299 — Secure storage is the Phase 1 keyring path, verified on device, with an
     Android backup-exclusion note.** The per-platform keyring stores are already wired
     (`src-tauri/Cargo.toml`) and the `secret_*` commands exist. Phase 14 verifies the
     round trip on a device and records the one caveat the matrix names: Android Auto
     Backup includes the app dir by default and a restored install loses Keystore keys, so
     the token must be re-acquired after a restore (a re-login, which the app already
     handles). No new secure-storage code.
-11. **A297 — Universal links / app links reuse the existing classifier and are
+11. **A300 — Universal links / app links reuse the existing classifier and are
     config-only.** `bundle.iOS.associatedDomains` (`applinks:app.stvdy`) and Android
     `autoVerify` intent filters (tauri-build generates them) point at
     `https://app.stvdy/.well-known/apple-app-site-association` and
     `https://app.stvdy/.well-known/assetlinks.json`; both feed the same
     `deeplink::classify` path, so no second URL parser exists.
-12. **A298 — The no-purchase-UI check inspects the shipped bundle, and it is a CI job.**
+12. **A301 — The no-purchase-UI check inspects the shipped bundle, and it is a CI job.**
     `scripts/check-no-purchase-ui.mjs` reads every file of the mobile build and fails on
     a denylist plus a `billing_policy.toml` re-assertion. It runs in CI immediately after
     the web build, because a check that is only run by hand is the one that is skipped.
-13. **A299 — The read-only plan screen is the mobile `/billing` route, and no purchase
+13. **A302 — The read-only plan screen is the mobile `/billing` route, and no purchase
     route exists in the mobile router.** On `ios`/`android` the route renders a screen
     that shows the plan name, credits remaining and the usage the app computes, with the
     neutral `lock.notOnPlan` copy — never a price, never a link. The web/desktop checkout
     screen is not reachable from the mobile bundle because the route element is chosen at
     the router, so the checkout component is tree-shaken out of the mobile chunk.
-14. **A300 — The 44px target check is measured in real headless Chrome at 390×844.**
+14. **A303 — The 44px target check is measured in real headless Chrome at 390×844.**
     `scripts/measure-mobile.mjs` (`puppeteer-core`, `CHROME_PATH` or the same probe list
     as `crates/server/src/render/chrome.rs`) loads the running app at a phone viewport,
     measures every interactive element's `getBoundingClientRect()` (≥44×44 CSS px),
     checks contrast on the default dark and light themes from computed colours, and
     re-measures at 200% text scale for clipping/overlap. jsdom cannot do this, which the
     repo's own `a11y.ts` says.
-15. **A301 — The adaptive UI is width-based, and Phase 14 verifies it rather than
+15. **A304 — The adaptive UI is width-based, and Phase 14 verifies it rather than
     introducing a second convention.** `useFormFactor` (768/1024px) is the only
     form-factor source. Phase 14 adds a `phone`/`tablet` render test and the measured
     viewport check; it does not add a platform-keyed layout.
-16. **A302 — Mobile updates ship through the stores; the updater stays desktop-only.**
+16. **A305 — Mobile updates ship through the stores; the updater stays desktop-only.**
     `tauri-plugin-updater` marks iOS/Android `none` and is already absent from the
     shell's dependencies. `docs/RELEASE.md` records that TestFlight/Play is the mobile
     update channel and the desktop updater is Phase 15's.
-17. **A303 — TestFlight and Play internal testing are the distribution channels, and
+17. **A306 — TestFlight and Play internal testing are the distribution channels, and
     the mobile test checklist is a document, not a claim.** `docs/RELEASE.md` gains the
     checklist (device builds, both platforms; push token; deep-link round trip on cold
     start and warm; share import; background sync fires or the foreground fallback is
     honest; the bundle inspection passes; the gates run on a phone viewport) with a
     pass/fail column filled at submission time.
-18. **A304 — The mobile CI job is macOS for iOS and ubuntu for Android, and a device
+18. **A307 — The mobile CI job is macOS for iOS and ubuntu for Android, and a device
     build is a prerequisite, not a CI step.** CI proves the projects *build*; it cannot
     prove APNs/FCM registration or the share-sheet row, which need a physical device and
     a store account. Those are named as user-side prerequisites in `docs/RELEASE.md` and
     the exit checklist, not silently assumed.
-19. **A305 — `google-services.json` and the APNs key are secrets, not committed files.**
+19. **A308 — `google-services.json` and the APNs key are secrets, not committed files.**
     The Android Google Services plugin needs `google-services.json`; iOS needs an
     `aps-environment` entitlement and a signing identity. Both are provided at build time
     from CI secrets (or a local untracked file named by an env var), and the repo ships a
     `google-services.json.example` documenting the shape. A committed service file would
     be a leaked project credential.
-20. **A306 — The push token is registered against the device row created at login.**
+20. **A309 — The push token is registered against the device row created at login.**
     `PUT /devices/{id}/push-token` (`devices.rs:34`) already exists and upserts on
     `device_id`. The client calls it after login and on every token refresh, sending
     `provider = "apns" | "fcm"`; no new server route is added, and `push_tokens` is not a
@@ -382,7 +382,7 @@ app/package.json                           # + puppeteer-core (devDependency)
 .github/workflows/ci.yml                   # + the `mobile` job (iOS + Android build)
 docs/RELEASE.md                            # + the store-policy mobile specifics + the checklist
 docs/ARCHITECTURE.md                       # + § Native shims chosen (Phase 14)
-docs/ASSUMPTIONS.md                        # + A287–A306
+docs/ASSUMPTIONS.md                        # + A290–A309
 ```
 
 ---
@@ -554,7 +554,7 @@ for the SPA to PUT. `src-tauri/src/lib.rs` registers the plugin under
 
 `tauri.conf.json` gains `plugins.notifications` with the app's identity (no secrets).
 `src-tauri/google-services.json.example` documents the shape; the real file is untracked
-and supplied at build time (A305). `.gitignore` gains `google-services.json` and
+and supplied at build time (A308). `.gitignore` gains `google-services.json` and
 `**/*.p12`/`**/*.mobileprovision`.
 
 - [ ] **Step 5: Run it**
@@ -570,7 +570,7 @@ git commit -am "Phase 14 Task 2: push receive plugin behind a provider/token sea
 
 ---
 
-## Task 3: The custom mobile plugin — the background scheduler seam (A292)
+## Task 3: The custom mobile plugin — the background scheduler seam (A295)
 
 **Concern:** one crate that registers `BGTaskScheduler` (iOS) and a `WorkManager`
 worker (Android) that call the Phase 8 Rust `sync_once` directly, never the webview.
@@ -592,7 +592,7 @@ worker (Android) that call the Phase 8 Rust `sync_once` directly, never the webv
 `src-tauri/plugins/mobile/tests/scheduler.rs`:
 
 ```rust
-//! A292's mechanical defence: the background entry points call Rust and never the
+//! A295's mechanical defence: the background entry points call Rust and never the
 //! webview. This is a source assertion because the property is structural — there
 //! is no runtime in which a background task could render JS to observe.
 
@@ -633,7 +633,7 @@ plugin's Rust entry via the JNI bridge Tauri generates, a `WorkManager`
 `enqueueUniquePeriodicWork` with a 15-minute minimum, and a `FirebaseMessagingService`
 whose `onMessageReceived` forwards to the Rust push path. The manifest declares
 `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`, `SCHEDULE_EXACT_ALARM`
-(A295) and the service.
+(A298) and the service.
 
 iOS (`ios/Sources/`): a `MobilePlugin` that registers
 `BGTaskSchedulerPermittedIdentifiers` handlers during `setup()` (the only seam that runs
@@ -654,7 +654,7 @@ git commit -am "Phase 14 Task 3: custom mobile plugin — the background sync se
 
 ---
 
-## Task 4: The iOS Share Extension and the App Group (A289)
+## Task 4: The iOS Share Extension and the App Group (A292)
 
 **Concern:** the app appears in the share sheet for a PDF from Files/Drive, and the file
 reaches the app without the extension launching it.
@@ -718,7 +718,7 @@ the import. `lib.rs` calls it in `setup` and on resume.
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_group` → pass. Then a
 **device** build confirms the app appears in the share sheet (the simulator cannot show
-a share sheet for a real file); that is a prerequisite, not a CI step (A304).
+a share sheet for a real file); that is a prerequisite, not a CI step (A307).
 
 - [ ] **Step 6: Commit**
 
@@ -728,7 +728,7 @@ git commit -am "Phase 14 Task 4: iOS Share Extension target + App Group import"
 
 ---
 
-## Task 5: Android share intake and durable file copy (A290, A291)
+## Task 5: Android share intake and durable file copy (A293, A294)
 
 **Concern:** a file shared *to* the app (or opened via `bundle.fileAssociations`) is
 read from its `content://` URI and copied into app storage before the grant expires.
@@ -788,7 +788,7 @@ git commit -am "Phase 14 Task 5: Android share intake with an immediate durable 
 
 ---
 
-## Task 6: Push token registration and deep-link round trip in the SPA (A297, A306)
+## Task 6: Push token registration and deep-link round trip in the SPA (A300, A309)
 
 **Concern:** after login the app registers its push token with the device row, and a
 tapped notification or a universal link lands on the right screen — including a cold
@@ -832,15 +832,15 @@ and an adapter case that `platform.push.onToken` forwards the shell's token even
 - [ ] **Step 3: Implement**
 
 `platform.push` wraps the shell's token event and `onNotification`. `registerPush` calls
-it once after login and on every token-refresh event, PUTting `provider`/`token` (A306).
+it once after login and on every token-refresh event, PUTting `provider`/`token` (A309).
 `NotificationRouter` maps a notification's payload to a route (`workspace`,
 `task`, `reminder`) and navigates, buffering the tap when the app is cold-started
-(A293's "tap-to-open is the only guaranteed surface").
+(A296's "tap-to-open is the only guaranteed surface").
 
 - [ ] **Step 4: Deep links**
 
 Add `applinks:app.stvdy` to `bundle.iOS.associatedDomains` and rely on tauri-build's
-`autoVerify` Android filters (A297). A test asserts a `stvdy://` URL and an
+`autoVerify` Android filters (A300). A test asserts a `stvdy://` URL and an
 `https://app.stvdy/...` universal link both classify to the same `DeepLinkIntent`.
 
 - [ ] **Step 5: Run it**
@@ -855,7 +855,7 @@ git commit -am "Phase 14 Task 6: push token registration + deep-link/notificatio
 
 ---
 
-## Task 7: Secure storage and local notifications, verified on a device (A296, A295)
+## Task 7: Secure storage and local notifications, verified on a device (A299, A298)
 
 **Concern:** the refresh token survives a restart in the keychain/keystore, and a
 scheduled local reminder fires while the app is closed — with the platform's inaccuracy
@@ -877,7 +877,7 @@ it('schedules a local reminder and never claims exact delivery', async () => {
   const { calls } = installFakePlatform()
   await scheduleReminder('Drink water', new Date('2026-10-12T09:00:00Z'))
   expect(calls.some((c) => c.path === 'notifications.schedule')).toBe(true)
-  // The copy under the reminder must not promise minute accuracy (A295).
+  // The copy under the reminder must not promise minute accuracy (A298).
   expect(screen.queryByText(/exactly|on the minute/i)).toBeNull()
 })
 ```
@@ -902,7 +902,7 @@ git commit -am "Phase 14 Task 7: secure storage + local notifications verified o
 
 ---
 
-## Task 8: `scripts/check-no-purchase-ui.mjs` — prove the absence in the artifact (A298)
+## Task 8: `scripts/check-no-purchase-ui.mjs` — prove the absence in the artifact (A301)
 
 **Concern:** the shipped mobile bundle contains no checkout, no price, no off-store
 purchase link — proved by reading the bytes, not the component.
@@ -955,7 +955,7 @@ node scripts/check-no-purchase-ui.mjs     # exit 0, prints the count
 node --test scripts/check-no-purchase-ui.test.mjs
 ```
 
-- [ ] **Step 5: Wire it into CI** after the web build job (A298).
+- [ ] **Step 5: Wire it into CI** after the web build job (A301).
 
 - [ ] **Step 6: Commit**
 
@@ -965,7 +965,7 @@ git commit -am "Phase 14 Task 8: bundle inspection proves no purchase UI in the 
 
 ---
 
-## Task 9: The read-only plan screen and the mobile `/billing` gate (A299)
+## Task 9: The read-only plan screen and the mobile `/billing` gate (A302)
 
 **Concern:** on iOS/Android `/billing` shows the plan and the usage the app computes,
 with no purchase path anywhere in the mobile router.
@@ -1008,7 +1008,7 @@ it('routes /billing to the read-only screen on android', () => {
 computes (from Phase 13's query), and the neutral `lock.notOnPlan` copy. `router.tsx`
 picks the element: `platform.kind()` in `('ios','android')` → `MobilePlanScreen`, else
 Phase 13's checkout screen. The checkout component is therefore not imported on the
-mobile path, so it is tree-shaken out (A299).
+mobile path, so it is tree-shaken out (A302).
 
 - [ ] **Step 4: Run it**
 
@@ -1023,7 +1023,7 @@ git commit -am "Phase 14 Task 9: read-only mobile plan screen + the /billing pla
 
 ---
 
-## Task 10: The adaptive phone/tablet UI and the phone-viewport measurements (A300, A301)
+## Task 10: The adaptive phone/tablet UI and the phone-viewport measurements (A303, A304)
 
 **Concern:** the phone and tablet shells render correctly, and gate 5's checks are
 measured on a phone viewport — including the ≥44px target check, at its most literal.
@@ -1058,7 +1058,7 @@ until the phone shell is asserted).
 - [ ] **Step 3: Implement `measure-mobile.mjs`**
 
 `puppeteer-core` with `executablePath` from `CHROME_PATH` or the same probe list as
-`crates/server/src/render/chrome.rs` (A300). It launches Chrome at 390×844 (device scale
+`crates/server/src/render/chrome.rs` (A303). It launches Chrome at 390×844 (device scale
 3), navigates to `http://localhost:5173`, and:
 
 1. asserts every element matching `a,button,input,select,textarea,[role=button],[role=tab]`
@@ -1096,7 +1096,7 @@ and gates 5/6/7 are run on a phone viewport with quoted output.
 **Files:**
 - Modify: `docs/RELEASE.md` (the mobile checklist + the store-policy mobile specifics)
 - Modify: `docs/ARCHITECTURE.md` (§ Native shims chosen)
-- Modify: `docs/ASSUMPTIONS.md` (A287–A306)
+- Modify: `docs/ASSUMPTIONS.md` (A290–A309)
 - New: `scripts/smoke-phase14.sh`
 - Test: `app/src/features/a11y.test.tsx` (an Indonesian phone-shell case)
 
@@ -1141,9 +1141,9 @@ machine can run.
 
 - [ ] **Step 5: Docs**
 
-`docs/ARCHITECTURE.md` § Native shims chosen records: push plugin + fallback (A287),
-the one custom plugin (A288), the Share Extension + App Group (A289), the scheduler
-seam (A292), the bundle inspection (A298). `docs/ASSUMPTIONS.md` gains A287–A306.
+`docs/ARCHITECTURE.md` § Native shims chosen records: push plugin + fallback (A290),
+the one custom plugin (A291), the Share Extension + App Group (A292), the scheduler
+seam (A295), the bundle inspection (A301). `docs/ASSUMPTIONS.md` gains A290–A309.
 
 - [ ] **Step 6: Commit**
 
@@ -1181,19 +1181,19 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
   import (Tasks 4–5), local notifications (Task 7), TestFlight + Play internal testing
   (Task 11), mobile test checklist + store-policy risk note in `docs/RELEASE.md`
   (Task 11). The risk-register row ("treat push + share extension + background scheduler
-  as **one native-work package**") is honoured: A288 makes the scheduler and Android
-  intake one plugin, A287 isolates push, and A289 is the share extension — one package,
+  as **one native-work package**") is honoured: A291 makes the scheduler and Android
+  intake one plugin, A290 isolates push, and A292 is the share extension — one package,
   three mechanisms, with the split justified by the platform mechanism rather than by
   convenience.
-- **Placeholders:** none. The push plugin version is pinned (A287); the fallback is
+- **Placeholders:** none. The push plugin version is pinned (A290); the fallback is
   named; every device-only step names its prerequisite and what degrades to a simulator
-  (A294, A304); `google-services.json` is a documented example, not a committed secret
-  (A305).
-- **A-numbering:** the roadmap reserves A227–A246 for Phase 11 and A287+ is the next
-  free range, so this plan uses **A287–A306** (the task's "starting at A287"). This is
+  (A297, A307); `google-services.json` is a documented example, not a committed secret
+  (A308).
+- **A-numbering:** the roadmap reserves A230–A249 for Phase 11 and A290+ is the next
+  free range, so this plan uses **A290–A309** (the task's "starting at A290"). This is
   the one place the task's literal number and a naive reading of the roadmap's blocks
-  could disagree; the number used is the next free one after Phase 11's A246 and Phase
-  12/13's reserved A247–A286.
+  could disagree; the number used is the next free one after Phase 11's A249 and Phase
+  12/13's reserved A250–A289.
 - **Type consistency:** `Platform.push` (Task 6), `provider_for`/`validate_token`
   (Task 2) and `push_tokens.provider` (`devices.rs`) all use the same two strings
   (`apns`, `fcm`); the App Group string (`group.app.stvdy`) is asserted unique in Task 4;
@@ -1201,7 +1201,7 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
   Task 10.
 - **The one thing this plan cannot make true:** a physical device and a store account.
   APNs/FCM registration, the share-sheet row and the store submission are prerequisites
-  named in A304 and the checklist, not claims.
+  named in A307 and the checklist, not claims.
 
 ## Execution notes
 
