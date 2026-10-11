@@ -158,7 +158,15 @@ export function QuizScreen() {
     const answer = question.kind === 'mcq' ? (choice ?? '') : written.trim()
     if (answer.length === 0) return
     record.mutate(
-      { questionId: question.id, userAnswer: answer },
+      {
+        questionId: question.id,
+        userAnswer: answer,
+        // The device's clock, as a review sends `reviewedAt`: an attempt is one of the
+        // kinds a client may write offline, so the moment the student answered is this
+        // device's to report. Without it the server stamps its own sync time, and two
+        // attempts made at different moments can land on the same instant.
+        answeredAt: new Date().toISOString(),
+      },
       {
         onSuccess: (response) => {
           setGraded(response.attempt.correct)
@@ -171,7 +179,12 @@ export function QuizScreen() {
   function mark(correct: boolean) {
     if (question === undefined) return
     record.mutate(
-      { questionId: question.id, userAnswer: written.trim(), correct },
+      {
+        questionId: question.id,
+        userAnswer: written.trim(),
+        correct,
+        answeredAt: new Date().toISOString(),
+      },
       { onSuccess: () => void results.refetch() },
     )
     advance()

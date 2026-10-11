@@ -20,6 +20,13 @@ BASE="${BASE:-http://localhost:8099}"
 # and leave this at its default, or set both to the same value.
 STUB_PORT="${STUB_PORT:-8100}"
 STUB_URL="http://127.0.0.1:$STUB_PORT"
+# This must match the SERVER's `MAIL_DIR`, because the server is what writes the
+# verification mail: the script only reads the newest `.eml` from it. A private sink
+# therefore has to be set on both, e.g.
+#   MAIL_DIR=var/smoke-mail just smoke-server      # and the same on this script
+# which is worth doing when other sessions are signing up against the same database:
+# the token is found by taking the newest file by name, so a concurrent signup can hand
+# this run someone else's token and fail the verify step for an unrelated reason.
 MAIL_DIR="${MAIL_DIR:-var/mail}"
 TMP="$(mktemp -d)"
 EMAIL="phase5-$(date +%s)@example.test"

@@ -123,10 +123,29 @@ afterEach(() => {
 })
 
 /** A fetch that serves the quiz and records the attempts sent. */
-function serve(attempts: { question_id: string; user_answer: string; correct?: boolean }[]) {
+function serve(
+  attempts: { question_id: string; user_answer: string; correct?: boolean }[],
+  // What the server already holds, as `GET /quizzes/:id` reports it. Empty for a fresh
+  // quiz; populated to drive resumption.
+  stored: Record<string, { id: string; user_answer: string; correct: boolean | null }> = {},
+) {
+  const withAttempt = (question: QuizQuestion): QuizQuestion => {
+    // Bound once: indexing `stored` twice does not carry the narrowing from the first
+    // read to the second, so the spread target stayed `… | undefined` and the fields
+    // came back optional.
+    const existing = stored[question.id]
+    return {
+      ...question,
+      attempt:
+        existing === undefined
+          ? null
+          : { answered_at: '2026-10-11T09:00:00Z', ...existing },
+    }
+  }
   mockFetch((url, init) => {
     const path = new URL(url).pathname
-    if (path === '/quizzes/q1') return jsonResponse(200, { quiz: QUIZ, questions: [MCQ, SHORT] })
+    if (path === '/quizzes/q1')
+      return jsonResponse(200, { quiz: QUIZ, questions: [MCQ, SHORT].map(withAttempt) })
     if (path === '/quizzes/q1/results') return jsonResponse(200, RESULTS)
     if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
     if (path === '/quizzes/q1/attempts') {
@@ -165,6 +184,46 @@ function renderQuiz() {
     { route: '/quiz/q1' },
   )
 }
+
+describe('resuming a quiz that was already answered', () => {
+  /**
+   * A reload, or the second device the product is premised on, must not restart at
+   * question 1 with the answers lost: the attempts are stored, so the screen opens
+   * where the student left off, with the answered question revealed rather than
+   * presented as still open. Without this the resumption code is unverified, which is
+   * how the gap arrived in the first place.
+   */
+  it('opens on the first unanswered question, with the verdict already shown', async () => {
+    const attempts: { question_id: string; user_answer: string; correct?: boolean }[] = []
+    // The MCQ was answered and graded; the short answer was not touched.
+    serve(attempts, {
+      'q-mcq': { id: 'a-stored', user_answer: 'Menutup koneksi TCP.', correct: false },
+    })
+    renderQuiz()
+
+    // It opens on the short answer, not on question 1.
+    expect(await screen.findByText('Question 2 of 2')).toBeInTheDocument()
+    expect(screen.getByText('Mengapa UDP lebih cepat daripada TCP?')).toBeInTheDocument()
+    // And that question is still open, so it can be answered.
+    expect(screen.getByRole('button', { name: 'Submit answer' })).toBeInTheDocument()
+  })
+
+  it('shows a stored answer as answered rather than open, and does not re-ask it', async () => {
+    const attempts: { question_id: string; user_answer: string; correct?: boolean }[] = []
+    // Both answered, so the quiz opens on its results.
+    serve(attempts, {
+      'q-mcq': { id: 'a1', user_answer: 'Membuka koneksi TCP.', correct: true },
+      'q-short': { id: 'a2', user_answer: 'Karena tidak ada handshake.', correct: true },
+    })
+    renderQuiz()
+
+    // The results view, from the server's summary, rather than a form asking again.
+    expect(await screen.findByText('Your score')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit answer' })).not.toBeInTheDocument()
+    // Nothing was posted by merely opening the quiz: resumption reads, it does not write.
+    expect(attempts).toHaveLength(0)
+  })
+})
 
 describe('grading, per question kind', () => {
   it('offers no self-assessment for an mcq and one for a short answer', async () => {
