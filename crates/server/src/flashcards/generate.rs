@@ -30,7 +30,7 @@ use crate::state::AppState;
 /// fills the whole budget from whichever source sorts first: a deck built from a
 /// 500-chunk textbook and a one-page summary would carry the textbook alone and
 /// silently generate nothing from the summary the student also selected.
-pub const GENERATION_CHUNK_LIMIT: i64 = 40;
+pub use crate::chunks::GENERATION_CHUNK_LIMIT;
 
 /// Low, because a card must be faithful to the material; not zero, because a fully
 /// deterministic model produces near-duplicate cards.
@@ -341,47 +341,9 @@ pub(crate) async fn find_usage_event_id(state: &AppState, deck: &DeckRow) -> Opt
 
 /// The chunks the prompt is built from, in a deterministic order.
 async fn load_chunks(state: &AppState, deck: &DeckRow) -> Result<Vec<PromptChunk>, Failure> {
-    // Round-robin across the selected sources: rank each chunk within its source,
-    // then take rank 1 of every source, then rank 2 of every source, and so on. A
-    // plain `order by source_id, idx limit 40` spends the whole budget on the source
-    // whose id sorts first, so a deck built from several sources silently ignores
-    // all but one of them whenever the first has more than `GENERATION_CHUNK_LIMIT`
-    // chunks -- which is the ordinary case for a textbook. Ordering by
-    // `(rank, source_id)` keeps the result deterministic, so the same deck still
-    // produces the same prompt twice.
-    let rows = sqlx::query(
-        "select id, source_id, page, content, title
-           from (
-                select c.id, c.source_id, c.page, c.content, s.title,
-                       row_number() over (partition by c.source_id order by c.idx) as rank
-                  from chunks c
-                  join sources s on s.id = c.source_id
-                 where c.source_id = any($1) and s.user_id = $3
-           ) ranked
-          order by ranked.rank, ranked.source_id
-          limit $2",
-    )
-    .bind(&deck.source_ids)
-    .bind(GENERATION_CHUNK_LIMIT)
-    .bind(deck.user_id)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|error| Failure::transient(format!("loading the deck's chunks: {error}")))?;
-
-    // The label is the index plus one, which is what the composer writes into the
-    // prompt and what the label resolver maps back.
-    Ok(rows
-        .iter()
-        .enumerate()
-        .map(|(index, row)| PromptChunk {
-            label: index as u32 + 1,
-            chunk_id: row.get("id"),
-            source_id: row.get("source_id"),
-            source_title: row.get("title"),
-            page: row.get("page"),
-            content: row.get("content"),
-        })
-        .collect())
+    crate::chunks::select_for_generation(&state.pool, &deck.source_ids, deck.user_id)
+        .await
+        .map_err(|error| Failure::transient(format!("loading the deck's chunks: {error}")))
 }
 
 /// The values `base_vars` needs, read from the row rather than from an `AuthUser`
