@@ -82,7 +82,7 @@ after reconnect; the Today view and focus timer work offline.
 
 | Action | Cost | Read from |
 |---|---|---|
-| quick capture | `2` | `[credits] task_breakdown` (A181 — the matrix has no `quick_capture` key) |
+| quick capture | `2` | `[credits] task_breakdown` (A187 — the matrix has no `quick_capture` key) |
 | task breakdown | `2` | `[credits] task_breakdown` |
 | task / event / session / settings write | `0` | — |
 
@@ -103,7 +103,7 @@ after reconnect; the Today view and focus timer work offline.
   - `tasks (id, user_id, workspace_id, parent_id references tasks on delete cascade,
     title, notes, due_at, estimate_min, priority default 2, status default 'todo',
     created_at, updated_at, deleted_at)` with `index on (user_id, status, due_at)` and
-    `index on (parent_id)`. **No `position` column** — see A187.
+    `index on (parent_id)`. **No `position` column** — see A193.
   - `study_sessions (id primary key, user_id, workspace_id, task_id references tasks on
     delete set null, started_at, duration_min, created_at, updated_at, deleted_at)` with
     `index on (user_id, started_at)`. Client-generated id, append-only.
@@ -111,7 +111,7 @@ after reconnect; the Today view and focus timer work offline.
     default 22, max_study_min_per_day default 240, block_len_min default 50, break_min
     default 10, reminder_channels jsonb default '["web"]', updated_at)`. **No `language`,
     no `theme`, no quiet hours** — the spec's DDL has the first two and `0012` dropped
-    them; the spec's settings screen requires the third. See A193.
+    them; the spec's settings screen requires the third. See A199.
 - `migrations/0013_calendar_events.sql`: `events (id, user_id, workspace_id, kind, title,
   starts_at, ends_at, external_id, etag, connection_id references calendar_connections,
   source default 'app', task_id references tasks on delete set null, created_at,
@@ -129,7 +129,7 @@ after reconnect; the Today view and focus timer work offline.
   `is_client_writable`, `is_append_only` and `accepts_push_op`. **Nothing to add here.**
 - `crates/sync/src/proto/push.rs`: `Mutation { mutation_id, entity, op, id, payload,
   client_ts }`. `client_ts` already exists on the wire, which is what makes the session
-  bound in A195 clock-skew-safe without adding a field.
+  bound in A201 clock-skew-safe without adding a field.
 - `crates/sync/src/lib.rs` is `pub mod proto;` and nothing else. **There is no
   `crates/sync/src/client/`** — the engine, the outbox, the apply path and the transport
   are Phase 8's, and this plan does not touch them.
@@ -147,7 +147,7 @@ after reconnect; the Today view and focus timer work offline.
   SPA can read what a plan grants without a plan-field read in a handler.
 - `crates/core/src/config/plans.rs:123` `CreditAction` has `TaskBreakdown` and **no
   `QuickCapture`**; `config/plans.toml [credits]` has `task_breakdown = 2` and **no
-  `quick_capture` key**. See A181.
+  `quick_capture` key**. See A187.
 
 **The prompts exist and are not wired.**
 
@@ -162,7 +162,7 @@ after reconnect; the Today view and focus timer work offline.
 - `crates/core/src/prompts/registry.rs:100-108`: `ModuleId` has exactly five variants and
   `ALL: [ModuleId; 5]`. `SOURCE_LANGUAGE` (`:57`) is "the same language as the source
   material (do not translate)". **Neither task module is registered**, so no
-  `usage_events.prompt_version` row can reference them — which is what makes A182 legal.
+  `usage_events.prompt_version` row can reference them — which is what makes A188 legal.
 - `crates/core/src/prompts/mod.rs`: `UNTRUSTED_VARIABLES` (`:65`) already carries
   `task_title`, `notes`, `capture_text`; `compose_task` (`:389`); `values_of` (`:275`)
   fills `now` and `timezone` from `ChatVars`, so a module declaring them gets them
@@ -226,10 +226,10 @@ after reconnect; the Today view and focus timer work offline.
   `## Study and dashboard (Phase 12)` which currently holds `POST /sessions`.
 
 **Docs that must move in the same commits:** `docs/API.md` (the three placeholder
-sections), `docs/SYNC.md` (the pushable entities' payload rules change — see A189, A191,
-A192, A195), `docs/ARCHITECTURE.md` (the offline write path as exercised, the timer's local
+sections), `docs/SYNC.md` (the pushable entities' payload rules change — see A195, A197,
+A198, A201), `docs/ARCHITECTURE.md` (the offline write path as exercised, the timer's local
 state, the one asymmetry between native and web reads), `docs/ASSUMPTIONS.md`
-(A181–A200) and `docs/THREAT_MODEL.md` § 6 R1 (an addendum: the plausibility bound R1 names
+(A187–A206) and `docs/THREAT_MODEL.md` § 6 R1 (an addendum: the plausibility bound R1 names
 now exists, and why it arrived in this phase).
 
 ---
@@ -247,7 +247,7 @@ file is the bug.
 | The advisory-lock-first rule in the push transaction | Task 10 relies on it: a task plus its subtasks is the roadmap's own named deadlock case, and it is already closed. |
 | `Platform.sync` (`SyncApi`: `status()`, `read(entity, filter?)`, `write(entity, id, payload)`, `tombstone(entity, id)`, `syncNow()`, `reset()`, `onStatus(handler)`) and its Tauri commands | Every SPA write and read of a synced entity goes through it. The web adapter is REST-backed; the native adapter is the cache + outbox. |
 | The `sync_status` / `SyncStatus` surface (`synced | syncing | offline | error`) and the last-synced timestamp | The Today screen's sync line and the settings screen's "Reset local data and resync" call `platform.sync.reset()`. |
-| The `local_state`-style storage the cache is built on | Task 12 adds a two-command `local_state_get` / `local_state_set` pair over the same SQLite file, for the focus timer's running state (A197). Phase 8's `src-tauri/src/cache/schema.rs` gains one table in that task. |
+| The `local_state`-style storage the cache is built on | Task 12 adds a two-command `local_state_get` / `local_state_set` pair over the same SQLite file, for the focus timer's running state (A203). Phase 8's `src-tauri/src/cache/schema.rs` gains one table in that task. |
 | Phase 8's `route_sweep.rs` rows for `/sync/pull`, `/sync/push`, `/sync/stream` | This phase adds only its own fourteen rows. |
 
 ---
@@ -255,16 +255,17 @@ file is the bug.
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A181–A200** in the same commits as the code. Phase 8 is
-drafting A161–A180 (confirmed with that plan's author), so this block starts at A181.
+`docs/ASSUMPTIONS.md` as rows **A187–A206** in the same commits as the code. Phase 6 wrote
+A119–A131 (reserved to A139), Phase 7 holds A140–A160 and Phase 8 holds A161–A186, so this
+block starts at A187.
 
-1. **A181 — quick capture is priced as `task_breakdown` (2), not with a new key.**
+1. **A187 — quick capture is priced as `task_breakdown` (2), not with a new key.**
    `config/plans.toml [credits]` has no `quick_capture` entry and
    `CreditAction` has no `QuickCapture` variant. The roadmap's own rule is that where the
    matrix has no key, the closest stated action's price applies rather than one invented in
    code, and A120 is the precedent (a cheatsheet is charged as `report_section`). The SPA
    reads the same number from `config/plans.toml` through `plans.ts`.
-2. **A182 — `prompts/quick_capture.v1.md` and `prompts/task_breakdown.v1.md` are edited in
+2. **A188 — `prompts/quick_capture.v1.md` and `prompts/task_breakdown.v1.md` are edited in
    place, not superseded.** The edit is the `<user_context_data>` block that
    `every_untrusted_value_is_delimited_as_data_in_every_module` requires, and nothing else.
    Rule 1 of `prompts/README.md` ("never edit a shipped version") exists so
@@ -272,57 +273,57 @@ drafting A161–A180 (confirmed with that plan's author), so this block starts a
    never been logged, so there is nothing to attribute. The check that this is true is
    `git log -S'QuickCaptureV1'` being empty at the time of the change, and the two modules
    being absent from `ModuleId::ALL` in the parent commit.
-3. **A183 — `{{output_language}}` is `VarKind::Caller` in both new modules, supplied from
+3. **A189 — `{{output_language}}` is `VarKind::Caller` in both new modules, supplied from
    `user_settings.language`.** `Optional(SOURCE_LANGUAGE)` would default to "the same
    language as the source material", and neither module has sources: the default would be a
    silent English breakdown of an Indonesian task. `prompts/json_contract.v1.md` uses
    `{{output_language}}` and is rendered with the module's table, so both modules must
    declare it even though `quick_capture.v1.md`'s own text does not use it.
-4. **A184 — a quick-capture draft is never persisted.** `POST /tasks/quick-capture` writes
+4. **A190 — a quick-capture draft is never persisted.** `POST /tasks/quick-capture` writes
    one `credit_ledger` row and one `usage_events` row and returns a proposal. The only
    writer of a task row is `POST /tasks` (or a push). Consequence, stated rather than
    hidden: a reload loses an unaccepted draft. That is what "confirm" means, and it is the
    mechanical defence against "a draft that saves without confirmation".
-5. **A185 — a `due_at` the parser cannot read becomes `null` with a warning, not a
+5. **A191 — a `due_at` the parser cannot read becomes `null` with a warning, not a
    failure.** The reply carries `warnings: ["due_at: could not read \"friday-ish\""]` and the
    draft still returns. Dropping the date silently is worse than a visible warning, and
    failing the request after the credits were spent is worse than both.
-6. **A186 — a breakdown proposal is never persisted either, and accepting it is N ordinary
+6. **A192 — a breakdown proposal is never persisted either, and accepting it is N ordinary
    task creates.** `POST /tasks/:id/breakdown` returns
    `{subtasks: [{title, estimate_min}], total_estimate_min}` and saves nothing. Accepting
-   sends one `POST /tasks` per kept subtask with `parent_id` and `position` (A187); editing
+   sends one `POST /tasks` per kept subtask with `parent_id` and `position` (A193); editing
    and dismissing are client-side acts on the proposal. `total_estimate_min` is the model's
    number and is shown only inside the "Suggested …" region; the `estimate_min` that gets
    stored is whatever the student left after editing.
-7. **A187 — `tasks.position int not null default 0` orders subtasks, and the order key is
+7. **A193 — `tasks.position int not null default 0` orders subtasks, and the order key is
    `(position, created_at, id)`.** Phase 5 shipped `quiz_questions` ordered by
    `created_at` and every question of one generation shared a timestamp to the microsecond,
    so the order fell through to a random uuid and the quiz came back in a different order
    than the model wrote it (A100). A breakdown has exactly that shape. `position` is a
    normal task field: the client sets it, push carries it, and LWW treats it like any other.
-8. **A188 — deleting a parent tombstones its children, and the local apply must too.**
+8. **A194 — deleting a parent tombstones its children, and the local apply must too.**
    Postgres's `on delete cascade` fires each child's DELETE trigger, so `log_change` writes
    the child tombstones and the server side needs no code. The *local* side does: a device
    that deletes a parent offline must tombstone the children in the same transaction, or it
    shows orphaned subtasks until the next pull. Tested in Task 11, not assumed.
-9. **A189 — `events.source`, `external_id`, `etag` and `connection_id` are server-owned.**
+9. **A195 — `events.source`, `external_id`, `etag` and `connection_id` are server-owned.**
    A push or REST write that sets any of them (other than `source = 'app'` with the other
    three null) is rejected: `read_only_entity` through push, 400 `validation` through REST.
    This is the same class as `flashcards.ease/interval/due` and it matters more, because
    Phase 10 fills those columns from Google and ICS: a client that could write them could
    forge a "Google" event, hijack the `(connection_id, external_id)` unique index, or
    overwrite a synced external row that the next incremental sync would then not match.
-10. **A190 — a deadline is an `event` with `kind = 'deadline'` and `ends_at = starts_at`.**
+10. **A196 — a deadline is an `event` with `kind = 'deadline'` and `ends_at = starts_at`.**
     `events.ends_at` is `not null` and there is no all-day flag in the spec's DDL or in the
     table. Date-only serialisation is Phase 10's ICS feed's problem, not this phase's, and
     inventing an `all_day` column now would give Phase 10 two ways to say the same thing.
-11. **A191 — the `user_settings` push `id` is the authenticated user's id.** The table's
+11. **A197 — the `user_settings` push `id` is the authenticated user's id.** The table's
     primary key *is* `user_id` and it has no `id` column, so the contract's `Mutation.id`
     has nothing else to be. A mutation whose `id` differs from the caller is rejected
     `validation`, and a payload carrying `user_id` is rejected rather than ignored: the
     field is not the client's to state, and silently dropping it would make a forged
     payload look accepted.
-12. **A192 — `PUT /settings` is a partial write that writes the whole row, and a reminder
+12. **A198 — `PUT /settings` is a partial write that writes the whole row, and a reminder
     channel the plan does not grant is refused per channel with 403 `plan_required`.**
     Partial, because the screen saves per section and a full replace would let a stale tab
     clobber a channel set changed on another device. Whole-row, because the roadmap gives
@@ -331,18 +332,18 @@ drafting A161–A180 (confirmed with that plan's author), so this block starts a
     `entitlements::require(Feature::ReminderChannel(c))` — never a
     `plans.get(..).reminder_channels` read, which the route sweep forbids and which would be
     a second source of truth for what a plan grants.
-13. **A193 — quiet hours, `language` and `theme` join `user_settings`; the quiet window may
+13. **A199 — quiet hours, `language` and `theme` join `user_settings`; the quiet window may
     wrap midnight.** `quiet_start_hour` / `quiet_end_hour` are nullable ints (a pair: both
     or neither) and the test is "inside the window", not `start < end`, because `22 → 7` is
     the normal case. `language` (`en | id`) and `theme` (`system | light | dark`) match the
     spec's DDL, which `0012` dropped; they belong on the synced settings row so a choice
     made on the phone is the choice the laptop uses.
-14. **A194 — the timezone stays on `users`, and `PUT /settings` writes it there.**
+14. **A200 — the timezone stays on `users`, and `PUT /settings` writes it there.**
     `users.timezone` predates any settings row, the reminder and planner math reads it for
     an account that may have no settings row yet, and a second copy on `user_settings` is
     exactly the drift the "local-date math only through `chrono-tz`" rule would not catch.
     `GET /settings` therefore returns it beside the row rather than inside it.
-15. **A195 — `study_sessions` gets a plausibility bound, and the comparison is against the
+15. **A201 — `study_sessions` gets a plausibility bound, and the comparison is against the
     *client's* own report.** `1 <= duration_min <= 1440`; `started_at <= server_now + 24 h`
     (the same bound a review and an attempt already use); and
     `started_at + duration_min <= client_ts + 2 min`, where `client_ts` is the field the
@@ -352,30 +353,30 @@ drafting A161–A180 (confirmed with that plan's author), so this block starts a
     already names this exact fix ("a session cannot exceed elapsed wall time"); the addendum
     records that the bound now exists, because the Today screen and the streak display these
     numbers as facts.
-16. **A196 — the Today view is computed on the client and there is no `GET /today` route.**
+16. **A202 — the Today view is computed on the client and there is no `GET /today` route.**
     The roadmap's gate is "the Today view works offline", and a server route cannot. The day
     buckets, the streak and the due counts are pure functions in
     `app/src/features/today/day.ts`, unit-tested against a fixed clock, mirroring
     `app/src/features/study/due.ts`.
-17. **A197 — the focus timer's running state is device-local, and the session id is minted
+17. **A203 — the focus timer's running state is device-local, and the session id is minted
     at *start*.** It is not a synced row (an unfinished session is not a fact) and not a
     task. `Platform.localState` holds `{id, started_at, task_id?, workspace_id?}`; the id
     survives the restart with the timer, so the flush after a restart is the *same*
     append-only id and `on conflict (id) do nothing` makes a double flush a no-op. That is
     the mechanical defence against "a timer that logs a session twice on restart".
-18. **A198 — a timer found running after `TIMER_STALE_AFTER_MIN = 240` minutes is not
+18. **A204 — a timer found running after `TIMER_STALE_AFTER_MIN = 240` minutes is not
     auto-resumed.** The screen offers Save (the elapsed duration, clamped to 1440, editable)
     or Discard (which writes nothing). Auto-resuming an overnight timer would log a
     plausible-looking false session into the streak and the Today counts, which is a number
     the honesty gate says must trace to something real.
-19. **A199 — the Study hub, reminders and the dashboard are not in this phase.** The
+19. **A205 — the Study hub, reminders and the dashboard are not in this phase.** The
     roadmap's Phase 9 line names the Today view, the timer and settings; the Study hub's two
     cross-workspace list routes (`decks` with due badges, `quizzes` with scores) are new
     surface for a screen the phase is not gated on, reminders need the job engine and the
     push channels, and the dashboard is Phase 12's own line. Recorded here rather than left
     implicit, so the spec's § Today paragraph is accounted for item by item in the
     Self-Review.
-20. **A200 — `PUT /settings` is `ReadOnly` in the route sweep, and the channel refusal is
+20. **A206 — `PUT /settings` is `ReadOnly` in the route sweep, and the channel refusal is
     asserted in the settings suite.** A `Swept` row's refusal is driven by
     `Fixture::call`, which has no per-row body, so a swept row for `PUT /settings` could only
     assert what an *empty* body does — which is refuse nothing. The honest classification is
@@ -390,7 +391,7 @@ drafting A161–A180 (confirmed with that plan's author), so this block starts a
 ```
 migrations/0028_tasks_events_settings.sql   # tasks.position; user_settings quiet hours,
                                             # language, theme
-prompts/quick_capture.v1.md                 # EDIT — the <user_context_data> block (A182)
+prompts/quick_capture.v1.md                 # EDIT — the <user_context_data> block (A188)
 prompts/task_breakdown.v1.md                # EDIT — same
 crates/core/src/prompts/registry.rs         # + QuickCaptureV1, TaskBreakdownV1
 crates/core/src/generation/capture.rs       # NEW — the draft contract
@@ -418,7 +419,7 @@ crates/server/tests/study.rs                # NEW
 crates/server/tests/settings.rs             # NEW
 crates/server/tests/offline_tasks.rs        # NEW — the phase's exit gate
 crates/server/tests/route_sweep.rs          # + 14 rows and 2 drivers
-crates/server/tests/tamper.rs               # + 3 push rows (A189, A191, A195)
+crates/server/tests/tamper.rs               # + 3 push rows (A195, A197, A201)
 app/src/platform/types.ts                   # + LocalStateApi
 app/src/platform/{web,desktop,mobile}.ts    # + localState
 src-tauri/src/cache/schema.rs               # + the local_state table
@@ -427,7 +428,7 @@ app/src/api/queries/tasks.ts                # NEW
 app/src/api/queries/events.ts               # NEW
 app/src/api/queries/settings.ts             # NEW
 app/src/features/billing/plans.ts           # + task_breakdown, and the export
-app/src/features/today/day.ts               # NEW — the pure rules (A196)
+app/src/features/today/day.ts               # NEW — the pure rules (A202)
 app/src/features/today/day.test.ts          # NEW
 app/src/features/today/useFocusTimer.ts     # NEW
 app/src/features/today/useFocusTimer.test.ts# NEW
@@ -520,7 +521,7 @@ fn the_task_modules_document_the_schemas_their_contracts_parse() {
 `cargo test -p stvdy-core --test prompts task_modules` →
 `error[E0599]: no variant named QuickCaptureV1`.
 
-- [ ] **Step 3: Edit the two prompt files (A182)**
+- [ ] **Step 3: Edit the two prompt files (A188)**
 
 Wrap every user-typed value in the block the composer's rule requires. In
 `prompts/quick_capture.v1.md`:
@@ -575,7 +576,7 @@ impl ModuleId {
             // `now` and `timezone` are `Caller` and filled by `values_of(ChatVars)`,
             // so the caller passes nothing for them and they still cannot be left
             // unfilled. `output_language` is `Caller` rather than
-            // `Optional(SOURCE_LANGUAGE)` because this module has no sources: see A183.
+            // `Optional(SOURCE_LANGUAGE)` because this module has no sources: see A189.
             ModuleId::QuickCaptureV1 => &[
                 ("now", VarKind::Caller),
                 ("timezone", VarKind::Caller),
@@ -634,7 +635,7 @@ pub struct DraftFile {
     #[serde(default)] pub estimate_min: Option<i32>,
 }
 
-/// The draft the route returns: a proposal, never a row (A184).
+/// The draft the route returns: a proposal, never a row (A190).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CaptureDraft {
     pub title: String,
@@ -642,7 +643,7 @@ pub struct CaptureDraft {
     pub due_at: Option<DateTime<Utc>>,
     pub priority: i32,
     pub estimate_min: Option<i32>,
-    /// One line per field the reply could not supply as asked (A185).
+    /// One line per field the reply could not supply as asked (A191).
     pub warnings: Vec<String>,
 }
 
@@ -670,7 +671,7 @@ fn a_due_date_keeps_the_offset_the_model_resolved_it_in() {
     assert!(draft.warnings.is_empty());
 }
 
-/// An unreadable date is a warning, not a lost field and not a failed request (A185):
+/// An unreadable date is a warning, not a lost field and not a failed request (A191):
 /// the credits are already spent by the time this runs.
 #[test]
 fn an_unreadable_due_date_becomes_a_warning_and_keeps_the_draft() {
@@ -783,7 +784,7 @@ pub struct ProposedSubtask {
 }
 
 /// The proposal, in the order the model wrote it. `position` is assigned here so the
-/// order cannot fall through to a uuid when a batch is inserted (A187).
+/// order cannot fall through to a uuid when a batch is inserted (A193).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Proposal {
     pub subtasks: Vec<ProposedSubtask>,
@@ -852,7 +853,7 @@ fn a_subtask_that_restates_its_parent_is_dropped_with_a_warning() {
 fn duplicate_subtask_titles_are_kept() { /* … */ }
 
 /// The order is the model's. `position` is 0..n-1 in that order, which is what stops a
-/// batch insert from coming back shuffled (A187, Phase 5's A100).
+/// batch insert from coming back shuffled (A193, Phase 5's A100).
 #[test]
 fn the_proposal_order_is_the_models_order() {
     let proposal = parse_proposal(&file_of(5)).unwrap();
@@ -947,7 +948,7 @@ pub enum TaskError {
 
 /// The one order the Tasks screen and the Today screen both use. Deterministic: the id
 /// breaks every tie, because two tasks can share a due date to the second and a batch
-/// insert shares `created_at` to the microsecond (A187).
+/// insert shares `created_at` to the microsecond (A193).
 pub fn order_tasks(rows: &mut [TaskRow]);
 
 /// Live subtasks of `parent`, in `order_tasks` order, with their own children flattened
@@ -974,7 +975,7 @@ pub enum SessionError {
     BeyondElapsed,
 }
 
-/// A195: the bound, with the comparison against the *client's* own report.
+/// A201: the bound, with the comparison against the *client's* own report.
 pub fn check_session(
     started_at: DateTime<Utc>,
     duration_min: i32,
@@ -989,7 +990,7 @@ pub fn check_session(
 
 ```rust
 /// A batch insert shares `created_at` to the microsecond, so ordering by time alone is a
-/// random order. Position first, then time, then id (A187).
+/// random order. Position first, then time, then id (A193).
 #[test]
 fn tasks_with_the_same_position_and_timestamp_still_order_deterministically() {
     let mut rows = vec![row_at(0, "2026-10-11T00:00:00Z", 3), row_at(0, "2026-10-11T00:00:00Z", 1)];
@@ -1046,7 +1047,7 @@ fn a_session_pushed_a_day_later_is_still_accepted() {
 
 /// A device whose clock runs two hours fast reports a start in the future and an end
 /// "before" the server's now. Rejecting it would reject valid data, so the bound reads
-/// the client's own clock (A195).
+/// the client's own clock (A201).
 #[test]
 fn a_device_whose_clock_runs_fast_does_not_lose_its_session() {
     assert!(check_session(at("2026-10-11T11:00:00Z"), 30, at("2026-10-11T11:30:00Z"),
@@ -1122,7 +1123,7 @@ file's references to it.
 -- is 0021-0023, which each say the same thing in their header.
 
 -- A breakdown inserts 3-8 subtasks in one transaction, and a batch insert shares
--- `created_at` to the microsecond, so `order by created_at` is a random order (A187).
+-- `created_at` to the microsecond, so `order by created_at` is a random order (A193).
 -- `position` is an ordinary client-writable field: the client numbers them 0..n-1 and
 -- push carries it like any other.
 alter table tasks
@@ -1205,9 +1206,9 @@ Routes (paths exactly as `docs/API.md:778` reserves them):
 | `GET /tasks` | `?status=&workspace_id=&parent_id=&due_before=&due_after=&limit=` (default 200, max 500). Tombstones excluded, `user_id` scoped. `ORDER BY` matches `stvdy_core::tasks::order_tasks`, with a comment naming it. |
 | `POST /tasks` | Body may carry `id` (A8). 201 `{task}`. 409 when that id exists. |
 | `PATCH /tasks/:id` | Partial; 200 `{task}`; 404 for another user's or a deleted row. |
-| `DELETE /tasks/:id` | 204. Tombstones the task **and its live descendants** in one transaction (A188). |
-| `POST /tasks/quick-capture` | Body `{text}`. `require(Feature::QuickCapture)` then one `reserve_in` transaction. 200 `{draft, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A184). |
-| `POST /tasks/:id/breakdown` | Body `{}`. `require(Feature::TaskBreakdown)` then `reserve_in`. 200 `{proposal, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A186). |
+| `DELETE /tasks/:id` | 204. Tombstones the task **and its live descendants** in one transaction (A194). |
+| `POST /tasks/quick-capture` | Body `{text}`. `require(Feature::QuickCapture)` then one `reserve_in` transaction. 200 `{draft, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A190). |
+| `POST /tasks/:id/breakdown` | Body `{}`. `require(Feature::TaskBreakdown)` then `reserve_in`. 200 `{proposal, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A192). |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1238,7 +1239,7 @@ async fn the_capture_prompt_carries_the_zone_the_clock_and_a_data_block(pool: Pg
     // a line "<user_context_data>", and no unfilled "{{"
 }
 
-/// A breakdown writes no subtasks: accepting is a separate act (A186).
+/// A breakdown writes no subtasks: accepting is a separate act (A192).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_breakdown_returns_a_proposal_and_writes_no_subtasks(pool: PgPool) {
     // one task exists; breakdown; assert 200, proposal.subtasks.len() >= 3,
@@ -1246,7 +1247,7 @@ async fn a_breakdown_returns_a_proposal_and_writes_no_subtasks(pool: PgPool) {
 }
 
 /// Accepting is N ordinary creates, and each one is a real row with the parent and its
-/// position, in the order proposed (A187).
+/// position, in the order proposed (A193).
 #[sqlx::test(migrations = "../../migrations")]
 async fn accepting_a_proposal_creates_ordered_subtasks(pool: PgPool) {
     // POST /tasks x3 with parent_id and position 0,1,2
@@ -1261,7 +1262,7 @@ async fn the_title_bound_is_exact(pool: PgPool) { /* … */ }
 #[sqlx::test(migrations = "../../migrations")]
 async fn deleting_a_parent_tombstones_its_children(pool: PgPool) {
     // parent + 2 children; DELETE parent; assert both children have deleted_at not null
-    // and that `change_log` carries a delete row for each child (A188)
+    // and that `change_log` carries a delete row for each child (A194)
 }
 
 /// Another account's task is a 404, never a 403: the existence of a row is not the
@@ -1338,7 +1339,7 @@ Routes:
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-/// The columns Phase 10 fills are not the client's to write (A189). Each one is its own
+/// The columns Phase 10 fills are not the client's to write (A195). Each one is its own
 /// case, because a validator that checked only `source` would pass a payload that sets
 /// `external_id` and silently break the next incremental sync's `(connection_id,
 /// external_id)` match.
@@ -1362,7 +1363,7 @@ async fn an_externally_sourced_event_cannot_be_edited_or_deleted(pool: PgPool) {
     // GET /events still returns it
 }
 
-/// `ends_at >= starts_at`; a deadline with equal ends is valid (A190).
+/// `ends_at >= starts_at`; a deadline with equal ends is valid (A196).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_deadline_is_an_event_with_equal_ends(pool: PgPool) {
     // POST { kind: "deadline", starts_at: X, ends_at: X } → 201
@@ -1428,9 +1429,9 @@ Routes:
 
 | Route | Notes |
 |---|---|
-| `POST /sessions` | Body `{id, started_at, duration_min, task_id?, workspace_id?, client_ts}` — the mutation's own shape, so one validator serves both callers (A195). Append-only: `on conflict (id) do nothing`, response `{applied: bool}` (the quiz-attempt precedent). |
+| `POST /sessions` | Body `{id, started_at, duration_min, task_id?, workspace_id?, client_ts}` — the mutation's own shape, so one validator serves both callers (A201). Append-only: `on conflict (id) do nothing`, response `{applied: bool}` (the quiz-attempt precedent). |
 | `GET /sessions?from=&to=` | The Today timeline and "time studied today". `ORDER BY started_at desc, id desc`. |
-| `GET /activity?from=&to=` | `{reviews: [ts], attempts: [ts], sessions: [ts]}` — the three instants a streak is made of, so the *client* owns the streak rule and there is one implementation of it (A196). The web build has no local cache, which is why this read exists as a route at all. |
+| `GET /activity?from=&to=` | `{reviews: [ts], attempts: [ts], sessions: [ts]}` — the three instants a streak is made of, so the *client* owns the streak rule and there is one implementation of it (A202). The web build has no local cache, which is why this read exists as a route at all. |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1442,7 +1443,7 @@ async fn a_session_is_recorded_once_and_reports_applied(pool: PgPool) {
     // `select count(*) from study_sessions where id = $1` == 1
 }
 
-/// The fabrication A195 exists for, and the reason the bound is not a client check.
+/// The fabrication A201 exists for, and the reason the bound is not a client check.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_session_longer_than_the_client_reported_elapsed_time_is_refused(pool: PgPool) {
     // started_at 09:00, duration 600, client_ts 09:05 → 400 validation
@@ -1511,8 +1512,8 @@ Routes:
 
 | Route | Notes |
 |---|---|
-| `GET /settings` | `{ settings: { study_start_hour, study_end_hour, max_study_min_per_day, block_len_min, break_min, reminder_channels, quiet_start_hour, quiet_end_hour, language, theme, updated_at }, timezone }` (A194). |
-| `PUT /settings` | Partial; only supplied fields change; the whole row is written, so `user_settings` stays record-level LWW (A192). Each supplied channel goes through `require(Feature::ReminderChannel(c))` **before** the write. `timezone` is written to `users`. |
+| `GET /settings` | `{ settings: { study_start_hour, study_end_hour, max_study_min_per_day, block_len_min, break_min, reminder_channels, quiet_start_hour, quiet_end_hour, language, theme, updated_at }, timezone }` (A200). |
+| `PUT /settings` | Partial; only supplied fields change; the whole row is written, so `user_settings` stays record-level LWW (A198). Each supplied channel goes through `require(Feature::ReminderChannel(c))` **before** the write. `timezone` is written to `users`. |
 
 `PUT /settings/api-key` and `DELETE /settings/api-key` stay in `docs/API.md` tagged
 Phase 13 (BYOK is Power's, and the key store is `user_api_keys`, which this phase does not
@@ -1524,7 +1525,7 @@ touch).
 /// A free plan's channels are `[web, push]`, so `telegram` is 403 `plan_required` with
 /// `min_plan: "power"` — the only plan that grants it. The check is the engine's; a
 /// `plans.get(..).reminder_channels` read here would fail the route sweep's third test
-/// and be a second source of truth (A192).
+/// and be a second source of truth (A198).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_channel_the_plan_does_not_grant_is_refused_with_the_plan_that_does(pool: PgPool) {
     // free account: PUT { reminder_channels: ["web", "telegram"] } → 403 plan_required,
@@ -1536,7 +1537,7 @@ async fn a_channel_the_plan_does_not_grant_is_refused_with_the_plan_that_does(po
 async fn a_granted_channel_set_saves(pool: PgPool) { /* pro: [web, push, email] → 200 */ }
 
 /// Quiet hours wrap midnight, so `22 -> 7` is valid and the *membership* test is what a
-/// consumer uses. A naive `start < end` check rejects the normal case (A193).
+/// consumer uses. A naive `start < end` check rejects the normal case (A199).
 #[sqlx::test(migrations = "../../migrations")]
 async fn quiet_hours_may_wrap_midnight(pool: PgPool) {
     // PUT { quiet_start_hour: 22, quiet_end_hour: 7 } → 200
@@ -1550,7 +1551,7 @@ async fn quiet_hours_may_wrap_midnight(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_partial_write_does_not_reset_the_rest(pool: PgPool) { /* … */ }
 
-/// The timezone is on `users` and this route is the only writer (A194), so it round-trips
+/// The timezone is on `users` and this route is the only writer (A200), so it round-trips
 /// and an unknown zone is refused rather than stored as a string `chrono-tz` will silently
 /// read as UTC.
 #[sqlx::test(migrations = "../../migrations")]
@@ -1628,7 +1629,7 @@ ro(
     "PUT",
     "/settings",
     "a channel the plan does not grant is refused per channel by the engine, which \
-     crates/server/tests/settings.rs asserts with a body (A200)",
+     crates/server/tests/settings.rs asserts with a body (A206)",
 ),
 ```
 
@@ -1657,19 +1658,19 @@ In `crates/server/tests/tamper.rs`, three rows that only the push path can prove
 
 ```rust
 /// A forged external event through push, which is the path a patched client would use
-/// because it skips the REST validator's `403` (A189).
+/// because it skips the REST validator's `403` (A195).
 async fn a_pushed_event_with_a_google_source_is_rejected(/* … */) {
     // Rejected { code: "read_only_entity" }
 }
 
 /// The settings row's primary key is the user's id, so a mutation whose `id` is someone
-/// else's is refused rather than applied to the caller (A191).
+/// else's is refused rather than applied to the caller (A197).
 async fn a_pushed_settings_row_for_another_user_id_is_rejected(/* … */) {
     // Rejected { code: "validation" }
 }
 
 /// The session bound holds on the push path, which is the path an offline timer uses
-/// (A195).
+/// (A201).
 async fn a_pushed_session_beyond_its_elapsed_time_is_rejected(/* … */) {
     // Rejected { code: "validation" }
 }
@@ -1696,7 +1697,7 @@ Entity::UserSettings => crate::settings::validate_settings_push(user_id, id, pay
 ```
 
 The `study_sessions` validator needs the mutation's `client_ts`, which `decide` already has
-in hand — pass it rather than reading a clock (A195).
+in hand — pass it rather than reading a clock (A201).
 
 - [ ] **Step 4: Run the tests**
 
@@ -1736,7 +1737,7 @@ failure the gate exists to catch.
 ///  1. **The server has nothing before the reconnect.** Read the database directly. A
 ///     "offline" write that silently went through REST would otherwise pass the rest of
 ///     the test unchanged.
-///  2. **The ids match after the reconnect.** The client mints them (A8/A197), so equality
+///  2. **The ids match after the reconnect.** The client mints them (A8/A203), so equality
 ///     is what proves the row the device shows is the row the server holds, not a
 ///     same-shaped row the server created.
 ///  3. **A second `sync_now` changes nothing.** Replaying the outbox is the normal case
@@ -1802,14 +1803,14 @@ async fn a_task_an_event_and_a_session_written_offline_sync_after_reconnect(pool
 }
 
 /// Deleting a parent offline removes its children locally too, or the device shows
-/// orphaned subtasks until the next pull (A188).
+/// orphaned subtasks until the next pull (A194).
 #[sqlx::test(migrations = "../../migrations")]
 async fn deleting_a_parent_offline_tombstones_its_children_locally(pool: PgPool) {
     // parent + 2 subtasks created offline, synced, then the parent deleted offline:
     // assert `a.read(Entity::Task, &filter_for(child))` is empty on the device
 }
 
-/// The timer's own failure mode: the same session id flushed twice writes one row (A197).
+/// The timer's own failure mode: the same session id flushed twice writes one row (A203).
 #[sqlx::test(migrations = "../../migrations")]
 async fn flushing_the_same_session_id_twice_writes_one_row(pool: PgPool) {
     // a.write(StudySession, id, …) twice while offline, then sync:
@@ -1880,7 +1881,7 @@ export interface Platform {
 // app/src/features/today/useFocusTimer.ts
 export interface RunningTimer {
   /** Minted at start and persisted with the timer, so a restart resumes the same
-   *  append-only session id and a double flush is a no-op (A197). */
+   *  append-only session id and a double flush is a no-op (A203). */
   id: string
   startedAt: string
   taskId: string | null
@@ -1921,7 +1922,7 @@ it('stopping writes one session with the elapsed minutes', async () => {
 it('a double stop writes once', async () => { /* … */ })
 
 /// A timer found running after four hours is not auto-resumed: the screen offers Save or
-/// Discard, because auto-resuming an overnight timer logs a false session (A198).
+/// Discard, because auto-resuming an overnight timer logs a false session (A204).
 it('a timer older than four hours is stale rather than resumed', async () => { /* … */ })
 
 /// Discard writes nothing at all.
@@ -1964,7 +1965,7 @@ it('returns null rather than a guess when the key is absent', () => { /* … */ 
   `crypto.randomUUID()` and persists; `stop` computes the elapsed minutes with the device
   clock (the honest source for a timer), writes one session through
   `platform.sync.write('study_session', id, payload)` with `client_ts: new Date().toISOString()`
-  (the field A195's bound reads), deletes the local state, and returns to `idle`. The
+  (the field A201's bound reads), deletes the local state, and returns to `idle`. The
   elapsed display ticks from a `setInterval` that is derived from `startedAt`, not
   accumulated, so a throttled background tab does not drift.
 - `plans.ts`: extend the parser with `task_breakdown` and export `TASK_CREDITS`.
@@ -1995,7 +1996,7 @@ feat(app): the local-state capability, the focus timer, and the cost of a breakd
 - Produces:
 
 ```ts
-// app/src/features/today/day.ts — the pure rules (A196). No React, no fetch, no Date.now().
+// app/src/features/today/day.ts — the pure rules (A202). No React, no fetch, no Date.now().
 export interface Activity {
   reviews: string[]      // ISO instants
   attempts: string[]
@@ -2169,10 +2170,10 @@ Replace the three placeholder sections with real ones and re-tag the fourth:
   two sentences that are the contract: quick capture and break-down return proposals and
   write no task; accepting a proposal is N creates.
 - `## Events (Phase 9)` — the four routes, the overlap rule for `from`/`to`, the
-  `source = 'app'` rule and the four server-owned columns (A189), and the read-only rule
+  `source = 'app'` rule and the four server-owned columns (A195), and the read-only rule
   for an externally sourced row.
 - `## Sessions and activity (Phase 9)` — `POST /sessions`, `GET /sessions`,
-  `GET /activity`, the bound and the exact body fields including `client_ts` (A195), and
+  `GET /activity`, the bound and the exact body fields including `client_ts` (A201), and
   the `applied` flag.
 - `## Settings (Phase 9)` — `GET`/`PUT /settings`, the partial-write rule, the per-channel
   refusal, quiet hours wrapping midnight, and the timezone living on `users`.
@@ -2182,9 +2183,9 @@ Replace the three placeholder sections with real ones and re-tag the fourth:
 - [ ] **Step 2: `docs/SYNC.md`**
 
 Add `### Entity payload validation` under Push, with the four rules a pushable entity now
-carries: the four server-owned `events` columns (A189), the `user_settings` id rule and its
-per-channel plan check (A191/A192), the `study_sessions` bound and why it reads `client_ts`
-(A195), and the parent-delete cascade producing one tombstone per child (A188). Note that
+carries: the four server-owned `events` columns (A195), the `user_settings` id rule and its
+per-channel plan check (A197/A198), the `study_sessions` bound and why it reads `client_ts`
+(A201), and the parent-delete cascade producing one tombstone per child (A194). Note that
 these are the *same* functions the REST routes call, so a rule cannot hold on one path only.
 
 - [ ] **Step 3: `docs/ARCHITECTURE.md`**
@@ -2196,7 +2197,7 @@ read for the streak), and the timer's single-log design (the id minted at start)
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
-Append A181–A200 as rows, and one line in the "Schema deviations" table for
+Append A187–A206 as rows, and one line in the "Schema deviations" table for
 `tasks.position`, the `user_settings` columns and the five new `check` constraints.
 
 - [ ] **Step 5: `docs/THREAT_MODEL.md`**
@@ -2335,7 +2336,7 @@ reminders, dashboard: the Today view's six parts and the new-user variant → Ta
 streak … a day counts if the user reviews at least one card, answers a quiz, or logs a
 study session (in the user's timezone)" → Tasks 8 and 13; "Pomodoro-style focus timer
 logging to `study_sessions` … Timer state survives app restarts" → Task 12; reminders →
-Phase 12 (A199); the Study hub → A199; the dashboard → Phase 12. § Screens item 13,
+Phase 12 (A205); the Study hub → A205; the dashboard → Phase 12. § Screens item 13,
 Settings: Study preferences, Notifications (channels and quiet hours), Language,
 Appearance, Devices and sync (the local reset) → Task 9 and Task 13; Calendar connections
 (Phase 10), Data (Phase 7/15), BYOK (Phase 13) → named on the screen and left to their
@@ -2343,10 +2344,10 @@ phases. § What is cached locally on native clients: unchanged, and this phase i
 consumer of it.
 
 **Placeholders:** none. The choices the spec does not make are pinned rather than waved at:
-the price of a quick capture (A181), whether the two prompt files may be edited (A182),
-whether a draft or a proposal is persisted (A184/A186), how subtasks are ordered (A187),
-which event columns are the server's (A189), where the settings live (A193/A194), what a
-session's length is bounded by (A195), and what is deliberately not here (A199).
+the price of a quick capture (A187), whether the two prompt files may be edited (A188),
+whether a draft or a proposal is persisted (A190/A192), how subtasks are ordered (A193),
+which event columns are the server's (A195), where the settings live (A199/A200), what a
+session's length is bounded by (A201), and what is deliberately not here (A205).
 
 **Type consistency:** `CaptureDraft`, `Proposal`, `ProposedSubtask`, `TaskRow`,
 `TaskStatus`, `SessionError`, `NewTask`, `NewEvent`, `NewSession`, `SettingsRow`, `Reject`,
@@ -2364,20 +2365,20 @@ a restart. Each gets a defence that fails loudly rather than a claim:
 
 - The gate test asserts **the server has nothing before the reconnect** by reading the
   database directly, so a write that secretly went through REST cannot pass.
-- The Today view has no route to call (A196), so there is nothing to fall back to; its
+- The Today view has no route to call (A202), so there is nothing to fall back to; its
   rules are pure functions with their own tests, and the screen test runs with a failing
   transport.
-- The session id is minted at start and persisted with the timer (A197), and
+- The session id is minted at start and persisted with the timer (A203), and
   `on conflict (id) do nothing` makes a replay a no-op; the test flushes twice and asserts
   one row.
 - The two "looks saved" generative actions are closed the same way: the routes write no
-  task (A184/A186), and the tests assert the count is unchanged after a capture, a
+  task (A190/A192), and the tests assert the count is unchanged after a capture, a
   breakdown and a dismissal.
 
 **What this plan does not do, deliberately:** it does not touch `crates/sync/src/client/`
 or the push transport (Phase 8's), it does not add a `+sync` table or a trigger (so
 `0017_sync_triggers.sql` stays last and `schema.rs` is unchanged), it does not add a
-`GET /today` route, and it does not plan the Study hub, reminders or the dashboard (A199).
+`GET /today` route, and it does not plan the Study hub, reminders or the dashboard (A205).
 
 **Open items:**
 - B1 (QRIS gateway docs) is still needed at Phase 13, not before.
