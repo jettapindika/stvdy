@@ -430,6 +430,25 @@
     color: var(--on-action);
   }
 
+  /* A citation is a control once it has somewhere to go, and a control needs a
+     real target on a phone (R-03). At phone widths the interactive pill grows to
+     44px; the non-interactive `span` form stays compact, because it is text.
+
+     The alternative, keeping the 15px box and expanding the hit area with an
+     absolutely-positioned pseudo-element, was rejected: it leaves the element's
+     own box at 15px, so it passes only an audit that measures something other
+     than the target, and two citations in adjacent lines would then overlap their
+     invisible hit areas. The cost here is honest and visible: the line holding a
+     citation is taller than the lines around it. */
+  @media (max-width: 767px) {
+    a.cite,
+    button.cite {
+      min-height: 2.75rem;
+      padding: 0.4rem 0.8rem;
+      vertical-align: middle;
+    }
+  }
+
   /* --- Labels and state --------------------------------------------------- */
 
   /* Metadata: page numbers, timestamps, counts. Monospace so it reads as

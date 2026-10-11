@@ -386,6 +386,14 @@ Deviations and discoveries from running the plan.
    unverified, so A43's 403 fired before the ownership check could be reached.
    The probe now verifies the intruder's email first, which leaves workspace
    ownership as the only thing that can refuse them.
+10. **Dropping a label left its whitespace behind.** The browser run rendered
+    "and also ." where the model had written "and also [9].", because the marker
+    was removed and the space it occupied was not. `strip_unknown` now tidies the
+    removal seam: a doubled space collapses and a space before sentence
+    punctuation is dropped, while a label that *stays* is left byte-for-byte as
+    written so the client does not have to re-find it. The one existing test that
+    pinned the double space was asserting the artifact rather than the intent and
+    now asserts a clean sentence plus the absence of any surviving marker.
 
 ### Phase 2 verification (as executed)
 
@@ -402,13 +410,23 @@ Deviations and discoveries from running the plan.
 
 ### Roadmap gate 5: accessibility (chat screen)
 
-AWAITING THE BROWSER RUN. The SPA task reports these results, and this table is
-filled in from its verbatim output, not from the claim: a gate asserted from
-someone else's summary is the failure mode this project already hit once. The
-checks are: keyboard-only reach with a measured focus ring, contrast in both
-themes, 44px targets at phone width, no state by colour alone, 200% text scale,
-and the two streaming-specific ones (the arriving answer must not move focus, and
-`aria-live` must announce it).
+Method: the built bundle in headless Chromium, measured with `getComputedStyle`
+and `getBoundingClientRect` after real key presses. Not a stylesheet reading.
+
+| Requirement | Result |
+|---|---|
+| Keyboard-only reach, visible focus ring | PASS. Tab-only walk at 1280px: citation chip x4, source checkbox, composer, Ask (with a draft), then out of the panel. Every stop has a 2px solid `rgb(53,136,200)` ring at 2px offset (the composer 1px); ring against its ground is 3.56:1 light and 8.19:1 dark. The disabled Ask button and the disabled web toggle are correctly *not* tab stops |
+| Contrast, default dark **and** light themes | PASS, 0 failures. Computed per text node against each element's composited effective background, in both themes. Worst cases: light chip text 5.04:1 at 10.5px and panel label 5.06:1; dark chip text 7.1:1 and panel label 7.41:1 |
+| Targets >= 44px at phone width (390px) | **ONE REAL FAILURE FOUND AND FIXED.** `button.cite` measured 118x15px. A `max-width: 767px` rule (min-height 2.75rem, 0.4rem/0.8rem padding) took it to 133x44. Passing: composer 358x80, Ask 61x44, source row label 358x44, web-search label 142x44. Cost, stated: the line holding a citation is taller at phone width. An absolute-positioned hit area was rejected because the box would stay 15px, passing only an audit that measures something other than the target |
+| No state conveyed by colour alone | PASS. Citation = the word plus an `aria-label`; streaming = `role="status"` "Searching this workspace"; disabled web toggle = a label plus `aria-describedby`; source selection = a worded count; errors = title and reason in `role="alert"` |
+| 200% text scale without clipping or overlap | PASS. `fontSize: 32px` doubled every computed size exactly (12 to 24px) at both 390 and 1280. 0 clipped, 0 overflowing the panel, `scrollWidth == clientWidth` (390/390, 1280/1280); the composer clears the fixed tab bar at full scroll (form bottom 755 = tab bar top 755) |
+| Streaming: the arriving answer must not move focus | PASS. Focus stayed on `#chat-message` in 120 of 120 samples at 10ms intervals |
+| Streaming: a screen reader is told it arrived | PASS structurally: the list is `role="log"` with `aria-live="polite"` and an `aria-label`, and `aria-busy` traced false to true to false with the first transition 11ms after submit |
+
+Not checked, stated rather than implied: no real screen reader was run (the live
+region is asserted structurally, the announcement itself is not observed);
+`prefers-reduced-motion` was not exercised; the citation panel was measured at
+200% only at 1280px, not at phone width.
 
 ### Roadmap gate 6: Indonesian end to end
 
@@ -419,7 +437,8 @@ and the two streaming-specific ones (the arriving answer must not move focus, an
 | Vector arm retrieves it with the **real** embedder | **PASS** (6.2 s, real model) |
 | `embed_query` applies the model's query convention | **PASS**, and it caught the missing override (execution note 1) |
 | The citation resolves to the Indonesian source | **PASS** |
-| The UI half: an Indonesian question typed into the real screen | AWAITING THE BROWSER RUN (same SPA task as gate 5 above) |
+| The UI half: an Indonesian question typed into the real screen | **PASS.** Account created through the UI and verified from the `var/mail` link; workspace "Jaringan Komputer"; the Indonesian fixture ingested to `ready` (1 chunk); the question typed into the chat panel. The answer streamed in, the visible text contains no `[9]` (`log.textContent.includes('[9]') === false`), and exactly **one** citation chip rendered, labelled "Open source: Topologi Jaringan, page unknown". Clicking it opened a panel with the fixture chunk text. "page unknown" is honest: pasted text has no pages |
+| The pre-stream error path, against the real server | **PASS.** With the stub provider down, the 502 arrived as a JSON body *before* the stream opened and the screen rendered it as "Service unavailable" with an "Ask again" retry and no assistant turn. A distinct case from a mid-stream `error`, where the user's turn is stored |
 
 ## Self-Review
 

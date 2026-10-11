@@ -212,8 +212,40 @@ fn an_empty_context_drops_every_label() {
     assert!(context.web(1).is_none());
 
     assert!(resolve("Everything [1] is [W1] dropped.", &context).is_empty());
+    // The intent is that no label survives; the spacing is the removal seam, and
+    // asserting the double space it used to leave would pin an artifact rather
+    // than the behaviour. A reader must see a clean sentence.
     let stripped = strip_unknown("Everything [1] is [W1] dropped.", &context);
-    assert_eq!(stripped, "Everything  is  dropped.");
+    assert_eq!(stripped, "Everything is dropped.");
+    assert!(!stripped.contains('['), "no marker may survive: {stripped}");
+    assert!(!stripped.contains("  "), "no doubled space: {stripped:?}");
+}
+
+#[test]
+fn a_dropped_label_before_punctuation_does_not_leave_a_space() {
+    let context = labels_with_web();
+
+    // The exact shape a model produces: a citation, then the sentence's period.
+    // Without tidying, the period is preceded by the space the marker occupied,
+    // which reads as a typo in an otherwise clean answer.
+    assert_eq!(
+        strip_unknown("a real claim [1] and a false one [9].", &context),
+        "a real claim [1] and a false one."
+    );
+    assert_eq!(
+        strip_unknown("one [9], two [9]; three [9]: four [9]!", &context),
+        "one, two; three: four!"
+    );
+}
+
+#[test]
+fn a_kept_label_is_left_exactly_as_written() {
+    let context = labels_with_web();
+
+    // The tidy pass must not touch a marker that stays, or the client would have
+    // to re-find labels it was already given.
+    let text = "grounded [1] and grounded again [1].";
+    assert_eq!(strip_unknown(text, &context), text);
 }
 
 #[test]

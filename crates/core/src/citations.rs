@@ -211,13 +211,52 @@ pub fn strip_unknown(text: &str, labels: &ContextLabels) -> String {
 
     let mut output = String::with_capacity(text.len());
     let mut cursor = 0;
+    let mut removed_any = false;
     for marker in markers {
         if is_known(marker.label, labels) {
             continue;
         }
         output.push_str(&text[cursor..marker.start]);
         cursor = marker.end;
+        removed_any = true;
     }
     output.push_str(&text[cursor..]);
-    output
+
+    if removed_any {
+        tidy_removal(&output)
+    } else {
+        output
+    }
+}
+
+/// Removes the whitespace a dropped marker leaves behind.
+///
+/// "and also [9]." becomes "and also ." without this, which reads as a typo in an
+/// otherwise clean sentence. Only the seams are touched: a double space or a
+/// space before sentence punctuation, both of which are artifacts of removal
+/// rather than anything the model wrote.
+fn tidy_removal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut previous_was_space = false;
+
+    for character in text.chars() {
+        if character == ' ' {
+            if previous_was_space {
+                continue;
+            }
+            // A space immediately before punctuation is the removal seam, not
+            // the model's spacing, so it is dropped.
+            previous_was_space = true;
+            continue;
+        }
+        if previous_was_space {
+            if !matches!(character, '.' | ',' | ';' | ':' | '!' | '?' | ')') {
+                out.push(' ');
+            }
+            previous_was_space = false;
+        }
+        out.push(character);
+    }
+
+    out.trim_end().to_string()
 }
