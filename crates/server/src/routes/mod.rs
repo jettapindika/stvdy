@@ -29,8 +29,8 @@ use crate::quizzes;
 use crate::reports;
 use crate::sources;
 use crate::state::AppState;
-use crate::usage;
 use crate::workspaces;
+use crate::{admin, usage};
 
 /// Origins the native shell presents. These are NOT `http://localhost`: Tauri
 /// serves the SPA from its own scheme, so omitting them is the classic
@@ -125,6 +125,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(reports::routes())
         .merge(cheatsheets::routes())
         .merge(usage::routes())
+        .merge(admin::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )));

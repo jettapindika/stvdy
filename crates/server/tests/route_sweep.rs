@@ -40,7 +40,9 @@ enum Class {
     /// spec requires over-limit data to stay viewable and exportable.
     ReadOnly,
     /// No authenticated user at all: a health check, a credentials route, an OAuth
-    /// redirect, or an HMAC-signed object download.
+    /// redirect, or an HMAC-signed object download. The admin routes are here too: they
+    /// take `AdminUser`, whose refusal is a 404 (A7), so there is no entitlement decision
+    /// to sweep.
     Exempt,
 }
 
@@ -350,6 +352,21 @@ fn exempt_rows() -> Vec<Row> {
             "GET",
             "/objects/{id}",
             "an HMAC-signed URL whose whole point is that it works without a session",
+        ),
+        exempt(
+            "PATCH",
+            "/admin/users/{id}/plan",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
+        ),
+        exempt(
+            "POST",
+            "/admin/users/{id}/credits",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
+        ),
+        exempt(
+            "GET",
+            "/admin/margin",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
         ),
     ]
 }
