@@ -33,6 +33,18 @@ Rust, from `crates/*/Cargo.toml`:
 
 Tauri and its plugins (`tauri`, `tauri-plugin-*`) are MIT OR Apache-2.0.
 
+Transitive, reached through `url`'s IDNA/ICU4X chain (18 crates, including
+`icu_collections`, `icu_locale_core`, `icu_normalizer`, `icu_properties`,
+`icu_provider`, `litemap`, `tinystr`, `writeable`, `yoke`):
+
+| Crate group | Licence |
+|---|---|
+| ICU4X components behind `url` | Unicode-3.0 |
+
+`Unicode-3.0` is permissive and easy to miss precisely because it is not
+copyleft, so it never surfaces in a copyleft audit. It still requires the
+licence and copyright notice to accompany a distribution.
+
 JavaScript, from `app/package.json`:
 
 | Package | Licence |
@@ -71,3 +83,23 @@ npm --prefix app ls --all --json | head
 Re-check the copyleft audit whenever a dependency is added or a version bumped:
 the audit is a claim about the resolved graph, and the resolved graph changes
 without the manifests changing.
+
+## Obligation before binaries ship (Phase 15)
+
+This file **names** licences; it does not yet reproduce their texts. Every
+permissive licence listed above (MIT, Apache-2.0, the SIL OFL, Unicode-3.0)
+requires its copyright notice and permission text to accompany a binary
+distribution, and naming the licence is not the same as including it. That
+obligation is not discharged by this file as it stands.
+
+No binaries are distributed yet, which is why this is a gate rather than a
+defect. Before the first installer or store build, generate the full texts:
+
+```bash
+cargo install cargo-about
+cargo about generate about.hbs > THIRD_PARTY_LICENSES.md   # Rust side
+npx license-checker --production --json > /tmp/npm-licences.json  # npm side
+```
+
+and ship the result alongside the installer. Do this in the same change that
+adds code signing, so the two cannot drift apart.
