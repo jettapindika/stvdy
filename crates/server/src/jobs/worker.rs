@@ -86,6 +86,14 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         "ingest_source" => crate::jobs::handlers::ingest::run(state, job).await,
         "generate_flashcards" => crate::jobs::handlers::generate::run(state, job).await,
         "generate_quiz" => crate::jobs::handlers::generate_quiz::run(state, job).await,
+        // The report's two steps are asymmetric on purpose: the outline is generated in its
+        // route (the roadmap's job table has no outline kind), so only the section is here.
+        "generate_report_section" => crate::jobs::handlers::report::run(state, job).await,
+        "generate_cheatsheet" => crate::jobs::handlers::cheatsheet::run(state, job).await,
+        // Separate from `generate_cheatsheet` so a failed print cannot discard a
+        // successfully generated document: the blocks are the document, and a print is
+        // retryable and free.
+        "render_cheatsheet_pdf" => crate::jobs::handlers::render_pdf::run(state, job).await,
         // Permanent: no retry will invent a handler for a kind this binary does
         // not know, which is what an old row from a newer version looks like.
         other => Err(jobs::Failure::permanent(format!(

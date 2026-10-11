@@ -415,6 +415,8 @@ const REFUND_SWEEP_LIMIT: i64 = 1000;
 pub enum RefundTarget {
     Deck,
     Quiz,
+    Report,
+    Cheatsheet,
 }
 
 impl RefundTarget {
@@ -423,6 +425,8 @@ impl RefundTarget {
         match self {
             RefundTarget::Deck => "deck",
             RefundTarget::Quiz => "quiz",
+            RefundTarget::Report => "report",
+            RefundTarget::Cheatsheet => "cheatsheet",
         }
     }
 
@@ -445,6 +449,18 @@ impl RefundTarget {
                   order by updated_at
                   limit $1"
             }
+            RefundTarget::Report => {
+                "select id from reports
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
+            RefundTarget::Cheatsheet => {
+                "select id from cheatsheets
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
         }
     }
 
@@ -462,6 +478,18 @@ impl RefundTarget {
                   where id = $1 and status = 'failed' and credits_spent > 0
                     for update skip locked"
             }
+            RefundTarget::Report => {
+                "select user_id, credits_spent
+                   from reports
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
+            RefundTarget::Cheatsheet => {
+                "select user_id, credits_spent
+                   from cheatsheets
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
         }
     }
 
@@ -472,6 +500,12 @@ impl RefundTarget {
             }
             RefundTarget::Quiz => {
                 "update quizzes set credits_spent = 0, updated_at = now() where id = $1"
+            }
+            RefundTarget::Report => {
+                "update reports set credits_spent = 0, updated_at = now() where id = $1"
+            }
+            RefundTarget::Cheatsheet => {
+                "update cheatsheets set credits_spent = 0, updated_at = now() where id = $1"
             }
         }
     }

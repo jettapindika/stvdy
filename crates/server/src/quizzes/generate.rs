@@ -28,7 +28,7 @@ const MAX_TOKENS: u32 = 3000;
 
 /// How far back the fallback usage lookup reaches. See the deck generator: the spend
 /// commits immediately before the quiz row, so this only absorbs that gap.
-const USAGE_LOOKBACK: chrono::Duration = chrono::Duration::minutes(5);
+pub(crate) const USAGE_LOOKBACK: chrono::Duration = chrono::Duration::minutes(5);
 
 /// What the second attempt says when the reply was not JSON at all.
 ///
@@ -259,7 +259,7 @@ pub async fn generate(state: &AppState, quiz: &QuizRow) -> Result<Generation, Fa
 
 /// Sums two optional costs, keeping `None` for "unknown" rather than treating it as
 /// zero: recording zero understates spend in the margin report (A41).
-fn sum_costs(first: Option<f64>, second: Option<f64>) -> Option<f64> {
+pub(crate) fn sum_costs(first: Option<f64>, second: Option<f64>) -> Option<f64> {
     match (first, second) {
         (None, None) => None,
         (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
@@ -267,7 +267,7 @@ fn sum_costs(first: Option<f64>, second: Option<f64>) -> Option<f64> {
 }
 
 /// Records what a failed generation already spent, before it gives up.
-async fn record_failed_usage(
+pub(crate) async fn record_failed_usage(
     state: &AppState,
     usage_event_id: Option<Uuid>,
     in_tokens: u32,
@@ -291,7 +291,7 @@ async fn record_failed_usage(
 
 /// Names the prompt version on the quiz's usage row. Best-effort: a reporting gap must
 /// not change the job's outcome.
-async fn attach_prompt_version(
+pub(crate) async fn attach_prompt_version(
     state: &AppState,
     usage_event_id: Option<Uuid>,
     prompt_version: &str,
@@ -335,13 +335,13 @@ async fn load_chunks(state: &AppState, quiz: &QuizRow) -> Result<Vec<PromptChunk
 
 /// The values `base_vars` needs, read from the row rather than from an `AuthUser` the
 /// job does not have.
-struct UserRow {
-    email: String,
-    timezone: String,
-    plan_id: String,
+pub(crate) struct UserRow {
+    pub(crate) email: String,
+    pub(crate) timezone: String,
+    pub(crate) plan_id: String,
 }
 
-async fn load_user(state: &AppState, user_id: Uuid) -> Result<UserRow, Failure> {
+pub(crate) async fn load_user(state: &AppState, user_id: Uuid) -> Result<UserRow, Failure> {
     let row = sqlx::query("select email, timezone, plan_id from users where id = $1")
         .bind(user_id)
         .fetch_optional(&state.pool)

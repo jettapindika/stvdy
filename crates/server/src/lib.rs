@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod chat;
+pub mod cheatsheets;
 pub mod chunks;
 pub mod config;
 pub mod credits;
@@ -15,6 +16,7 @@ pub mod limits;
 pub mod quizzes;
 pub mod ratelimit;
 pub mod render;
+pub mod reports;
 pub mod routes;
 pub mod sources;
 pub mod state;

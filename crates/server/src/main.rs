@@ -44,7 +44,9 @@ async fn main() -> anyhow::Result<()> {
     // Nothing else resolves that state, so recover it here, before the worker can
     // start charging new generations.
     let refunded = credits::refund_pending(&pool, credits::RefundTarget::Deck).await?
-        + credits::refund_pending(&pool, credits::RefundTarget::Quiz).await?;
+        + credits::refund_pending(&pool, credits::RefundTarget::Quiz).await?
+        + credits::refund_pending(&pool, credits::RefundTarget::Report).await?
+        + credits::refund_pending(&pool, credits::RefundTarget::Cheatsheet).await?;
     if refunded > 0 {
         tracing::warn!(
             refunded,
@@ -62,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         clock: providers.clock,
         llm: providers.llm,
         search: providers.search,
+        renderer: providers.renderer,
         jobs: jobs::Queue::new(),
     };
 

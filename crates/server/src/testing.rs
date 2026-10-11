@@ -89,6 +89,7 @@ pub fn state(pool: PgPool) -> AppState {
         clock: Arc::new(FixedClock::at(chrono::Utc::now())),
         llm: None,
         search: None,
+        renderer: None,
         jobs: Queue::new(),
     }
 }
@@ -128,6 +129,12 @@ impl TestState {
                 clock: clock.clone(),
                 llm: None,
                 search: None,
+                // Never launched in a test: the print step is the only thing that
+                // needs a browser, and a suite that started Chromium per case would be
+                // slow and would fail on a machine without one. The PDF routes answer
+                // `provider_error` here, which is what a deployment without a browser
+                // does too.
+                renderer: None,
                 jobs: Queue::new(),
             },
             storage,

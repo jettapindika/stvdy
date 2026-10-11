@@ -20,11 +20,13 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth;
 use crate::chat;
+use crate::cheatsheets;
 use crate::chunks;
 use crate::config::AppConfig;
 use crate::devices;
 use crate::flashcards;
 use crate::quizzes;
+use crate::reports;
 use crate::sources;
 use crate::state::AppState;
 use crate::workspaces;
@@ -119,6 +121,8 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(chat::routes())
         .merge(flashcards::routes())
         .merge(quizzes::routes())
+        .merge(reports::routes())
+        .merge(cheatsheets::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )));

@@ -13,6 +13,7 @@ use stvdy_core::traits::llm::LlmProvider;
 use crate::config::AppConfig;
 use crate::integrations::search::composite::CompositeSearch;
 use crate::jobs::Queue;
+use crate::render::chrome::Renderer;
 
 /// Provider handles and the job queue. Built once at startup by
 /// `integrations::Providers::build` plus `jobs::spawn_worker`, so a handler
@@ -32,6 +33,14 @@ pub struct AppState {
     /// `None` only when the pinned tier is unconfigured. The composite itself
     /// needs no keys, so this is present on a default deployment.
     pub search: Option<Arc<CompositeSearch>>,
+    /// The pooled Chromium, or `None` when no browser could be found.
+    ///
+    /// `None` is a supported state and not a degraded one: the only thing that needs a
+    /// browser is the *print* step, and a cheatsheet without a PDF is still a ready
+    /// document with its blocks stored (the re-render endpoint exists precisely so the
+    /// print can be repeated later). A report's PDF export is the one route that answers
+    /// `502 provider_error` without it, because there is nothing else it could answer.
+    pub renderer: Option<Arc<Renderer>>,
     pub jobs: Queue,
 }
 

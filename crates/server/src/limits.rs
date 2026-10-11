@@ -129,6 +129,43 @@ pub fn enforce_storage_mb(
     })
 }
 
+/// An export format the plan does not include.
+///
+/// `403 plan_required` with `min_plan`, not `limit_reached`: the format is not a
+/// quantity the user has run out of, it is a feature the plan does not have, and the
+/// client's remedy is a purchase rather than a wait. The pair is what the roadmap's
+/// error-mapping table names, and `AppError::status` maps the code to 403 for exactly
+/// that reason.
+///
+/// `min_plan` is **derived from the matrix** rather than written down: the first plan in
+/// price order whose `export_formats` contains this one. A hardcoded "pro" would keep
+/// naming pro after a later phase moved the format to power, and the mobile build is
+/// required to name the plan it would have to buy.
+pub fn enforce_export_format(
+    plans: &PlansFile,
+    plan: PlanId,
+    format: stvdy_core::config::ExportFormat,
+) -> Result<(), AppError> {
+    if plans.get(plan).export_formats.contains(&format) {
+        return Ok(());
+    }
+
+    Err(AppError::Entitlement {
+        code: "plan_required",
+        message: format!(
+            "exporting a document as {} is not included in the {} plan",
+            format!("{format:?}").to_lowercase(),
+            plan.as_str()
+        ),
+        min_plan: PlanId::ALL
+            .into_iter()
+            .find(|candidate| plans.get(*candidate).export_formats.contains(&format))
+            .map(PlanId::as_str),
+        limit: None,
+        used: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

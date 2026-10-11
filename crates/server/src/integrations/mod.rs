@@ -33,6 +33,8 @@ pub struct Providers {
     /// `None` only when the pinned tier is unconfigured. The composite needs no
     /// keys, so a default deployment has one.
     pub search: Option<Arc<search::CompositeSearch>>,
+    /// The pooled Chromium, or `None` when none could be found or launched.
+    pub renderer: Option<Arc<crate::render::chrome::Renderer>>,
 }
 
 impl Providers {
@@ -112,6 +114,35 @@ impl Providers {
             tracing::info!(tiers = ?composite.tier_names(), "search composite ready");
         }
 
+        // The pooled Chromium, launched at boot so a deployment that cannot render finds
+        // out at startup rather than when a student asks for a PDF. `None` is a supported
+        // state: the print step is the only thing that needs a browser, and a cheatsheet
+        // whose blocks are stored can be re-rendered later.
+        //
+        // The sandbox is disabled only in dev, and only because a container without the
+        // user-namespace support Chromium's sandbox needs is a deployment fact rather than
+        // a preference. Outside dev an unsandboxed render is refused outright: the browser
+        // is rendering model-influenced HTML.
+        let renderer = match crate::render::chrome::find_executable() {
+            Some(executable) => {
+                let allow_no_sandbox = cfg.env.is_dev();
+                match crate::render::chrome::Renderer::launch(Some(&executable), allow_no_sandbox) {
+                    Ok(renderer) => {
+                        tracing::info!(%executable, "chromium renderer ready");
+                        Some(Arc::new(renderer))
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, %executable, "chromium did not launch; PDF rendering is unavailable");
+                        None
+                    }
+                }
+            }
+            None => {
+                tracing::warn!("no Chromium found (set CHROME_PATH); PDF rendering is unavailable");
+                None
+            }
+        };
+
         Ok(Self {
             storage,
             embedder,
@@ -120,6 +151,7 @@ impl Providers {
             s3,
             llm,
             search,
+            renderer,
         })
     }
 }

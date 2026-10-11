@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<!--
+  Report print template. V1
+  ==========================================================================
+  A report is Markdown (the section call returns prose), so unlike the cheatsheet it has
+  no typed blocks and no renderer in `stvdy_core::render`: the body arrives as Markdown and
+  is converted to the markup below by `crates/server/src/reports/render.rs`.
+
+  The conversion is deliberately a **subset**: headings, paragraphs, ordered and unordered
+  lists, `code`, bold and italic, and the `[n]` chunk labels the section prompt asks for.
+  Everything else is escaped and shown literally, because the report is generated from a
+  student's documents and a field containing `<` must never become markup in a file they
+  print.
+
+  MATHS
+  -----
+  A report is not a maths document: `prompts/report_section.v1.md` asks for Markdown prose
+  with `[n]` labels and no LaTeX. So there is no KaTeX here, and the `data-math-ready`
+  sentinel the server's renderer waits for is set to "1" unconditionally — which is the
+  honest answer for a document with nothing to render. It is set on `load` for the same
+  reason the cheatsheet sets it there: the server polls after `load`, and a template that
+  marked itself ready before the document existed would defeat the guard.
+
+  PAGE NUMBERS AND THE RUNNING HEADER
+  -----------------------------------
+  Unlike the cheatsheet template this one carries **no** `@page` margin boxes: their
+  `content` is a CSS string, and interpolating the report's title into it would let a quote
+  in a generated title break the stylesheet — a second escaping context for no gain, since
+  Chromium ignores margin boxes anyway. The running header and the `Halaman N dari M`
+  footer come from CDP (`displayHeaderFooter` plus `headerTemplate`/`footerTemplate`) in
+  `crates/server/src/render/chrome.rs`, which is the only path that works in Chrome. A
+  future non-Chromium renderer needs a template change, and that is the honest trade.
+-->
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{doc_title}}</title>
+
+<style>
+@page {
+  size: A4;
+  margin: 18mm 16mm;
+}
+
+:root {
+  --ink: #111827;
+  --muted: #4b5563;
+  --rule: #e5e7eb;
+}
+
+html { font-size: 11pt; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.55;
+  /* A report is read, not skimmed: no hyphenation, no justification rivers. */
+  text-align: left;
+  hyphens: none;
+}
+
+h1.doc-title {
+  font-size: 20pt;
+  line-height: 1.2;
+  margin: 0 0 10mm 0;
+  padding-bottom: 3mm;
+  border-bottom: 1.2pt solid var(--rule);
+}
+
+h1, h2, h3 {
+  /* A heading must not be the last thing on a page. */
+  break-after: avoid;
+  page-break-after: avoid;
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: 14pt;
+  margin: 8mm 0 3mm 0;
+}
+
+h3 {
+  font-size: 12pt;
+  margin: 6mm 0 2mm 0;
+  color: var(--muted);
+}
+
+p { margin: 0 0 3mm 0; }
+
+ul, ol { margin: 0 0 3mm 0; padding-left: 6mm; }
+
+li { margin-bottom: 1.5mm; }
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+  background: #f3f4f6;
+  padding: 0.5mm 1mm;
+  border-radius: 1mm;
+}
+
+blockquote {
+  margin: 0 0 3mm 0;
+  padding-left: 4mm;
+  border-left: 2pt solid var(--rule);
+  color: var(--muted);
+}
+
+/* The chunk labels a claim is cited to. Small and unobtrusive, but present: a report whose
+   claims cannot be traced back to a source is the thing the citations exist to prevent. */
+sup.cite {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.7em;
+  color: var(--muted);
+  vertical-align: super;
+  margin-left: 0.5mm;
+}
+
+/* The prompt's honesty note, "(Not covered in your sources: …)". Marked, not hidden. */
+p.gap {
+  color: #92400e;
+  background: #fffbeb;
+  border-left: 2pt solid #f59e0b;
+  padding: 2mm 3mm;
+}
+</style>
+</head>
+<body>
+<h1 class="doc-title">{{doc_title}}</h1>
+{{body}}
+<script>
+  // See the header: a report has no maths to render, so this document declares its maths
+  // ready as soon as it exists. The server's renderer polls for exactly this attribute.
+  (function () {
+    function mark() {
+      document.documentElement.dataset.mathReady = '1';
+    }
+    if (document.readyState === 'complete') mark();
+    else window.addEventListener('load', mark);
+  })();
+</script>
+</body>
+</html>
