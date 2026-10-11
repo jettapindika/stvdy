@@ -3494,18 +3494,19 @@ export function StudyScreen() {
 Behaviour, exactly:
 - Reveal: a `Show answer` button and the `Space` key. The back, and the citation chip,
   appear only after reveal.
-- The chip's prop type is **`CitationSource`**, verified in
-  `app/src/components/ui/Citation.tsx:18-20`:
-  `{ type: 'chunk'; label: number; sourceTitle: string; page: number | null }` — there
-  is no `chunk_id` or `source_id` field. The card carries only `chunk_id`, so the chip
-  needs the chunk's title and page, which `useChunk(card.chunk_id)` already returns
-  (`Chunk` has `source_id`, `page`, `idx`, `content` — but no title). So either render
-  the chip as plain text from what the card has, or fetch the chunk and use the source
-  list (`useSources`) for the title. Simplest correct option, and the one to take:
-  a `chunk_id !== null` card renders a `Show source` button that opens the existing
-  `CitationPanel` pattern from `ChatScreen` with the chunk from `useChunk`, and the
-  `label` is a display number (the card's position in the queue, 1-based) — nothing is
-  being cited back to a model, so no label map is involved.
+- **The source, when the card has one.** Two facts, both verified: the card carries
+  only `chunk_id` (no `source_id`, no title, no page), and `CitationPanel` is private
+  to `ChatScreen` (`app/src/features/chat/ChatScreen.tsx:245`) and takes a
+  `ChatCitation`, which requires a `source_id` the card cannot fill.
+  So do **not** reuse `CitationPanel` and do **not** try to render a `Citation`
+  (its `CitationSource` is `{ type: 'chunk'; label: number; sourceTitle: string;
+  page: number | null }` — no chunk id at all). Instead: when `card.chunk_id !== null`,
+  render a `Show source` button that toggles an inline panel containing the chunk text
+  from `useChunk(card.chunk_id)` and the source's title looked up in `useSources(workspaceId)`
+  by `chunk.source_id`. Both queries already exist and are cached by the chat screen, so
+  this costs no new API surface. When `chunk_id` is null, render nothing: a card whose
+  label was dropped has no source to show, and saying so in the UI would be noise on a
+  card the student can still study.
 - Grade: four buttons — `Again` `1`, `Hard` `2`, `Good` `3`, `Easy` `4`. Each posts
   `{ id: crypto.randomUUID(), rating, reviewed_at: new Date().toISOString() }`.
 - On success: `setIndex(index + 1)`, `setRevealed(false)`, focus `cardRef.current`.
