@@ -36,11 +36,11 @@ Sampled from the frame. Two cores plus two functional colours, per R-29.
 | Token | Light | Dark | Role |
 |---|---|---|---|
 | `paper` | `#f5f7fb` | `#12141a` | Page ground. Cool and slightly blue-tinted, not warm and not pure white. |
-| `card` | `#ffffff` | `#1a1d24` | Panels and cards. Pure white in light mode, which is what lets a card read as raised on the tinted ground without needing a heavy border. |
+| `card` | `#ffffff` | `#22262e` | Panels and cards. Pure white in light mode, which is what lets a card read as raised on the tinted ground without needing a heavy border. |
 | `surface-sunk` | `#eef1f7` | `#0e1015` | Inputs and insets: recessed rather than raised. |
 | `ink` | `#101010` | `#f2f4f8` | Body text and the action fill. Near-black from the design, not `#000`. |
 | `ink-muted` | `#5f6b7a` | `#9aa5b8` | Metadata and secondary text. |
-| `rule` | `#dfe4ee` | `#2b3038` | Hairlines and borders. |
+| `rule` | `#dfe4ee` | `#353b47` | Hairlines and borders. |
 | `accent` | `#3588c8` | `#6db4e8` | **The brand azure**, sampled from the wordmark, book, and sparkle. Fills, illustration, and large text only. |
 | `accent-text` | `#1a6aa8` | `#6db4e8` | The same hue darkened for body-size text. The design's blue is 3.56:1 on paper, which is AA only at large sizes, so links use this instead. |
 | `success` | `#0e9080` | `#3fbfae` | The checkmark teal. Confirmation and positive state. |

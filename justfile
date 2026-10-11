@@ -14,6 +14,14 @@ db-up:
 search-up:
     docker compose up -d searxng
 
+# Phase 0 exit check: the JSON must have a non-empty `results` and an empty
+# `unresponsive_engines`. A non-JSON body (the "Verifying your browser…" HTML
+# page) or a `results` of `[]` means the engines are not answering. `-T` because
+# the output is piped, and the request runs inside the container so it does not
+# depend on the host port mapping.
+db-search:
+    docker compose exec -T searxng wget -qO- "http://127.0.0.1:8080/search?q=spaced+repetition&format=json"
+
 db-down:
     docker compose down
 
