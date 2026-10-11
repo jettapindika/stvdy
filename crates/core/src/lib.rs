@@ -5,4 +5,5 @@
 //! SM-2 replay, the planner, the entitlements engine, the prompt composer and
 //! the document renderer.
 
+pub mod config;
 pub mod error;

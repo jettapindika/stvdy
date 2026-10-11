@@ -1,0 +1,110 @@
+[meta]
+version = 1
+currency = "IDR"
+
+[credits]
+chat_message = 1
+web_search = 2
+flashcard_batch_10 = 4
+quiz_10 = 6
+report_outline = 3
+report_section = 6
+task_breakdown = 2
+syllabus_import = 8
+plan_generation = 2
+agent_turn = 2
+long_doc_threshold_tokens = 20000
+long_doc_credits_per_1k_tokens = 1
+
+[provider_cost_ceiling_usd]
+free = 0.50
+pro = 2.00
+power = 6.00
+
+[plans.free]
+name = "Free"
+price_idr_monthly = 0
+price_idr_yearly = 0
+student_percent_off = 0
+workspaces = 2
+sources_total = 20
+max_file_mb = 20
+storage_mb = 200
+devices_max = 2
+credits_per_month = 60
+chat_msgs_per_day = 20
+web_searches_per_day = 3
+flashcards_per_month = 30
+quizzes_per_month = 2
+reports_per_month = 1
+export_formats = ["md"]
+task_ai_breakdown = false
+quick_capture = false
+google_calendar = false
+google_accounts_max = 0
+syllabus_imports_total = 1
+planner = "manual"
+agent_actions = false
+reminder_channels = ["web", "push"]
+model_tier = "cheap"
+byok = false
+advanced_analytics = false
+
+[plans.pro]
+name = "Pro"
+price_idr_monthly = 10000
+price_idr_yearly = 100000
+student_percent_off = 50
+# 0 means unlimited throughout this file.
+workspaces = 0
+sources_total = 150
+max_file_mb = 50
+storage_mb = 2000
+devices_max = 5
+credits_per_month = 500
+chat_msgs_per_day = 0
+web_searches_per_day = 30
+flashcards_per_month = 0
+quizzes_per_month = 0
+reports_per_month = 0
+export_formats = ["md", "pdf", "docx"]
+task_ai_breakdown = true
+quick_capture = true
+google_calendar = true
+google_accounts_max = 1
+syllabus_imports_total = 0
+planner = "auto"
+agent_actions = true
+reminder_channels = ["web", "push", "email"]
+model_tier = "cheap"
+byok = false
+advanced_analytics = false
+
+[plans.power]
+name = "Power"
+price_idr_monthly = 25000
+price_idr_yearly = 250000
+student_percent_off = 50
+workspaces = 0
+sources_total = 500
+max_file_mb = 100
+storage_mb = 10000
+devices_max = 10
+credits_per_month = 2000
+chat_msgs_per_day = 0
+web_searches_per_day = 100
+flashcards_per_month = 0
+quizzes_per_month = 0
+reports_per_month = 0
+export_formats = ["md", "pdf", "docx", "csv", "json"]
+task_ai_breakdown = true
+quick_capture = true
+google_calendar = true
+google_accounts_max = 0
+syllabus_imports_total = 0
+planner = "auto+balancer+weakness_blocks"
+agent_actions = true
+reminder_channels = ["web", "push", "email", "telegram", "discord"]
+model_tier = "best"
+byok = true
+advanced_analytics = true

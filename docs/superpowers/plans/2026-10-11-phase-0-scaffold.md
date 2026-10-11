@@ -30,8 +30,9 @@ Inherited from `docs/superpowers/plans/2026-10-11-study-os-master-roadmap.md` §
 | `rust-toolchain.toml` | Pin 1.94.1 + rustfmt/clippy |
 | `clippy.toml` | Relax `unwrap_used`/`expect_used`/`panic` inside test code |
 | `.cargo/config.toml` | `SQLX_OFFLINE` note, alias for `cargo sqlx prepare` |
-| `justfile` | `db-up`, `migrate`, `server`, `web`, `tauri`, `check`, `test` |
-| `docker-compose.yml` | postgres (pgvector image), minio, bucket-init |
+| `justfile` | `db-up`, `db-search`, `migrate`, `server`, `web`, `tauri`, `check`, `test` |
+| `docker-compose.yml` | postgres (pgvector image), minio, bucket-init, searxng (search tier 2, internal only) |
+| `searxng/settings.yml` | SearXNG config: `formats: [html, json]`, limiter off, broken engines disabled (A3) |
 | `.env.example` | Every env var the server reads, documented |
 | `crates/core/Cargo.toml` | Pure crate: no axum, no sqlx |
 | `crates/core/src/lib.rs` | Module tree + re-exports |
@@ -228,7 +229,10 @@ SQLX_OFFLINE = "false"   # CI sets SQLX_OFFLINE=true for lint/build jobs
 set dotenv-load := true
 
 db-up:
-    docker compose up -d postgres minio minio-init
+    docker compose up -d postgres minio minio-init searxng
+
+db-search:
+    docker compose exec searxng wget -qO- "http://127.0.0.1:8080/search?q=test&format=json" | head -c 400
 
 db-down:
     docker compose down
@@ -458,6 +462,24 @@ git commit -m "chore: cargo workspace skeleton with pinned toolchain and lint ga
 version = 1
 currency = "IDR"
 
+# Credit prices are in *credits*, not currency. They are calibrated against measured
+# provider cost per action, not guessed (A41). Reference figures at 2026-10-11 rates,
+# IDR/USD 17,889:
+#   one chat message  ~= 1500 system + 4000 retrieved + 500 history in, 600 out
+#   deepseek-v4.1-flash   $0.00119 blended   (off-peak $0.00104 / peak $0.00207)
+#   gemini-2.5-flash-lite $0.00073           (no peak/off-peak split)
+#   search                $0.00              (A3: academic APIs keyless, SearXNG self-hosted)
+# A credit is therefore worth about $0.0011-0.0019 of revenue depending on plan, and
+# the cheapest model costs less than one credit's worth of revenue per message.
+# Consequence: `chat_message = 1` is correct and must NOT be raised to cover search --
+# search is now free, and raising it would only make the paid tiers look worse.
+#
+# Off-peak matters: DeepSeek peak is Mon-Fri 01:00-04:00 and 06:00-10:00 UTC, which is
+# 08:00-11:00 and 13:00-17:00 WIB. The Indonesian student study window (19:00-23:00 WIB)
+# falls entirely in off-peak, so the realistic blended cost is the cheaper column.
+# Keep the system prompt a byte-stable prefix: DeepSeek cache hits bill $0.003/1M
+# off-peak vs $0.15/1M on a miss, a 50x difference, at no extra cost to write.
+
 [credits]
 chat_message = 1
 web_search = 2
@@ -471,6 +493,13 @@ plan_generation = 2
 agent_turn = 2
 long_doc_threshold_tokens = 20000
 long_doc_credits_per_1k_tokens = 1
+
+# Hard per-user monthly provider-cost stop, in USD. These are runaway backstops, not
+# the normal operating point: at the cheapest tier the free plan's full 60 credits cost
+# about $0.044 against a $0.50 ceiling, and power's 2000 credits about $2.39 against
+# $6.00. Exceeding one pauses expensive actions with a clear message rather than
+# silently spending (docs/SPEC.md:528). They are what makes an unattended free tier
+# survivable, so they MUST be enforced in Phase 7, not merely configured.
 
 [provider_cost_ceiling_usd]
 free = 0.50
@@ -502,7 +531,7 @@ syllabus_imports_total = 1
 planner = "manual"
 agent_actions = false
 reminder_channels = ["web", "push"]
-model_tier = "cheap"
+model_tier = "cheapest"
 byok = false
 advanced_analytics = false
 
@@ -570,7 +599,7 @@ advanced_analytics = true
 `crates/core/tests/plans_matrix.rs`:
 ```rust
 use std::path::Path;
-use stvdy_core::config::{load_plans, CreditAction, PlanId};
+use stvdy_core::config::{load_plans, CreditAction, ModelTier, PlanId};
 use stvdy_core::error::CoreError;
 
 const PLANS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/plans.toml");
@@ -623,6 +652,14 @@ fn plan_limits_are_monotonic_free_le_pro_le_power() {
     assert!(free.byok == false && pro.byok == false && power.byok);
     assert!(free.quick_capture == false && pro.quick_capture && power.quick_capture);
     assert!(free.google_calendar == false && pro.google_calendar && power.google_calendar);
+
+    // Model tier must not go backwards: a higher plan never gets a cheaper model.
+    // `ModelTier` derives `Ord` precisely so this is a comparison, not three string
+    // matches that silently stop covering a newly added variant.
+    assert!(free.model_tier <= pro.model_tier, "free must not outrank pro");
+    assert!(pro.model_tier <= power.model_tier, "pro must not outrank power");
+    assert_eq!(free.model_tier, ModelTier::Cheapest);
+    assert_eq!(power.model_tier, ModelTier::Best);
 }
 
 #[test]
@@ -697,7 +734,7 @@ use std::path::Path;
 use crate::error::{CoreError, CoreResult};
 
 pub use billing_policy::{BillingPolicy, Platform, PlatformPolicy};
-pub use plans::{CreditAction, Credits, PlanConfig, PlanId, PlansFile};
+pub use plans::{CreditAction, Credits, ModelTier, PlanConfig, PlanId, PlansFile};
 
 fn read_to_string(path: &Path) -> CoreResult<String> {
     std::fs::read_to_string(path).map_err(|source| CoreError::ConfigRead {
@@ -847,9 +884,13 @@ pub enum ReminderChannel {
     Discord,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelTier {
+    /// Free only. The cheapest model that still passes the citation/grounding
+    /// contract — a free user costs real money and has no revenue behind them,
+    /// so this tier exists to cap that exposure (A41).
+    Cheapest,
     Cheap,
     Best,
 }
@@ -2073,10 +2114,10 @@ git commit -m "test(db): assert sync columns, trigger coverage and change_log se
 
 ---
 
-## Task 8: docker-compose, env template, and the DB pool + plan seeding
+## Task 8: docker-compose (incl. SearXNG), env template, and the DB pool + plan seeding
 
 **Files:**
-- Create: `docker-compose.yml`, `.env.example`
+- Create: `docker-compose.yml`, `.env.example`, `searxng/settings.yml`
 - Create: `crates/server/src/config.rs`, `crates/server/src/db.rs`
 - Modify: `crates/server/src/lib.rs`
 
@@ -2131,10 +2172,74 @@ services:
       echo 'bucket ready'
       "
 
+  # Search tier 2 (A3). Internal only: there is deliberately NO `ports:` mapping,
+  # so the container is reachable only by the server over the compose network at
+  # http://searxng:8080. Add `ports: ["8888:8080"]` locally only to poke the UI.
+  searxng:
+    image: docker.io/searxng/searxng:latest   # dev only; pin a digest in prod
+    environment:
+      # SearXNG maps `SEARXNG_*` env vars onto settings paths, so this sets
+      # server.secret_key and is the ONE source of that value — settings.yml
+      # deliberately omits it so no secret is ever committed. Verified: the
+      # container starts with no `secret_key` in settings.yml as long as this
+      # variable is present.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    healthcheck:
+      # Verified against the image: /usr/sbin/wget exists, curl does not, and
+      # GET /healthz returns 200 with body "OK".
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
 ```
+
+- [ ] **Step 1b: Write `searxng/settings.yml`**
+
+`searxng/settings.yml`:
+```yaml
+use_default_settings: true
+
+server:
+  # `secret_key` is deliberately absent: it comes from the SEARXNG_SECRET env var
+  # in docker-compose.yml, so no secret is ever committed to the repository.
+  limiter: false          # server-to-server only; there are no browser clients to rate-limit
+  public_instance: false
+
+search:
+  formats: [html, json]   # REQUIRED. `json` is off by default; without it the API returns 403.
+
+engines:
+  # Measured 2026-10-11 from an Indonesian ISP. Left enabled, these only add
+  # latency to every query and fill the logs with suspensions.
+  - name: brave
+    disabled: true        # -> 429 "Suspended: too many requests"
+  - name: duckduckgo
+    disabled: true        # -> TLS interception by the ISP (not a SearXNG fault)
+  - name: qwant
+    disabled: true        # -> CAPTCHA
+  # `mojeek` and `startpage` are `inactive: true` upstream. Do not enable them
+  # without re-testing: both failed here (mojeek timeout, startpage CAPTCHA).
+  #
+  # The only engine that answered was `google cse` (no API key needed), which
+  # scrapes a third-party CX id. That is a single point of failure and a ToS
+  # question, which is exactly why SearXNG is tier 2 and never the backbone (A3).
+```
+
+**Verification for Step 1b** — with the stack up:
+```bash
+curl -s "http://127.0.0.1:8888/search?q=spaced+repetition&format=json" | head -c 200   # only with the dev port mapping
+docker compose exec searxng wget -qO- "http://127.0.0.1:8080/search?q=test&format=json" | head -c 200
+```
+Expected: a JSON object with a `results` array, not the `Verifying your browser…` HTML page (which is what a *public* SearXNG instance returns to an unauthenticated JSON client).
 
 - [ ] **Step 2: Write `.env.example`**
 
@@ -2167,8 +2272,32 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 EMBEDDER=fastembed             # fastembed | http
-SEARCH_PROVIDER=tavily          # tavily | brave
+
+# --- search (A3: composite = academic -> searxng -> exa -> tavily) ---
+SEARCH_PROVIDER=composite       # composite | academic | searxng | exa | tavily
+SEARCH_CACHE_TTL_HOURS=24       # A40: repeated query serves from cache, no second credit charge
+
+# Tier 1 - academic APIs. No key required. OPENALEX_MAILTO puts us in the
+# "polite pool" (10 req/s) and a free key raises the daily budget 10x.
+ACADEMIC_PROVIDERS=openalex,eric,crossref,doaj,arxiv,pubmed
+OPENALEX_MAILTO=                # e.g. admin@stvdy.app
+OPENALEX_API_KEY=               # optional; free from openalex.org/settings/api
+NCBI_API_KEY=                   # optional; raises PubMed 3 req/s -> 10 req/s
+
+# Tier 2 - self-hosted SearXNG (compose service; internal network only)
+SEARXNG_SECRET=dev-only-change-me-searxng-secret   # prod: 32+ random bytes; never commit the real one
+SEARXNG_URL=http://searxng:8080
+SEARXNG_ENGINE_ALLOWLIST=google_cse
+
+# Tier 3 - fallback APIs, consulted only when tier 1 and 2 return nothing.
+# Exa: $10 free credit/month (~1,428 searches, ~10,000 page fetches), no card.
+EXA_API_KEY=
+# Tavily: 1,000 free credits/month (~33 searches/day), no card.
 SEARCH_API_KEY=
+
+# --- page fetching for save-as-source / citation expansion (Phase 3) ---
+MOLI_BIN=moli                   # JS-rendered pages; --block-private-networks is always on
+PAGE_FETCH_TIMEOUT_SECS=15
 
 # --- email (Phase 1; dev writes to var/mail) ---
 SMTP_URL=
@@ -4875,6 +5004,7 @@ All must be true before the phase is called done:
 - [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
 - [ ] `npm --prefix app test` and `npm --prefix app run build` green.
 - [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0016` with no error; 32 sync triggers exist and no non-sync table has one.
+- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object with a non-empty `results` array (not the `Verifying your browser…` HTML page).
 - [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.

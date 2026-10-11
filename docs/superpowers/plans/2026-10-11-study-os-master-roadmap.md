@@ -168,7 +168,42 @@ These are fixed now so that parallel work in later phases cannot diverge. Phase 
 #[async_trait] pub trait SearchProvider: Send + Sync {
     fn name(&self) -> &'static str;
     async fn search(&self, q: &str, max_results: u8) -> Result<Vec<SearchHit>, SearchError>;
-}   // SearchHit { title, url, snippet, published_at }
+}
+// SearchHit { title, url, snippet, published_at: Option<DateTime<Utc>>,
+//             source_kind: SourceKind, doi: Option<String>, provider: &'static str,
+//             score: Option<f32>, license: Option<String> }
+// SourceKind = Web | Academic        // drives citation rendering and ranking, not the UI badge
+// SearchError is *per provider*, never fatal for the request: a tier that errors is
+// recorded and the composite moves on. Only "every tier failed" is a user-visible error.
+// `published_at` is populated by the academic tier (OpenAlex/Crossref/DOAJ/ERIC carry a
+// real date) and by Exa; Tavily and SearXNG returned null in 20/20 measured results — so
+// any "recent sources" filter MUST read this field, never assume it is present.
+
+// The composite is itself a SearchProvider, so callers cannot tell tiers apart:
+//   CompositeSearch { tiers: Vec<Box<dyn SearchProvider>> }
+//   search(): for each tier in order -> hit Postgres cache (A40) -> on miss call the tier ->
+//             if results are non-empty, cache, rank, return; else record `unresponsive`
+//             and continue. Every tier's outcome lands on one `usage_events` row.
+// Ranking (crates/core/src/search/rank.rs, pure + unit-tested): dedupe by
+//   normalized URL, then DOI; then sort by (kind_priority: Academic > Web,
+//   has_doi, published_at desc if present, tier order, provider score). Deterministic —
+//   a tie resolves by URL so two runs of the same query return the same order.
+// A query that produces zero results from *every* tier is not an error: the chat turn
+// proceeds without web context and the `citations` event is empty (A17 drops unknown labels).
+
+#[async_trait] pub trait PageFetcher: Send + Sync {
+    fn name(&self) -> &'static str;
+    async fn fetch(&self, url: &str) -> Result<FetchedPage, FetchError>;
+}   // FetchedPage { final_url, title, text, fetched_at }
+// Used for the "save to workspace" path and for expanding a citation's page. Order:
+//   1. Exa /contents  — $1 per 1,000 pages, returns clean text, honours robots upstream
+//   2. moli CLI       — `moli fetch --dump markdown --timeout 15000 --block-private-networks`,
+//                       JS-rendered pages; exit code 1 + stderr reason is a real failure
+//   3. reqwest + readability — static pages, cheapest
+// `--block-private-networks` is mandatory on every path that fetches a user-supplied URL:
+// ingestion accepts arbitrary URLs, so an unguarded fetch is an SSRF primitive (A18/A34).
+// Note moli's own help states proxy-resolved targets bypass that client-side policy — do not
+// combine `--block-private-networks` with `--http-proxy` on this path.
 
 #[async_trait] pub trait PaymentProvider: Send + Sync {
     fn name(&self) -> &'static str;
@@ -384,7 +419,7 @@ The security property that makes this safe: **the model produces structured JSON
 | 0 | Scaffold compiles on all targets | `just check` green; `docker compose up` + `sqlx migrate run` clean; `/health` returns ok; Tauri builds for macOS + Windows; CI green |
 | 1 | Auth + devices + ingestion + mobile capability spike | Signup→verify→login on 2 "devices"; PDF upload → chunks+embeddings → `ready`; iOS+Android device builds proving push-token registration and file intake, results in ARCHITECTURE.md |
 | 2 | Retrieval + streaming chat | Cited answer streams, unknown chunk ids dropped, message persisted and visible on second device |
-| 3 | Web search | Toggle on → web citations with URLs; "save to workspace" creates `kind=web` source |
+| 3 | Web search | Toggle on → cited results with URLs **and DOIs**; repeated query bills once (cache hit); academic tier answers with SearXNG + both fallback keys unavailable; "save to workspace" creates a `kind=web` source |
 | 4 | Flashcards + SRS | Generated deck; reviews from two clients replay to identical ease/interval/due |
 | 5 | Quiz | Generated quiz; attempts scored; weak-topic summary grouped by source/page |
 | 6 | Reports + cheatsheet/PDF pipeline | Outline edit → section generation with citations → `.md` export; cheatsheet JSON → template HTML → A4 PDF with header, page numbers and TOC |
@@ -419,7 +454,7 @@ Record every result — pass **and** fail — in `docs/ARCHITECTURE.md` § Nativ
 
 **Phase 2 — Retrieval + chat.** Hybrid vector+tsvector top-k with RRF, source-scoped filter, chunk-labeled prompt, streaming SSE, citation validation, message persistence. *Risk:* citation hallucination → validation is a pure function with its own tests, and a golden test asserts a fabricated id is dropped.
 
-**Phase 3 — Web search.** `SearchProvider` (Tavily default), cleaned/truncated context, `use_web` per message, URL citations, save-as-source.
+**Phase 3 — Web search.** `SearchProvider` as a **composite** (A3): academic tier first (OpenAlex, ERIC, Crossref, DOAJ, arXiv, PubMed), then the self-hosted SearXNG service, then Exa, then Tavily — each tier only consulted on empty results or transport error. Postgres result cache with `cache_hit` accounting and a `usage_events` row per search (A40). Ranking + URL/DOI dedupe as a pure function. `use_web` per message, cleaned/truncated context as a separate "web" block, URL **and DOI** citations, `PageFetcher` (Exa `/contents` → moli → reqwest+readability, all with `--block-private-networks`) for save-as-source. **Acceptance:** the same query twice bills one credit (second is a cache hit); with SearXNG stopped and the fallback keys unset, the request still answers from the academic tier; a query that hits nothing returns an empty `citations` array rather than an error.
 
 **Phase 4 — Flashcards.** Strict-JSON generation with one retry, chunk-linked cards, append-only reviews, SM-2 replay in `(reviewed_at, id)` order, due-cards endpoint, client-side due computation from synced state, swipe study UI.
 
