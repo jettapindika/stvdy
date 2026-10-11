@@ -523,10 +523,10 @@ mod tests {
 }
 ```
 
-Add to `crates/core/src/lib.rs`, keeping the alphabetical order:
+Add to `crates/core/src/lib.rs`, keeping the alphabetical order (only `sm2` — the
+`generation` module arrives in Task 3, and declaring it here would not compile):
 
 ```rust
-pub mod generation;
 pub mod sm2;
 ```
 
@@ -1551,8 +1551,12 @@ async fn an_invalid_reply_is_retried_once_and_then_succeeds(pool: PgPool) {
     assert_eq!(llm.requests().len(), 2, "the second attempt must happen");
     // The retry carries the bad reply and a correction, not the same prompt twice.
     let second = &llm.requests()[1].messages;
-    assert_eq!(second.len(), 4, "{second:?}");
-    assert_eq!(second[2].content, "Sure! Here are your cards.");
+    // The retry carries the original system prompt, the bad reply as an assistant
+    // turn, and the correction. Three messages, not a second copy of the system
+    // prompt: repeating the instruction unchanged is what makes a model answer the
+    // same way again.
+    assert_eq!(second.len(), 3, "{second:?}");
+    assert_eq!(second[1].content, "Sure! Here are your cards.");
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -1763,18 +1767,89 @@ pub async fn refund(
 job builds them the same way the chat route does:
 
 ```rust
-/// The base-prompt variables for one user and workspace.
+/// The base-prompt variables for one request.
 ///
-/// Extracted because a task prompt is composed on the same trimmed base: two
-/// builders would eventually disagree about `{{platform}}` or `{{plan_name}}`, and
-/// the disagreement would show up as a prompt that describes the wrong app.
-pub fn base_vars(state: &AppState, user: &AuthUser, workspace_name: &str) -> ChatVars {
-    // body moved verbatim from `compose`, which now calls this
+/// Extracted because a task prompt is composed on the same trimmed base, and two
+/// builders would eventually disagree about `{{platform}}` or `{{plan_name}}`. The
+/// disagreement would show up as a prompt describing the wrong app, which is not
+/// something a test would catch.
+///
+/// It takes the individual values rather than an `AuthUser` because the generation
+/// job has no `AuthUser`: it has a row. Fabricating one (with a device id and a
+/// session id it does not have) would be a lie in the type system.
+pub fn base_vars(
+    state: &AppState,
+    email: &str,
+    timezone: &str,
+    plan: stvdy_core::config::PlanId,
+    study_mode: bool,
+    use_web: bool,
+    workspace_name: &str,
+) -> ChatVars {
+    let plan_config = state.config.plans.get(plan);
+    let now_local = state
+        .clock
+        .now()
+        .with_timezone(&timezone.parse().unwrap_or(chrono_tz::UTC));
+
+    ChatVars {
+        assistant_name: ASSISTANT_NAME.to_string(),
+        app_name: APP_NAME.to_string(),
+        now: now_local.format("%Y-%m-%d %H:%M %Z").to_string(),
+        timezone: timezone.to_string(),
+        // The prompt tells the model to keep phone replies short, so this has to be
+        // the real platform rather than a guess.
+        platform: "unknown".to_string(),
+        plan_name: plan_config.name.clone(),
+        study_mode: if study_mode { "on" } else { "off" }.to_string(),
+        study_hours_summary: "not set".to_string(),
+        use_web: if use_web { "on" } else { "off" }.to_string(),
+        allow_upgrade_hint: state
+            .config
+            .billing_policy
+            .purchase_allowed(stvdy_core::config::Platform::Web),
+        user_name: email.to_string(),
+        workspace_name: workspace_name.to_string(),
+    }
 }
 ```
 
-and `compose` becomes `let vars = base_vars(state, user, workspace_name);` plus its
-two chat-specific values (`use_web`, `study_mode`).
+and `compose` becomes:
+
+```rust
+    let vars = base_vars(
+        state,
+        &user.email,
+        &user.timezone,
+        user.plan(),
+        study_mode,
+        use_web,
+        workspace_name,
+    );
+```
+
+replacing the `let now_local = ...` and `let vars = ChatVars { ... };` blocks
+verbatim. `plan_config` is no longer needed in `compose`; delete it.
+
+**Also in this step:** `crates/core/src/config/plans.rs` gains the parse that today
+lives inline in `AuthUser::plan()`:
+
+```rust
+    /// The plan a stored `users.plan_id` names. An unrecognised value is `Free`,
+    /// which is the safe direction: a corrupt or future plan string must not grant
+    /// more than the free tier.
+    pub fn parse(raw: &str) -> PlanId {
+        match raw {
+            "pro" => PlanId::Pro,
+            "power" => PlanId::Power,
+            _ => PlanId::Free,
+        }
+    }
+```
+
+and `AuthUser::plan()` becomes `stvdy_core::config::PlanId::parse(&self.plan_id)`.
+One implementation, because a second copy is how a plan string starts meaning two
+different things.
 
 - [ ] **Step 5: Implement the flashcards module**
 
