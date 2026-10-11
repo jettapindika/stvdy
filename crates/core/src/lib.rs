@@ -8,6 +8,7 @@
 pub mod chunk;
 pub mod citations;
 pub mod config;
+pub mod entitlements;
 pub mod error;
 pub mod generation;
 pub mod prompts;

@@ -371,6 +371,26 @@ fn a_cheaper_model_on_a_higher_plan_is_rejected() {
 }
 
 #[test]
+fn monthly_rollover_defaults_to_off_and_is_configurable() {
+    // The spec says "no rollover by default, configurable". The key must exist and
+    // default to false, because a default of `true` silently lets monthly credits
+    // accumulate for a user who never spends them.
+    assert!(!shipped().credits.monthly_rollover);
+    // A scratch copy, the same way the file's other config cases do it: `load_plans`
+    // takes a path, and mutating the shipped file to test a variant would make the
+    // suite order-dependent. The substitution also proves the shipped file carries
+    // the key at all.
+    let dir = scratch_dir();
+    let path = dir.join("plans.toml");
+    let shipped_raw = std::fs::read_to_string(PLANS_PATH).expect("plans.toml");
+    let raw = shipped_raw.replace("monthly_rollover = false", "monthly_rollover = true");
+    assert_ne!(raw, shipped_raw, "the substitution must have applied");
+    std::fs::write(&path, raw).expect("writing the scratch config");
+    let parsed = load_plans(&path).expect("a config that enables rollover must load");
+    assert!(parsed.credits.monthly_rollover);
+}
+
+#[test]
 fn the_whole_config_round_trips_through_json() {
     // `plans.entitlements` mirrors the config for auditing (the spec requires the
     // blob to match plans.toml). A `Limit` whose Serialize and Deserialize

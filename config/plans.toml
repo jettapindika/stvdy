@@ -15,6 +15,9 @@ plan_generation = 2
 agent_turn = 2
 long_doc_threshold_tokens = 20000
 long_doc_credits_per_1k_tokens = 1
+# No rollover by default (A153): an unspent monthly grant expires at the period
+# boundary rather than accumulating. Purchased credit packs never expire.
+monthly_rollover = false
 
 [provider_cost_ceiling_usd]
 free = 0.50

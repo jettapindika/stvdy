@@ -71,6 +71,13 @@ pub struct Credits {
     pub agent_turn: i64,
     pub long_doc_threshold_tokens: i64,
     pub long_doc_credits_per_1k_tokens: i64,
+    /// Whether an unspent monthly grant carries into the next period (A153).
+    ///
+    /// The spec says "no rollover by default, configurable", and the tree had no such
+    /// key at all. Off is the default the shipped file states, and the safe direction:
+    /// on, a user who never spends accumulates a balance that costs us more every month
+    /// they are away. Purchased credits are never expired either way.
+    pub monthly_rollover: bool,
 }
 
 impl Credits {
@@ -130,7 +137,7 @@ pub enum PlannerMode {
     AutoBalancerWeaknessBlocks,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReminderChannel {
     Web,
@@ -151,7 +158,7 @@ pub enum ModelTier {
     Best,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     Md,
