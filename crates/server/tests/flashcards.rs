@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use sqlx::PgPool;
+use stvdy_core::traits::Clock;
 use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::testing::TestState;
 use uuid::Uuid;
@@ -566,11 +567,20 @@ async fn the_monthly_card_limit_is_enforced(pool: PgPool) {
 /// The exit gate: two clients reviewing one card produce the state a local replay
 /// of the same rows produces, whatever order the rows arrived in.
 ///
+/// The two reviews are sent **later-first**, which is what a second device whose
+/// clock ran ahead produces. That order is the whole test: a route that never
+/// re-reads the history it has already stored — one that applied the arriving
+/// review to the card's stored `ease`/`interval_days`, or dated the result from the
+/// incoming `reviewed_at` — would end at `ten_min_ago + 6 days`, while a full replay
+/// ends at `now + 6 days`. In chronological arrival order the two agree, so the gate
+/// would not see the difference.
+///
 /// The expected state comes from `stvdy_core::sm2::replay` run here over the same
-/// two reviews, not from what the route wrote, so the assertion is against the
-/// SM-2 rules. The review ids in the local replay are arbitrary: the route mints
-/// them when the body has no `id`, and the replay orders by `(reviewed_at, id)`,
-/// so the ids only decide anything if two reviews share a timestamp.
+/// two reviews, and from hand-derived literals beside it, so the assertion is
+/// against the SM-2 rules rather than against the code under test. The review ids in
+/// the local replay are arbitrary: the route mints them when the body has no `id`,
+/// and the replay orders by `(reviewed_at, id)`, so the ids only decide anything if
+/// two reviews share a timestamp.
 #[sqlx::test(migrations = "../../migrations")]
 async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -599,36 +609,44 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
     .await;
     let card_id = deck["cards"][0]["id"].as_str().unwrap().to_string();
 
-    // Device A grades `good`, then device B grades `easy` ten minutes later. Both
-    // timestamps are in the past, so neither trips the future-clock refusal.
-    let (status, first) = json(
-        &app,
-        "POST",
-        &format!("/flashcards/{card_id}/review"),
-        &token,
-        serde_json::json!({ "rating": "good", "reviewed_at": "2026-10-11T09:00:00Z" }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{first}");
-    assert_eq!(first["applied"], true, "{first}");
+    // Derived from the injected clock, not from an absolute literal: the route
+    // refuses a `reviewed_at` more than 24 h ahead of that clock, so a hard-coded
+    // date would make this gate fail on a machine whose clock is behind. Truncated
+    // to whole seconds because `timestamptz` has microsecond resolution and rounds,
+    // so a sub-second instant would come back a value this test cannot predict.
+    let now = chrono::DateTime::from_timestamp(harness.clock.now().timestamp(), 0).unwrap();
+    let ten_min_ago = now - chrono::Duration::minutes(10);
 
-    let (status, second) = json(
+    // Device B's clock runs ten minutes ahead of device A's, so its later review
+    // arrives first.
+    let (status, later) = json(
         &app,
         "POST",
         &format!("/flashcards/{card_id}/review"),
         &token,
-        serde_json::json!({ "rating": "easy", "reviewed_at": "2026-10-11T09:10:00Z" }),
+        serde_json::json!({ "rating": "easy", "reviewed_at": now.to_rfc3339() }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(status, StatusCode::OK, "{later}");
+    assert_eq!(later["applied"], true, "{later}");
+
+    let (status, earlier) = json(
+        &app,
+        "POST",
+        &format!("/flashcards/{card_id}/review"),
+        &token,
+        serde_json::json!({ "rating": "good", "reviewed_at": ten_min_ago.to_rfc3339() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{earlier}");
     assert_eq!(
-        second["applied"], true,
-        "the second device's review is a new row: {second}"
+        earlier["applied"], true,
+        "a review that arrives late is still a new row: {earlier}"
     );
 
-    // The rows the route stored are exactly the two the replay below replays, so
-    // the comparison is between the stored facts and the spec, not between two
-    // copies of the same code path.
+    // The stored rows are the two that were sent, ordered the way the replay orders
+    // them — so the replay input is the stored fact, not a second copy of what this
+    // test meant to send.
     let rows: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
         "select rating, reviewed_at from flashcard_reviews
           where flashcard_id = $1::uuid order by reviewed_at asc, id asc",
@@ -639,10 +657,8 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
     .unwrap();
     assert_eq!(
         rows,
-        vec![
-            ("good".to_string(), "2026-10-11T09:00:00Z".parse().unwrap()),
-            ("easy".to_string(), "2026-10-11T09:10:00Z".parse().unwrap()),
-        ]
+        vec![("good".to_string(), ten_min_ago), ("easy".to_string(), now)],
+        "the earlier review sorts first whatever order the rows arrived in"
     );
 
     let created_at: chrono::DateTime<chrono::Utc> =
@@ -657,21 +673,21 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
             stvdy_core::sm2::Review {
                 id: uuid::Uuid::from_u128(1),
                 rating: stvdy_core::sm2::Rating::Good,
-                reviewed_at: "2026-10-11T09:00:00Z".parse().unwrap(),
+                reviewed_at: ten_min_ago,
             },
             stvdy_core::sm2::Review {
                 id: uuid::Uuid::from_u128(2),
                 rating: stvdy_core::sm2::Rating::Easy,
-                reviewed_at: "2026-10-11T09:10:00Z".parse().unwrap(),
+                reviewed_at: now,
             },
         ],
     );
 
     // The response the second device got, and the row a third device would fetch.
     let responded: (f32, i32, chrono::DateTime<chrono::Utc>) = (
-        second["card"]["ease"].as_f64().unwrap() as f32,
-        second["card"]["interval_days"].as_i64().unwrap() as i32,
-        second["card"]["due_at"].as_str().unwrap().parse().unwrap(),
+        earlier["card"]["ease"].as_f64().unwrap() as f32,
+        earlier["card"]["interval_days"].as_i64().unwrap() as i32,
+        earlier["card"]["due_at"].as_str().unwrap().parse().unwrap(),
     );
     let persisted: (f32, i32, chrono::DateTime<chrono::Utc>) =
         sqlx::query_as("select ease, interval_days, due_at from flashcards where id = $1::uuid")
@@ -688,6 +704,27 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
         assert_eq!(stored.1, local.interval_days, "{label}: {stored:?}");
         assert_eq!(stored.2, local.due_at, "{label}: {stored:?}");
     }
+
+    // The literals are the point: `replay` is the function the route calls, so a
+    // change to the SM-2 rules would leave a `replay`-only comparison green. Two
+    // successful reviews give 1 day then 6, and ease moves 2.5 -> 2.5 (`good` is
+    // ease-neutral at q=4) -> 2.6 (`easy`); the schedule is dated from the *last*
+    // review in `(reviewed_at, id)` order, which is the later one. An
+    // implementation that dated it from the arriving review would land ten minutes
+    // earlier, on `ten_min_ago + 6 days`.
+    let (ease, interval_days, due_at) = persisted;
+    assert_eq!(interval_days, 6, "two successful reviews: {interval_days}");
+    assert!((ease - 2.6).abs() < 1e-5, "{ease}");
+    assert_eq!(
+        due_at,
+        now + chrono::Duration::days(6),
+        "the schedule is dated from the last review in (reviewed_at, id) order"
+    );
+    assert_ne!(
+        due_at,
+        ten_min_ago + chrono::Duration::days(6),
+        "the schedule must not be dated from the review that happened to arrive last"
+    );
 }
 
 /// A review is an append-only fact keyed by a client-generated id, so replaying
@@ -734,6 +771,14 @@ async fn a_replayed_review_id_applies_once(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK, "{first}");
     assert_eq!(first["applied"], true, "{first}");
+    // From the rules, not from the response: one successful review is the first
+    // rung of the ladder. Without this, a route that inserted the review row and
+    // then skipped the card update would pass, since the two `due_at`s it compares
+    // below would simply be the card's untouched value.
+    assert_eq!(
+        first["card"]["interval_days"], 1,
+        "the first review must move the card: {first}"
+    );
     let due_at = first["card"]["due_at"].clone();
 
     let (status, second) = json(
