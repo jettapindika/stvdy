@@ -67,13 +67,20 @@ to end, including the rendered document's text).
 
 - `migrations/0011_reports.sql`: `reports (id, user_id, workspace_id, title, outline
   jsonb, body_md text, …)`. `outline` and `body_md` are both present, so the two-step
-  report flow needs no schema change.
+  report flow needs no new *content* column. **`report_revisions` also already exists**
+  (lines 19-29: `id, report_id, user_id, body_md, replaced_at` plus an index on
+  `(report_id, replaced_at desc)`), and `crates/server/tests/schema.rs` already lists it.
+  Decision 8's table therefore needs **no migration at all** — writing the `0023` the first
+  draft of this plan asked for fails with `relation "report_revisions" already exists`.
+  What `reports` *does* lack is the generation bookkeeping every generator carries:
+  `status`, `error`, `credits_spent`, `usage_event_id`.
 - `migrations/0016_cheatsheets.sql`: `cheatsheets` with `scope`, `exam_date`, `depth`,
   `source_ids`, `status`, `error`, `blocks_key`, `template_version`, `html_key`, `pdf_key`,
   `page_count`. **The whole artifact pipeline is already modelled**, including the
-  re-render contract's `blocks_key` and `template_version`. No schema change is needed
-  except the generation columns Phase 4/5 taught (`credits_spent`, `usage_event_id`,
-  `requested_*`), which a later migration adds.
+  re-render contract's `blocks_key` and `template_version`. The columns it lacks are
+  `credits_spent` and `usage_event_id` (the refund path needs both, exactly as `decks` and
+  `quizzes` do) and a `requested_*` shape is unnecessary here: a cheatsheet has no count
+  parameter, its size is `depth`.
 - `templates/cheatsheet.v1.html` (912 lines) and `prompts/cheatsheet.v1.md`, which
   documents the twelve block kinds and their fields. **The template's first render already
   surfaced five defects** (blocked KaTeX, SVG scale, orphaned answers, SVG `id` collisions,
@@ -130,11 +137,15 @@ to end, including the rendered document's text).
    report again.
 8. **A long report body edited on two devices keeps the latest and stores the loser as a
    revision** (the roadmap's conflict table names `report_revisions` for exactly this).
-   The table does not exist yet; this phase adds it, with the losing body recoverable.
-9. **Chromium is pinned and the renderer is a pooled child process**, because this is the
-   phase's stated risk: it must be in the Docker image, not just on a laptop. Locally it
-   uses the installed Chrome; in the image it uses the pinned build. The renderer refuses
-   to run unsandboxed outside dev.
+   The table already exists in `0011_reports.sql`, with `replaced_at` rather than
+   `created_at`; this phase writes the rows, not the table.
+9. **Chromium is pinned and the renderer is a pooled child process.** This is the phase's
+   stated risk, and it is resolved in two halves: CI runs the acceptance test on a runner
+   that has Chrome (so the test is never skipped), and `docs/RELEASE.md` carries the
+   **Phase 15 prerequisite** that the server image bakes a pinned Chromium and sets
+   `CHROME_PATH`. There is no server `Dockerfile` in this repository yet — Phase 15 owns
+   it — and writing one here would be a second thing to keep in step. Locally the renderer
+   uses the installed Chrome; it refuses to run unsandboxed outside dev.
 10. **The PDF's page count is read back from the renderer, not assumed.** `page_count` is
     what the footer's `Halaman N dari M` depends on, so it is a value the renderer reports
     (Chromium's page count for the print), not a number the template guesses.
@@ -142,6 +153,13 @@ to end, including the rendered document's text).
     `GET /cheatsheets/:id/pdf` both check `export_formats` and answer 403
     `plan_required` with `min_plan` when the format is not in the plan, so the mobile
     build cannot be told about a purchase it must not offer.
+12. **The report outline is generated synchronously in its route, not as a job.** The
+    roadmap's job table is a fixed list and contains no outline kind, so adding one would
+    put this phase out of step with a table later phases read. The call is one short
+    completion (3 credits) whose result the student edits before anything else happens,
+    which is the opposite of the long, cancellable work the job queue exists for. Section
+    generation *is* a job (`generate_report_section`), because it is per-section, can be
+    retried, and a report can be long enough to outlive a request.
 
 ---
 
@@ -186,6 +204,17 @@ docs/API.md, docs/ARCHITECTURE.md, docs/ASSUMPTIONS.md, docs/RELEASE.md
   `render_html(&Blocks, &Template, &ContextLabels) -> Result<Rendered, RenderError>`,
   `Template { text: &'static str, version: &'static str }`,
   `Rendered { html: String, dropped: Vec<DroppedBlock> }`.
+
+> **Task 1 is already implemented and committed** (`90d5469`, `139c503`, `0e10b2f`). The
+> signatures above are the draft's; the shipped ones differ in four places and **the code
+> is right**: `parse_blocks` returns `Result<Blocks, GenerationError>` (so a drifted model
+> reply is the same error class as a drifted deck or quiz), `render_html` takes a fourth
+> `&Cover` argument, the SVG entry point is `svg::check_and_prefix(&str, &str) ->
+> Result<String, SvgRejection>` (it returns the reason a block was dropped, which is why
+> it is not a plain `String`), and the id prefix is the **document path** `b{chapter}-
+> {section}-{block}-` rather than a flat block index — the draft's `b1-arrowhead` could not
+> distinguish two diagrams in different sections, and a test for exactly that was added in
+> `139c503`. Treat this task as a record of what was built, not as instructions.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -305,59 +334,68 @@ git commit -m "feat(core): the pure renderer, the typed blocks, and the SVG allo
 
 **Files:**
 - Create: `crates/core/src/generation/report.rs`
-- Modify: `crates/core/src/prompts/registry.rs` (+ three modules), `crates/core/src/generation/mod.rs`
+- Modify: `crates/core/src/prompts/registry.rs` (+ two modules), `crates/core/src/generation/mod.rs`
 - Create: `crates/server/src/reports/{mod.rs,routes.rs,generate.rs}`
 - Create: `crates/server/src/jobs/handlers/report.rs`
-- Create: `migrations/0023_report_revisions.sql`, `migrations/0024_report_cheatsheet_generation.sql`
+- Create: `migrations/0023_report_generation.sql`
 - Test: `crates/server/tests/reports.rs`, `crates/core/tests/generation_report.rs`
 
 - [ ] **Step 1: The outline contract and its tests**
 
-`ReportOutline { title, sections: Vec<OutlineSection { heading, summary, source_ids }> }`,
-`deny_unknown_fields`, bounded (`MAX_REPORT_SECTIONS`). The outline is **editable**, so the
-route accepts a replacement outline and validates it against the same struct — an edit that
-the generator could not have produced is still valid input if it parses.
+The contract is the prompt's, not a paraphrase of it. `prompts/report_outline.v1.md`
+documents:
 
-- [ ] **Step 2: The generation columns, and the revisions table**
-
-`0024` adds the generation columns the two earlier phases taught (`status`, `error`,
-`credits_spent`, `usage_event_id`) to `reports`, and to `cheatsheets` if any are missing
-(they are present, so verify rather than assume). `0023` creates:
-
-```sql
--- The roadmap's conflict rule for long text: keep the latest body and store the losing
--- one as a recoverable copy, so a two-device edit cannot silently destroy work.
-create table report_revisions (
-  id uuid primary key default gen_random_uuid(),
-  report_id uuid not null references reports on delete cascade,
-  user_id uuid not null references users on delete cascade,
-  body_md text not null,
-  created_at timestamptz not null default now()
-);
-create index on report_revisions (report_id, created_at desc);
+```
+{"title":"string","sections":[{"heading":"string","purpose":"string","labels":[1,4],"gaps":false}]}
 ```
 
-`report_revisions` is deliberately **not** `+sync`: it is a server-side recovery log, not
-user-facing state a device needs, and adding it to the trigger array would ship every
-revision to every device.
+So: `ReportOutline { title, sections: Vec<OutlineSection { heading, purpose, labels:
+Vec<u32>, gaps: bool }> }`, `deny_unknown_fields`, bounded (`MAX_REPORT_SECTIONS`), and
+`gaps` is **required output**, not decoration: the roadmap's exit gate and the spec's
+`## Reports` both name it ("sections whose topics are not supported by the sources are
+flagged `gaps: true`"). A struct without it cannot represent the contract.
+
+`ReportSection { body_md }` is the section reply: Markdown with `[n]` labels, and the
+inline `(Not covered in your sources: …)` note the prompt asks for is text, not a field.
+
+The outline is **editable**, so the route accepts a replacement outline and validates it
+against the same struct — an edit the generator could not have produced is still valid
+input if it parses, and its `labels` are re-validated against the sources on generation.
+
+- [ ] **Step 2: The generation columns**
+
+`0023_report_generation.sql` adds to `reports`: `status text not null default 'draft'`
+(`draft | generating | ready | failed`), `error text`, `credits_spent int not null default
+0`, `usage_event_id uuid`, and to `cheatsheets`: `credits_spent int not null default 0`,
+`usage_event_id uuid`. Both are `+sync` tables already covered by `0017_sync_triggers.sql`,
+so no trigger work is needed — but a new *column* on a `+sync` table is a real change to
+what syncs, so `docs/API.md`'s report/cheatsheet payloads name them.
+
+`report_revisions` needs **nothing**: it exists in `0011_reports.sql`.
 
 - [ ] **Step 3: The job**
 
-`generate_report_outline` and `generate_report_section`, mirroring
-`quizzes::generate` exactly: compose through `compose_task`, one retry on a parse failure
-with the violation appended, record the prompt version and the provider cost on the usage
-row, claim the row with a guarded status flip, and refund once on a permanent failure.
+`generate_report_section` — that is the name in the roadmap's fixed job table and in
+`migrations/0015_jobs.sql`. Mirror `quizzes::generate` exactly: compose through
+`compose_task`, one retry on a parse failure with the violation appended, record the prompt
+version and the provider cost on the usage row, claim the row with a guarded status flip,
+and refund once on a permanent failure.
+
+**The outline is not a job.** The roadmap's job table has no outline kind, and inventing
+one would put this phase's list out of step with a table later phases read. The outline is
+generated synchronously in its route: it is one short call, it is the step whose result the
+student edits before anything else happens, and it is cheap (3 credits).
 
 Section generation writes **only that section's** Markdown into `body_md`, replacing any
 previous text for that index, so regenerating one section does not cost the whole report.
 
 - [ ] **Step 4: The routes**
 
-`POST /workspaces/:id/reports` (outline), `PATCH /reports/:id` (edit the outline),
+`POST /workspaces/:id/reports/outline`, `PATCH /reports/:id` (edit the outline),
 `POST /reports/:id/generate` (sections), `GET /reports/:id`, and
 `GET /reports/:id/export?format=md`. The export checks `export_formats`; `pdf` arrives in
 Task 4. Each write that can race another device's write stores the losing body as a
-revision (decision 8).
+`report_revisions` row (decision 8).
 
 - [ ] **Step 5: Tests, then commit**
 
@@ -437,11 +475,26 @@ async fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
 }
 ```
 
-- [ ] **Step 3: The image**
+- [ ] **Step 3: Where Chromium runs, in CI and in the image**
 
-The `Dockerfile` installs a **pinned** Chromium; the CI job builds the image and runs the
-acceptance test inside it, not on the host. Without that, the pipeline works on a laptop
-and fails on deploy, which is the risk the roadmap names.
+The repository has **no server `Dockerfile`**: the container image is Phase 15's deliverable
+("server Docker image" is in its exit gate), and inventing one here would either be dead
+weight or a second thing to keep in step. So this step does the two things that are
+actually available now, and records the third:
+
+1. **CI runs the acceptance test for real.** A new `pdf` job in `.github/workflows/ci.yml`
+   runs on `ubuntu-24.04` (whose image ships Google Chrome stable) and runs
+   `CHROME_PATH=/usr/bin/google-chrome cargo test -p stvdy-server --test pdf -- --ignored`.
+   The test is `#[ignore]`d by default so a laptop without a browser still gets a green
+   `cargo test --workspace`; CI is where it must not be skipped. Without this the phase's
+   acceptance test is a test nobody runs, which is the same as not having it.
+2. **`docs/RELEASE.md` carries the image requirement** as a Phase 15 prerequisite: the
+   server image must bake a **pinned** Chromium and set `CHROME_PATH`, because the pipeline
+   otherwise works on a laptop and fails on deploy — the risk the roadmap names for this
+   phase.
+3. The renderer reads `CHROME_PATH` first and probes the usual paths second, so the same
+   code runs on both. `crates/server/src/render/chrome.rs` already does this; what this
+   step adds is the CI job and the documentation.
 
 - [ ] **Step 4: The PDF routes** — `GET /cheatsheets/:id/pdf` and
       `GET /reports/:id/export?format=pdf`, both gated on `export_formats`.
@@ -461,6 +514,24 @@ and fails on deploy, which is the risk the roadmap names.
       outline, generates sections one at a time with visible progress, and offers the export
       formats the plan allows.
 
+      **Read the Studio panel as it exists before writing this.** The SPA was cut over to
+      the spec's design system, i18n and `LockedFeature` after this plan's first draft, so
+      three things are now non-negotiable and none of them were in the draft:
+      - Every string goes through `t()` with an entry in **both** `app/src/i18n/locales/
+        en.json` and `id.json`; `app/src/i18n/i18n.test.ts` fails the build otherwise (A104).
+      - Every colour and size comes from the spec's tokens (`--surface`, `--text`,
+        `--border`, `--primary`, `--ring`, `rounded-card`, …). A raw hex fails
+        `app/src/tokens/contrast.test.ts`, and a focus `outline-*` other than `outline-ring`
+        fails `app/src/tokens/invariants.test.ts` (A101/A114).
+      - "Shown only when the plan allows it" is `LockedFeature` reading
+        `config/billing_policy.toml` through `app/src/features/billing/policy.ts`, not a
+        bespoke conditional (A106/A116). On mobile it must render the neutral variant: a
+        price or an upgrade link in a phone build is the review risk the policy exists for.
+      - The honesty gate applies to this screen: the outline and section generation show
+        their credit cost (`report_outline`, `report_section`) **before** the action runs,
+        from the same numbers the server charges, and any AI-proposed outline is labelled
+        "Suggested …" (roadmap gate 7).
+
 - [ ] **Step 2: The cheatsheet preview.** `GET /cheatsheets/:id/html` renders in a sandboxed
       frame (the document is generated HTML; the frame is what keeps it away from the app's
       own DOM), with a "Download PDF" action shown only when the plan allows it.
@@ -476,16 +547,23 @@ and fails on deploy, which is the risk the roadmap names.
 - [ ] **Step 2: `docs/ARCHITECTURE.md`** — the content-versus-layout split, the purity
       property, and the renderer's deployment story.
 - [ ] **Step 3: `docs/RELEASE.md`** — the pinned Chromium in the image.
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`** — one row per decision above, from the next free
-      number.
+- [ ] **Step 4: `docs/ASSUMPTIONS.md`** — one row per decision above. The next free number
+      is **A119** (A101-A118 were taken by the design-system and i18n cutover), so the plan's
+      first draft would have collided with eight existing rows.
 - [ ] **Step 5: Roadmap gate 5** on the report screen and the cheatsheet preview, performed
       and recorded, with the same five checks the earlier phases used.
 - [ ] **Step 6: Roadmap gate 6** — an Indonesian source produces an Indonesian cheatsheet
       and the rendered PDF's text is Indonesian.
-- [ ] **Step 7: `scripts/smoke-phase6.sh`** — generate a report and a cheatsheet from an
+- [ ] **Step 7: Roadmap gate 7 (honesty)** — on the report screen and the cheatsheet
+      preview: the credit cost is visible before each generative action, the numbers trace
+      to `config/plans.toml`, the composer hint is not applicable (no composer here) but the
+      "Suggested …" label is, and no invented number (page count, coverage, confidence)
+      reaches the screen. `page_count` is the one number this phase adds, and it is read
+      back from the renderer rather than guessed (decision 10), which is what the gate asks.
+- [ ] **Step 8: `scripts/smoke-phase6.sh`** — generate a report and a cheatsheet from an
       Indonesian source, export both, and assert the PDF's page count and that its text
       contains no `$`.
-- [ ] **Step 8: The full gate**, then commit.
+- [ ] **Step 9: The full gate**, then commit.
 
 ---
 
@@ -502,10 +580,15 @@ and fails on deploy, which is the risk the roadmap names.
 - [ ] A cheatsheet renders to A4 PDF with the running header, `Halaman N dari M`, and no
       raw `$`.
 - [ ] `POST /cheatsheets/:id/re-render` re-renders from stored blocks with no model call.
-- [ ] Chromium is pinned in the Docker image and CI runs the acceptance test inside it.
+- [ ] The renderer waits for the template's `data-math-ready` sentinel and fails the job on
+      any value other than `1`, so a KaTeX that failed to load cannot produce a PDF of
+      literal `$x$` (the template documents this at `templates/cheatsheet.v1.html`).
+- [ ] CI runs the acceptance test (`--ignored`) on a runner with Chrome, and
+      `docs/RELEASE.md` records the pinned-Chromium requirement for the Phase 15 image.
 - [ ] PDF export is plan-gated, and the mobile build is never told about a purchase.
 - [ ] Roadmap gate 5 performed and recorded.
 - [ ] Roadmap gate 6 performed and recorded.
+- [ ] Roadmap gate 7 performed and recorded.
 - [ ] Docs updated in the same commit as the code.
 - [ ] The full quality gate is green.
 
