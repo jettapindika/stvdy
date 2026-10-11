@@ -2,32 +2,21 @@
 // relaxations are not guaranteed to apply.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sqlx::PgPool;
-use stvdy_server::config::AppConfig;
-use stvdy_server::state::AppState;
+use stvdy_server::testing;
 use tower::ServiceExt; // for `oneshot`
 
-fn config() -> AppConfig {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    AppConfig::from_env_at(
-        &root,
-        &[
-            ("PLANS_CONFIG", "config/plans.toml"),
-            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
-        ],
-    )
-    .expect("config must load")
+fn config() -> stvdy_server::config::AppConfig {
+    testing::config()
 }
 
+/// The real router over a scratch database, with every provider replaced by a
+/// deterministic double. `testing::state` is the single place that builds an
+/// `AppState`, so a new provider is added in one file.
 fn app(pool: PgPool) -> axum::Router {
-    stvdy_server::routes::router(AppState {
-        pool,
-        config: Arc::new(config()),
-    })
+    stvdy_server::routes::router(testing::state(pool)).expect("the router builds")
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -116,6 +105,8 @@ fn error_mapping_matches_the_documented_table() {
         code: "insufficient_credits",
         message: "need 5".into(),
         min_plan: None,
+        limit: None,
+        used: None,
     };
     assert_eq!(credits.status(), StatusCode::PAYMENT_REQUIRED);
 
@@ -123,7 +114,21 @@ fn error_mapping_matches_the_documented_table() {
         code: "plan_required",
         message: "pro required".into(),
         min_plan: Some("pro"),
+        limit: None,
+        used: None,
     };
     assert_eq!(plan.status(), StatusCode::FORBIDDEN);
     assert_eq!(plan.code(), "plan_required");
+
+    // A limit the user can raise by paying is 422, not 403: the UI shows a
+    // precise upgrade prompt with the numbers, which 403 does not carry.
+    let limit = AppError::Entitlement {
+        code: "limit_reached",
+        message: "3 devices".into(),
+        min_plan: Some("pro"),
+        limit: Some(2),
+        used: Some(2),
+    };
+    assert_eq!(limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(limit.code(), "limit_reached");
 }

@@ -272,7 +272,17 @@ async fn every_table_in_the_spec_ddl_exists(pool: PgPool) {
 async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
     // Anything not in the spec's DDL must be a documented deviation, so this
     // fails when someone invents a table without recording it.
-    let documented = ["report_revisions", "cheatsheets"];
+    //
+    // Phase 1 added two, and neither is a `+sync` table on purpose:
+    // `email_verification_tokens` holds a single-use credential, and
+    // `login_tickets` holds the one the Google callback hands the app, so a
+    // client must never see or replay either through the sync log.
+    let documented = [
+        "report_revisions",
+        "cheatsheets",
+        "email_verification_tokens",
+        "login_tickets",
+    ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
         .iter()
