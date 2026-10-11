@@ -48,6 +48,63 @@ bytes = "1.12.1"
 tokio-util = "0.7.20"
 unicode-segmentation = "1.13.3"
 
+# --- auth / crypto (Phase 1) ---
+# `rust_crypto` picks the pure-Rust backend: the default `aws-lc-rs` needs a C
+# toolchain and a cmake that the Windows CI job does not have.
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
+argon2 = "0.6.0"
+sha2 = "0.11.0"
+hmac = "0.13.0"
+# Protects the Google login `state` parameter, which carries the PKCE verifier
+# (A48), and is what `ENCRYPTION_KEY_HEX` exists for.
+aes-gcm = "0.11.0"
+
+# --- email (Phase 1, A4) ---
+# rustls with webpki roots, not native-tls: the same reasoning as sqlx's
+# `tls-rustls-ring`, and it keeps the Docker image from needing OpenSSL.
+# `tokio1-rustls-tls` (not `tokio1-rustls`) is the one that also selects a
+# crypto provider and a certificate store; without them the build fails with
+# "feature `rustls` also requires ...". `pool` keeps a verification mail from
+# paying a full SMTP handshake each time.
+lettre = { version = "0.11.23", default-features = false, features = [
+  "builder",
+  "smtp-transport",
+  "pool",
+  "hostname",
+  "tokio1-rustls-tls",
+] }
+
+# --- object storage (Phase 1, A15) ---
+aws-config = "1.12.0"
+aws-sdk-s3 = "1.152.0"
+
+# --- embeddings and documents (Phase 1, A2) ---
+# `ort-download-binaries-rustls-tls` fetches the ONNX runtime at build time so
+# no system onnxruntime is required; the model itself is fetched at first use.
+fastembed = { version = "7.1.1", default-features = false, features = [
+  "hf-hub-rustls-tls",
+  "ort-download-binaries-rustls-tls",
+] }
+# Dynamic binding only: pdfium is loaded from PDFIUM_LIB_PATH at runtime, so the
+# build needs no pdfium binary and the Docker image supplies one (roadmap
+# Phase 6/1 risk note). Default features pull the `image` crate for rendering,
+# which this app never does.
+pdfium-render = { version = "0.9.4", default-features = false, features = [
+  "pdfium_latest",
+  "thread_safe",
+] }
+
+# --- http client / OAuth (Phase 1, A48) ---
+reqwest = { version = "0.13.5", default-features = false, features = [
+  "json",
+  "form",
+  "rustls",
+  "stream",
+  "multipart",
+] }
+url = "2.5.8"
+oauth2 = "5.0.0"
+
 # --- async / web ---
 tokio = { version = "1.53.2", features = [
   "rt-multi-thread",
@@ -58,7 +115,10 @@ tokio = { version = "1.53.2", features = [
   "sync",
   "fs",
 ] }
-axum = { version = "0.8.9", features = ["macros"] }
+
+# `multipart` is for POST /workspaces/:id/sources, which takes the file and the
+# pasted-text form of a source through one endpoint.
+axum = { version = "0.8.9", features = ["macros", "multipart"] }
 axum-extra = { version = "0.12.6", features = ["typed-header"] }
 tower = { version = "0.5.3", features = ["util", "timeout", "limit"] }
 tower-http = { version = "0.7.1", features = [

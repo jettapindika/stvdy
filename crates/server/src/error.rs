@@ -40,7 +40,17 @@ pub enum AppError {
         code: &'static str,
         message: String,
         min_plan: Option<&'static str>,
+        /// Populated for `limit_reached`, so the UI can say "3 of 3 devices"
+        /// instead of only "upgrade".
+        limit: Option<i64>,
+        used: Option<i64>,
     },
+
+    /// A verified email is required before any action that costs money (A43).
+    /// Distinct from `Forbidden` because the remedy is "check your inbox", not
+    /// "upgrade".
+    #[error("email verification required")]
+    EmailNotVerified,
 
     #[error("provider error: {0}")]
     Provider(String),
@@ -58,10 +68,16 @@ impl AppError {
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::ResyncRequired => StatusCode::GONE,
+            // A limit the user can raise by paying is 422; a feature the plan
+            // does not include at all is 403. Both are documented in the roadmap
+            // § HTTP error mapping.
             AppError::Entitlement { code, .. } if *code == "insufficient_credits" => {
                 StatusCode::PAYMENT_REQUIRED
             }
-            AppError::Entitlement { .. } => StatusCode::FORBIDDEN,
+            AppError::Entitlement { code, .. } if *code == "limit_reached" => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            AppError::Entitlement { .. } | AppError::EmailNotVerified => StatusCode::FORBIDDEN,
             AppError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             AppError::Provider(_) => StatusCode::BAD_GATEWAY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -79,6 +95,7 @@ impl AppError {
             AppError::ResyncRequired => "resync_required",
             AppError::RateLimited => "rate_limited",
             AppError::Entitlement { code, .. } => code,
+            AppError::EmailNotVerified => "email_not_verified",
             AppError::Provider(_) => "provider_error",
             AppError::Internal(_) => "internal",
         }
@@ -99,9 +116,26 @@ impl IntoResponse for AppError {
             other => other.to_string(),
         };
 
-        let mut body = json!({ "code": code, "message": message });
-        if let AppError::Entitlement { min_plan, .. } = &self {
+        // The shape is fixed: every field is always present, so the client's
+        // error mapper never has to guess. A missing `limit` means "not
+        // applicable", not "absent".
+        let mut body = json!({
+            "code": code,
+            "message": message,
+            "min_plan": serde_json::Value::Null,
+            "limit": serde_json::Value::Null,
+            "used": serde_json::Value::Null,
+        });
+        if let AppError::Entitlement {
+            min_plan,
+            limit,
+            used,
+            ..
+        } = &self
+        {
             body["min_plan"] = json!(min_plan);
+            body["limit"] = json!(limit);
+            body["used"] = json!(used);
         }
 
         (status, Json(body)).into_response()
