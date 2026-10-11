@@ -52,7 +52,7 @@
   "plugins": {
     "deep-link": {
       "desktop": { "schemes": ["stvdy"] },
-      "mobile": [{ "scheme": "stvdy" }]
+      "mobile": [{ "scheme": ["stvdy"] }]
     }
   }
 }

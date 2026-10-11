@@ -47,7 +47,13 @@ check-web:
 # during workspace clippy), which means the workspace commands skip it entirely.
 # Without this target the shell's keychain code, IPC commands, and Phase 8's
 # sync engine would accumulate unlinted and untested.
-check-shell:
+#
+# It depends on the web build on purpose: `generate_context!()` panics at compile
+# time when `frontendDist` (../app/dist) is missing, and dist/ is gitignored. So a
+# fresh checkout cannot lint or test the shell until the SPA has been built — the
+# dependency makes that explicit rather than relying on check-web happening to run
+# first.
+check-shell: check-web
     cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
     cargo test --manifest-path src-tauri/Cargo.toml

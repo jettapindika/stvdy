@@ -2167,7 +2167,11 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    # `minio/minio` was REMOVED from Docker Hub (A15) — verified 404 on both the
+    # Hub API and `docker manifest inspect`. This is the community fork/mirror;
+    # same S3 API, same `server /data` CLI, amd64+arm64. Verified working:
+    # bucket create + object put/get via the matching `pgsty/mc`.
+    image: pgsty/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -2181,7 +2185,7 @@ services:
       retries: 20
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:latest   # `minio/mc` is gone too (A15); this is the mirror
     depends_on:
       minio:
         condition: service_healthy
