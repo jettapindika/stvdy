@@ -10,6 +10,7 @@ pub mod clock;
 pub mod embedder;
 pub mod llm;
 pub mod mailer;
+pub mod search;
 pub mod storage;
 pub mod testing;
 
@@ -20,4 +21,7 @@ pub use llm::{
     ToolCall, ToolSpec, Usage,
 };
 pub use mailer::{Email, MailError, Mailer};
+pub use search::{
+    FetchError, FetchedPage, PageFetcher, SearchError, SearchHit, SearchProvider, SourceKind,
+};
 pub use storage::{Storage, StorageError};
