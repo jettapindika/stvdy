@@ -238,10 +238,15 @@ pub async fn chat(
         // so the user never sees a citation they cannot open.
         let resolved = stvdy_core::citations::resolve(&answer, &labels);
         let cleaned = strip_unknown(&answer, &labels);
-        if cleaned != answer {
+        // Counted, not inferred from `resolved.len()`: that is the number of
+        // citations that survived, so logging it as "dropped" would report the
+        // inverse of the citation-hallucination rate.
+        let unknown = stvdy_core::citations::unknown_count(&answer, &labels);
+        if unknown > 0 {
             tracing::info!(
-                dropped = resolved.len(),
-                "the model cited a label that was not in the context"
+                dropped = unknown,
+                kept = resolved.len(),
+                "the model cited labels that were not in the context"
             );
         }
 

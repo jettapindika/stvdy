@@ -408,10 +408,15 @@ rather than taken on faith. Eleven were real and are fixed here.
     streaming path. The server now holds back at most one marker's length
     (`citations::streamable_end`) and emits a marker only once it is complete and
     known, so the fabricated one is dropped before the user sees it and the
-    client's unmatched-marker branch becomes unreachable. A partial-marker hold
-    needs the client's spacing preserved, hence
-    `strip_unknown_preserving_spacing`, which does not trim the seam that
-    `strip_unknown` tidies.
+    client's unmatched-marker branch becomes unreachable. The hold-back has four
+    clauses and each one is load-bearing: an unterminated `[`, the space before it,
+    a trailing space on its own, and a complete marker at the very end of the text.
+    The last one is subtle: `strip_unknown` decides whether to swallow the space
+    before a marker by looking at the byte after it, and at the end of a slice that
+    byte is not known yet, so the streamed text joined two words where the stored
+    text kept them apart. `strip_unknown` is now the single function used on both
+    paths, and it drops the space before a marker only when the marker is not
+    followed by a word character.
 12. **The gate-6 UI row recorded a false PASS.** It quoted
     `log.textContent.includes('[9]') === false`, sampled *after* `done`, so it
     measured the persisted copy rather than the streaming path. Replaced with the

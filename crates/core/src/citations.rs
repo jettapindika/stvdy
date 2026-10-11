@@ -223,11 +223,21 @@ pub fn strip_unknown(text: &str, labels: &ContextLabels) -> String {
         if is_known(marker.label, labels) {
             continue;
         }
-        // The space before the marker, if there is one. `cursor` is where the
-        // previous kept span ended, so the space is only swallowed when it
-        // belongs to the text immediately preceding this marker.
+        // The space before the marker, if there is one, and only when the marker
+        // is not glued to the word that follows it.
+        //
+        // `"A [9]B"` is the case that matters: swallowing unconditionally joins
+        // two words into `"AB"`, because the marker sat between a space and a
+        // word character and both of its neighbours are content. The old
+        // whitespace-tidying pass got this right by collapsing the seam instead,
+        // which is why the rule has to be about the *neighbours* rather than
+        // about the whitespace alone.
         let mut start = marker.start;
-        if start > cursor && text[..start].ends_with(' ') {
+        let followed_by_a_word = text[marker.end..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric);
+        if start > cursor && text[..start].ends_with(' ') && !followed_by_a_word {
             start -= 1;
         }
         output.push_str(&text[cursor..start]);
@@ -240,6 +250,19 @@ pub fn strip_unknown(text: &str, labels: &ContextLabels) -> String {
 /// The largest marker the scanner recognises: `[999]` and `[W99]` are both five
 /// bytes, with a byte of margin for a wider label later.
 pub const MAX_MARKER_BYTES: usize = 8;
+
+/// How many markers in `text` name something the server did not send.
+///
+/// Exposed rather than left to the caller to infer: the resolved citation count is
+/// the number that *survived*, so logging it as "dropped" reports the inverse of
+/// the thing anyone would want to measure, and a hallucination rate computed from
+/// it would be wrong in the direction that looks reassuring.
+pub fn unknown_count(text: &str, labels: &ContextLabels) -> usize {
+    scan(text)
+        .into_iter()
+        .filter(|marker| !is_known(marker.label, labels))
+        .count()
+}
 
 /// How much of `text` is safe to show the user right now.
 ///
@@ -271,14 +294,35 @@ pub fn streamable_end(text: &str) -> usize {
     {
         let held = text.len() - open;
         if held <= MAX_MARKER_BYTES {
-            let marker_start = if open > 0 && text[..open].ends_with(' ') {
-                open - 1
-            } else {
-                open
-            };
-            end = end.min(marker_start);
+            end = end.min(hold_from(text, open));
         }
     }
 
+    // Hold a *complete* marker that sits at the very end of the text.
+    //
+    // `strip_unknown` decides whether to swallow the space before a marker by
+    // looking at the byte after it, and at the end of a slice that byte does not
+    // exist yet. Emitting the marker now would decide "nothing follows" and
+    // swallow a space the stored text keeps, so the two copies would differ by
+    // exactly the bug this whole hold-back exists to prevent. One more token is
+    // enough to know.
+    if text.ends_with(']')
+        && let Some(open) = text.rfind('[')
+        && text.len() - open <= MAX_MARKER_BYTES
+    {
+        end = end.min(hold_from(text, open));
+    }
+
     end
+}
+
+/// Where a hold-back must start for a marker whose `[` is at `open`: the bracket
+/// itself, or the space before it, because `strip_unknown` may swallow that space
+/// with the marker.
+fn hold_from(text: &str, open: usize) -> usize {
+    if open > 0 && text[..open].ends_with(' ') {
+        open - 1
+    } else {
+        open
+    }
 }

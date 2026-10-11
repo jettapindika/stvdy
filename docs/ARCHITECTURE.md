@@ -464,10 +464,18 @@ that runs at period start cannot help the account whose period starts at signup,
 and without the signup grant a new account has a zero balance and cannot send a
 single message. The chat suite caught exactly that.
 
-## Build environment note: the release profile is blocked here
+## Build environment note: the server's release binary is blocked here
 
-`cargo build --release` cannot complete **on this machine**, and the cause is not
-in this repository. The failure is:
+**What ships to users builds fine.** `tauri build --no-bundle` and the full
+`tauri build` (the macOS `.app` bundle) both succeed in the release profile, and
+the release shell launches. So the honest statement is narrow: **the server's
+release binary** cannot be produced on this machine, and only because of one
+proc-macro. `cargo build --release -p stvdy-core` links without trouble, and
+`stvdy-core` pulls `serde_derive`, so ordinary proc-macro dylibs are fine; the
+failure is specific to `sqlx-macros`, whose dylib is the large one.
+
+It does not affect the desktop bundle because `src-tauri` depends on `stvdy-sync`
+only, with no `sqlx` in its graph. The failure is:
 
 ```
 error: target/release/deps/libsqlx_macros-<hash>.dylib: dlopen(...):
@@ -487,12 +495,14 @@ compile in the release profile. What was ruled out, with the evidence:
 | Stripping | `CARGO_PROFILE_RELEASE_STRIP=debuginfo` fails identically |
 | **A minimal project** | `cargo new /tmp/probe` + `sqlx` as the only dependency, fresh target dir: **same failure**. This is the decisive one, because it contains none of this repo's code |
 
-So it is a toolchain defect in the release-profile link of that specific
-proc-macro on this machine (macOS 27, arm64, rustc 1.94.1). It is not a phase
-gate: the gates are `cargo fmt`, `cargo clippy`, `cargo test`, the web build, and
-the desktop bundle, and the first four plus `tauri build --debug` all pass. A
-release server binary is a Phase 15 packaging concern, and the Docker image
-builds on Linux where this does not arise.
+So it is a toolchain defect in the release-profile link of that one proc-macro on
+this machine (macOS 27, arm64, rustc 1.94.1), not a repository problem.
+
+It is not a phase gate. The gates are `cargo fmt`, `cargo clippy`, `cargo test`,
+the web build and the desktop bundle, and **all of them pass**: the first three in
+debug, `npm run build`, and `tauri build` in release. The server's release binary
+is a Phase 15 packaging concern, and the Docker image builds on Linux, where this
+does not arise.
 
 ## CORS origins
 

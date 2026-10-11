@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use stvdy_core::citations::{
     Citation, ContextLabels, LabeledChunk, LabeledWeb, resolve, streamable_end, strip_unknown,
+    unknown_count,
 };
 
 fn labels(chunk_labels: &[u32]) -> ContextLabels {
@@ -264,8 +265,18 @@ fn a_complete_marker_is_streamable_but_a_partial_one_is_not() {
     // Nothing to hold back: no bracket at all.
     assert_eq!(streamable_end("a plain sentence"), "a plain sentence".len());
 
-    // A complete marker is safe: the caller can validate it and drop it.
-    assert_eq!(streamable_end("claim [1]"), "claim [1]".len());
+    // A complete marker mid-sentence is safe: the caller can validate it and
+    // drop it, and the byte after it is already known.
+    assert_eq!(streamable_end("claim [1] and"), "claim [1] and".len());
+
+    // A complete marker at the very END is held for one more byte, because
+    // `strip_unknown` decides whether to swallow the space before it by looking
+    // at what follows. Emitting it here would decide "nothing follows" and
+    // swallow a space the stored text keeps.
+    assert_eq!(streamable_end("claim [1]"), "claim".len());
+    assert_eq!(streamable_end("claim [9]"), "claim".len());
+    // With no space before the bracket there is nothing extra to hold.
+    assert_eq!(streamable_end("claim[9]"), "claim".len());
 
     // A marker still being assembled is not: `[9` may yet become `[9]`, which
     // must be validated rather than shown. The space before the bracket is held
@@ -305,6 +316,35 @@ fn a_dropped_marker_takes_its_preceding_space_and_nothing_else() {
         strip_unknown("a claim [1] and", &context),
         "a claim [1] and"
     );
+}
+
+#[test]
+fn the_streamed_text_equals_the_stored_text_for_a_word_adjacent_marker() {
+    let context = labels_with_web();
+    // No punctuation after the dropped marker, so the space before it is content
+    // and must survive on both paths.
+    let answer = "A claim [1] then [9]B follows.";
+
+    let stored = strip_unknown(answer, &context);
+    assert_eq!(stored, "A claim [1] then B follows.");
+
+    let mut emitted = String::new();
+    let mut cursor = 0;
+    for (index, _) in answer.char_indices() {
+        let end = index + 1;
+        let safe = streamable_end(&answer[..end]);
+        if safe > cursor {
+            emitted.push_str(&strip_unknown(&answer[cursor..safe], &context));
+            cursor = safe;
+        }
+    }
+    emitted.push_str(&strip_unknown(&answer[cursor..], &context));
+
+    assert_eq!(
+        emitted, stored,
+        "a marker glued to the next word must not differ between the two paths"
+    );
+    assert!(!emitted.contains("[9]"), "{emitted:?}");
 }
 
 #[test]
@@ -372,4 +412,30 @@ fn the_space_before_a_marker_is_held_when_the_two_arrive_separately() {
     );
     assert!(!emitted.contains("[9]"), "{emitted:?}");
     assert!(emitted.contains("[1]"), "{emitted:?}");
+}
+
+#[test]
+fn the_unknown_count_is_the_dropped_markers_not_the_kept_ones() {
+    let context = labels_with_web();
+
+    // Two unknown, one known. Reporting `resolve().len()` as "dropped" would say
+    // 1, and a hallucination rate computed from that is wrong in the direction
+    // that looks reassuring.
+    let answer = "a [1] b [9] c [42] d";
+    assert_eq!(resolve(answer, &context).len(), 1, "one citation survived");
+    assert_eq!(
+        unknown_count(answer, &context),
+        2,
+        "two markers were dropped"
+    );
+
+    // A reply that cites nothing unknown is not a drop.
+    assert_eq!(unknown_count("grounded [1] only", &context), 0);
+
+    // A marker-shaped thing that is not a label is not a marker, so it is not a
+    // drop either: rewriting `[abc]` would be guessing.
+    assert_eq!(unknown_count("a footnote [abc] here", &context), 0);
+
+    // A known web label counts as known.
+    assert_eq!(unknown_count("from the web [W1]", &context), 0);
 }

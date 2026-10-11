@@ -892,6 +892,69 @@ async fn a_marker_split_across_tokens_is_never_shown_partial(pool: PgPool) {
     );
 }
 
+/// A token that *ends* exactly at `]` must not finalise the marker early.
+///
+/// This is the boundary the hold-back exists for: `strip_unknown` decides whether
+/// to swallow the space before a marker by looking at the byte after it, and at
+/// the end of a slice that byte is not known yet. The route slices per token, so a
+/// provider that splits `"[9]"` into its own token hits this exactly.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_token_ending_at_the_bracket_does_not_finalise_the_marker_early(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "bracket-token@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // The marker is its own token, and the next token starts with a word
+    // character, so the space before the marker is content and must survive on
+    // both the streamed and the stored path.
+    let llm = Arc::new(ScriptedLlm::with_tokens(vec![
+        "A claim [1] then ".to_string(),
+        "[9]".to_string(),
+        "B follows.".to_string(),
+    ]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("anything"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let streamed: String = events
+        .iter()
+        .filter(|event| event.kind() == "token")
+        .filter_map(|event| event.json()["t"].as_str().map(str::to_string))
+        .collect();
+    assert!(!streamed.contains("[9]"), "{streamed:?}");
+
+    let (_, thread) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/messages"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    let stored = thread["messages"][1]["content"]
+        .as_str()
+        .expect("the assistant turn");
+
+    assert_eq!(
+        streamed, stored,
+        "the marker's own token must not decide the lookahead before the next byte arrives"
+    );
+    assert!(
+        stored.contains("then B follows"),
+        "the space before the dropped marker is content here: {stored:?}"
+    );
+}
+
 /// A spent-out account's 402 carries the plan-matrix sense of `limit`/`used`,
 /// which is "not applicable", and names the plan that would lift it. Putting the
 /// action's cost and the balance in those fields would make the client render
