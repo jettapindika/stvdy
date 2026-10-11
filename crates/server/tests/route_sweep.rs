@@ -159,6 +159,11 @@ fn read_only_rows() -> Vec<Row> {
         ),
         ro("GET", "/sources/{id}/file", "reads the caller's own file"),
         ro(
+            "GET",
+            "/sources/{id}/preview",
+            "reads the caller's own PDF rendition; a read, so an over-limit account keeps it (A149)",
+        ),
+        ro(
             "DELETE",
             "/sources/{id}",
             "deleting frees a slot, per the refusal's message",
@@ -655,8 +660,38 @@ fn every_registered_route_is_classified() {
     }
 }
 
-/// Every swept route refuses an exhausted account with the exact code the table names.
+/// Every route the spend cap covers is also a `Swept` row.
 ///
+/// Two lists of "the routes that spend" would drift, and the drift has one shape: a
+/// route the sweep classifies but the cap forgets is a route whose burst can overshoot
+/// the provider-cost ceiling, because the ceiling is checked before the provider call
+/// and the cost is recorded after it (A155). The cap's list is therefore a *subset* of
+/// the swept rows, not a second table: the entitlement decision stays the one place
+/// that decides whether an action is allowed, and the cap only decides how fast.
+#[test]
+fn the_spend_cap_covers_only_swept_routes() {
+    let swept: BTreeSet<(&str, &str)> = table()
+        .iter()
+        .filter(|row| row.class == Class::Swept)
+        .map(|row| (row.method, row.path))
+        .collect();
+
+    for (method, path) in stvdy_server::ratelimit::spending_routes() {
+        assert!(
+            swept.contains(&(*method, *path)),
+            "{method} {path} is capped as a spending route but the sweep does not classify it as Swept"
+        );
+    }
+
+    // And the cap must not be empty: a list that named nothing would pass the loop
+    // above while capping nothing at all.
+    assert!(
+        !stvdy_server::ratelimit::spending_routes().is_empty(),
+        "the spend cap covers no route"
+    );
+}
+
+/// Every swept route refuses an exhausted account with the exact code the table names.
 /// The account is exhausted by direct writes rather than through the API, because the API
 /// would refuse the very requests that fill it. Every limit is at its cap and the balance is
 /// negative, so the *first* refusal the engine produces is the one asserted here: a counted

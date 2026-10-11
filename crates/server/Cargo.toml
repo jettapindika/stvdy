@@ -57,6 +57,13 @@ reqwest.workspace = true
 url.workspace = true
 oauth2.workspace = true
 readability = "0.3.0"
+# PPTX/DOCX text extraction (A158, and the crate-list deviation in
+# docs/ASSUMPTIONS.md): both formats are zip + OOXML, and the guards the
+# deviation names (zip-slip, decompressed size) live in `sources::parse`.
+# `deflate` only: a document that needs another codec is refused rather than
+# pulling a second decompressor in.
+zip = { version = "9.0.1", default-features = false, features = ["deflate"] }
+quick-xml = "0.42"
 
 [dev-dependencies]
 pdf-extract.workspace = true

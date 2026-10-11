@@ -236,6 +236,10 @@
     "source": {
       "untitled": "Untitled source",
       "kindPdf": "PDF",
+      "kindDocx": "Word",
+      "kindPptx": "Slides",
+      "kindUrl": "Link",
+      "kindWeb": "Saved from search",
       "kindText": "Text",
       "status": {
         "pending": "Waiting to start",
@@ -248,11 +252,15 @@
       "removeConfirm": "Remove this source?",
       "removing": "Removing",
       "removeIt": "Remove it",
-      "noun": "sources"
+      "noun": "sources",
+      "kindOther": "Source"
     },
     "upload": {
       "legend": "Add material",
       "kindPdf": "PDF file",
+      "kindDocx": "Word document",
+      "kindPptx": "Slides",
+      "kindUrl": "Link",
       "kindText": "Pasted text",
       "textLabel": "Text to add",
       "titleLabel": "Title",
@@ -260,7 +268,9 @@
       "uploading": "Uploading",
       "submit": "Add source",
       "afterStored": "After the file is stored, this workspace's source list shows extraction and indexing until the source is ready.",
-      "noun": "uploading sources"
+      "noun": "uploading sources",
+      "urlLabel": "Link to add",
+      "urlInvalid": "Enter a full web address, starting with http:// or https://"
     },
     "sourcePicker": {
       "legend": "Answer from",

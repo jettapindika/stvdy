@@ -52,6 +52,10 @@ pub fn config() -> AppConfig {
             ("REFRESH_TOKEN_TTL_DAYS", "30"),
             ("VERIFY_TOKEN_TTL_HOURS", "24"),
             ("PDFIUM_LIB_PATH", "var/pdfium/libpdfium.dylib"),
+            // Pinned empty so a developer whose shell exports SOFFICE_BIN cannot make
+            // the "no converter" case vacuous. The preview cases install a path
+            // explicitly.
+            ("SOFFICE_BIN", ""),
             ("GOOGLE_LOGIN_CLIENT_ID", ""),
             ("GOOGLE_LOGIN_CLIENT_SECRET", ""),
             ("GOOGLE_LOGIN_REDIRECT_URI", ""),
@@ -90,8 +94,19 @@ pub fn state(pool: PgPool) -> AppState {
         llm: None,
         search: None,
         renderer: None,
+        fetcher: offline_fetcher(),
         jobs: Queue::new(),
     }
+}
+
+/// A fetch chain with nothing in it.
+///
+/// Deliberately empty rather than the real chain: a test that fetches without
+/// installing a stub must fail with "no page fetcher is configured" rather than
+/// reach the network, because a suite that quietly depends on a live page is a
+/// suite that fails on a train.
+pub fn offline_fetcher() -> Arc<crate::integrations::fetch::ChainFetcher> {
+    Arc::new(crate::integrations::fetch::ChainFetcher::new(Vec::new()))
 }
 
 /// The same state with each provider handed out for assertions.
@@ -135,6 +150,7 @@ impl TestState {
                 // `provider_error` here, which is what a deployment without a browser
                 // does too.
                 renderer: None,
+                fetcher: offline_fetcher(),
                 jobs: Queue::new(),
             },
             storage,
@@ -165,6 +181,17 @@ impl TestState {
     pub fn with_clock(mut self, clock: Arc<FixedClock>) -> Self {
         self.state.clock = clock.clone();
         self.clock = clock;
+        self
+    }
+
+    /// The same state with a fetch chain of the test's own.
+    ///
+    /// The ingestion suite installs a stub here so the URL path is exercised end to
+    /// end (guard, extraction, chunking) without a network, and the SSRF case
+    /// installs a chain containing only the real `ReqwestFetcher`, which refuses a
+    /// loopback target before it connects.
+    pub fn with_fetcher(mut self, fetcher: Arc<crate::integrations::fetch::ChainFetcher>) -> Self {
+        self.state.fetcher = fetcher;
         self
     }
 

@@ -11,6 +11,7 @@ use stvdy_core::traits::storage::Storage;
 use stvdy_core::traits::llm::LlmProvider;
 
 use crate::config::AppConfig;
+use crate::integrations::fetch::ChainFetcher;
 use crate::integrations::search::composite::CompositeSearch;
 use crate::jobs::Queue;
 use crate::render::chrome::Renderer;
@@ -41,6 +42,13 @@ pub struct AppState {
     /// print can be repeated later). A report's PDF export is the one route that answers
     /// `502 provider_error` without it, because there is nothing else it could answer.
     pub renderer: Option<Arc<Renderer>>,
+    /// The page fetcher for a user-supplied URL.
+    ///
+    /// **Every** fetch of a URL a user gave us goes through this, never a bare
+    /// `reqwest` call: the chain is what carries the SSRF guard (A18/A34), and a
+    /// second fetch path would be a second place to forget it. Present on every
+    /// deployment, because the chain's last step needs no key and no binary.
+    pub fetcher: Arc<ChainFetcher>,
     pub jobs: Queue,
 }
 

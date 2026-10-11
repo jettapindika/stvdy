@@ -4,6 +4,9 @@ import { useParams } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
 import {
+  HTTP_URL_PATTERN,
+  UPLOAD_KINDS,
+  acceptFor,
   isSettledStatus,
   useDeleteSource,
   useSourceStatus,
@@ -12,6 +15,7 @@ import {
   type Source,
   type SourceKind,
   type SourceStatusName,
+  type UploadKind,
 } from '@/api/queries/sources'
 import { useWorkspace } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
@@ -306,6 +310,36 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
   )
 }
 
+/**
+ * What a row calls a source's kind.
+ *
+ * A function with literal `t()` calls rather than a map of key strings: the i18n
+ * suite scans the source for the keys the code asks for, so an indirected key is
+ * indistinguishable from a key nothing renders. A switch also fails to compile
+ * silently on a new kind, where a map lookup would fall through to "Source".
+ *
+ * `web` is the "saved from search" kind and says so, since a student who saved a
+ * page needs to recognise it as one.
+ */
+function sourceKindLabel(kind: SourceKind, t: (key: string) => string): string {
+  switch (kind) {
+    case 'pdf':
+      return t('workspaces.source.kindPdf')
+    case 'docx':
+      return t('workspaces.source.kindDocx')
+    case 'pptx':
+      return t('workspaces.source.kindPptx')
+    case 'url':
+      return t('workspaces.source.kindUrl')
+    case 'text':
+      return t('workspaces.source.kindText')
+    case 'web':
+      return t('workspaces.source.kindWeb')
+    default:
+      return t('workspaces.source.kindOther')
+  }
+}
+
 function SourceRow({ workspaceId, source }: { workspaceId: string; source: Source }) {
   const { t } = useTranslation()
   const remove = useDeleteSource(workspaceId)
@@ -336,11 +370,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
         <span className="min-w-0 flex-1 break-words font-medium">
           {source.title.length > 0 ? source.title : t('workspaces.source.untitled')}
         </span>
-        <span className="meta">
-          {source.kind === 'pdf'
-            ? t('workspaces.source.kindPdf')
-            : t('workspaces.source.kindText')}
-        </span>
+        <span className="meta">{sourceKindLabel(source.kind, t)}</span>
         {/* The word carries the state; the chip's tone repeats it. Colour is
             never the only signal, and "Ready" is readable in monochrome. */}
         <span className={STATUS_CHIP[status]} role="status">
@@ -413,24 +443,44 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
 
 function UploadForm({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
-  const [kind, setKind] = useState<SourceKind>('pdf')
+  const [kind, setKind] = useState<UploadKind>('pdf')
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
+  const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
   const fileId = useId()
   const textId = useId()
+  const urlId = useId()
   const fileErrorId = useId()
   const textErrorId = useId()
+  const urlErrorId = useId()
   const upload = useUploadSource(workspaceId)
 
   const uploadError = asApiError(upload.error)
   const validation =
     uploadError?.code === 'validation'
-      ? validationMessage(uploadError, ['file', 'text', 'title'])
+      ? validationMessage(uploadError, ['file', 'text', 'url', 'title'])
       : null
   const showNotice = uploadError !== null && (validation === null || validation.field === null)
-  const ready = kind === 'pdf' ? file !== null : text.trim().length > 0
+
+  // The URL's own error comes from the client, before a round trip: the server is
+  // the enforcement, and this is only the message.
+  const urlMalformed = kind === 'url' && url.trim().length > 0 && !HTTP_URL_PATTERN.test(url.trim())
+  const ready =
+    kind === 'text'
+      ? text.trim().length > 0
+      : kind === 'url'
+        ? HTTP_URL_PATTERN.test(url.trim())
+        : file !== null
+
+  const kindLabel: Record<UploadKind, string> = {
+    pdf: t('workspaces.upload.kindPdf'),
+    docx: t('workspaces.upload.kindDocx'),
+    pptx: t('workspaces.upload.kindPptx'),
+    url: t('workspaces.upload.kindUrl'),
+    text: t('workspaces.upload.kindText'),
+  }
 
   return (
     <form
@@ -439,13 +489,16 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
         event.preventDefault()
         if (!ready) return
         upload.mutate(
-          kind === 'pdf' && file !== null
-            ? { kind: 'pdf', file, title }
-            : { kind: 'text', text, title },
+          kind === 'text'
+            ? { kind: 'text', text, title }
+            : kind === 'url'
+              ? { kind: 'url', url: url.trim(), title }
+              : { kind, file: file as File, title },
           {
             onSuccess: () => {
               setFile(null)
               setText('')
+              setUrl('')
               setTitle('')
               // A file input cannot be cleared by state alone; the element keeps
               // the chosen file until it is reset, which would leave the old name
@@ -463,7 +516,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       <fieldset className="flex flex-col gap-1">
         <legend className="label">{t('workspaces.upload.legend')}</legend>
         <div className="flex flex-wrap gap-2">
-          {(['pdf', 'text'] as const).map((option) => (
+          {UPLOAD_KINDS.map((option) => (
             <label
               key={option}
               className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
@@ -477,39 +530,13 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
                   setKind(option)
                 }}
               />
-              {option === 'pdf'
-                ? t('workspaces.upload.kindPdf')
-                : t('workspaces.upload.kindText')}
+              {kindLabel[option]}
             </label>
           ))}
         </div>
       </fieldset>
 
-      {kind === 'pdf' ? (
-        <div className="flex flex-col gap-1">
-          <label className="label" htmlFor={fileId}>
-            {t('workspaces.upload.kindPdf')}
-          </label>
-          <input
-            ref={fileInput}
-            id={fileId}
-            className="field"
-            type="file"
-            name="file"
-            accept="application/pdf"
-            aria-invalid={validation?.field === 'file' ? true : undefined}
-            aria-describedby={validation?.field === 'file' ? fileErrorId : undefined}
-            onChange={(event) => {
-              setFile(event.target.files?.[0] ?? null)
-            }}
-          />
-          {validation?.field === 'file' && (
-            <span id={fileErrorId} className="text-sm text-danger">
-              {validation.message}
-            </span>
-          )}
-        </div>
-      ) : (
+      {kind === 'text' ? (
         <div className="flex flex-col gap-1">
           <label className="label" htmlFor={textId}>
             {t('workspaces.upload.textLabel')}
@@ -527,6 +554,55 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
           />
           {validation?.field === 'text' && (
             <span id={textErrorId} className="text-sm text-danger">
+              {validation.message}
+            </span>
+          )}
+        </div>
+      ) : kind === 'url' ? (
+        <div className="flex flex-col gap-1">
+          <label className="label" htmlFor={urlId}>
+            {t('workspaces.upload.urlLabel')}
+          </label>
+          <input
+            id={urlId}
+            className="field"
+            type="url"
+            name="url"
+            inputMode="url"
+            placeholder="https://"
+            value={url}
+            aria-invalid={urlMalformed || validation?.field === 'url' ? true : undefined}
+            aria-describedby={urlMalformed || validation?.field === 'url' ? urlErrorId : undefined}
+            onChange={(event) => {
+              setUrl(event.target.value)
+            }}
+          />
+          {(urlMalformed || validation?.field === 'url') && (
+            <span id={urlErrorId} className="text-sm text-danger">
+              {urlMalformed ? t('workspaces.upload.urlInvalid') : validation?.message}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <label className="label" htmlFor={fileId}>
+            {kindLabel[kind]}
+          </label>
+          <input
+            ref={fileInput}
+            id={fileId}
+            className="field"
+            type="file"
+            name="file"
+            accept={acceptFor(kind)}
+            aria-invalid={validation?.field === 'file' ? true : undefined}
+            aria-describedby={validation?.field === 'file' ? fileErrorId : undefined}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null)
+            }}
+          />
+          {validation?.field === 'file' && (
+            <span id={fileErrorId} className="text-sm text-danger">
               {validation.message}
             </span>
           )}

@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         llm: providers.llm,
         search: providers.search,
         renderer: providers.renderer,
+        fetcher: providers.fetcher,
         jobs: jobs::Queue::new(),
     };
 

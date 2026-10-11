@@ -16,6 +16,8 @@
 //! recovered network never gets a second chance.
 
 use sqlx::Row;
+use stvdy_core::entitlements::Feature;
+use stvdy_core::traits::search::{FetchError, PageFetcher};
 use uuid::Uuid;
 
 use crate::jobs::{ClaimedJob, Failure};
@@ -36,7 +38,7 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
 
     // The source may have been deleted between enqueue and claim.
     let row = sqlx::query(
-        "select id, user_id, kind, file_key, title, deleted_at
+        "select id, user_id, kind, file_key, url, title, deleted_at
            from sources where id = $1",
     )
     .bind(source_id)
@@ -57,7 +59,21 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
     let user_id: Uuid = row.get("user_id");
     let kind: String = row.get("kind");
     let file_key: Option<String> = row.get("file_key");
+    let url: Option<String> = row.get("url");
     let title: String = row.get("title");
+
+    // The user may have downgraded between the request and the claim: the upload
+    // checked `UploadSource` against the plan that existed then, and a source the
+    // new plan does not allow must not be embedded on the old plan's authority.
+    // Permanent, because no retry changes a plan.
+    if let Err(error) =
+        crate::entitlements::require_for(state, user_id, Feature::IngestSource).await
+    {
+        let message = error.to_string();
+        tracing::info!(%source_id, %user_id, code = error.code(), "ingest refused after a plan change");
+        set_status(&state.pool, source_id, "failed", Some(&message)).await?;
+        return Err(Failure::permanent(message));
+    }
 
     set_status(&state.pool, source_id, "processing", None).await?;
 
@@ -67,6 +83,7 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
         user_id,
         &kind,
         file_key.as_deref(),
+        url.as_deref(),
         &title,
     )
     .await
@@ -108,12 +125,15 @@ async fn ingest(
     user_id: Uuid,
     kind: &str,
     file_key: Option<&str>,
+    url: Option<&str>,
     title: &str,
 ) -> Result<usize, Failure> {
     let pages = match kind {
         // Pasted text is stored as an object, so both kinds read from storage
-        // and there is one path to test.
-        "text" => {
+        // and there is one path to test. A `web` source is the same shape: the
+        // route fetched the page and stored what it read, so the job's job is
+        // still just extraction.
+        "text" | "web" => {
             let key = file_key.ok_or_else(|| Failure::permanent("a text source has no body"))?;
             let bytes =
                 state.storage.get(key).await.map_err(|error| {
@@ -138,6 +158,95 @@ async fn ingest(
                 )
             })?;
             parse::pdf_pages(&pdfium, &bytes, title).map_err(Failure::permanent)?
+        }
+        "docx" | "pptx" => {
+            let key =
+                file_key.ok_or_else(|| Failure::permanent("an office document has no file"))?;
+            let bytes =
+                state.storage.get(key).await.map_err(|error| {
+                    Failure::transient(format!("reading the source file: {error}"))
+                })?;
+
+            let pages = if kind == "docx" {
+                parse::docx_runs(&bytes)
+            } else {
+                parse::pptx_slides(&bytes)
+            }
+            .map_err(Failure::permanent)?;
+
+            // The PDF rendition for the uniform viewer, and it is best-effort by
+            // policy (A158): a deployment without LibreOffice still ingests the
+            // document, because its text comes from the OOXML itself. What it does
+            // not do is stay quiet about it — a source with no preview and no
+            // explanation looks like a scanned document.
+            match state.config.soffice_bin.as_deref() {
+                Some(soffice) => match parse::preview_pdf(soffice, kind, &bytes) {
+                    Ok(pdf) => {
+                        let preview_key = preview_key(user_id, source_id);
+                        match state
+                            .storage
+                            .put(&preview_key, bytes::Bytes::from(pdf), "application/pdf")
+                            .await
+                        {
+                            Ok(()) => {
+                                sqlx::query("update sources set preview_key = $2 where id = $1")
+                                    .bind(source_id)
+                                    .bind(&preview_key)
+                                    .execute(&state.pool)
+                                    .await
+                                    .map_err(|error| {
+                                        Failure::transient(format!(
+                                            "recording the preview key: {error}"
+                                        ))
+                                    })?;
+                            }
+                            Err(error) => {
+                                tracing::warn!(%source_id, %error, "storing the preview failed; the source still ingests");
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            %source_id,
+                            %kind,
+                            %error,
+                            "rendering the PDF preview failed; the source still ingests without one"
+                        );
+                    }
+                },
+                None => {
+                    tracing::info!(
+                        %source_id,
+                        %kind,
+                        "SOFFICE_BIN is unset; this source ingests without a PDF preview"
+                    );
+                }
+            }
+
+            pages
+        }
+        // A URL source stores no bytes at all, so the fetch happens here rather
+        // than at upload: the request does not block on someone else's server, and
+        // a refusal lands on `sources.error`, which the client already shows.
+        // **Through the chain**, never a bare `reqwest` call: the chain is what
+        // carries the SSRF guard (A18/A34).
+        "url" => {
+            let url = url.ok_or_else(|| Failure::permanent("a url source has no url"))?;
+            let page = state
+                .fetcher
+                .fetch(url)
+                .await
+                .map_err(|error| match error {
+                    // A refusal or an invalid URL fails identically on every attempt, so
+                    // it is permanent; only a provider failure is worth a retry.
+                    FetchError::Refused(reason) | FetchError::Invalid(reason) => {
+                        Failure::permanent(reason)
+                    }
+                    FetchError::Provider(reason) => {
+                        Failure::transient(format!("fetching the page: {reason}"))
+                    }
+                })?;
+            vec![(None, page.text)]
         }
         other => {
             return Err(Failure::permanent(format!(
@@ -265,4 +374,14 @@ fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// The object key of a source's PDF rendition.
+///
+/// Prefixed by user for the same reason `sources::routes::object_key` is: a key can
+/// never be guessed into another account's prefix. `preview.pdf` rather than a
+/// second id, because there is exactly one rendition per source and a deterministic
+/// key means a retry overwrites instead of accumulating.
+fn preview_key(user_id: Uuid, source_id: Uuid) -> String {
+    format!("users/{user_id}/sources/{source_id}.preview.pdf")
 }

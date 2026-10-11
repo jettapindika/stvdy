@@ -35,6 +35,13 @@ pub struct Providers {
     pub search: Option<Arc<search::CompositeSearch>>,
     /// The pooled Chromium, or `None` when none could be found or launched.
     pub renderer: Option<Arc<crate::render::chrome::Renderer>>,
+    /// The page-fetch chain, for a user-supplied URL (A18/A34).
+    ///
+    /// Always present: the chain's last step is plain `reqwest`, which needs no
+    /// key and no binary, so there is no deployment where a URL source has nowhere
+    /// to go. A test can replace it (see `testing::TestState::with_fetcher`), which
+    /// is how the URL path is exercised without a network.
+    pub fetcher: Arc<fetch::ChainFetcher>,
 }
 
 impl Providers {
@@ -152,6 +159,12 @@ impl Providers {
             llm,
             search,
             renderer,
+            fetcher: Arc::new(fetch::ChainFetcher::from_config(
+                cfg.search
+                    .exa_api_key
+                    .as_ref()
+                    .map(|key| key.expose_secret().to_string()),
+            )?),
         })
     }
 }

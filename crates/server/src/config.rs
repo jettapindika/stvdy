@@ -64,6 +64,14 @@ pub struct AppConfig {
     /// before the rollover expires it (the spec's "3-day grace period
     /// (configurable)"). Read by `jobs::handlers::counters`.
     pub grace_period_days: i64,
+    /// LibreOffice's CLI, for the PPTX/DOCX PDF preview (A158).
+    ///
+    /// `None` follows the same policy as `pdfium_lib_path`: the source still
+    /// ingests (its text and slide numbers come from the OOXML itself), the
+    /// preview is simply absent, and the ingest job logs one line. An absent
+    /// converter must be honest rather than silent, because a source with no
+    /// preview and no explanation looks like a scanned document.
+    pub soffice_bin: Option<PathBuf>,
 }
 
 /// Token lifetimes and the verification-link window.
@@ -304,6 +312,9 @@ impl AppConfig {
             llm: llm_config(&get_or, &get),
             search: search_config(&get, &get_or)?,
             grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
+            soffice_bin: get("SOFFICE_BIN")
+                .filter(|s| !s.is_empty())
+                .map(|s| root.join(s)),
         })
     }
 }

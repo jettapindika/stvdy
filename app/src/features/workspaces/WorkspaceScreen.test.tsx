@@ -251,6 +251,106 @@ describe('the sources panel', () => {
     expect(screen.getByRole('button', { name: 'Add source' })).toBeDisabled()
   })
 
+  it('uploads a Word document as a file part, with the docx kind', async () => {
+    const sent: { form: FormData | null } = { form: null }
+    serve((path, init) => {
+      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
+        sent.form = init.body as FormData
+        const created = source({ id: 's3', kind: 'docx', title: 'Week 3', status: 'pending' })
+        sources = [...sources, created]
+        return jsonResponse(201, { source: created })
+      }
+      return undefined
+    })
+
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(await screen.findByLabelText('Word document'))
+    const input = screen.getByLabelText('Word document', { selector: 'input[type="file"]' })
+    expect(input).toHaveAttribute(
+      'accept',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx',
+    )
+    const file = new File(['%PDF'], 'week3.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    await user.upload(input, file)
+    await user.click(screen.getByRole('button', { name: 'Add source' }))
+
+    await vi.waitFor(() => {
+      expect(sent.form).not.toBeNull()
+    })
+    expect(sent.form?.get('kind')).toBe('docx')
+    expect((sent.form?.get('file') as File).name).toBe('week3.docx')
+    expect(await screen.findByText('Word')).toBeInTheDocument()
+  })
+
+  it('uploads slides as a pptx, which the form could not send before', async () => {
+    const sent: { form: FormData | null } = { form: null }
+    serve((path, init) => {
+      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
+        sent.form = init.body as FormData
+        return jsonResponse(201, {
+          source: source({ id: 's4', kind: 'pptx', title: 'Lecture 7', status: 'pending' }),
+        })
+      }
+      return undefined
+    })
+
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(await screen.findByLabelText('Slides'))
+    const input = screen.getByLabelText('Slides', { selector: 'input[type="file"]' })
+    await user.upload(input, new File(['zip'], 'lecture.pptx'))
+    await user.click(screen.getByRole('button', { name: 'Add source' }))
+
+    await vi.waitFor(() => {
+      expect(sent.form).not.toBeNull()
+    })
+    expect(sent.form?.get('kind')).toBe('pptx')
+    expect((sent.form?.get('file') as File).name).toBe('lecture.pptx')
+  })
+
+  it('adds a link, and refuses a bare host with its own message', async () => {
+    const sent: { form: FormData | null } = { form: null }
+    serve((path, init) => {
+      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
+        sent.form = init.body as FormData
+        return jsonResponse(201, {
+          source: source({ id: 's5', kind: 'url', title: 'example.test', status: 'pending' }),
+        })
+      }
+      return undefined
+    })
+
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(await screen.findByLabelText('Link'))
+    const field = screen.getByLabelText('Link to add')
+
+    // A bare host is the mistake this catches, and it is caught before a request.
+    await user.type(field, 'example.test/osmosis')
+    expect(
+      await screen.findByText('Enter a full web address, starting with http:// or https://'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add source' })).toBeDisabled()
+
+    await user.clear(field)
+    await user.type(field, 'https://example.test/osmosis')
+    await user.click(screen.getByRole('button', { name: 'Add source' }))
+
+    await vi.waitFor(() => {
+      expect(sent.form).not.toBeNull()
+    })
+    expect(sent.form?.get('kind')).toBe('url')
+    expect(sent.form?.get('url')).toBe('https://example.test/osmosis')
+    // No file part for a link: there is nothing to upload.
+    expect(sent.form?.get('file')).toBeNull()
+  })
+
   it('removes a source only after the confirmation', async () => {
     sources = [source({ id: 's1', title: 'Lecture 3' })]
     statuses = {

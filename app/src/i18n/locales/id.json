@@ -235,6 +235,10 @@
     "source": {
       "untitled": "Sumber tanpa judul",
       "kindPdf": "PDF",
+      "kindDocx": "Word",
+      "kindPptx": "Slide",
+      "kindUrl": "Tautan",
+      "kindWeb": "Disimpan dari pencarian",
       "kindText": "Teks",
       "status": {
         "pending": "Menunggu dimulai",
@@ -246,11 +250,15 @@
       "removeConfirm": "Buang sumber ini?",
       "removing": "Membuang",
       "removeIt": "Buang",
-      "noun": "sumber"
+      "noun": "sumber",
+      "kindOther": "Sumber"
     },
     "upload": {
       "legend": "Tambah materi",
       "kindPdf": "File PDF",
+      "kindDocx": "Dokumen Word",
+      "kindPptx": "Slide",
+      "kindUrl": "Tautan",
       "kindText": "Teks yang ditempel",
       "textLabel": "Teks yang ditambahkan",
       "titleLabel": "Judul",
@@ -258,7 +266,9 @@
       "uploading": "Mengunggah",
       "submit": "Tambah sumber",
       "afterStored": "Setelah file tersimpan, daftar sumber di ruang belajar ini menampilkan proses ekstraksi dan pengindeksan sampai sumbernya siap.",
-      "noun": "mengunggah sumber"
+      "noun": "mengunggah sumber",
+      "urlLabel": "Tautan yang ditambahkan",
+      "urlInvalid": "Masukkan alamat web lengkap, dimulai dengan http:// atau https://"
     },
     "sourcePicker": {
       "legend": "Jawab dari",

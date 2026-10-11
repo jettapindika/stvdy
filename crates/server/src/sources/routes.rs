@@ -17,28 +17,74 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
+use stvdy_core::traits::search::{FetchError, PageFetcher};
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
+use crate::integrations::fetch;
 use crate::integrations::storage as storage_integration;
 use crate::state::AppState;
 
 use super::status::status;
 
-/// Kinds Phase 1 accepts. PPTX/DOCX/URL/syllabus are Phase 7 work (roadmap
-/// Phase 7 lists them explicitly); rejecting them with a clear message is
-/// better than accepting a file that silently produces no text.
-const SUPPORTED_KINDS: &[&str] = &["pdf", "text"];
+/// Kinds this server accepts.
+///
+/// One list, and the dispatch in [`create`] is a `match` over it, so a kind cannot
+/// be accepted and then fall through to "unsupported": the `other` arm of the
+/// match is unreachable for anything in this list, which is what the route sweep
+/// and the ingestion suite between them check.
+const SUPPORTED_KINDS: &[&str] = &["pdf", "pptx", "docx", "url", "text", "web"];
 
 /// One gigabyte is a ceiling that no plan allows, so it exists only to stop a
 /// malicious client from streaming forever before the plan check runs.
 const HARD_MAX_BYTES: usize = 1024 * 1024 * 1024;
+
+/// The extension a kind's file must carry.
+///
+/// The extension is the check, not the client's content type: a browser sends
+/// whatever the OS guessed, and an `application/pdf` label on a `.zip` would let a
+/// kind be claimed that the extractor cannot read. The two OOXML kinds share a
+/// container format, so their extensions are the only thing distinguishing them —
+/// which is exactly why the guard is per kind rather than per container.
+fn required_extension(kind: &str) -> Option<&'static str> {
+    match kind {
+        "pdf" => Some(".pdf"),
+        "docx" => Some(".docx"),
+        "pptx" => Some(".pptx"),
+        _ => None,
+    }
+}
+
+/// The media type stored for a kind, when the client's guess is not usable.
+fn default_mime(kind: &str) -> &'static str {
+    match kind {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text" | "web" => "text/plain",
+        _ => "text/plain",
+    }
+}
+
+/// The object key's extension for a kind.
+fn key_extension(kind: &str) -> &'static str {
+    match kind {
+        "pdf" => "pdf",
+        "docx" => "docx",
+        "pptx" => "pptx",
+        _ => "txt",
+    }
+}
 
 pub fn routes(body_limit_bytes: usize) -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/sources", get(list).post(create))
         .route("/sources/{id}/status", get(status))
         .route("/sources/{id}/file", get(file_url))
+        // The uniform viewer: PPTX and DOCX get a PDF rendition, so the client
+        // opens one media type for every source kind instead of learning three.
+        // A read, so it is never entitlement-gated (A149).
+        .route("/sources/{id}/preview", get(preview_url))
         .route("/sources/{id}", delete(remove))
         // The local storage backend's signed URL points here. It is
         // deliberately not behind `AuthUser`: the signature *is* the
@@ -229,12 +275,164 @@ pub async fn list(
     Ok(Json(serde_json::json!({ "sources": sources })))
 }
 
-/// `POST /workspaces/:id/sources` (multipart: `kind`, then `file` or `text`).
+/// What a request turned into, once the kind's own guard has passed.
+struct Prepared {
+    /// The bytes to store, or `None` when the kind has no original file.
+    ///
+    /// `None` is only `url`: its text is fetched by the ingest job, so the upload
+    /// stores nothing and the source counts zero against the storage quota (A157).
+    body: Option<Vec<u8>>,
+    mime: String,
+    title: String,
+    /// Set by the two fetch-based kinds.
+    url: Option<String>,
+}
+
+/// Validates one kind's payload and, for `web`, fetches it.
+///
+/// One function per concern, and the `match` is exhaustive over
+/// [`SUPPORTED_KINDS`]: a kind that is listed but not handled here cannot compile,
+/// which is the difference between a guard and a comment.
+async fn prepare(
+    state: &AppState,
+    kind: &str,
+    title: Option<String>,
+    file: Option<(String, String, Vec<u8>)>,
+    text: Option<String>,
+    url: Option<String>,
+) -> AppResult<Prepared> {
+    match kind {
+        "pdf" | "docx" | "pptx" => {
+            let (filename, mime, bytes) =
+                file.ok_or_else(|| AppError::Validation(format!("a {kind} source needs a file")))?;
+
+            // The extension is the check, not the client's content type: a browser
+            // sends whatever the OS guessed, and an `application/pdf` label on a zip
+            // would claim a kind the extractor cannot read.
+            let extension = required_extension(kind).unwrap_or_default();
+            if !filename.to_lowercase().ends_with(extension) {
+                return Err(AppError::Validation(format!(
+                    "{kind} sources must be {extension} files"
+                )));
+            }
+
+            let title = title.unwrap_or_else(|| filename.clone());
+            let mime = if mime == "application/octet-stream" {
+                default_mime(kind).to_string()
+            } else {
+                mime
+            };
+            Ok(Prepared {
+                body: Some(bytes),
+                mime,
+                title,
+                url: None,
+            })
+        }
+        "text" => {
+            let body = text.ok_or_else(|| {
+                AppError::Validation("a text source needs the text field".to_string())
+            })?;
+            if body.trim().is_empty() {
+                return Err(AppError::Validation("the text is empty".to_string()));
+            }
+            let title = title.unwrap_or_else(|| first_line_title(&body));
+            Ok(Prepared {
+                body: Some(body.into_bytes()),
+                mime: "text/plain".to_string(),
+                title,
+                url: None,
+            })
+        }
+        // A URL the user typed. The scheme is checked here so the error is
+        // immediate and specific; the fetch itself is the ingest job's, so the
+        // request does not block on someone else's server and the SSRF refusal
+        // lands on `sources.error` where the client already shows it.
+        "url" => {
+            let url = url.filter(|value| !value.is_empty()).ok_or_else(|| {
+                AppError::Validation("a url source needs the url field".to_string())
+            })?;
+            let parsed = fetch::parse_target(&url).map_err(|error| {
+                AppError::Validation(format!("this is not a link this server can open: {error}"))
+            })?;
+            let title =
+                title.unwrap_or_else(|| parsed.host_str().unwrap_or("Untitled link").to_string());
+            Ok(Prepared {
+                body: None,
+                mime: "text/plain".to_string(),
+                title,
+                url: Some(parsed.to_string()),
+            })
+        }
+        // "Save to workspace" from a search hit (the Phase 3 acceptance item that
+        // was never wired). The page is fetched **now** rather than by the job,
+        // because saving a result is meant to preserve what was saved: the text
+        // that was on the page when the student saved it, not whatever is there
+        // when a retry happens to run.
+        "web" => {
+            let url = url.filter(|value| !value.is_empty()).ok_or_else(|| {
+                AppError::Validation("a web source needs the url field".to_string())
+            })?;
+            let parsed = fetch::parse_target(&url).map_err(|error| {
+                AppError::Validation(format!("this is not a link this server can open: {error}"))
+            })?;
+
+            let page = state
+                .fetcher
+                .fetch(parsed.as_str())
+                .await
+                .map_err(|error| {
+                    match error {
+                        // A refusal is the SSRF guard answering, and it is the user's
+                        // input that is wrong, not our provider: 400, not 502.
+                        FetchError::Refused(reason) | FetchError::Invalid(reason) => {
+                            AppError::Validation(reason)
+                        }
+                        FetchError::Provider(reason) => {
+                            AppError::Provider(format!("fetching the page: {reason}"))
+                        }
+                    }
+                })?;
+
+            if page.text.trim().is_empty() {
+                return Err(AppError::Validation(
+                    "this page has no readable text to save".to_string(),
+                ));
+            }
+
+            let title = title.unwrap_or_else(|| {
+                if page.title.trim().is_empty() {
+                    parsed.host_str().unwrap_or("Saved page").to_string()
+                } else {
+                    page.title.clone()
+                }
+            });
+            Ok(Prepared {
+                body: Some(page.text.into_bytes()),
+                mime: "text/plain".to_string(),
+                title,
+                // The URL that actually answered, so the citation points at the page
+                // the text came from rather than at a redirect.
+                url: Some(page.final_url),
+            })
+        }
+        other => Err(AppError::Validation(format!("unsupported kind {other}"))),
+    }
+}
+
+/// `POST /workspaces/:id/sources` (multipart: `kind`, then `file`, `text` or `url`).
 ///
 /// Takes `VerifiedUser`, not `AuthUser`: ingestion is one of the four things A43
 /// keeps locked until the address is confirmed ("chat, generation, search and
 /// ingestion stay locked until `email_verified`"), and it is the first route in
 /// the project that spends provider money on embedding calls.
+///
+/// The six kinds divide into three shapes, and the difference is deliberate:
+///   * `pdf`, `pptx`, `docx` — an original file, stored, charged against storage;
+///   * `text` — pasted text, stored like a file so the job has one read path;
+///   * `url` — no bytes at all; the job fetches the page (A157);
+///   * `web` — "save to workspace", fetched now and stored, so the snapshot is
+///     what the student saved.
 pub async fn create(
     State(state): State<AppState>,
     user: VerifiedUser,
@@ -258,6 +456,7 @@ pub async fn create(
     let mut title: Option<String> = None;
     let mut file: Option<(String, String, Vec<u8>)> = None;
     let mut text: Option<String> = None;
+    let mut url: Option<String> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -292,8 +491,18 @@ pub async fn create(
                         .map_err(|error| AppError::Validation(error.to_string()))?,
                 );
             }
+            "url" => {
+                url = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|error| AppError::Validation(error.to_string()))?
+                        .trim()
+                        .to_string(),
+                );
+            }
             "file" => {
-                let filename = field.file_name().unwrap_or("upload.pdf").to_string();
+                let filename = field.file_name().unwrap_or("upload").to_string();
                 let mime = field
                     .content_type()
                     .unwrap_or("application/octet-stream")
@@ -319,38 +528,16 @@ pub async fn create(
         )));
     }
 
-    let (body, mime, default_title): (Vec<u8>, String, String) = match kind.as_str() {
-        "pdf" => {
-            let (filename, mime, bytes) =
-                file.ok_or_else(|| AppError::Validation("a pdf source needs a file".to_string()))?;
-            // The extension is the check, not the client's content type: a
-            // browser sends whatever the OS guessed.
-            if !filename.to_lowercase().ends_with(".pdf") {
-                return Err(AppError::Validation(
-                    "pdf sources must be .pdf files".to_string(),
-                ));
-            }
-            let title = title
-                .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| filename.clone());
-            (bytes, mime, title)
-        }
-        "text" => {
-            let body = text.ok_or_else(|| {
-                AppError::Validation("a text source needs the text field".to_string())
-            })?;
-            if body.trim().is_empty() {
-                return Err(AppError::Validation("the text is empty".to_string()));
-            }
-            let title = title
-                .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| first_line_title(&body));
-            (body.into_bytes(), "text/plain".to_string(), title)
-        }
-        other => return Err(AppError::Validation(format!("unsupported kind {other}"))),
-    };
+    let title = title.filter(|t| !t.trim().is_empty());
+    let prepared = prepare(
+        &state, &kind, title, file, text,
+        url,
+        // The multipart field order is the client's, so a `url` that arrives before
+        // the `kind` cannot be dispatched on; it is read above and used here.
+    )
+    .await?;
 
-    let size = body.len() as i64;
+    let size = prepared.body.as_ref().map_or(0, |body| body.len() as i64);
     // One decision for three axes: `max_file_mb` (a ceiling, so a 20 MB file fits a
     // 20 MB plan), `sources_total` (a count, so the check is `used < max`), and
     // `storage_mb` (a running total, so the check is `existing + new <= quota`). The
@@ -359,30 +546,40 @@ pub async fn create(
     //
     // `sources_total` is a separate axis from storage on purpose: a text source is a few
     // KB, so without it one account could create unbounded sources while staying far
-    // under the storage cap.
+    // under the storage cap. A `url` source is the extreme case of that: zero bytes, so
+    // only this count bounds it.
     crate::entitlements::require(&state, &user, Feature::UploadSource { size_bytes: size }).await?;
 
     let source_id = Uuid::now_v7();
-    let key = object_key(user.user_id, source_id, &kind);
-    state
-        .storage
-        .put(&key, bytes::Bytes::from(body), &mime)
-        .await
-        .map_err(|error| AppError::Provider(format!("storing the source: {error}")))?;
+    // A `url` source has no original file at all: its text is fetched by the ingest
+    // job, so there is nothing to store and nothing to charge the quota for (A157).
+    let file_key = match &prepared.body {
+        Some(body) => {
+            let key = object_key(user.user_id, source_id, &kind);
+            state
+                .storage
+                .put(&key, bytes::Bytes::from(body.clone()), &prepared.mime)
+                .await
+                .map_err(|error| AppError::Provider(format!("storing the source: {error}")))?;
+            Some(key)
+        }
+        None => None,
+    };
 
     sqlx::query(
         "insert into sources
-           (id, user_id, workspace_id, kind, title, file_key, file_size, mime, status)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')",
+           (id, user_id, workspace_id, kind, title, url, file_key, file_size, mime, status)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')",
     )
     .bind(source_id)
     .bind(user.user_id)
     .bind(workspace_id)
     .bind(&kind)
-    .bind(&default_title)
-    .bind(&key)
-    .bind(size)
-    .bind(&mime)
+    .bind(&prepared.title)
+    .bind(&prepared.url)
+    .bind(&file_key)
+    .bind(file_key.as_ref().map(|_| size))
+    .bind(&prepared.mime)
     .execute(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("recording the source: {error}")))?;
@@ -418,11 +615,10 @@ pub async fn create(
 /// account's prefix, and deterministic so a retry overwrites rather than
 /// duplicates.
 fn object_key(user_id: Uuid, source_id: Uuid, kind: &str) -> String {
-    let extension = match kind {
-        "pdf" => "pdf",
-        _ => "txt",
-    };
-    format!("users/{user_id}/sources/{source_id}.{extension}")
+    format!(
+        "users/{user_id}/sources/{source_id}.{}",
+        key_extension(kind)
+    )
 }
 
 /// A title from pasted text: the first non-empty line, trimmed to something a
@@ -530,6 +726,52 @@ pub async fn remove(
     delete_objects(&state, &keys).await;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /sources/:id/preview`: a short-lived URL for the PDF rendition.
+///
+/// The uniform viewer's one media type: a PPTX or DOCX is rendered to PDF by
+/// LibreOffice during ingestion and stored under `preview_key`, so the client
+/// opens a PDF for every kind instead of learning three viewers. `404` when the
+/// source has no rendition — which is the honest answer both when no converter is
+/// installed (A158) and when the kind has no original file to render.
+///
+/// A read, and one of the caller's own rows, so it is never entitlement-gated
+/// (A149): a student over the source limit must still be able to read what they
+/// already have.
+pub async fn preview_url(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(source_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let row = sqlx::query_as::<_, (Option<String>,)>(
+        "select preview_key from sources
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(source_id)
+    .bind(user.user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading a source: {error}")))?;
+
+    let key = row.and_then(|(key,)| key).ok_or(AppError::NotFound)?;
+
+    let url = storage_integration::source_file_url(
+        &state.config.storage,
+        state.storage.as_ref(),
+        &source_id.to_string(),
+        &key,
+    )
+    .await
+    .map_err(|error| AppError::Provider(format!("signing a URL: {error}")))?;
+
+    let expires_at = Utc::now()
+        + chrono::Duration::from_std(state.config.storage.presign_ttl)
+            .unwrap_or_else(|_| chrono::Duration::minutes(15));
+
+    Ok(Json(
+        serde_json::json!({ "url": url, "expires_at": expires_at }),
+    ))
 }
 
 /// `GET /sources/:id/file`: a short-lived URL for the original.
