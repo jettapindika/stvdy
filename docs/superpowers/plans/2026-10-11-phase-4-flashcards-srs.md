@@ -1933,6 +1933,9 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+// `Row` is required for `row.get::<T, _>("column")`; a trait object's methods resolve
+// without an import, but a `PgRow`'s do not.
+use sqlx::Row;
 use uuid::Uuid;
 
 use stvdy_core::config::Limit;
@@ -2365,7 +2368,56 @@ pub async fn review_card(
 }
 ```
 
-Plus the small helpers in the same file: `owned_deck`, `deck_from_row`, `card_from_row`.
+Plus the helpers in the same file:
+
+```rust
+/// The deck, or 404 when it is not this user's. Tombstones are excluded, so a
+/// deleted deck is indistinguishable from one that never existed.
+async fn owned_deck(state: &AppState, user_id: Uuid, deck_id: Uuid) -> AppResult<DeckJson> {
+    let row = sqlx::query(
+        "select d.id, d.workspace_id, d.title, d.source_ids, d.status, d.error,
+                d.requested_count, d.created_at,
+                (select count(*) from flashcards f
+                  where f.deck_id = d.id and f.deleted_at is null) as card_count
+           from decks d
+          where d.id = $1 and d.user_id = $2 and d.deleted_at is null",
+    )
+    .bind(deck_id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the deck: {error}")))?;
+
+    row.as_ref().map(deck_from_row).ok_or(AppError::NotFound)
+}
+
+fn deck_from_row(row: &sqlx::postgres::PgRow) -> DeckJson {
+    DeckJson {
+        id: row.get("id"),
+        workspace_id: row.get("workspace_id"),
+        title: row.get("title"),
+        source_ids: row.get("source_ids"),
+        status: row.get("status"),
+        error: row.get("error"),
+        requested_count: row.get("requested_count"),
+        card_count: row.get("card_count"),
+        created_at: row.get("created_at"),
+    }
+}
+
+fn card_from_row(row: &sqlx::postgres::PgRow) -> CardJson {
+    CardJson {
+        id: row.get("id"),
+        deck_id: row.get("deck_id"),
+        front: row.get("front"),
+        back: row.get("back"),
+        chunk_id: row.get("chunk_id"),
+        ease: row.get("ease"),
+        interval_days: row.get("interval_days"),
+        due_at: row.get("due_at"),
+    }
+}
+```
 
 - [ ] **Step 6: Implement the generation job**
 
