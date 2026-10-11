@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  API_ERROR_CODES,
   ApiError,
+  type ApiErrorCode,
   apiErrorReason,
   apiErrorTitle,
   apiErrorFromBody,
@@ -108,26 +110,73 @@ describe('mapping a response body', () => {
   })
 
   it('has a title and a reason for every code', () => {
-    for (const code of [
-      'validation',
-      'unauthorized',
-      'token_expired',
-      'plan_required',
-      'feature_locked',
-      'email_not_verified',
-      'not_found',
-      'conflict',
-      'limit_reached',
-      'insufficient_credits',
-      'rate_limited',
-      'provider_error',
-      'internal',
-      'network',
-    ] as const) {
+    // Iterates the exported list rather than a copy of it. A hardcoded list
+    // cannot fail when a code is added on the server, which is exactly how
+    // `link_expired` shipped with no client mapping.
+    for (const code of API_ERROR_CODES) {
       const error = new ApiError({ status: 0, code, message: '' })
       expect(apiErrorTitle(error).length).toBeGreaterThan(0)
       expect(apiErrorReason(error).length).toBeGreaterThan(0)
     }
+  })
+
+  it('gives every code its documented status', () => {
+    // The switches are easy to leave half-wired: `Record<ApiErrorCode, …>` forces
+    // the *tables* to be complete, but a missing `case` in a switch falls through
+    // to a `default` arm and `tsc` stays green. That is how `link_expired` shipped
+    // mapping to 400. This table is the documented status per code, and it is
+    // checked for completeness against the exported list.
+    //
+    // A round trip is not usable here: several codes share a status (401 is both
+    // `unauthorized` and `token_expired`), so `codeForStatus(statusForCode(code))`
+    // legitimately returns a sibling.
+    const expected: Record<ApiErrorCode, number> = {
+      validation: 400,
+      unauthorized: 401,
+      token_expired: 401,
+      plan_required: 403,
+      feature_locked: 403,
+      email_not_verified: 403,
+      not_found: 404,
+      conflict: 409,
+      link_expired: 410,
+      limit_reached: 422,
+      insufficient_credits: 402,
+      rate_limited: 429,
+      provider_error: 502,
+      internal: 500,
+      network: 0,
+    }
+
+    // Every exported code has an entry, and every entry is an exported code: a
+    // code added on the server and not here fails, and a stale entry fails too.
+    expect(Object.keys(expected).sort()).toEqual([...API_ERROR_CODES].sort())
+
+    for (const code of API_ERROR_CODES) {
+      expect({ code, status: statusForCode(code) }).toEqual({
+        code,
+        status: expected[code],
+      })
+    }
+
+    // The statuses the server actually sends map back to a code, never to a
+    // fall-through.
+    for (const status of [400, 401, 402, 403, 404, 409, 410, 422, 429, 500, 502]) {
+      expect(API_ERROR_CODES).toContain(codeForStatus(status))
+    }
+  })
+
+  it('reads a 410 as an expired link rather than a validation failure', () => {
+    // The server distinguishes an expired signed URL (410 `link_expired`) from a
+    // tampered one (403), because the remedy differs. Falling through to
+    // `validation` would tell the user the request was malformed.
+    const expired = apiErrorFromBody(410, { code: 'link_expired', message: 'expired' })
+    expect(expired.code).toBe('link_expired')
+    expect(apiErrorReason(expired)).toContain('expired')
+
+    // A 410 with a body the client does not recognise still reads as expiry.
+    const bare = apiErrorFromBody(410, null)
+    expect(bare.code).toBe('link_expired')
   })
 })
 

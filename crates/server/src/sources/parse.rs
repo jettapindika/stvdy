@@ -32,21 +32,3 @@ pub fn pdf_pages(
     }
     Ok(pages)
 }
-
-#[cfg(test)]
-mod tests {
-
-    /// A hand-built `Pdfium` is impossible without bindings, and binding one
-    /// here would occupy the process-wide slot and make a later `init` fail. The
-    /// init and missing-file paths are covered by `integrations::documents`; this
-    /// asserts the property the caller depends on, that the handle is absent in a
-    /// process that never initialized it, so `pdf_pages` is never reached with a
-    /// fake document.
-    #[test]
-    fn the_handle_is_absent_before_init() {
-        assert!(
-            crate::integrations::documents::handle().is_none(),
-            "no test may bind pdfium, or a later `init` would fail on the second bind"
-        );
-    }
-}

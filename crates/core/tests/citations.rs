@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 use stvdy_core::citations::{
     Citation, ContextLabels, LabeledChunk, LabeledWeb, resolve, streamable_end, strip_unknown,
-    strip_unknown_preserving_spacing,
 };
 
 fn labels(chunk_labels: &[u32]) -> ContextLabels {
@@ -269,10 +268,15 @@ fn a_complete_marker_is_streamable_but_a_partial_one_is_not() {
     assert_eq!(streamable_end("claim [1]"), "claim [1]".len());
 
     // A marker still being assembled is not: `[9` may yet become `[9]`, which
-    // must be validated rather than shown.
-    assert_eq!(streamable_end("claim [9"), "claim ".len());
-    assert_eq!(streamable_end("claim ["), "claim ".len());
-    assert_eq!(streamable_end("claim [W"), "claim ".len());
+    // must be validated rather than shown. The space before the bracket is held
+    // too, because `strip_unknown` swallows it with the marker and an emitted
+    // byte cannot be taken back.
+    assert_eq!(streamable_end("claim [9"), "claim".len());
+    assert_eq!(streamable_end("claim ["), "claim".len());
+    assert_eq!(streamable_end("claim [W"), "claim".len());
+    // With no preceding space there is nothing extra to hold.
+    assert_eq!(streamable_end("claim[9"), "claim".len());
+    assert_eq!(streamable_end("[9"), 0);
 
     // A prose bracket with no close within a marker's length is emitted rather
     // than stalling the stream for the rest of the answer.
@@ -281,57 +285,91 @@ fn a_complete_marker_is_streamable_but_a_partial_one_is_not() {
 }
 
 #[test]
-fn streaming_strips_an_unknown_marker_and_keeps_the_spacing() {
+fn a_dropped_marker_takes_its_preceding_space_and_nothing_else() {
     let context = labels_with_web();
 
     // The exact case the browser run caught: a fabricated label must not reach
-    // the user, and the words around it must stay separated.
+    // the user, and the sentence must read cleanly afterwards.
+    assert_eq!(strip_unknown("a claim [9] and", &context), "a claim and");
+    assert_eq!(strip_unknown("a claim [9].", &context), "a claim.");
+    assert_eq!(strip_unknown("one [9], two", &context), "one, two");
+    assert_eq!(strip_unknown("word [9] word", &context), "word word");
+
+    // A trailing space is never trimmed: the streaming path depends on it, or the
+    // next fragment would be joined to this one.
+    assert_eq!(strip_unknown("Mitochondria ", &context), "Mitochondria ");
+    assert_eq!(strip_unknown("Mitochondria", &context), "Mitochondria");
+
+    // A known label survives byte for byte, and the space before it stays.
     assert_eq!(
-        strip_unknown_preserving_spacing("a claim [9] and", &context),
-        "a claim  and",
-        "the marker goes; the surrounding spacing is the caller's to manage"
-    );
-    // A known label survives byte for byte.
-    assert_eq!(
-        strip_unknown_preserving_spacing("a claim [1] and", &context),
+        strip_unknown("a claim [1] and", &context),
         "a claim [1] and"
-    );
-    // Crucially, a trailing space is NOT trimmed: the next streamed fragment
-    // would otherwise join the two words.
-    assert_eq!(
-        strip_unknown_preserving_spacing("Mitochondria ", &context),
-        "Mitochondria "
     );
 }
 
 #[test]
-fn the_streaming_path_never_emits_an_unknown_marker() {
-    // Simulates the token loop: a model streaming an answer that cites a
-    // fabricated label one character at a time.
+fn the_streamed_text_equals_the_stored_text() {
     let context = labels_with_web();
-    let answer = "ATP is made here [1], and also [9].";
+    let answer = "ATP is made here [1], and also [9]. The rest is ordinary.";
+
+    // The stored copy.
+    let stored = strip_unknown(answer, &context);
+
+    // The streamed copy, fragment by fragment through the same hold-back the
+    // server uses.
     let mut emitted = String::new();
     let mut cursor = 0;
-
     for (index, _) in answer.char_indices() {
         let end = index + 1;
         let safe = streamable_end(&answer[..end]);
         if safe > cursor {
-            emitted.push_str(&strip_unknown_preserving_spacing(
-                &answer[cursor..safe],
-                &context,
-            ));
+            emitted.push_str(&strip_unknown(&answer[cursor..safe], &context));
             cursor = safe;
         }
     }
-    emitted.push_str(&strip_unknown_preserving_spacing(
-        &answer[cursor..],
-        &context,
-    ));
+    emitted.push_str(&strip_unknown(&answer[cursor..], &context));
 
-    assert_eq!(emitted, "ATP is made here [1], and also .");
-    assert!(
-        !emitted.contains("[9]"),
-        "a fabricated marker must never reach the screen: {emitted:?}"
+    assert_eq!(
+        emitted, stored,
+        "the user must not watch the text change when the answer is finalised"
     );
+    assert!(!emitted.contains("[9]"), "{emitted:?}");
+    assert!(emitted.contains("[1]"), "{emitted:?}");
+}
+
+#[test]
+fn the_space_before_a_marker_is_held_when_the_two_arrive_separately() {
+    let context = labels_with_web();
+    let answer = "ATP is made here [1], and also [9].";
+
+    // The boundary the joined-text test cannot see: a provider that emits
+    // `"and also "` as one token and `"[9]."` as the next. The space is emitted
+    // before the marker is ever visible, so the hold-back must keep a trailing
+    // space rather than only looking at the unmatched bracket.
+    let fragments = ["ATP is made here ", "[1], ", "and also ", "[9]."];
+
+    let mut emitted = String::new();
+    let mut seen = String::new();
+    // The cursor is an index into `seen`, not `emitted.len()`: `strip_unknown`
+    // removes bytes, so the two differ and using the wrong one silently skips
+    // text.
+    let mut cursor = 0;
+    for fragment in fragments {
+        seen.push_str(fragment);
+        let safe = streamable_end(&seen);
+        if safe > cursor {
+            emitted.push_str(&strip_unknown(&seen[cursor..safe], &context));
+            cursor = safe;
+        }
+    }
+    // The final flush, as the route does at the end of the stream.
+    emitted.push_str(&strip_unknown(&seen[cursor..], &context));
+
+    assert_eq!(
+        emitted,
+        strip_unknown(answer, &context),
+        "a space emitted before its marker arrives is what breaks the equality"
+    );
+    assert!(!emitted.contains("[9]"), "{emitted:?}");
+    assert!(emitted.contains("[1]"), "{emitted:?}");
 }

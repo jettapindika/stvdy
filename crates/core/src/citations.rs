@@ -200,9 +200,17 @@ pub fn resolve(text: &str, labels: &ContextLabels) -> Vec<Citation> {
 /// Removes every *unknown* label marker from `text`, so a reply cannot show a
 /// citation the user cannot open.
 ///
-/// Known labels are left exactly as written (including `[w1]` lowercased), and
-/// a body that is not a valid label at all is left untouched: rewriting
-/// `[abc]` would be guessing at the author's intent.
+/// Known labels are left exactly as written (including `[w1]` lowercased), and a
+/// body that is not a valid label at all is left untouched: rewriting `[abc]`
+/// would be guessing at the author's intent.
+///
+/// Dropping a marker also drops the single space immediately before it, so
+/// `"and also [9]."` becomes `"and also."` rather than `"and also ."`. That rule
+/// is deliberately the *only* whitespace rule: tidying the seam afterwards would
+/// trim trailing spaces, and the streaming path must not lose one, because the
+/// next fragment would then be joined to this one. One rule means the streamed
+/// text and the stored text are byte-identical, so the user does not watch
+/// punctuation move when the answer is finalised.
 pub fn strip_unknown(text: &str, labels: &ContextLabels) -> String {
     let markers = scan(text);
     if markers.is_empty() {
@@ -211,54 +219,22 @@ pub fn strip_unknown(text: &str, labels: &ContextLabels) -> String {
 
     let mut output = String::with_capacity(text.len());
     let mut cursor = 0;
-    let mut removed_any = false;
     for marker in markers {
         if is_known(marker.label, labels) {
             continue;
         }
-        output.push_str(&text[cursor..marker.start]);
+        // The space before the marker, if there is one. `cursor` is where the
+        // previous kept span ended, so the space is only swallowed when it
+        // belongs to the text immediately preceding this marker.
+        let mut start = marker.start;
+        if start > cursor && text[..start].ends_with(' ') {
+            start -= 1;
+        }
+        output.push_str(&text[cursor..start]);
         cursor = marker.end;
-        removed_any = true;
     }
     output.push_str(&text[cursor..]);
-
-    if removed_any {
-        tidy_removal(&output)
-    } else {
-        output
-    }
-}
-
-/// Removes the whitespace a dropped marker leaves behind.
-///
-/// "and also [9]." becomes "and also ." without this, which reads as a typo in an
-/// otherwise clean sentence. Only the seams are touched: a double space or a
-/// space before sentence punctuation, both of which are artifacts of removal
-/// rather than anything the model wrote.
-fn tidy_removal(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut previous_was_space = false;
-
-    for character in text.chars() {
-        if character == ' ' {
-            if previous_was_space {
-                continue;
-            }
-            // A space immediately before punctuation is the removal seam, not
-            // the model's spacing, so it is dropped.
-            previous_was_space = true;
-            continue;
-        }
-        if previous_was_space {
-            if !matches!(character, '.' | ',' | ';' | ':' | '!' | '?' | ')') {
-                out.push(' ');
-            }
-            previous_was_space = false;
-        }
-        out.push(character);
-    }
-
-    out.trim_end().to_string()
+    output
 }
 
 /// The largest marker the scanner recognises: `[999]` and `[W99]` are both five
@@ -274,44 +250,35 @@ pub const MAX_MARKER_BYTES: usize = 8;
 /// otherwise stall the stream for the rest of the answer.
 ///
 /// This exists because streaming raw tokens leaks citations: a model that writes
-/// `[9]` for a label the server never sent would show the user a marker it has
-/// already decided to drop, and then that marker would vanish when the persisted
-/// copy replaced it.
+/// `[9]` for a label the server never sent would show the user a marker the
+/// server has already decided to drop, and the user would then watch it vanish
+/// when the persisted copy replaced the live turn.
 pub fn streamable_end(text: &str) -> usize {
-    match text.rfind('[') {
-        Some(open) if !text[open..].contains(']') => {
-            let held = text.len() - open;
-            if held <= MAX_MARKER_BYTES {
-                open
+    let mut end = text.len();
+
+    // Never emit a trailing space on its own. The next byte may be a marker whose
+    // preceding space `strip_unknown` has to swallow, and an emitted byte cannot
+    // be taken back: emitting the space early is what made the streamed sentence
+    // read "and also ." where the stored one reads "and also.".
+    if text.ends_with(' ') {
+        end -= 1;
+    }
+
+    // Hold an unterminated marker, and the space before it, so a complete marker
+    // is always validated as a unit.
+    if let Some(open) = text.rfind('[')
+        && !text[open..].contains(']')
+    {
+        let held = text.len() - open;
+        if held <= MAX_MARKER_BYTES {
+            let marker_start = if open > 0 && text[..open].ends_with(' ') {
+                open - 1
             } else {
-                text.len()
-            }
+                open
+            };
+            end = end.min(marker_start);
         }
-        _ => text.len(),
-    }
-}
-
-/// Removes unknown markers without touching the surrounding whitespace.
-///
-/// The streaming path needs this rather than [`strip_unknown`]: that one tidies
-/// the removal seam, which includes trimming a trailing space, and a streamed
-/// fragment ending in a space would lose it, joining two words when the next
-/// fragment arrived.
-pub fn strip_unknown_preserving_spacing(text: &str, labels: &ContextLabels) -> String {
-    let markers = scan(text);
-    if markers.is_empty() {
-        return text.to_string();
     }
 
-    let mut output = String::with_capacity(text.len());
-    let mut cursor = 0;
-    for marker in markers {
-        if is_known(marker.label, labels) {
-            continue;
-        }
-        output.push_str(&text[cursor..marker.start]);
-        cursor = marker.end;
-    }
-    output.push_str(&text[cursor..]);
-    output
+    end
 }

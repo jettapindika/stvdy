@@ -16,7 +16,7 @@ use futures::stream::Stream;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use stvdy_core::citations::{Citation, ContextLabels, strip_unknown};
+use stvdy_core::citations::{Citation, strip_unknown};
 use stvdy_core::traits::llm::{ChatMsg, ChatRequest, Role, StreamEvent};
 
 use crate::auth::extract::VerifiedUser;
@@ -55,15 +55,6 @@ pub struct ChatBody {
     /// Study mode makes the prompt guide with hints before the answer.
     #[serde(default)]
     pub study_mode: bool,
-}
-
-/// The whole reply, for a non-streaming caller and for the tests' convenience.
-#[derive(Debug, serde::Serialize)]
-pub struct ChatOutcome {
-    pub message_id: Uuid,
-    pub content: String,
-    pub citations: Vec<Citation>,
-    pub credits_remaining: i64,
 }
 
 /// `POST /workspaces/:id/chat`, answering `text/event-stream`.
@@ -107,7 +98,7 @@ pub async fn chat(
         )
     })?;
 
-    credits::enforce_daily_chat_cap(&state, &user).await?;
+    let cap = credits::daily_chat_cap(&state, &user);
     let cost = credits::chat_message_cost(&state);
 
     let chunks = retrieve::retrieve(
@@ -136,7 +127,13 @@ pub async fn chat(
     // provider is called: retrieval and composition are a database read and a
     // pure function, so doing them first costs nothing and shrinks the window in
     // which a credit can be spent on a request that never reaches a model.
-    let remaining = credits::spend(&state.pool, user.user_id, user.plan(), ACTION, cost).await?;
+    //
+    // The daily cap is enforced inside this call, under the same lock, because a
+    // separate check and spend can interleave and let two requests through on the
+    // last slot.
+    let spent = credits::spend(&state, user.user_id, user.plan(), ACTION, cost, Some(cap)).await?;
+    let remaining = spent.remaining;
+    let usage_event_id = spent.usage_event_id;
 
     let user_message_id = insert_message(
         &state,
@@ -207,9 +204,7 @@ pub async fn chat(
                     let safe = stvdy_core::citations::streamable_end(&answer);
                     if safe > emitted {
                         let slice = &answer[emitted..safe];
-                        let visible = stvdy_core::citations::strip_unknown_preserving_spacing(
-                            slice, &labels,
-                        );
+                        let visible = stvdy_core::citations::strip_unknown(slice, &labels);
                         if !visible.is_empty() {
                             yield Ok(sse::token(&visible));
                         }
@@ -232,10 +227,7 @@ pub async fn chat(
         // Flush whatever the hold-back was keeping, so the last marker of an
         // answer still reaches the client.
         if emitted < answer.len() {
-            let visible = stvdy_core::citations::strip_unknown_preserving_spacing(
-                &answer[emitted..],
-                &labels,
-            );
+            let visible = stvdy_core::citations::strip_unknown(&answer[emitted..], &labels);
             if !visible.is_empty() {
                 yield Ok(sse::token(&visible));
             }
@@ -256,8 +248,7 @@ pub async fn chat(
         if let Some(reported) = &usage
             && let Err(error) = credits::record_provider_usage(
                 &state_for_stream.pool,
-                user_id,
-                ACTION,
+                usage_event_id,
                 reported.in_tokens,
                 reported.out_tokens,
                 reported.provider_cost_usd,
@@ -423,22 +414,4 @@ pub async fn list_messages(
         .collect();
 
     Ok(Json(serde_json::json!({ "messages": messages })))
-}
-
-/// Exposed for the tests: the label map a request would build, without the
-/// streaming half.
-pub fn labels_for(chunks: &[retrieve::RetrievedChunk]) -> ContextLabels {
-    ContextLabels::new(
-        chunks
-            .iter()
-            .enumerate()
-            .map(|(index, chunk)| stvdy_core::citations::LabeledChunk {
-                label: index as u32 + 1,
-                chunk_id: chunk.chunk_id,
-                source_id: chunk.source_id,
-                page: chunk.page,
-            })
-            .collect(),
-        Vec::new(),
-    )
 }

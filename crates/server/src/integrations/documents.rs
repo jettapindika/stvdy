@@ -21,17 +21,30 @@ use pdfium_render::prelude::Pdfium;
 /// ingest job reports as a readable error rather than as an empty document.
 static PDFIUM: OnceLock<Arc<Pdfium>> = OnceLock::new();
 
-/// Binds pdfium from `path`.
+/// Binds pdfium from `path`, or returns the handle already bound.
 ///
 /// `Ok(false)` means no path is configured, so this deployment does not do PDFs.
 /// An error means a path *was* configured and the library could not be loaded:
 /// that is a boot failure, because a configured extractor that silently does
 /// nothing is worse than an absent one.
+///
+/// **Idempotent on purpose.** `pdfium-render` keeps its bindings in a process-wide
+/// slot and returns `PdfiumLibraryBindingsAlreadyInitialized` on a second
+/// `bind_to_library`, which is also what the crate does internally: it reuses the
+/// existing bindings rather than failing. Treating that one error as success is
+/// what makes a second `init` harmless, and a second `init` is easy to reach: two
+/// tests in one binary, a boot path that runs twice, or a future caller that wants
+/// to be sure. Any *other* load failure is still an error.
 pub fn init(path: Option<&Path>) -> anyhow::Result<bool> {
     let Some(path) = path else {
         tracing::info!("PDFIUM_LIB_PATH is unset; PDF ingestion is disabled");
         return Ok(false);
     };
+
+    if PDFIUM.get().is_some() {
+        tracing::debug!("pdfium is already bound; reusing the handle");
+        return Ok(true);
+    }
 
     anyhow::ensure!(
         path.exists(),
@@ -39,11 +52,25 @@ pub fn init(path: Option<&Path>) -> anyhow::Result<bool> {
         path.display()
     );
 
-    let bindings = Pdfium::bind_to_library(path)
-        .map_err(|error| anyhow::anyhow!("loading pdfium from {}: {error}", path.display()))?;
+    let bindings = match Pdfium::bind_to_library(path) {
+        Ok(bindings) => bindings,
+        // Already bound, by this function on another thread or by something else
+        // in the process. Reuse is correct, so this is not a failure.
+        Err(pdfium_render::prelude::PdfiumError::PdfiumLibraryBindingsAlreadyInitialized) => {
+            tracing::debug!("pdfium was already bound; reusing the existing bindings");
+            return Ok(true);
+        }
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "loading pdfium from {}: {error}",
+                path.display()
+            ));
+        }
+    };
+
     // `Pdfium` is `Send + Sync` under pdfium-render's `thread_safe` feature, so
-    // one handle serves the worker's tasks. `set` fails only if `init` ran twice,
-    // which the second `bind_to_library` would already have rejected.
+    // one handle serves the worker's tasks. A lost race here means another thread
+    // won, and its handle is as good as this one.
     let _ = PDFIUM.set(Arc::new(Pdfium::new(bindings)));
 
     tracing::info!(path = %path.display(), "pdfium loaded");

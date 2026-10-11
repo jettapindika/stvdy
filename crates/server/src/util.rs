@@ -27,15 +27,6 @@ pub fn local_day_start(timezone: &str, clock: &dyn Clock) -> DateTime<Utc> {
     midnight.with_timezone(&Utc)
 }
 
-/// A title shortened for a list row or a log line.
-pub fn truncate(value: &str, max_chars: usize) -> String {
-    let mut out: String = value.chars().take(max_chars).collect();
-    if value.chars().count() > max_chars {
-        out.push('…');
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,13 +57,5 @@ mod tests {
             local_day_start("Not/AZone", &clock).to_rfc3339(),
             "2026-10-11T00:00:00+00:00"
         );
-    }
-
-    #[test]
-    fn truncate_counts_characters_not_bytes() {
-        assert_eq!(truncate("abcdef", 3), "abc…");
-        assert_eq!(truncate("abc", 3), "abc");
-        // A multi-byte character must not be cut in half.
-        assert_eq!(truncate("日本語テキスト", 3), "日本語…");
     }
 }

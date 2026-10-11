@@ -14,8 +14,12 @@ are JSON unless noted.
   than only "upgrade".
 - **Status codes**: 401 unauthorized/expired token, 402 insufficient credits,
   403 plan required, feature locked, or `email_not_verified`, 404 not found,
-  409 conflict, 410 `resync_required`, 422 limit reached (`limit_reached`),
-  429 rate limited, 502 provider error.
+  409 conflict, 410 `resync_required` or `link_expired`, 422 limit reached
+  (`limit_reached`), 429 rate limited, 502 provider error.
+- **Expired versus tampered links**: a signed URL past its expiry is 410
+  `link_expired`, because the remedy is to fetch a fresh one; a signature that
+  does not match is 403. They are separated so a client can tell a retryable
+  condition from an attack.
 - **Times** are ISO 8601 UTC. Local rendering uses the user's IANA timezone from
   `GET /settings` (default `Asia/Jakarta`).
 - **IDs** are UUIDv7. Clients may supply ids on create; the server accepts them.
@@ -269,8 +273,10 @@ stored, so an over-quota file never occupies the bucket.
 - `GET /objects/:id?exp=&sig=` (public, no bearer token) → the original bytes.
   This is the local storage backend's signed download: the HMAC signature is the
   authorization, which is what makes it equivalent to an S3 presigned URL from
-  the client's point of view. 403 for a bad or expired signature; 404 on the S3
-  backend, where this route is not part of the contract.
+  the client's point of view. An expired signature is **410 `link_expired`** and a
+  mismatched one is **403**, because the remedies differ: an expired link needs a
+  fresh URL, a mismatch means the link was tampered with and must not be retried.
+  404 on the S3 backend, where this route is not part of the contract.
 
 ## Chat (Phase 2, implemented)
 

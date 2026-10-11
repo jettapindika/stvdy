@@ -32,6 +32,11 @@ pub enum AppError {
     #[error("sync cursor is older than retained history")]
     ResyncRequired,
 
+    /// A signed URL past its expiry. Distinct from `Forbidden` because the remedy
+    /// is "request a fresh link", not "you may not read this".
+    #[error("this link has expired")]
+    LinkExpired,
+
     #[error("rate limited")]
     RateLimited,
 
@@ -67,7 +72,7 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
-            AppError::ResyncRequired => StatusCode::GONE,
+            AppError::ResyncRequired | AppError::LinkExpired => StatusCode::GONE,
             // A limit the user can raise by paying is 422; a feature the plan
             // does not include at all is 403. Both are documented in the roadmap
             // § HTTP error mapping.
@@ -93,6 +98,7 @@ impl AppError {
             AppError::Validation(_) => "validation",
             AppError::Conflict(_) => "conflict",
             AppError::ResyncRequired => "resync_required",
+            AppError::LinkExpired => "link_expired",
             AppError::RateLimited => "rate_limited",
             AppError::Entitlement { code, .. } => code,
             AppError::EmailNotVerified => "email_not_verified",

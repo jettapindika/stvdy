@@ -23,32 +23,6 @@ use crate::state::AppState;
 /// Which bucket a spend came from, in the order they are consumed.
 const BUCKETS: [&str; 2] = ["monthly", "purchased"];
 
-/// The balance, as the ledger sums it. There is deliberately no balance column
-/// to keep consistent: `sum(delta)` cannot drift from the rows that produced it.
-pub async fn balance(pool: &PgPool, user_id: Uuid) -> AppResult<i64> {
-    let total: i64 = sqlx::query_scalar(
-        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the credit balance: {error}")))?;
-    Ok(total)
-}
-
-pub async fn bucket_balance(pool: &PgPool, user_id: Uuid, bucket: &str) -> AppResult<i64> {
-    let total: i64 = sqlx::query_scalar(
-        "select coalesce(sum(delta), 0)::bigint from credit_ledger
-          where user_id = $1 and bucket = $2",
-    )
-    .bind(user_id)
-    .bind(bucket)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading a credit bucket: {error}")))?;
-    Ok(total)
-}
-
 /// Grants the plan's monthly allowance, once, at the start of a period.
 ///
 /// Called at signup because that is when the first period starts. Without it a
@@ -97,19 +71,51 @@ fn plan_for_more_credits(plan: stvdy_core::config::PlanId) -> Option<&'static st
     }
 }
 
-/// Spends `credits` for `action`, returning the remaining balance.
+/// A per-local-day cap on how many times `action` may be spent.
+///
+/// Passed into [`spend`] rather than checked before it, because a check and a
+/// spend in separate statements can interleave: two concurrent requests both see
+/// 19 of 20 used and both proceed. Under the spend's advisory lock the count is
+/// exact.
+#[derive(Debug, Clone, Copy)]
+pub struct DailyCap {
+    pub limit: stvdy_core::config::Limit,
+    /// Start of the user's local day, from `util::local_day_start`.
+    pub since: DateTime<Utc>,
+    /// The label the error names, e.g. "chat messages today".
+    pub label: &'static str,
+}
+
+/// What a successful spend leaves behind.
+#[derive(Debug, Clone, Copy)]
+pub struct Spent {
+    /// The `usage_events` row this spend created.
+    ///
+    /// Returned so the provider's cost and token counts can be attached to *this*
+    /// request. Looking up "the newest row for this user and action" instead
+    /// attributes the cost to whichever request happened to finish last, which
+    /// with two chats in flight is the wrong one.
+    pub usage_event_id: Uuid,
+    /// The balance after the spend.
+    pub remaining: i64,
+}
+
+/// Spends `credits` for `action`, returning the usage row and the new balance.
 ///
 /// The advisory lock is taken **first**, before any read of the ledger: without
 /// it two concurrent requests can both see a sufficient balance and both insert,
 /// which is a double spend. It is transaction-scoped, so it is released at
-/// commit or rollback with no cleanup path to get wrong.
+/// commit or rollback with no cleanup path to get wrong. The daily cap is checked
+/// inside the same lock, for the same reason.
 pub async fn spend(
-    pool: &PgPool,
+    state: &AppState,
     user_id: Uuid,
     plan: stvdy_core::config::PlanId,
     action: &str,
     credits: i64,
-) -> AppResult<i64> {
+    daily_cap: Option<DailyCap>,
+) -> AppResult<Spent> {
+    let pool = &state.pool;
     if credits < 0 {
         return Err(AppError::Internal(anyhow::anyhow!(
             "a spend must not be negative (action {action}, credits {credits})"
@@ -129,6 +135,21 @@ pub async fn spend(
         .execute(&mut *tx)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the spend lock: {error}")))?;
+
+    if let Some(cap) = daily_cap {
+        let used: i64 = sqlx::query_scalar(
+            "select count(*)::bigint from usage_events
+              where user_id = $1 and action = $2 and created_at >= $3",
+        )
+        .bind(user_id)
+        .bind(action)
+        .bind(cap.since)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("counting usage: {error}")))?;
+
+        crate::limits::enforce_count(&state.config.plans, plan, cap.limit, used, cap.label)?;
+    }
 
     let mut available = 0i64;
     for bucket in BUCKETS {
@@ -201,22 +222,28 @@ pub async fn spend(
         remaining_to_charge -= take;
     }
 
-    sqlx::query("insert into usage_events (user_id, action, credits) values ($1, $2, $3)")
-        .bind(user_id)
-        .bind(action)
-        .bind(i32::try_from(credits).unwrap_or(i32::MAX))
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("writing a usage event: {error}")))?;
+    let usage_event_id: Uuid = sqlx::query_scalar(
+        "insert into usage_events (user_id, action, credits) values ($1, $2, $3)
+      returning id",
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(i32::try_from(credits).unwrap_or(i32::MAX))
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("writing a usage event: {error}")))?;
 
     tx.commit()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a spend: {error}")))?;
 
-    Ok(available - credits)
+    Ok(Spent {
+        usage_event_id,
+        remaining: available - credits,
+    })
 }
 
-/// Attaches the provider's cost, token counts and prompt version to the most
+/// Attaches the provider's cost, token counts and prompt version to the usage row
 /// recent `usage_events` row for this action.
 ///
 /// Written after the stream because the token counts only exist then, and the
@@ -225,8 +252,7 @@ pub async fn spend(
 /// spend in the margin report (A41).
 pub async fn record_provider_usage(
     pool: &PgPool,
-    user_id: Uuid,
-    action: &str,
+    usage_event_id: Uuid,
     in_tokens: u32,
     out_tokens: u32,
     provider_cost_usd: Option<f64>,
@@ -234,15 +260,10 @@ pub async fn record_provider_usage(
 ) -> AppResult<()> {
     sqlx::query(
         "update usage_events
-            set tokens_in = $3, tokens_out = $4, provider_cost_usd = $5, prompt_version = $6
-          where id = (
-                select id from usage_events
-                 where user_id = $1 and action = $2
-                 order by created_at desc
-                 limit 1)",
+            set tokens_in = $2, tokens_out = $3, provider_cost_usd = $4, prompt_version = $5
+          where id = $1",
     )
-    .bind(user_id)
-    .bind(action)
+    .bind(usage_event_id)
     .bind(i32::try_from(in_tokens).unwrap_or(i32::MAX))
     .bind(i32::try_from(out_tokens).unwrap_or(i32::MAX))
     .bind(provider_cost_usd)
@@ -253,60 +274,24 @@ pub async fn record_provider_usage(
     Ok(())
 }
 
-/// How many chat messages the user has sent since their local midnight.
+/// The daily chat cap for a user, from their plan and their local day.
 ///
 /// Counted from `usage_events` rather than a counter column: a counter can drift
 /// from the events that produced it, and the drift is invisible until a user is
-/// wrongly blocked. `since` is computed by the caller through `chrono-tz` (A6),
-/// never from a fixed offset.
-pub async fn count_since(
-    pool: &PgPool,
-    user_id: Uuid,
-    action: &str,
-    since: DateTime<Utc>,
-) -> AppResult<i64> {
-    let count: i64 = sqlx::query_scalar(
-        "select count(*)::bigint from usage_events
-          where user_id = $1 and action = $2 and created_at >= $3",
-    )
-    .bind(user_id)
-    .bind(action)
-    .bind(since)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting usage: {error}")))?;
-    Ok(count)
-}
-
-/// Enforces `chat_msgs_per_day` for the user's local day.
-pub async fn enforce_daily_chat_cap(
-    state: &AppState,
-    user: &crate::auth::extract::AuthUser,
-) -> AppResult<i64> {
+/// wrongly blocked. The day boundary goes through `chrono-tz` (A6), never a fixed
+/// offset.
+pub fn daily_chat_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -> DailyCap {
     let plan = user.plan();
-    let limit = state.config.plans.get(plan).chat_msgs_per_day;
-    let since = crate::util::local_day_start(&user.timezone, state.clock.as_ref());
-
-    let used = count_since(&state.pool, user.user_id, "chat_message", since).await?;
-
-    crate::limits::enforce_count(
-        &state.config.plans,
-        plan,
-        limit,
-        used,
-        "chat messages today",
-    )?;
-    Ok(used)
+    DailyCap {
+        limit: state.config.plans.get(plan).chat_msgs_per_day,
+        since: crate::util::local_day_start(&user.timezone, state.clock.as_ref()),
+        label: "chat messages today",
+    }
 }
 
 /// The cost of one chat message, from the config rather than a literal.
 pub fn chat_message_cost(state: &AppState) -> i64 {
     state.config.plans.credits.chat_message
-}
-
-/// Exposed so a handler can report the balance it just left behind.
-pub async fn remaining_after(pool: &PgPool, user_id: Uuid) -> AppResult<i64> {
-    balance(pool, user_id).await
 }
 
 #[cfg(test)]

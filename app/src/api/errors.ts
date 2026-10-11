@@ -23,6 +23,11 @@ export const API_ERROR_CODES = [
   'not_found',
   'conflict',
   'limit_reached',
+  /**
+   * A signed URL past its expiry. Distinct from `unauthorized`: the remedy is to
+   * fetch a fresh link, not to sign in again.
+   */
+  'link_expired',
   /** The account's credit balance is short of what the action costs. */
   'insufficient_credits',
   'rate_limited',
@@ -96,6 +101,8 @@ export function codeForStatus(status: number): ApiErrorCode {
       return 'validation'
     case 401:
       return 'unauthorized'
+    case 410:
+      return 'link_expired'
     case 402:
       return 'insufficient_credits'
     case 403:
@@ -138,6 +145,8 @@ export function statusForCode(code: ApiErrorCode): number {
       return 409
     case 'limit_reached':
       return 422
+    case 'link_expired':
+      return 410
     case 'rate_limited':
       return 429
     case 'unauthorized':
@@ -197,6 +206,7 @@ const REASON_BY_CODE: Record<ApiErrorCode, string> = {
   not_found: 'It is no longer there. It may have been deleted, or it belongs to another account.',
   conflict: 'Something else changed this first. Reload and try again.',
   limit_reached: 'Your plan has reached its limit for this.',
+  link_expired: 'This link has expired. Open the source again to get a fresh one.',
   insufficient_credits: 'Your credit balance is short of what this costs.',
   rate_limited: 'Too many attempts in a row. Wait a minute and try again.',
   provider_error: 'A service this depends on is failing. Nothing was saved. Try again shortly.',
@@ -219,6 +229,7 @@ const TITLE_BY_CODE: Record<ApiErrorCode, string> = {
   not_found: 'Not found',
   conflict: 'Changed elsewhere',
   limit_reached: 'Plan limit reached',
+  link_expired: 'Link expired',
   insufficient_credits: 'Not enough credits',
   rate_limited: 'Too many attempts',
   provider_error: 'Service unavailable',

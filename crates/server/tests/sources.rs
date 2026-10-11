@@ -924,3 +924,93 @@ async fn deleting_a_workspace_reclaims_its_chunks_and_objects(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
 }
+
+/// An expired link is a 410 with its own code, not a 403.
+///
+/// The two failures need different remedies: an expired link means "ask for a
+/// fresh URL", a bad signature means "this was tampered with". Collapsing them
+/// leaves a client unable to tell a retryable condition from an attack.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_expired_signed_url_is_gone_rather_than_forbidden(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "expiry@example.test").await;
+    let workspace = create_workspace(&app, &token, "Expiry").await;
+
+    let (content_type, body) = multipart(&[
+        ("kind", "text", None),
+        ("text", "Content behind a signed link.", None),
+    ]);
+    let (status, created) = send(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/sources"),
+        &token,
+        Some(&content_type),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let source_id = created["source"]["id"].as_str().unwrap().to_string();
+
+    let (_, signed) = json(
+        &app,
+        "GET",
+        &format!("/sources/{source_id}/file"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    let url = signed["url"].as_str().expect("a URL").to_string();
+    let path = url
+        .split("http://localhost:8080")
+        .nth(1)
+        .expect("a path")
+        .to_string();
+
+    // The same signature, with the expiry moved into the past. The signature
+    // covers `source_id:exp`, so this is a mismatch by construction, which is why
+    // expiry is checked before the comparison.
+    let expired = path
+        .split("exp=")
+        .nth(1)
+        .and_then(|rest| rest.split('&').next())
+        .map(|exp| path.replace(&format!("exp={exp}"), "exp=1"))
+        .expect("an expiry in the URL");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(expired)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response.status(),
+        StatusCode::GONE,
+        "an expired link must be 410, so a client knows to fetch a fresh one"
+    );
+
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["code"], "link_expired");
+
+    // And a tampered signature is still 403: not retryable.
+    let tampered = path.replace("sig=", "sig=0");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(tampered)
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

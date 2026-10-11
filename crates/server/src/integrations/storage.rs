@@ -140,16 +140,29 @@ pub fn local_signed_url(
 
 /// Verifies a signature produced by [`local_signed_url`]. Kept here rather than
 /// in the route so the signing and the checking cannot drift apart.
+/// Why a signed URL was refused.
+///
+/// Expiry and tampering are separated because the client's remedy differs: an
+/// expired link needs a fresh one, a tampered link is an attack. Collapsing both
+/// into one error leaves a client unable to tell "request a new URL" from "do not
+/// retry", and the route maps them to different statuses for that reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureError {
+    Expired,
+    Mismatch,
+}
+
 pub fn verify_local_signature(
     sign_key: &[u8],
     source_id: &str,
     exp: u64,
     sig: &str,
-) -> Result<(), StorageError> {
+) -> Result<(), SignatureError> {
     if exp < now_secs() {
-        return Err(StorageError::Invalid("signed URL expired".to_string()));
+        return Err(SignatureError::Expired);
     }
-    let expected = sign(sign_key, &format!("{source_id}:{exp}"))?;
+    let expected =
+        sign(sign_key, &format!("{source_id}:{exp}")).map_err(|_| SignatureError::Mismatch)?;
     // Constant-time compare: a byte-by-byte comparison would leak the signature.
     let matches = expected.len() == sig.len()
         && expected
@@ -160,7 +173,7 @@ pub fn verify_local_signature(
     if matches {
         Ok(())
     } else {
-        Err(StorageError::Invalid("bad signature".to_string()))
+        Err(SignatureError::Mismatch)
     }
 }
 
@@ -397,13 +410,22 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .expect("exp in URL");
         let sig = url.split("sig=").nth(1).expect("sig in URL").to_string();
-        assert!(verify_local_signature(key, "src-1", exp, &sig).is_ok());
+        assert_eq!(verify_local_signature(key, "src-1", exp, &sig), Ok(()));
         // A different object id must not validate the same signature.
-        assert!(verify_local_signature(key, "src-2", exp, &sig).is_err());
-        assert!(
-            verify_local_signature(key, "src-1", exp + 1, &sig).is_err(),
-            "signature is bound to the expiry"
+        assert_eq!(
+            verify_local_signature(key, "src-2", exp, &sig),
+            Err(SignatureError::Mismatch)
         );
-        assert!(verify_local_signature(key, "src-1", 1, &sig).is_err());
+        assert_eq!(
+            verify_local_signature(key, "src-1", exp + 1, &sig),
+            Err(SignatureError::Mismatch),
+            "the signature is bound to the expiry, so a moved expiry is a mismatch"
+        );
+        // An expiry in the past is reported as expiry, not as tampering, so the
+        // client knows to fetch a fresh link rather than to give up.
+        assert_eq!(
+            verify_local_signature(key, "src-1", 1, &sig),
+            Err(SignatureError::Expired)
+        );
     }
 }

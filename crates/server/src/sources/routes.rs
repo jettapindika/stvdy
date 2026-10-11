@@ -92,7 +92,12 @@ pub async fn download(
         query.exp,
         &query.sig,
     )
-    .map_err(|_| AppError::Forbidden)?;
+    .map_err(|error| match error {
+        // An expired link is a 410 with its own code: the client's remedy is to
+        // ask for a fresh URL, which it cannot infer from a 403.
+        storage_integration::SignatureError::Expired => AppError::LinkExpired,
+        storage_integration::SignatureError::Mismatch => AppError::Forbidden,
+    })?;
 
     let row = sqlx::query_as::<_, (Option<String>, String, Option<String>)>(
         "select file_key, kind, mime from sources

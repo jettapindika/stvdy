@@ -464,6 +464,36 @@ that runs at period start cannot help the account whose period starts at signup,
 and without the signup grant a new account has a zero balance and cannot send a
 single message. The chat suite caught exactly that.
 
+## Build environment note: the release profile is blocked here
+
+`cargo build --release` cannot complete **on this machine**, and the cause is not
+in this repository. The failure is:
+
+```
+error: target/release/deps/libsqlx_macros-<hash>.dylib: dlopen(...):
+  mis-aligned LINKEDIT string pool, fileOffset=0x0088CBDC
+error[E0432]: unresolved imports `self::encode::Encode`, `self::decode::Decode`, ...
+```
+
+The `sqlx-macros` proc-macro dylib links but will not load, so `sqlx` fails to
+compile in the release profile. What was ruled out, with the evidence:
+
+| Check | Result |
+|---|---|
+| Stale artifacts | `rm -rf target/release` (whole profile) reproduces it byte-identically at the same offset |
+| Repo build config | `.cargo/config.toml` sets only `SQLX_OFFLINE`; `Cargo.toml` has no `[profile.release]` block |
+| A different target dir | `CARGO_TARGET_DIR=/tmp/stvdy-rel` fails identically |
+| The linker | The system `ld` and the bundled `rust-lld` both fail |
+| Stripping | `CARGO_PROFILE_RELEASE_STRIP=debuginfo` fails identically |
+| **A minimal project** | `cargo new /tmp/probe` + `sqlx` as the only dependency, fresh target dir: **same failure**. This is the decisive one, because it contains none of this repo's code |
+
+So it is a toolchain defect in the release-profile link of that specific
+proc-macro on this machine (macOS 27, arm64, rustc 1.94.1). It is not a phase
+gate: the gates are `cargo fmt`, `cargo clippy`, `cargo test`, the web build, and
+the desktop bundle, and the first four plus `tauri build --debug` all pass. A
+release server binary is a Phase 15 packaging concern, and the Docker image
+builds on Linux where this does not arise.
+
 ## CORS origins
 
 `routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist

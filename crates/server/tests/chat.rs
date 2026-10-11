@@ -869,6 +869,27 @@ async fn a_marker_split_across_tokens_is_never_shown_partial(pool: PgPool) {
         streamed.contains("The claim") && streamed.contains("not grounded"),
         "no ordinary text may be lost to the hold-back: {streamed:?}"
     );
+
+    // The route slices per *token* while the core simulation slices per
+    // character, so the equality property has to be asserted here too: a
+    // per-character proof does not cover a different partition, and two earlier
+    // attempts at this were reasoned-correct and then failed on the real one.
+    let (_, thread) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/messages"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    let stored = thread["messages"][1]["content"]
+        .as_str()
+        .expect("the assistant turn");
+
+    assert_eq!(
+        streamed, stored,
+        "the user must not watch the text change when the answer is finalised"
+    );
 }
 
 /// A spent-out account's 402 carries the plan-matrix sense of `limit`/`used`,
