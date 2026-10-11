@@ -5,6 +5,7 @@
 pub mod clock;
 pub mod documents;
 pub mod embedder;
+pub mod fetch;
 pub mod llm;
 pub mod mailer;
 pub mod search;

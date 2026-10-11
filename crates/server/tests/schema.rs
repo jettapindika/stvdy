@@ -282,6 +282,9 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         "cheatsheets",
         "email_verification_tokens",
         "login_tickets",
+        // Phase 3. A server-side cost control with no client-visible entity, so
+        // it is deliberately not a `+sync` table (A40).
+        "search_cache",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
