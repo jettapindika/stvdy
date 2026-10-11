@@ -8,6 +8,7 @@ pub mod config;
 pub mod credits;
 pub mod db;
 pub mod devices;
+pub mod entitlements;
 pub mod error;
 pub mod flashcards;
 pub mod integrations;

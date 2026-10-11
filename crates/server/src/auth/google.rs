@@ -306,8 +306,7 @@ pub async fn exchange(
 
     // Through the same resolver as a password login, so the Google path is not
     // an unlimited-device backdoor around A43's `devices_max` control.
-    let device_id =
-        super::routes::resolve_device(state, user.id, &user.plan_id, &body.device).await?;
+    let device_id = super::routes::resolve_device(state, user.id, &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, user.id, device_id).await?;
 
     Ok(super::routes::AuthResponse {

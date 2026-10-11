@@ -17,6 +17,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, strip_unknown};
+use stvdy_core::entitlements::Feature;
 use stvdy_core::traits::llm::{ChatMsg, ChatRequest, Role, StreamEvent};
 
 use crate::auth::extract::VerifiedUser;
@@ -88,6 +89,19 @@ pub async fn chat(
             "the message is too long (8000 characters)".to_string(),
         ));
     }
+
+    // The plan decision, before any read that can fail: a refused turn must not retrieve,
+    // must not search and must not reach a model. The daily cap and the balance are checked
+    // again inside the spend below, under the advisory lock, because a check here and a
+    // spend there can interleave; this call is what makes the refusal cheap and what the
+    // route sweep drives.
+    //
+    // `WebSearch` is deliberately **not** checked here, even when `use_web` is set: whether
+    // this turn costs a search is not known until the search has run, because a cache hit
+    // costs nothing and must not consume `web_searches_per_day` either (A40). Checking it up
+    // front would refuse a repeat of a question the cache can answer, which is exactly the
+    // case the cache exists for. Its gate is below, where `search_cost` is known.
+    crate::entitlements::require(&state, &user, Feature::ChatMessage).await?;
 
     let workspace_name = crate::workspaces::owned_name(&state, user.user_id, workspace_id).await?;
 
@@ -162,6 +176,15 @@ pub async fn chat(
     };
     let total_cost = cost + search_cost;
 
+    // The `WebSearch` gate, now that it is known whether this turn ran a chargeable search.
+    // A cache hit and an empty result both leave `search_cost` at zero and neither consumes
+    // `web_searches_per_day` (A40), so neither may be refused by this check. The cap is also
+    // enforced inside the spend below, under the advisory lock, which is what makes it hold
+    // under concurrency; this call is what refuses before the provider is reached.
+    if search_cost > 0 {
+        crate::entitlements::require(&state, &user, Feature::WebSearch).await?;
+    }
+
     // The spend comes after every read that can fail, and immediately before the
     // provider is called: retrieval and composition are a database read and a
     // pure function, so doing them first costs nothing and shrinks the window in
@@ -173,7 +196,7 @@ pub async fn chat(
     let spent = credits::spend(
         &state,
         user.user_id,
-        user.plan(),
+        user.effective_plan(),
         ACTION,
         total_cost,
         // Both caps, in this one transaction. The search cap is only armed when a

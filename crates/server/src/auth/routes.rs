@@ -11,6 +11,7 @@ use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use stvdy_core::entitlements::Feature;
 use uuid::Uuid;
 
 use crate::auth::{email_verify, extract::AuthUser, password, tokens};
@@ -132,7 +133,6 @@ pub(crate) fn validate_device(device: &DeviceInfo) -> AppResult<()> {
 pub(crate) async fn resolve_device(
     state: &AppState,
     user_id: Uuid,
-    plan_id: &str,
     device: &DeviceInfo,
 ) -> AppResult<Uuid> {
     let name = device.name.trim();
@@ -159,7 +159,7 @@ pub(crate) async fn resolve_device(
         return Ok(id);
     }
 
-    enforce_device_limit(state, user_id, plan_id).await?;
+    enforce_device_limit(state, user_id).await?;
     insert_device(state, user_id, device).await
 }
 
@@ -183,25 +183,15 @@ pub(crate) async fn insert_device(
     Ok(id)
 }
 
-/// Enforces `devices_max` for the user's plan. A revoked device does not count:
-/// that is what makes "sign out that old laptop" the remedy the error suggests.
-pub(crate) async fn enforce_device_limit(
-    state: &AppState,
-    user_id: Uuid,
-    plan_id: &str,
-) -> AppResult<()> {
-    let plan = stvdy_core::config::PlanId::parse(plan_id);
-    let limit = stvdy_core::config::Limit::Max(state.config.plans.get(plan).devices_max);
-
-    let used: i64 = sqlx::query_scalar(
-        "select count(*) from devices where user_id = $1 and revoked_at is null",
-    )
-    .bind(user_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("counting devices: {error}")))?;
-
-    crate::limits::enforce_count(&state.config.plans, plan, limit, used, "devices")
+/// Enforces `devices_max` for the user's **effective** plan. A revoked device does not
+/// count: that is what makes "sign out that old laptop" the remedy the error suggests.
+///
+/// The check goes through the entitlements engine's device arm rather than reading the
+/// plan's `devices_max` here, so this route and the engine cannot disagree about the
+/// limit. The plan is resolved from the user's own subscription status rather than from a
+/// `plan_id` string, so an expired subscription cannot buy devices.
+pub(crate) async fn enforce_device_limit(state: &AppState, user_id: Uuid) -> AppResult<()> {
+    crate::entitlements::require_for(state, user_id, Feature::DeviceLogin).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -294,7 +284,7 @@ pub async fn signup(
     )
     .await?;
 
-    let device_id = resolve_device(&state, user_id, "free", &body.device).await?;
+    let device_id = resolve_device(&state, user_id, &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, user_id, device_id).await?;
 
     email_verify::send_verification(&state, user_id, &email).await?;
@@ -358,7 +348,7 @@ pub async fn login(
         return Err(AppError::Unauthorized);
     }
 
-    let device_id = resolve_device(&state, row.id, &row.plan_id, &body.device).await?;
+    let device_id = resolve_device(&state, row.id, &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, row.id, device_id).await?;
 
     tracing::info!(user_id = %row.id, platform = %body.device.platform, "login");

@@ -595,7 +595,7 @@ async fn refund_one_pending(pool: &PgPool, target: RefundTarget, id: Uuid) -> Ap
 /// wrongly blocked. The day boundary goes through `chrono-tz` (A6), never a fixed
 /// offset.
 pub fn daily_chat_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -> DailyCap {
-    let plan = user.plan();
+    let plan = user.effective_plan();
     DailyCap {
         action: "chat_message",
         limit: state.config.plans.get(plan).chat_msgs_per_day,
@@ -612,7 +612,7 @@ pub fn daily_chat_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -
 /// exactly the case the cache exists for, and charging the allowance for it would
 /// make the free tier's three searches per day unusable for a student who revises.
 pub fn daily_search_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -> DailyCap {
-    let plan = user.plan();
+    let plan = user.effective_plan();
     DailyCap {
         action: "web_search",
         limit: stvdy_core::config::Limit::Max(state.config.plans.get(plan).web_searches_per_day),

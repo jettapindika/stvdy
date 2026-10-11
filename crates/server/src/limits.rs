@@ -1,11 +1,15 @@
-//! Plan limits, read from `config/plans.toml`.
+//! The plan matrix's countable-limit check, in the shape the credit spend needs.
 //!
-//! This is the Phase 1 shim. The roadmap puts `check(&UsageSnapshot, Feature)`
-//! in `crates/core/src/entitlements/` in Phase 7, and every handler calls it.
-//! Phase 1 needs five limits before that engine exists, so it reads
-//! `PlanConfig` directly here and returns the *same* `AppError::Entitlement`
-//! shape the engine will return. Phase 7 replaces the call sites with `check`
-//! and the response bodies do not change.
+//! This module used to be the Phase 1 shim: five limits, read straight from
+//! `config/plans.toml`, before `crates/core/src/entitlements/` existed. Phase 7 moved
+//! every handler onto the engine — `crate::entitlements::require` builds one
+//! `UsageSnapshot`, hands it to `check_with`, and maps the verdict into the same
+//! `AppError::Entitlement` envelope this file has always produced, so no response body
+//! changed shape.
+//!
+//! What is left here is the one caller the engine cannot serve: `credits::spend_in`
+//! enforces a daily cap **inside the spend's own transaction**, where the count and the
+//! charge have to be one atomic decision. It needs a check, not a snapshot.
 //!
 //! Nothing here hardcodes a limit: the matrix lives in `plans.toml`.
 
@@ -13,16 +17,20 @@ use stvdy_core::config::{Limit, PlanId, PlansFile};
 
 use crate::error::AppError;
 
-/// The plan a user would have to buy to get past this limit. Every plan in the
-/// matrix raises or removes every limit of the plan below it, so "the next one
-/// up" is the honest answer, and `None` on the top plan means "not for sale",
-/// which is the truth.
+/// The plan a user would have to buy to get past this limit: the next one up the ladder,
+/// derived from `PlanId::ALL` rather than written down, so a plan added later joins the
+/// ladder without a second place to edit.
+///
+/// `None` on the top plan means "not for sale", which is the truth: a limit on the top
+/// plan is a genuine maximum. The same rule and the same derivation live in
+/// `crates/core/src/entitlements/check.rs`; this copy exists only because the daily cap
+/// is checked on the spend's connection rather than through the snapshot.
 fn upgrade_from(plan: PlanId) -> Option<PlanId> {
-    match plan {
-        PlanId::Free => Some(PlanId::Pro),
-        PlanId::Pro => Some(PlanId::Power),
-        PlanId::Power => None,
-    }
+    PlanId::ALL
+        .iter()
+        .skip_while(|candidate| **candidate != plan)
+        .nth(1)
+        .copied()
 }
 
 fn limit_reached(plan: PlanId, limit: Limit, used: i64, feature: &'static str) -> AppError {
@@ -40,6 +48,10 @@ fn limit_reached(plan: PlanId, limit: Limit, used: i64, feature: &'static str) -
 }
 
 /// A countable limit: `used` items already exist and one more is requested.
+///
+/// Used by `credits::spend_in` for the daily chat and web-search caps, under the spend's
+/// advisory lock: a check and a spend in separate transactions can interleave, and two
+/// concurrent requests both see the last slot free.
 pub fn enforce_count(
     _plans: &PlansFile,
     plan: PlanId,
@@ -54,118 +66,6 @@ pub fn enforce_count(
     Err(limit_reached(plan, limit, i64::from(used), feature))
 }
 
-/// A countable limit where more than one is requested at a time.
-///
-/// `enforce_count` asks "is there room for one more", which is the right question
-/// for a workspace or a device. A deck asks for `count` cards in one request, and
-/// checking them one at a time would let 30 requests of 30 cards each through.
-pub fn enforce_batch(
-    plans: &PlansFile,
-    plan: PlanId,
-    limit: Limit,
-    used: i64,
-    requested: i64,
-    feature: &'static str,
-) -> Result<(), AppError> {
-    let _ = plans;
-    match limit.max() {
-        None => Ok(()),
-        Some(max) => {
-            if used + requested <= i64::from(max) {
-                Ok(())
-            } else {
-                Err(limit_reached(plan, limit, used, feature))
-            }
-        }
-    }
-}
-
-/// A file-size limit. `max_file_mb` is a `u32` rather than a `Limit` because no
-/// plan offers unlimited uploads.
-pub fn enforce_max_file_mb(
-    plans: &PlansFile,
-    plan: PlanId,
-    size_bytes: i64,
-) -> Result<(), AppError> {
-    let max_mb = i64::from(plans.get(plan).max_file_mb);
-    let max_bytes = max_mb * 1024 * 1024;
-    if size_bytes <= max_bytes {
-        return Ok(());
-    }
-    Err(AppError::Entitlement {
-        code: "limit_reached",
-        message: format!(
-            "files on the {} plan are limited to {max_mb} MB",
-            plan.as_str()
-        ),
-        min_plan: upgrade_from(plan).map(|p| p.as_str()),
-        limit: Some(max_bytes),
-        used: Some(size_bytes),
-    })
-}
-
-/// Storage is a running total, so the check is "existing + new".
-pub fn enforce_storage_mb(
-    plans: &PlansFile,
-    plan: PlanId,
-    used_bytes: i64,
-    add_bytes: i64,
-) -> Result<(), AppError> {
-    let max_bytes = i64::from(plans.get(plan).storage_mb) * 1024 * 1024;
-    let after = used_bytes + add_bytes;
-    if after <= max_bytes {
-        return Ok(());
-    }
-    Err(AppError::Entitlement {
-        code: "limit_reached",
-        message: format!(
-            "the {} plan includes {} MB of storage",
-            plan.as_str(),
-            plans.get(plan).storage_mb
-        ),
-        min_plan: upgrade_from(plan).map(|p| p.as_str()),
-        limit: Some(max_bytes),
-        used: Some(after),
-    })
-}
-
-/// An export format the plan does not include.
-///
-/// `403 plan_required` with `min_plan`, not `limit_reached`: the format is not a
-/// quantity the user has run out of, it is a feature the plan does not have, and the
-/// client's remedy is a purchase rather than a wait. The pair is what the roadmap's
-/// error-mapping table names, and `AppError::status` maps the code to 403 for exactly
-/// that reason.
-///
-/// `min_plan` is **derived from the matrix** rather than written down: the first plan in
-/// price order whose `export_formats` contains this one. A hardcoded "pro" would keep
-/// naming pro after a later phase moved the format to power, and the mobile build is
-/// required to name the plan it would have to buy.
-pub fn enforce_export_format(
-    plans: &PlansFile,
-    plan: PlanId,
-    format: stvdy_core::config::ExportFormat,
-) -> Result<(), AppError> {
-    if plans.get(plan).export_formats.contains(&format) {
-        return Ok(());
-    }
-
-    Err(AppError::Entitlement {
-        code: "plan_required",
-        message: format!(
-            "exporting a document as {} is not included in the {} plan",
-            format!("{format:?}").to_lowercase(),
-            plan.as_str()
-        ),
-        min_plan: PlanId::ALL
-            .into_iter()
-            .find(|candidate| plans.get(*candidate).export_formats.contains(&format))
-            .map(PlanId::as_str),
-        limit: None,
-        used: None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,11 +78,8 @@ mod tests {
 
     /// The values come from the file, never from a literal here: retuning
     /// plans.toml must not leave a stale expectation behind.
-    ///
-    /// `devices_max` is a plain `u32` in the config (no plan offers unlimited
-    /// devices), so the limit is built here the way a caller would build it.
     #[test]
-    fn the_device_limit_is_read_from_the_config_file() {
+    fn a_counted_limit_is_read_from_the_config_file() {
         let plans = plans();
         let max = i64::from(plans.get(PlanId::Free).devices_max);
         let limit = Limit::Max(plans.get(PlanId::Free).devices_max);
@@ -234,41 +131,5 @@ mod tests {
             Err(AppError::Entitlement { min_plan, .. }) => assert_eq!(min_plan, None),
             other => panic!("expected an entitlement error, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn a_batch_checks_the_whole_request_not_one_at_a_time() {
-        let plans = plans();
-        let limit = plans.get(PlanId::Free).flashcards_per_month;
-        let max = i64::from(limit.max().expect("free cards are limited"));
-
-        // 29 used plus 1 requested fits; 30 used plus 1 does not, because the
-        // limit is a ceiling on the total, not on each request.
-        assert!(enforce_batch(&plans, PlanId::Free, limit, max - 1, 1, "flashcards").is_ok());
-        assert!(enforce_batch(&plans, PlanId::Free, limit, max, 1, "flashcards").is_err());
-
-        // A single request larger than the whole allowance is refused outright.
-        let error = enforce_batch(&plans, PlanId::Free, limit, 0, max + 1, "flashcards")
-            .expect_err("a request over the monthly allowance is refused");
-        assert_eq!(error.code(), "limit_reached");
-        assert_eq!(error.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-    }
-
-    #[test]
-    fn storage_is_a_running_total() {
-        let plans = plans();
-        let mb = 1024 * 1024;
-        let max = i64::from(plans.get(PlanId::Free).storage_mb);
-        assert!(enforce_storage_mb(&plans, PlanId::Free, (max - 1) * mb, mb).is_ok());
-        assert!(enforce_storage_mb(&plans, PlanId::Free, max * mb, 1).is_err());
-    }
-
-    #[test]
-    fn file_size_is_checked_against_the_plan() {
-        let plans = plans();
-        let mb = 1024 * 1024;
-        let max = i64::from(plans.get(PlanId::Free).max_file_mb);
-        assert!(enforce_max_file_mb(&plans, PlanId::Free, max * mb).is_ok());
-        assert!(enforce_max_file_mb(&plans, PlanId::Free, max * mb + 1).is_err());
     }
 }

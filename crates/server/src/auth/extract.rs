@@ -7,6 +7,7 @@
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use stvdy_core::entitlements::SubStatus;
 use uuid::Uuid;
 
 use crate::auth::tokens;
@@ -26,14 +27,36 @@ pub struct AuthUser {
     pub timezone: String,
     pub is_admin: bool,
     pub student_verified: bool,
+    /// From `devices.platform`. The *only* platform an entitlement decision trusts
+    /// (A144): a request body may claim anything, while a device row was written by a
+    /// login against the platform allowlist.
+    pub platform: String,
+    /// The user's live `subscriptions.status`, or `SubStatus::None` when there is no
+    /// row. It decides whether `plan_id` means anything (A146).
+    pub subscription_status: SubStatus,
 }
 
 impl AuthUser {
-    /// The plan as a typed value. A plan id in the database that is not in
-    /// `plans.toml` cannot happen through the API, but it must not panic here:
-    /// the caller gets the free plan's limits, which is the safe direction.
-    pub fn plan(&self) -> stvdy_core::config::PlanId {
-        stvdy_core::config::PlanId::parse(&self.plan_id)
+    /// The plan the entitlement decision uses: `users.plan_id` honoured only while the
+    /// subscription is active or in grace (A146).
+    ///
+    /// An expired subscription therefore drops to the free limits on its own, without an
+    /// admin editing the row, and a plan id in the database that is not in `plans.toml`
+    /// gets the free plan's limits — the safe direction.
+    pub fn effective_plan(&self) -> stvdy_core::config::PlanId {
+        crate::entitlements::effective_plan(&self.plan_id, self.subscription_status)
+    }
+
+    /// Whether an upgrade may be offered to this client at all (A143).
+    ///
+    /// The platform comes from the device row, never the body. An unrecognised value
+    /// offers nothing: a platform the policy cannot classify must fail closed, and the
+    /// config's own rule for a platform it does not know is deny-by-default.
+    pub fn upgrade_offerable(&self, policy: &stvdy_core::config::BillingPolicy) -> bool {
+        stvdy_core::config::Platform::ALL
+            .into_iter()
+            .find(|platform| platform.as_str() == self.platform)
+            .is_some_and(|platform| policy.purchase_allowed(platform))
     }
 }
 
@@ -69,15 +92,25 @@ impl FromRequestParts<AppState> for AuthUser {
             // signed-out or rotated-away session family still authenticates,
             // which is exactly the guarantee `logout-all` and device revocation
             // promise. Caught by the auth suite, not by inspection.
+            //
+            // The platform comes from the device row this request is scoped to (A144),
+            // and the subscription status from the user's live row: an entitlement
+            // decision must not read either from the request body.
             "select u.id as user_id, u.email, u.email_verified, u.plan_id, u.timezone,
-                    u.is_admin, u.student_verified
+                    u.is_admin, u.student_verified, d.platform,
+                    (select sub.status
+                       from subscriptions sub
+                      where sub.user_id = u.id
+                      order by (sub.status in ('active', 'grace')) desc,
+                               sub.current_period_end desc
+                      limit 1) as subscription_status
                from users u
                join devices d on d.id = $2 and d.user_id = u.id and d.revoked_at is null
                join auth_sessions s
                  on s.family_id = $3 and s.user_id = u.id and s.revoked_at is null
               where u.id = $1 and u.deleted_at is null
               group by u.id, u.email, u.email_verified, u.plan_id, u.timezone,
-                       u.is_admin, u.student_verified",
+                       u.is_admin, u.student_verified, d.platform",
         )
         .bind(claims.sub)
         .bind(claims.did)
@@ -100,6 +133,11 @@ impl FromRequestParts<AppState> for AuthUser {
             timezone: row.timezone,
             is_admin: row.is_admin,
             student_verified: row.student_verified,
+            platform: row.platform,
+            subscription_status: crate::entitlements::subscription_status(
+                row.subscription_status.as_deref(),
+                row.user_id,
+            ),
         })
     }
 }
@@ -113,6 +151,8 @@ struct SessionUser {
     timezone: String,
     is_admin: bool,
     student_verified: bool,
+    platform: String,
+    subscription_status: Option<String>,
 }
 
 /// An authenticated user whose email is verified. A43: signup may create the

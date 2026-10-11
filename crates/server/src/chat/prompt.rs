@@ -39,7 +39,7 @@ pub fn compose(
         state,
         &user.email,
         &user.timezone,
-        user.plan(),
+        user.effective_plan(),
         study_mode,
         use_web,
         sources_only,
