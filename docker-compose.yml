@@ -13,8 +13,14 @@ services:
       timeout: 3s
       retries: 20
 
+  # Dev object storage. A15: MinIO removed its community container images —
+  # `minio/minio:latest` and `minio/mc:latest` both 404 on Docker Hub — so this
+  # uses `pgsty/silo`, a maintained drop-in fork of the MinIO server (same S3
+  # API, same MINIO_* variables, same `server /data` argv). The bucket is
+  # created by the server at boot (plan decision 4), so there is no
+  # `minio-init` sidecar.
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -26,19 +32,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/stvdy-sources &&
-      mc anonymous set none local/stvdy-sources &&
-      echo 'bucket ready'
-      "
 
   # Search tier 2 (A3): the self-hosted general-web provider behind
   # SearchProvider. Internal only. Nothing outside the server calls it, and it
