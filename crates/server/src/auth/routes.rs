@@ -1,8 +1,9 @@
 //! Auth routes: signup, login, refresh, logout, verification.
 //!
 //! Every one of these is on a per-IP rate-limited router (A12: per-instance, and
-//! documented as such; A43's database-backed signup limiter is a Phase 7 gate and
-//! is deliberately not half-built here).
+//! documented as such). `signup` additionally consults A43's database-backed
+//! limiter, because an in-process bucket resets on restart and a restart is free
+//! for a script.
 
 use axum::Json;
 use axum::extract::State;
@@ -220,11 +221,25 @@ pub(crate) fn user_view(
 /// `POST /auth/signup`
 pub async fn signup(
     State(state): State<AppState>,
+    ip: crate::ratelimit::SignupIp,
     Json(body): Json<SignupRequest>,
 ) -> AppResult<impl IntoResponse> {
     let email = normalize_email(&body.email)?;
     validate_device(&body.device)?;
     let password_hash = password::hash(&body.password)?;
+
+    // A43's limiter, and it runs before the row is written. The attempt is
+    // recorded even when the rest of this handler refuses (a taken address, a
+    // device over the limit), because a farm's *failures* are the signal that
+    // separates it from a lecture hall behind one NAT (A154/R5).
+    let domain = email
+        .rsplit_once('@')
+        .map(|(_, domain)| domain.to_string())
+        .unwrap_or_default();
+    crate::ratelimit::signup_limiter()
+        .check(&state.pool, &ip.0, &domain)
+        .await?;
+    crate::ratelimit::record_signup_attempt(&state.pool, &ip.0, &domain).await?;
 
     // The unique index on `users.email` is the real guard; this pre-check turns
     // the common case into a clear message instead of a constraint error.

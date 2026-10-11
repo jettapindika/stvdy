@@ -127,6 +127,11 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
             &state.config.plans,
         )));
 
+    // A155's per-account spend cap, applied to the merged authenticated routes.
+    // After the merge so it covers every spending route and no read: the guard
+    // decides from `MatchedPath`, and `route_layer` means the fallback never sees it.
+    let authenticated = crate::ratelimit::spend_layer(authenticated, state.clone());
+
     let router = Router::new()
         .merge(public_routes)
         .merge(auth_routes)
