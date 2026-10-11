@@ -77,6 +77,36 @@ pub async fn json(
     .await
 }
 
+/// A request whose body is a document rather than JSON: its status, its content type and its
+/// raw bytes.
+///
+/// The export routes and the cheatsheet's HTML and PDF answer bytes on purpose, so a helper
+/// that parsed them as JSON would report `null` for a response that is perfectly correct —
+/// which is the shape of a test that passes without looking at the document.
+pub async fn document(app: &axum::Router, uri: &str, token: &str) -> (StatusCode, String, Vec<u8>) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .expect("request");
+
+    let response = app.clone().oneshot(request).await.expect("response");
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let bytes = axum::body::to_bytes(response.into_body(), 32 * 1024 * 1024)
+        .await
+        .expect("body")
+        .to_vec();
+
+    (status, content_type, bytes)
+}
+
 /// A multipart body with one `kind` field and one payload field.
 pub fn multipart(fields: &[(&str, &str, Option<&[u8]>)]) -> (String, Vec<u8>) {
     let boundary = "----stvdy-test-boundary";

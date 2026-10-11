@@ -17,26 +17,15 @@ use uuid::Uuid;
 use stvdy_core::citations::{ContextLabels, LabeledChunk};
 use stvdy_core::render::blocks::parse_blocks;
 use stvdy_core::render::{Cover, cheatsheet_v1, render_html};
-use stvdy_server::render::chrome::{Renderer, pdf_options};
+use stvdy_server::render::chrome::{RenderError, Renderer, find_executable, pdf_options};
 
 /// Where Chromium lives. The image sets `CHROME_PATH` to its pinned build; a developer's
 /// machine usually has Chrome in the standard place.
+///
+/// The lookup itself is the server's (`find_executable`), not a copy of it: the test must
+/// resolve the same binary the renderer does, or it proves something about the test.
 fn chrome_path() -> Option<String> {
-    if let Ok(path) = std::env::var("CHROME_PATH")
-        && !path.is_empty()
-    {
-        return Some(path);
-    }
-    let candidates = [
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-    ];
-    candidates
-        .iter()
-        .find(|path| std::path::Path::new(path).exists())
-        .map(|path| (*path).to_string())
+    find_executable()
 }
 
 fn labels() -> ContextLabels {
@@ -214,4 +203,77 @@ fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
 /// assertion, because it reads as coverage.
 fn extract_text(bytes: &[u8]) -> String {
     pdf_extract::extract_text_from_mem(bytes).expect("the PDF's text is extractable")
+}
+
+/// A template that never sets `data-math-ready` fails the render, and fails it **when the
+/// deadline passes** rather than hanging the worker.
+///
+/// This is the guard's other half. The acceptance test proves a document whose maths
+/// rendered prints; this proves the document that never reported anything does not print
+/// at all. Without it, a renamed attribute or a `render()` that throws before it marks
+/// anything leaves the pipeline printing literal LaTeX with no error anywhere — the same
+/// silent defect, reached by a different route.
+///
+/// The deadline is a few hundred milliseconds here so the test proves the bound instead of
+/// waiting out the production one, which is the assertion that matters: a promise that
+/// never settles must end in an error, not in a stuck job.
+#[test]
+#[ignore = "needs Chromium; run with --ignored"]
+fn a_document_that_never_reports_its_maths_fails_the_render() {
+    let Some(path) = chrome_path() else {
+        panic!("no Chromium found; set CHROME_PATH");
+    };
+
+    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    // Complete, printable, and silent about its maths.
+    let html = "<!DOCTYPE html><html lang=\"id\"><head><meta charset=\"utf-8\">\
+                <title>T</title></head><body><p>$x$</p></body></html>";
+
+    let started = std::time::Instant::now();
+    let error = renderer
+        .render_within(html, "Cheatsheet", 500)
+        .expect_err("a document that never sets the sentinel must not produce a PDF");
+
+    assert!(
+        matches!(error, RenderError::MathNotReady(_)),
+        "the failure must name the sentinel: {error}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "the poll must end at its own deadline, not hang: {:?}",
+        started.elapsed()
+    );
+}
+
+/// A template that reports a failed KaTeX fails the render too, and says which value it
+/// reported.
+///
+/// `unavailable` is what the template sets when `renderMathInElement` is not a function —
+/// a blocked or missing KaTeX asset. This is the exact state the acceptance test's `no raw
+/// $` assertion is written to catch at print time; catching it here is the point, because
+/// here it is an error rather than a plausible-looking document.
+#[test]
+#[ignore = "needs Chromium; run with --ignored"]
+fn a_template_that_reports_katex_unavailable_fails_the_render() {
+    let Some(path) = chrome_path() else {
+        panic!("no Chromium found; set CHROME_PATH");
+    };
+
+    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    let html = "<!DOCTYPE html><html lang=\"id\"><head><meta charset=\"utf-8\"><title>T</title>\
+                </head><body><p>$x$</p><script>\
+                document.documentElement.dataset.mathReady = 'unavailable';</script></body></html>";
+
+    let error = renderer
+        .render_within(html, "Cheatsheet", 5000)
+        .expect_err("a document whose maths did not render must not produce a PDF");
+
+    assert!(
+        matches!(error, RenderError::MathNotReady(_)),
+        "the failure must name the sentinel: {error}"
+    );
+    assert!(
+        error.to_string().contains("unavailable"),
+        "the message must carry the value the template reported: {error}"
+    );
 }
