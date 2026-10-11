@@ -40,10 +40,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // A refund that could not be written when a generation failed for good leaves
-    // the deck terminal with its charge still pending (see `fail_and_refund`).
+    // the row terminal with its charge still pending (see `fail_and_refund`).
     // Nothing else resolves that state, so recover it here, before the worker can
-    // start charging new decks.
-    let refunded = credits::refund_pending_decks(&pool).await?;
+    // start charging new generations.
+    let refunded = credits::refund_pending(&pool, credits::RefundTarget::Deck).await?
+        + credits::refund_pending(&pool, credits::RefundTarget::Quiz).await?;
     if refunded > 0 {
         tracing::warn!(
             refunded,

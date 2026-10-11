@@ -1198,7 +1198,7 @@ async fn a_deck_cannot_read_another_accounts_chunks(pool: PgPool) {
 /// and the SPA polls a `generating` deck every 1.5 s without end — so the rollback
 /// traded a visible failure for a silent, permanent one. The contract is now: the
 /// status change commits even when the refund cannot be written, `credits_spent`
-/// stays charged (the pending-refund marker), and `credits::refund_pending_decks`
+/// stays charged (the pending-refund marker), and `credits::refund_pending`
 /// recovers it at the next boot, exactly once.
 ///
 /// The ledger insert is forced to fail with a `user_id` that violates
@@ -1266,9 +1266,12 @@ async fn a_failed_refund_leaves_a_terminal_deck_and_the_boot_sweep_recovers_it(p
     assert_eq!(refunds_before, 0, "the failed insert wrote no refund row");
 
     // The next boot recovers the pending charge.
-    let recovered = stvdy_server::credits::refund_pending_decks(&harness.state.pool)
-        .await
-        .unwrap();
+    let recovered = stvdy_server::credits::refund_pending(
+        &harness.state.pool,
+        stvdy_server::credits::RefundTarget::Deck,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         recovered, 1,
         "the sweep must recover exactly the pending charge"
@@ -1292,9 +1295,12 @@ async fn a_failed_refund_leaves_a_terminal_deck_and_the_boot_sweep_recovers_it(p
     assert_eq!(refunded, 4, "the user gets back exactly what was charged");
 
     // Idempotent: a second boot must not refund the same deck twice.
-    let recovered_again = stvdy_server::credits::refund_pending_decks(&harness.state.pool)
-        .await
-        .unwrap();
+    let recovered_again = stvdy_server::credits::refund_pending(
+        &harness.state.pool,
+        stvdy_server::credits::RefundTarget::Deck,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         recovered_again, 0,
         "a recovered charge is not refunded twice"

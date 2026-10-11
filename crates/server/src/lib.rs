@@ -12,6 +12,7 @@ pub mod flashcards;
 pub mod integrations;
 pub mod jobs;
 pub mod limits;
+pub mod quizzes;
 pub mod ratelimit;
 pub mod routes;
 pub mod sources;

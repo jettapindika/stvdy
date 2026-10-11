@@ -403,77 +403,145 @@ pub async fn refund_in(
 /// next boot (or a later pass) picks up the rest, and the sweep is idempotent.
 const REFUND_SWEEP_LIMIT: i64 = 1000;
 
-/// Refunds every deck whose charge is still pending, once.
+/// A table that carries `credits_spent` and a terminal `failed` status, and can
+/// therefore be left with a charge that is "pending a refund".
 ///
-/// The failure path in `jobs::handlers::generate::fail_and_refund` commits the deck
-/// as `failed` and leaves `credits_spent` in place when the ledger insert cannot be
-/// written, because the job that reached that point has no retry left. This is what
-/// makes that state recoverable instead of permanent: it runs at boot, before the
-/// worker, and is idempotent because the same statement zeroes the charge it
+/// An enum rather than a table name from the caller: the sweep interpolates the name
+/// into its SQL, and a value chosen from a closed set of compile-time constants cannot
+/// carry anything a user supplied. `decks` and `quizzes` share the whole recovery
+/// sequence (claim, refund, zero, commit), and the sequence is subtle enough that a
+/// second copy of it would be a second place to get it wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefundTarget {
+    Deck,
+    Quiz,
+}
+
+impl RefundTarget {
+    /// What the row is called in a log line, for whoever reads the log.
+    fn label(self) -> &'static str {
+        match self {
+            RefundTarget::Deck => "deck",
+            RefundTarget::Quiz => "quiz",
+        }
+    }
+
+    /// The statements this target needs, as literals rather than as `format!`ed
+    /// strings: `sqlx` refuses a dynamically built query precisely because a table name
+    /// is the kind of value that should never be interpolated, and writing one arm per
+    /// target is what keeps that guarantee. The logic around them is shared; only the
+    /// three statements are not.
+    fn list_failed_sql(self) -> &'static str {
+        match self {
+            RefundTarget::Deck => {
+                "select id from decks
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
+            RefundTarget::Quiz => {
+                "select id from quizzes
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
+        }
+    }
+
+    fn claim_pending_sql(self) -> &'static str {
+        match self {
+            RefundTarget::Deck => {
+                "select user_id, credits_spent
+                   from decks
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
+            RefundTarget::Quiz => {
+                "select user_id, credits_spent
+                   from quizzes
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
+        }
+    }
+
+    fn zero_charge_sql(self) -> &'static str {
+        match self {
+            RefundTarget::Deck => {
+                "update decks set credits_spent = 0, updated_at = now() where id = $1"
+            }
+            RefundTarget::Quiz => {
+                "update quizzes set credits_spent = 0, updated_at = now() where id = $1"
+            }
+        }
+    }
+}
+
+/// Refunds every row whose charge is still pending, once.
+///
+/// The failure path in `jobs::handlers::generate::fail_and_refund` (and its quiz
+/// counterpart) commits the row as `failed` and leaves `credits_spent` in place when the
+/// ledger insert cannot be written, because the job that reached that point has no retry
+/// left. This is what makes that state recoverable instead of permanent: it runs at boot,
+/// before the worker, and is idempotent because the same statement zeroes the charge it
 /// refunds.
 ///
 /// Returns how many charges it recovered.
-pub async fn refund_pending_decks(pool: &PgPool) -> AppResult<u64> {
-    let deck_ids: Vec<Uuid> = sqlx::query_scalar(
-        "select id from decks
-          where status = 'failed' and credits_spent > 0
-          order by updated_at
-          limit $1",
-    )
-    .bind(REFUND_SWEEP_LIMIT)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("listing decks awaiting a refund: {error}"))
-    })?;
+pub async fn refund_pending(pool: &PgPool, target: RefundTarget) -> AppResult<u64> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(target.list_failed_sql())
+        .bind(REFUND_SWEEP_LIMIT)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!(
+                "listing {}s awaiting a refund: {error}",
+                target.label()
+            ))
+        })?;
 
     let mut recovered = 0u64;
-    for deck_id in deck_ids {
-        match refund_one_pending(pool, deck_id).await {
+    for id in ids {
+        match refund_one_pending(pool, target, id).await {
             Ok(true) => recovered += 1,
             Ok(false) => {}
-            // One deck's failure must not abort the sweep: the rest are still
+            // One row's failure must not abort the sweep: the rest are still
             // recoverable, and the next boot retries this one.
             Err(error) => {
-                tracing::error!(%error, %deck_id, "could not recover a pending refund");
+                tracing::error!(%error, %id, target = target.label(), "could not recover a pending refund");
             }
         }
     }
     Ok(recovered)
 }
 
-/// Refunds one deck's pending charge, if it still has one.
+/// Refunds one row's pending charge, if it still has one.
 ///
-/// `false` when there was nothing left to do: another instance claimed the deck
-/// first (`for update skip locked`), or an earlier pass already zeroed the charge.
-/// The row lock and the `credits_spent > 0` predicate together make the refund
-/// once-only.
-async fn refund_one_pending(pool: &PgPool, deck_id: Uuid) -> AppResult<bool> {
+/// `false` when there was nothing left to do: another instance claimed the row first
+/// (`for update skip locked`), or an earlier pass already zeroed the charge. The row lock
+/// and the `credits_spent > 0` predicate together make the refund once-only.
+async fn refund_one_pending(pool: &PgPool, target: RefundTarget, id: Uuid) -> AppResult<bool> {
     let mut tx = pool.begin().await.map_err(|error| {
         AppError::Internal(anyhow::anyhow!("starting a refund transaction: {error}"))
     })?;
 
-    let pending: Option<(Uuid, i32)> = sqlx::query_as(
-        "select user_id, credits_spent
-           from decks
-          where id = $1 and status = 'failed' and credits_spent > 0
-            for update skip locked",
-    )
-    .bind(deck_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("claiming a pending refund: {error}")))?;
+    let pending: Option<(Uuid, i32)> = sqlx::query_as(target.claim_pending_sql())
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("claiming a pending refund: {error}"))
+        })?;
 
     let Some((user_id, credits)) = pending else {
         return Ok(false);
     };
 
-    refund_in(&mut tx, user_id, i64::from(credits), deck_id, "refund").await?;
+    refund_in(&mut tx, user_id, i64::from(credits), id, "refund").await?;
 
     // Zeroing the charge in the same transaction as the ledger row is what makes a
     // second pass a no-op: the guard and the refund move together.
-    sqlx::query("update decks set credits_spent = 0, updated_at = now() where id = $1")
-        .bind(deck_id)
+    sqlx::query(target.zero_charge_sql())
+        .bind(id)
         .execute(&mut *tx)
         .await
         .map_err(|error| {

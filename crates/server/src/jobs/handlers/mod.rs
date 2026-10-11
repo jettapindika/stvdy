@@ -2,4 +2,5 @@
 //! caller.
 
 pub mod generate;
+pub mod generate_quiz;
 pub mod ingest;
