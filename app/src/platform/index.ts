@@ -1,10 +1,9 @@
-import type { FormFactor, Platform, PlatformKind, Runtime } from './types'
+import type { Platform, Runtime } from './types'
 import { webPlatform } from './web'
 
 export type {
   DeepLinksApi,
   FilesApi,
-  FormFactor,
   NotificationsApi,
   Platform,
   PlatformKind,
@@ -19,34 +18,6 @@ export function detectRuntime(scope: Record<string, unknown>): Runtime {
 
 export function isTauri(): boolean {
   return detectRuntime(globalThis as unknown as Record<string, unknown>) === 'tauri'
-}
-
-export function formFactorFor(kind: PlatformKind): FormFactor {
-  switch (kind) {
-    case 'ios':
-    case 'android':
-      return 'phone'
-    case 'macos':
-    case 'windows':
-      return 'desktop'
-    case 'web':
-      return 'web'
-  }
-}
-
-/**
- * Viewport-based layout bucket, used for the tablet two-panel layout.
- *
- * Deliberately NOT derived from `PlatformKind`: a tablet is a width, not a
- * platform (an iPad and a small laptop window are the same problem), and
- * `formFactorFor` could never return `'tablet'`, which made that variant
- * unreachable and would have silently rendered tablets as desktop. Callers that
- * care about tablet pass their own width check.
- */
-export function formFactorForWidth(width: number): FormFactor {
-  if (width >= 1024) return 'desktop'
-  if (width >= 768) return 'tablet'
-  return 'phone'
 }
 
 /**

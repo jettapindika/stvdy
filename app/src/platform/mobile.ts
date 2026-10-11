@@ -9,7 +9,6 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { desktopPlatform } from './desktop'
-import { formFactorFor } from './index'
 import type { Platform, PlatformKind } from './types'
 
 /**
@@ -24,7 +23,6 @@ export function mobilePlatform(kind: PlatformKind): Platform {
 
   return {
     ...base,
-    formFactor: () => formFactorFor(kind),
 
     notifications: {
       async requestPermission() {

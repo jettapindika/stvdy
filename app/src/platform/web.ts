@@ -1,4 +1,3 @@
-import { formFactorFor } from './index'
 import type {
   DeepLinksApi,
   FilesApi,
@@ -62,7 +61,6 @@ export function webPlatform(kind: PlatformKind = 'web'): Platform {
   return {
     kind: () => kind,
     runtime: () => 'web',
-    formFactor: () => formFactorFor(kind),
     secureStore,
     notifications,
     files,

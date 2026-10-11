@@ -1,36 +1,28 @@
 import { NavLink } from 'react-router'
 
-const tabs = [
-  { to: '/', label: 'Today' },
-  { to: '/workspaces', label: 'Work' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/tasks', label: 'Tasks' },
-  { to: '/settings', label: 'More' },
-]
+import { NAV_ITEMS } from './Sidebar'
 
 /**
- * Bottom navigation for phones. Each target is at least 44px tall, the minimum
- * comfortable touch target, and the bar clears the home indicator via
- * `pb-safe-bottom`. The focus-visible ring comes from `.nav-link`.
+ * Bottom navigation for phones. Each target is at least 44px tall (R-03), and
+ * the bar clears the home indicator via `pb-safe-bottom`.
+ *
+ * The active item is marked by weight and an ink rule rather than by the accent,
+ * because the accent is rationed to the provenance layer (DESIGN.md).
  */
 export function TabBar() {
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 flex border-t border-gray-200 bg-white pb-safe-bottom sm:hidden dark:border-neutral-800 dark:bg-neutral-950"
+      className="fixed inset-x-0 bottom-0 z-40 flex border-t border-rule bg-paper pb-safe-bottom md:hidden"
     >
-      {tabs.map((tab) => (
+      {NAV_ITEMS.map((item) => (
         <NavLink
-          key={tab.to}
-          to={tab.to}
-          end={tab.to === '/'}
-          className={({ isActive }) =>
-            `nav-link flex min-h-11 flex-1 items-center justify-center text-xs ${
-              isActive ? 'text-brand-900' : 'text-gray-500'
-            }`
-          }
+          key={item.to}
+          to={item.to}
+          end={item.to === '/'}
+          className="flex min-h-11 flex-1 items-center justify-center border-t-2 border-transparent px-1 text-xs text-ink-muted aria-[current=page]:border-ink aria-[current=page]:font-medium aria-[current=page]:text-ink"
         >
-          {tab.label}
+          {item.short}
         </NavLink>
       ))}
     </nav>

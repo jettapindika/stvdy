@@ -1,21 +1,74 @@
 import { createBrowserRouter } from 'react-router'
 
 import { App } from './App'
-import { Placeholder } from './components/Placeholder'
+import { NotBuiltYet } from './components/ui/States'
+import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
+import { TodayScreen } from './features/today/TodayScreen'
+import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
+import { WorkspaceScreen } from './features/workspaces/WorkspaceScreen'
 
-/** Phase 0 routes are placeholders; later phases replace each element. */
+/**
+ * Routes.
+ *
+ * Every destination in the navigation resolves to a real screen. The ones that
+ * are not built yet say so plainly and name what will be there, rather than
+ * pretending to work: a nav item that leads to a broken or empty promise is the
+ * defect R-24 describes.
+ */
 export const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <Placeholder title="Today" phase={9} /> },
-      { path: 'workspaces', element: <Placeholder title="Workspaces" phase={1} /> },
-      { path: 'calendar', element: <Placeholder title="Calendar" phase={10} /> },
-      { path: 'tasks', element: <Placeholder title="Tasks" phase={9} /> },
-      { path: 'settings', element: <Placeholder title="Settings" phase={9} /> },
-      { path: 'billing', element: <Placeholder title="Plan and usage" phase={13} /> },
-      { path: '*', element: <Placeholder title="Not found" phase={0} /> },
+      { index: true, element: <TodayScreen /> },
+      { path: 'workspaces', element: <WorkspaceListScreen /> },
+      { path: 'workspaces/:workspaceId', element: <WorkspaceScreen /> },
+      {
+        path: 'calendar',
+        element: (
+          <NotBuiltYet
+            title="Calendar"
+            what="a week and month view of classes, deadlines, and the study blocks the planner proposes, plus Google Calendar and ICS connections"
+          />
+        ),
+      },
+      {
+        path: 'tasks',
+        element: (
+          <NotBuiltYet
+            title="Tasks"
+            what="tasks and subtasks across your workspaces, with quick capture and an assistant that proposes breakdowns you confirm before they save"
+          />
+        ),
+      },
+      {
+        path: 'settings',
+        element: (
+          <NotBuiltYet
+            title="Settings"
+            what="timezone and study hours, daily limits, reminder channels, connected calendars, and your signed-in devices"
+          />
+        ),
+      },
+      {
+        path: 'billing',
+        element: (
+          <NotBuiltYet
+            title="Plan and usage"
+            what="your current plan, when the prepaid period ends, and your remaining credits. Purchase screens live on the web and desktop builds only."
+          />
+        ),
+      },
+      {
+        path: 'styleguide',
+        element: <StyleguideScreen />,
+      },
+      {
+        path: '*',
+        element: (
+          <NotBuiltYet title="Not found" what="nothing: this address does not match a screen" />
+        ),
+      },
     ],
   },
 ])

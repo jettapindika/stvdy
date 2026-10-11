@@ -1,5 +1,4 @@
 export type PlatformKind = 'web' | 'macos' | 'windows' | 'ios' | 'android'
-export type FormFactor = 'web' | 'desktop' | 'tablet' | 'phone'
 export type Runtime = 'web' | 'tauri'
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
@@ -38,7 +37,6 @@ export interface DeepLinksApi {
 export interface Platform {
   kind(): PlatformKind
   runtime(): Runtime
-  formFactor(): FormFactor
   secureStore: SecureStore
   notifications: NotificationsApi
   files: FilesApi

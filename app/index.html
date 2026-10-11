@@ -5,7 +5,20 @@
     <!-- viewport-fit=cover is required for env(safe-area-inset-*) to be non-zero.
          Do not add user-scalable=no (accessibility; iOS ignores it anyway). -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <title>Stvdy</title>
+
+    <!-- IBM Plex Sans + Plex Mono (DESIGN.md). `display=swap` so text paints
+         immediately in the fallback stack rather than staying invisible; the
+         fallbacks are metric-adjacent system faces, so the swap is not jarring.
+         Bundling these into the native builds instead of fetching them is a
+         Phase 14 task: a desktop app should not need the network for type. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

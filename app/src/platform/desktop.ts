@@ -10,7 +10,6 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
 
-import { formFactorFor } from './index'
 import type { Platform, PlatformKind } from './types'
 import { webPlatform } from './web'
 
@@ -27,7 +26,6 @@ export function desktopPlatform(kind: PlatformKind): Platform {
   return {
     ...base,
     runtime: () => 'tauri',
-    formFactor: () => formFactorFor(kind),
 
     secureStore: {
       set: async (key, value) => {
