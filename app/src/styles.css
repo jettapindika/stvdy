@@ -1,3 +1,4 @@
+@import "./fonts.css";
 @import "tailwindcss";
 
 /* ==========================================================================
@@ -93,9 +94,12 @@
   --color-action: var(--action);
   --color-on-action: var(--on-action);
 
-  /* Type. The design's typeface could not be read from the render (DESIGN.md
-     says so); Plex is chosen for Latin-Extended coverage, which Indonesian
-     source material needs, and for narrower forms in dense reading views. */
+  /* Type. Self-hosted (src/fonts.css + public/fonts), so the app needs no
+     network for type: the desktop build renders Plex offline and there is no CDN
+     for the shell's CSP to allow. The design's typeface could not be read from
+     the render (DESIGN.md says so); Plex is chosen for Latin-Extended coverage,
+     which Indonesian source material needs, and for narrower forms in dense
+     reading views. */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
 

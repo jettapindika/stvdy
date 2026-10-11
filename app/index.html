@@ -8,17 +8,9 @@
     <meta name="color-scheme" content="light dark" />
     <title>Stvdy</title>
 
-    <!-- IBM Plex Sans + Plex Mono (DESIGN.md). `display=swap` so text paints
-         immediately in the fallback stack rather than staying invisible; the
-         fallbacks are metric-adjacent system faces, so the swap is not jarring.
-         Bundling these into the native builds instead of fetching them is a
-         Phase 14 task: a desktop app should not need the network for type. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
-    />
+    <!-- Fonts are self-hosted: see src/fonts.css and public/fonts. The desktop
+         build therefore renders type offline, and the shell's CSP needs no remote
+         font origins. A preconnect hint would also be governed by connect-src. -->
   </head>
   <body>
     <div id="root"></div>
