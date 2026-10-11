@@ -69,12 +69,14 @@ async fn insert_user(pool: &PgPool) -> Uuid {
 
 async fn insert_device(pool: &PgPool, user: Uuid) -> Uuid {
     let id = Uuid::now_v7();
-    sqlx::query("insert into devices (id, user_id, name, platform) values ($1, $2, 'test', 'macos')")
-        .bind(id)
-        .bind(user)
-        .execute(pool)
-        .await
-        .expect("insert device");
+    sqlx::query(
+        "insert into devices (id, user_id, name, platform) values ($1, $2, 'test', 'macos')",
+    )
+    .bind(id)
+    .bind(user)
+    .execute(pool)
+    .await
+    .expect("insert device");
     id
 }
 
@@ -136,7 +138,9 @@ async fn every_sync_table_has_both_triggers(pool: PgPool) {
         .expect("query triggers");
 
         assert!(
-            names.iter().any(|n| n == &format!("{table}_touch_updated_at")),
+            names
+                .iter()
+                .any(|n| n == &format!("{table}_touch_updated_at")),
             "{table} is missing touch_updated_at (has {names:?})"
         );
         assert!(
@@ -471,12 +475,13 @@ async fn a_concurrent_writer_blocks_so_seq_order_matches_commit_order(pool: PgPo
         .execute(&mut *tx_a)
         .await
         .unwrap();
-    let seq_a: i64 =
-        sqlx::query_scalar("select seq from change_log where entity_id = $1 order by seq desc limit 1")
-            .bind(ws_a)
-            .fetch_one(&mut *tx_a)
-            .await
-            .unwrap();
+    let seq_a: i64 = sqlx::query_scalar(
+        "select seq from change_log where entity_id = $1 order by seq desc limit 1",
+    )
+    .bind(ws_a)
+    .fetch_one(&mut *tx_a)
+    .await
+    .unwrap();
 
     // A second connection writing for the same user must block on the advisory
     // lock. Bound the wait so the test cannot hang.
@@ -508,24 +513,26 @@ async fn a_concurrent_writer_blocks_so_seq_order_matches_commit_order(pool: PgPo
         .execute(&mut *tx_b)
         .await
         .unwrap();
-    let seq_b: i64 =
-        sqlx::query_scalar("select seq from change_log where entity_id = $1 order by seq desc limit 1")
-            .bind(ws_b)
-            .fetch_one(&mut *tx_b)
-            .await
-            .unwrap();
+    let seq_b: i64 = sqlx::query_scalar(
+        "select seq from change_log where entity_id = $1 order by seq desc limit 1",
+    )
+    .bind(ws_b)
+    .fetch_one(&mut *tx_b)
+    .await
+    .unwrap();
     tx_b.commit().await.unwrap();
 
     assert!(seq_b > seq_a, "seq {seq_b} must be ordered after {seq_a}");
 
     // A reader that has seen seq_b can never be missing seq_a.
-    let seen: Vec<i64> =
-        sqlx::query_scalar("select seq from change_log where user_id = $1 and seq <= $2 order by seq")
-            .bind(user)
-            .bind(seq_b)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+    let seen: Vec<i64> = sqlx::query_scalar(
+        "select seq from change_log where user_id = $1 and seq <= $2 order by seq",
+    )
+    .bind(user)
+    .bind(seq_b)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert!(
         seen.contains(&seq_a),
         "seq_a must be visible once seq_b is: {seen:?}"
@@ -548,16 +555,18 @@ async fn change_log_is_scoped_to_one_user(pool: PgPool) {
         .await
         .unwrap();
 
-    let a_seqs: Vec<i64> = sqlx::query_scalar("select seq from change_log where user_id = $1 order by seq")
-        .bind(a)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    let b_seqs: Vec<i64> = sqlx::query_scalar("select seq from change_log where user_id = $1 order by seq")
-        .bind(b)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let a_seqs: Vec<i64> =
+        sqlx::query_scalar("select seq from change_log where user_id = $1 order by seq")
+            .bind(a)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let b_seqs: Vec<i64> =
+        sqlx::query_scalar("select seq from change_log where user_id = $1 order by seq")
+            .bind(b)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(a_seqs.len(), 1, "user A sees only its own change");
     assert_eq!(b_seqs.len(), 1, "user B sees only its own change");
@@ -591,11 +600,13 @@ async fn deleting_a_user_cascades_its_change_log(pool: PgPool) {
 async fn only_one_active_subscription_per_user_is_enforced(pool: PgPool) {
     // The spec states this as a rule; the schema must make it true.
     let user = insert_user(&pool).await;
-    sqlx::query("insert into plans (id,name,price_idr_monthly,price_idr_yearly,entitlements)
-                 values ('pro','Pro',10000,100000,'{}') on conflict do nothing")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "insert into plans (id,name,price_idr_monthly,price_idr_yearly,entitlements)
+                 values ('pro','Pro',10000,100000,'{}') on conflict do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let insert = |status: &'static str| {
         let pool = pool.clone();
@@ -651,7 +662,7 @@ async fn chunks_dedupe_index_is_not_unique_across_tenants(pool: PgPool) {
     let user_a = insert_user(&pool).await;
     let user_b = insert_user(&pool).await;
 
-    let mut source = |user: Uuid| {
+    let source = |user: Uuid| {
         let pool = pool.clone();
         async move {
             let ws = Uuid::now_v7();

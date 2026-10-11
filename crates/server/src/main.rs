@@ -5,30 +5,20 @@ use stvdy_server::{config::AppConfig, db, routes, state::AppState, telemetry};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let env = if std::env::var("APP_ENV").as_deref() == Ok("prod") {
-        "prod"
-    } else {
-        "dev"
-    };
-    telemetry::init(env, "info,stvdy_server=debug,tower_http=debug");
+    // Load and validate configuration before binding anything: a broken
+    // plans.toml must be a startup failure, not a 500 on the first request.
+    let config = AppConfig::from_env()?;
 
-    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let bind_addr: std::net::SocketAddr =
-        bind_addr.parse().context("BIND_ADDR must be host:port")?;
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/stvdy".to_string());
+    telemetry::init(
+        if config.env.is_dev() { "dev" } else { "prod" },
+        "info,stvdy_server=debug,tower_http=debug",
+    );
 
-    let pool = db::connect(&database_url).await?;
+    let pool = db::connect(&config).await?;
+    db::migrate(&pool).await?;
+    db::seed_plans(&pool, &config.plans).await?;
 
-    let config = AppConfig {
-        env: if env == "prod" {
-            stvdy_server::config::Env::Prod
-        } else {
-            stvdy_server::config::Env::Dev
-        },
-        bind_addr,
-        database_url,
-    };
+    let bind_addr = config.bind_addr;
     let state = AppState {
         pool,
         config: Arc::new(config),

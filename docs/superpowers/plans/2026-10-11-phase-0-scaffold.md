@@ -1327,7 +1327,15 @@ git commit -m "feat(core): billing_policy loader that structurally forbids mobil
 
 - [ ] **Step 1: Create migrations 0001–0005**
 
-Copy the SQL bodies verbatim from `docs/SPEC.md` § DATABASE SCHEMA, applying the deltas listed in this plan's migration table:
+`docs/SPEC.md` § DATABASE SCHEMA is a **sketch, not a script** — it says so in its own heading ("create as migrations; add sensible indexes and FKs"), states the sync columns as a *rule* rather than writing them into each table body, and describes the trigger behaviour in prose. So: **copy each `create table` body as the source, then apply the deltas below *and* the sync-column rule.** Do not copy the section verbatim — a verbatim copy produces tables with no `user_id`/`updated_at`/`deleted_at`, and Task 7's schema test plus the exit checklist (32 triggers, three sync columns on every `+sync` table) would both fail.
+
+**The sync-column rule, applied to every table marked `-- +sync` in this and the following two tasks:**
+```sql
+  user_id uuid not null references users on delete cascade,  -- denormalized for fast scoping
+  updated_at timestamptz not null default now(),             -- maintained by touch_updated_at
+  deleted_at timestamptz,                                    -- tombstone; deletes sync as tombstones
+```
+`user_settings` is the one exception: it is keyed by `user_id` already and has neither `id` nor `deleted_at`, which is why `0006` provides a separate `log_change_by_user()`.
 
 - `0001_extensions.sql`: the two `create extension if not exists` statements.
 - `0002_plans.sql`: the `plans` table.
@@ -1471,7 +1479,7 @@ git commit -m "feat(db): extensions, plans, users, devices, sync log and sync fu
 
 - [ ] **Step 1: Create the five migrations**
 
-Copy the bodies from `docs/SPEC.md` and apply these deltas:
+Same rule as Task 4: `docs/SPEC.md` supplies the table bodies; you supply the sync columns (the rule in Task 4 Step 1 applies to every `-- +sync` table here), the indexes below, and the FKs the spec's heading asks for but does not write. Apply these deltas:
 
 - `0007`: add `create index on sources (user_id, workspace_id);` and `create index on sources (status);`
 - `0008`: add `create index on messages (user_id, workspace_id, created_at);`
@@ -1518,7 +1526,7 @@ git commit -m "feat(db): content tables (workspaces, sources, chunks, chat, stud
 
 - [ ] **Step 1: Create migrations 0012–0015**
 
-From `docs/SPEC.md`, with these deltas:
+`docs/SPEC.md` supplies the table bodies; the sync-column rule from Task 4 Step 1 applies to every `-- +sync` table here (`tasks`, `goals`, `study_sessions`, `pending_actions`, `events`, `cheatsheets`). Add these deltas:
 
 - `0012`: add
   ```sql
@@ -1637,6 +1645,19 @@ sqlx migrate run
 psql "$DATABASE_URL" -c "select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal order by 1,2;"
 ```
 Expected: 34 rows (17 tables × 2 triggers), with `user_settings` showing `user_settings_touch_updated_at` and `user_settings_log_change`. The only tables with no triggers are the non-sync ones: `change_log`, `mutation_log`, `chunks`, `jobs`, the billing tables, and `report_revisions`. `cheatsheets` **does** carry both triggers like every other sync table — it is created by `0016_cheatsheets.sql`, which runs before this migration.
+
+Then confirm the sync columns actually landed, since the spec states them as a rule and it is easy to copy a table body without them:
+```bash
+psql "$DATABASE_URL" -c "
+select c.relname, count(*) filter (where a.attname in ('user_id','updated_at','deleted_at')) as sync_cols
+from pg_class c join pg_attribute a on a.attrelid = c.oid
+where c.relkind = 'r' and a.attnum > 0 and not a.attisdropped
+  and c.relname in ('workspaces','sources','messages','decks','flashcards','flashcard_reviews',
+                    'quizzes','quiz_questions','quiz_attempts','reports','cheatsheets','tasks',
+                    'goals','events','study_sessions','pending_actions')
+group by 1 having count(*) filter (where a.attname in ('user_id','updated_at','deleted_at')) <> 3;"
+```
+Expected: **zero rows.** Any row returned is a `+sync` table missing one of the three columns, which Task 7's schema test would catch later — better to see it here.
 
 - [ ] **Step 5: Commit**
 
@@ -4959,6 +4980,7 @@ Expected: all four jobs green. The `desktop` job is the phase's macOS/Windows pr
 
 **Files:**
 - Create: `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md`
+- Verify in place: `docs/THREAT_MODEL.md` — already written; this task only confirms it is present and linked from `docs/ARCHITECTURE.md` and `README.md`, so it cannot drift out of the doc set
 - Modify: `README.md`
 
 **Interfaces:**
@@ -4969,17 +4991,25 @@ Expected: all four jobs green. The `desktop` job is the phase's macOS/Windows pr
 
 Each file gets its headings plus an explicit "filled by phase N" marker, so a later phase cannot silently skip documentation:
 
-`docs/ARCHITECTURE.md`: `## Layers`, `## Provider traits`, `## Config`, `## Native capability matrix` (link `docs/research/2026-10-11-tauri-2-capability-matrix.md`), `## Native prototypes` (Phase 1: keychain, deep link; Phase 14: push, share target, background sync), `## Local cache` (SQLCipher flag, default off).
+`docs/ARCHITECTURE.md`: `## Layers`, `## Provider traits`, `## Config`, `## Trust boundary` (one paragraph + a link to `docs/THREAT_MODEL.md`, which is the normative statement), `## Native capability matrix` (link `docs/research/2026-10-11-tauri-2-capability-matrix.md`), `## Native prototypes` (Phase 1: keychain, deep link; Phase 14: push, share target, background sync), `## Local cache` (SQLCipher flag, default off).
 
 `docs/API.md`: `## Conventions` (auth header, error shape, pagination, SSE event names), `## Auth`, `## Devices`, `## Sync`, `## Workspaces`, `## Sources`, `## Chat`, `## Flashcards`, `## Quiz`, `## Reports`, `## Tasks`, `## Events`, `## Goals and planner`, `## Syllabus`, `## Calendar`, `## Actions`, `## Study`, `## Settings`, `## Account`, `## Billing`, `## Admin` — each with a "Phase N" note.
 
 `docs/SYNC.md`: `## Cursor model`, `## Pull`, `## Push and idempotency`, `## Realtime hint`, `## Conflict rules` (copy the normative table from the roadmap), `## Offline scope`, `## Compaction and resync`, `## Local cache contents`.
 
-`docs/RELEASE.md`: `## Desktop distribution`, `## Mobile distribution`, `## Store policy risk` (QRIS-only mobile selling; note the risk that stores may require their own billing for digital subscriptions), `## Privacy labels`, `## Account deletion`, `## Tax and PPN` (unconfirmed; see ASSUMPTIONS B2), `## Versioning`.
+`docs/RELEASE.md`: `## Desktop distribution`, `## Mobile distribution`, `## Store policy risk` (QRIS-only mobile selling; note the risk that stores may require their own billing for digital subscriptions), `## Privacy labels`, `## Account deletion`, `## Tax and PPN` (unconfirmed; see ASSUMPTIONS B2), `## Versioning`, and the operations sections a *public* launch requires — these are not distribution concerns and must not be skipped, because the app is unreleased today but a paying user is a promise to keep running:
+
+- `## Hosting` (Phase 15) — single VPS, one compose stack, ap-southeast region, sizing floor (4 GB RAM / 40 GB disk; see `docs/ASSUMPTIONS.md` hosting row), and the note that Chromium (Phase 6) is what forces the 4 GB.
+- `## Backups and restore` (Phase 15) — what is backed up (Postgres dump + object storage), frequency, retention, **where the restore is tested**, and the restore-drill cadence. An untested backup is not a backup.
+- `## Monitoring and alerting` (Phase 15) — the signals that mean the service is broken: job worker stalled (oldest `queued` row age), webhook failures, `unresponsive_engines` on every search (A3 degradation), provider-cost ceiling hits, disk and connection saturation, and the alert route for each.
+- `## Incident response` (Phase 15) — the UU PDP 72-hour breach clock: how a breach is detected, who decides it is reportable, what is logged for the report, and the fact that notification goes to both data subjects **and** the authority. Also the on-call reality: one operator, so the runbook must be executable by a tired person at 03:00.
+- `## Abuse control` (Phase 7) — the A43 controls as deployed values: signup rate limits (per IP, per domain), the per-account global cap, the verification-before-spending rule, and the manual unblock path for R5 false positives.
+- `## Data retention` (Phase 15) — per-category retention (change_log 90 days per A19; uploads and chunks for the life of the workspace; `usage_events` and billing rows as required for margin and tax; account deletion semantics and the scheduled hard delete). UU PDP requires a stated schedule, not just a delete button.
+- `## Data processing agreements` (Phase 15) — the vendor list needing a DPA before public launch: LLM provider, Exa/Tavily (A3), VPS host, object storage, SMTP, and the payment gateway (B1). UU PDP explicitly requires formalized vendor contracts.
 
 - [ ] **Step 2: Write `README.md`**
 
-Include: what the project is (one paragraph), the architecture in five bullets, prerequisites (Rust 1.94.1, Node 24, Docker, Xcode for iOS, Android Studio + NDK for Android), the quick start (`docker compose up -d`, `cp .env.example .env`, `sqlx migrate run`, `cargo run -p stvdy-server`, `npm --prefix app install`, `npm --prefix app run dev`, `npm --prefix app run tauri dev`), the `justfile` targets, the CI gates, and pointers to `docs/SPEC.md`, `docs/ASSUMPTIONS.md` and the plan files.
+Include: what the project is (one paragraph), the architecture in five bullets, the trust boundary in two sentences (server is the only enforcement point; see `docs/THREAT_MODEL.md`), prerequisites (Rust 1.94.1, Node 24, Docker, Xcode for iOS, Android Studio + NDK for Android), the quick start (`docker compose up -d`, `cp .env.example .env`, `sqlx migrate run`, `cargo run -p stvdy-server`, `npm --prefix app install`, `npm --prefix app run dev`, `npm --prefix app run tauri dev`), the `justfile` targets, the CI gates, and pointers to `docs/SPEC.md`, `docs/ASSUMPTIONS.md`, `docs/THREAT_MODEL.md` and the plan files.
 
 - [ ] **Step 3: Verify the links resolve**
 
@@ -5003,19 +5033,20 @@ All must be true before the phase is called done:
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean, **and** the `unwrap_used`/`expect_used` lint demonstrably fires (Task 1 Step 5).
 - [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
 - [ ] `npm --prefix app test` and `npm --prefix app run build` green.
-- [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0016` with no error; 32 sync triggers exist and no non-sync table has one.
+- [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2 — 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
 - [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object with a non-empty `results` array (not the `Verifying your browser…` HTML page).
 - [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
-- [ ] `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md` exist with their headings and phase markers.
+- [ ] `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md` exist with their headings and phase markers; `docs/THREAT_MODEL.md` exists and is linked from `docs/ARCHITECTURE.md` § Trust boundary and from `README.md`.
+- [ ] The SPA shell passes the accessibility gate (roadmap § Verification Gates 6) on the screens it has: keyboard-only navigation reaches every control with a visible focus ring, the default theme meets contrast, and no interactive element is below the 44px touch target on a phone-width viewport.
 - [ ] Phase summary posted; wait for "continue".
 
 ## Self-Review
 
 **Spec coverage for Phase 0's scope** — the spec's Phase 0 line asks for: Cargo workspace ✓ (Task 1), React+Vite app ✓ (Task 11), Tauri 2 shell building for macOS and Windows ✓ (Task 13 + CI matrix in Task 14), docker-compose with Postgres+pgvector and MinIO ✓ (Task 8), migrations ✓ (Tasks 4–6), plans.toml + billing_policy.toml loaders ✓ (Tasks 2–3), health endpoint ✓ (Task 9), CI with fmt/clippy/test and the web + macOS + Windows build matrix ✓ (Task 14), `platform` adapter skeleton ✓ (Task 12). The full schema is created in Phase 0 rather than Phase 1 because the spec's sync columns and triggers must exist "from the start" and retrofitting triggers onto live tables is the expensive mistake this ordering avoids.
 
-**Placeholders** — none. Every code step carries the real content; migration bodies are the one deliberate reference, and they point at `docs/SPEC.md` (in-repo, normative) with an explicit per-file table of deltas, which is stronger than duplicating 400 lines that could drift.
+**Placeholders** — none in the sense of unfinished work. Two honest qualifications: (1) migration bodies are authored from `docs/SPEC.md` § DATABASE SCHEMA, which is a *sketch* — its own heading says "create as migrations; add sensible indexes and FKs", it states the sync columns as a rule rather than writing them into each table body, and it describes the trigger behaviour in prose. Tasks 4–6 therefore carry the sync-column rule, the index/FK deltas and a verification query, and the exit checklist asserts the resulting counts (34 triggers, three sync columns on every `+sync` table) rather than trusting the copy. This is deliberate: one authoritative sketch plus explicit deltas is stronger than duplicating 400 lines that would drift, but it is not "copy the file". (2) `docs/THREAT_MODEL.md` is written and normative; `docs/ARCHITECTURE.md`, `API.md`, `SYNC.md` and `RELEASE.md` are created as stubs in Task 15 with the headings and phase markers later phases must fill.
 
 **Type consistency** — `PlanId`, `PlanConfig`, `BillingPolicy`, `Platform`, `AppConfig`, `AppState`, `AppError`, `Entity`, `Op`, `Change`, `Mutation`, `MutationResult`, `PullResponse`, `PushRequest/Response`, `Platform`/`PlatformKind`/`FormFactor` are each defined exactly once and referenced by name thereafter. `Entity::ALL` has 17 variants and `dependency_rank()` returns a dense 1..=17, asserted by the wire test. The schema test's `SYNC_TABLES` list (16 tables) plus `user_settings` matches `0017_sync_triggers.sql` exactly, and `tables_added_beyond_the_spec_are_deliberate` carries `report_revisions` + `cheatsheets` as the documented deviations.
 
