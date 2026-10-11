@@ -440,6 +440,22 @@ mod task_composition {
         assert!(matches!(error, PromptError::MissingSection(_)), "{error:?}");
     }
 
+    /// The guard rail has two required sections and both must be checked: a case
+    /// that keeps grounding but drops security is the one that catches a future
+    /// edit removing the second name from the required list.
+    #[test]
+    fn trimming_away_the_security_section_is_an_error() {
+        let error = stvdy_core::prompts::trim_base_with(
+            stvdy_core::prompts::base_v1(),
+            &["context", "grounding_and_citations"],
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, PromptError::MissingSection(name) if name == "security_untrusted_content"),
+            "{error:?}"
+        );
+    }
+
     #[test]
     fn compose_task_fills_the_module_variables_and_leaves_no_marker() {
         let mut module_vars = BTreeMap::new();

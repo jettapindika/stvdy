@@ -8,7 +8,8 @@
 
 use stvdy_core::citations::{ContextLabels, LabeledChunk};
 use stvdy_core::generation::GenerationError;
-use stvdy_core::generation::flashcards::{parse_cards, resolve_cards};
+use stvdy_core::generation::flashcards::{MAX_CARDS_PER_REPLY, parse_cards, resolve_cards};
+use stvdy_core::generation::is_retryable;
 use uuid::Uuid;
 
 fn labels() -> ContextLabels {
@@ -97,4 +98,42 @@ fn a_card_with_an_empty_side_is_dropped() {
     .unwrap();
     let outcome = resolve_cards(cards, &labels());
     assert!(outcome.cards.is_empty(), "{:?}", outcome.cards);
+}
+
+/// Pins both sides of the cap: the limit itself is accepted, one card more is
+/// refused. A truncating implementation would return `Ok` with fewer cards, so
+/// the passing case asserts the count too.
+#[test]
+fn a_reply_at_the_cap_parses_and_one_over_is_refused() {
+    let card = |index: usize| {
+        serde_json::json!({
+            "front": format!("front {index}"),
+            "back": format!("back {index}"),
+            "label": 1,
+        })
+    };
+    let at_cap = serde_json::to_string(&serde_json::json!({
+        "cards": (0..MAX_CARDS_PER_REPLY).map(card).collect::<Vec<_>>(),
+    }))
+    .unwrap();
+    assert_eq!(parse_cards(&at_cap).unwrap().len(), MAX_CARDS_PER_REPLY);
+
+    let over_cap = serde_json::to_string(&serde_json::json!({
+        "cards": (0..=MAX_CARDS_PER_REPLY).map(card).collect::<Vec<_>>(),
+    }))
+    .unwrap();
+    assert!(matches!(
+        parse_cards(&over_cap),
+        Err(GenerationError::Schema(_))
+    ));
+}
+
+/// Only an empty deck is not retryable. Task 4 branches on exactly this to choose
+/// between a second billed call and a permanent failure, so inverting the match
+/// must fail a test.
+#[test]
+fn only_an_empty_deck_is_not_retryable() {
+    assert!(is_retryable(&GenerationError::Json("bad".to_string())));
+    assert!(is_retryable(&GenerationError::Schema("bad".to_string())));
+    assert!(!is_retryable(&GenerationError::Empty));
 }
