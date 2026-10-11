@@ -6,6 +6,11 @@
 /app/node_modules
 /app/dist
 /app/coverage
+# Vitest resolves its cache directory against the *current* directory, and the
+# documented invocation (`npm --prefix app test`, `justfile`) runs from the repo
+# root, so it creates `/node_modules/.vite/vitest` here. Untracked cache, ignored
+# so the tree stays clean after the gate runs.
+/node_modules
 
 # Native shell: `gen` is deliberately NOT ignored. Tauri's CLI writes its own
 # .gitignore containing `*` inside gen/<project>/.tauri/, which implies the
