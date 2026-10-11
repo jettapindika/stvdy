@@ -5108,6 +5108,12 @@ Deviations and discoveries from actually running the plan. The plan text above i
 9. **Haptics exports are `impactFeedback`/`notificationFeedback`**, not `hapticImpact`/`hapticNotification` — caught by `tsc`.
 10. **`i64::div_ceil` is unstable**; the long-document multiplier uses manual ceiling division.
 11. **Tests must not mutate the process environment** (it is global and racy), so `AppConfig::from_env_at` takes explicit overrides.
+12. **Plugin config in `tauri.conf.json` is validated only by the Tauri CLI, and only when the plugin is rebuilt.** The CLI sets `TAURI_{PLUGIN}_PLUGIN_CONFIG` for every plugin in the config with no target gating, and each plugin's `build.rs` calls `plugin_config::<Config>("...")`, which panics on a shape mismatch. Two consequences:
+    - `cargo build`/`cargo clippy` can never catch it — they do not set the variable.
+    - **Changing `tauri.conf.json` does not re-run the plugin's `build.rs`.** Cargo re-runs the *shell's* build script (it declares `rerun-if-changed` on the config), but nothing tells cargo the plugin's script depends on our config, so a wrong shape can sit undetected until a fresh checkout or `cargo clean -p <plugin>`.
+
+    Verified the hard way: `"mobile": [{ "scheme": "stvdy" }]` built cleanly on an incremental `tauri build`, then panicked with `failed to parse configuration: Error("invalid type: string \"stvdy\", expected a sequence")` once `cargo clean -p tauri-plugin-deep-link` forced the script to re-run. `AssociatedDomain.scheme` is `Vec<String>`.
+    **Rule for later phases:** after editing any `plugins.*` block, verify with `cargo clean -p <the-plugin>` followed by `./app/node_modules/.bin/tauri build --debug --no-bundle`. An incremental build proves nothing.
 
 ### Phase 0 verification (as executed)
 

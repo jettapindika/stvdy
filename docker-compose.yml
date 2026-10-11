@@ -43,13 +43,43 @@ services:
   # Search tier 2 (A3): the self-hosted general-web provider behind
   # SearchProvider. Internal only — nothing outside the server calls it, and it
   # is not exposed on a public interface.
+  #
+  # The settings file is rendered into a volume rather than mounted from the repo
+  # because SearXNG honours no `SEARXNG_SECRET` variable and does no `${VAR}`
+  # expansion in YAML: mounting the repo file would skip the entrypoint's
+  # "generate a random secret" branch and run with whatever is committed. See
+  # searxng/settings.yml.
+  searxng-init:
+    image: busybox:latest
+    environment:
+      # Deliberately NOT `${SEARXNG_SECRET:?}`: compose interpolates every
+      # service before selecting one, so a required-variable error here would
+      # break `docker compose up postgres` for anyone who has not set a search
+      # secret. The emptiness check lives in the command instead, so the failure
+      # is scoped to starting searxng.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./searxng/settings.yml:/template/settings.yml:ro
+      - searxng-config:/etc/searxng
+    command: >
+      sh -c '
+      if [ -z "$$SEARXNG_SECRET" ]; then
+        echo "SEARXNG_SECRET is empty. Set it in .env (openssl rand -hex 32) before starting searxng." >&2;
+        exit 1;
+      fi;
+      sed "s|__SEARXNG_SECRET__|$$SEARXNG_SECRET|" /template/settings.yml > /etc/searxng/settings.yml;
+      echo "searxng settings rendered"'
+
   searxng:
     image: searxng/searxng:latest
-    environment:
-      SEARXNG_SECRET: dev-only-change-me
-      SEARXNG_BASE_URL: http://localhost:8088/
+    depends_on:
+      searxng-init:
+        condition: service_completed_successfully
     volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      # The rendered config. The entrypoint chowns it to searxng:searxng when
+      # running as root (FORCE_OWNERSHIP defaults to true), so the init
+      # container does not need to.
+      - searxng-config:/etc/searxng
     ports: ["8088:8080"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
@@ -60,3 +90,4 @@ services:
 volumes:
   pgdata:
   miniodata:
+  searxng-config:

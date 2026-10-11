@@ -369,3 +369,31 @@ fn a_cheaper_model_on_a_higher_plan_is_rejected() {
         other => panic!("expected ConfigInvalid, got {other:?}"),
     }
 }
+
+#[test]
+fn the_whole_config_round_trips_through_json() {
+    // `plans.entitlements` mirrors the config for auditing (the spec requires the
+    // blob to match plans.toml). A `Limit` whose Serialize and Deserialize
+    // disagree stored `{"Max":2}` — a blob its own reader rejects — and nothing
+    // round-tripped, so no test caught it. This asserts the symmetry for the
+    // entire file, which is what the audit snapshot actually serialises.
+    let plans = shipped();
+
+    let json = serde_json::to_value(&plans).expect("serialize");
+    // Spot-check the shape: an integer and the literal string, not enum wrappers.
+    let free = &json["plans"]["free"];
+    assert_eq!(free["workspaces"], 2);
+    assert_eq!(free["google_accounts_max"], 0);
+    assert_eq!(json["plans"]["power"]["workspaces"], "unlimited");
+    assert_eq!(json["plans"]["free"]["model_tier"], "cheapest");
+
+    let back: stvdy_core::config::PlansFile =
+        serde_json::from_value(json.clone()).expect("deserialize what we just serialized");
+    // Compare the re-serialized form rather than the struct: it proves the same
+    // fixpoint without requiring PartialEq on every nested type.
+    assert_eq!(
+        serde_json::to_value(&back).expect("re-serialize"),
+        json,
+        "the config must round-trip losslessly"
+    );
+}

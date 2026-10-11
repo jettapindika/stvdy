@@ -157,7 +157,7 @@ pub enum ExportFormat {
 /// "unlimited", so free read as unlimited Google accounts and only the separate
 /// `google_calendar` boolean kept it honest — two fields encoding one policy,
 /// with the numeric one stating the opposite of the intent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Limit {
     Unlimited,
     Max(u32),
@@ -181,6 +181,26 @@ impl Limit {
         match self {
             Limit::Unlimited => true,
             Limit::Max(max) => used < max,
+        }
+    }
+}
+
+/// Serializes to the SAME shape `Deserialize` accepts: an integer for `Max`, the
+/// string `"unlimited"` for `Unlimited`.
+///
+/// This must be hand-written. The derived form produced `{"Max":2}` and
+/// `"Unlimited"`, which the hand-written visitor cannot read back — so
+/// `plans.entitlements` (which mirrors the config for auditing, per the spec)
+/// stored a blob that could never be parsed again. Nothing round-tripped, so no
+/// test noticed.
+impl Serialize for Limit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Limit::Unlimited => serializer.serialize_str("unlimited"),
+            Limit::Max(n) => serializer.serialize_u32(*n),
         }
     }
 }

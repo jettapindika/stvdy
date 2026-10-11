@@ -9,7 +9,6 @@ import {
 } from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
-import { check } from '@tauri-apps/plugin-updater'
 
 import { formFactorFor } from './index'
 import type { Platform, PlatformKind } from './types'
@@ -80,8 +79,11 @@ export function desktopPlatform(kind: PlatformKind): Platform {
     openExternal: (url) => openUrl(url),
 
     async checkForUpdate() {
-      const update = await check()
-      return update !== null
+      // The updater plugin is not registered yet: it needs a signing keypair and
+      // a release endpoint, which arrive in Phase 15 (A35). Returning false
+      // rather than calling a command that does not exist keeps the same
+      // no-fabricated-capability rule the Rust side follows.
+      return false
     },
   }
 }

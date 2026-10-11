@@ -28,58 +28,84 @@ behind traits, so a provider is configuration rather than code.
 
 - Rust 1.94.1 (`rust-toolchain.toml` pins it; sqlx 0.9 needs ≥1.94.0)
 - Node 24 (`.nvmrc`; ≥22.22 required by React Router 8)
-- **Postgres with pgvector** — Docker, a local install, or hosted Supabase
+- **Postgres with pgvector** — one of: Docker, a local install, or hosted Supabase
 - `just` (`brew install just`) for the dev recipes
 - For mobile later: Xcode (iOS), Android Studio + NDK (Android)
 
+You do **not** need `sqlx-cli` just to run the server: `crates/server` applies
+migrations on boot from the compile-time `sqlx::migrate!` macro. It is only
+needed for `just migrate` and `just prepare`.
+
 ## Quick start
 
+**1. Pick a database.** Both paths are supported; pick the one that matches your
+machine.
+
 ```bash
-cp .env.example .env          # the server loads this automatically (dotenvy)
+# (a) Docker — needs port 5432 free
+brew services stop postgresql@17   # if a local Postgres holds 5432
+just db-up                         # postgres + pgvector, MinIO, bucket
 
-# Database: Docker, an existing local Postgres with pgvector, or Supabase.
-docker compose up -d postgres
-
-cargo install sqlx-cli --no-default-features --features postgres,rustls
-sqlx migrate run              # 17 migrations
-
-cargo run -p stvdy-server
-curl localhost:8080/health    # {"env":"dev","plans":3,"status":"ok","version":"0.1.0"}
-
-# Web app (separate terminal)
-npm --prefix app install
-npm --prefix app run dev      # http://localhost:5173
-
-# Desktop app (separate terminal, from the repo root)
-just tauri                    # or: ./app/node_modules/.bin/tauri dev
+# (b) An existing local Postgres that already has pgvector
+createdb stvdy                     # once
+# then set DATABASE_URL in .env to your own role, e.g.
+#   DATABASE_URL=postgres://$USER@localhost:5432/stvdy
 ```
+
+**2. Configuration.**
+
+```bash
+cp .env.example .env
+```
+
+Then **check `DATABASE_URL` in `.env` matches the path you chose above.** The
+template ships `postgres://postgres:postgres@localhost:5432/stvdy`, which is
+correct for Docker and wrong for a local Homebrew Postgres (its role is your
+username, and there is no `postgres` role) — the symptom is
+`role "postgres" does not exist`.
+
+**3. Server** → http://localhost:8080
+
+```bash
+just server                        # or: cargo run -p stvdy-server
+curl localhost:8080/health
+# {"env":"dev","plans":3,"status":"ok","version":"0.1.0"}
+```
+
+Migrations and plan seeding happen at boot, so a fresh database needs no extra
+step. To run them without starting the server: `just migrate`.
+
+**4. Web app** → http://localhost:5173
+
+```bash
+npm --prefix app install
+npm --prefix app run dev
+```
+
+**5. Desktop app**
+
+```bash
+just tauri
+```
+
+`just tauri` starts its own frontend via `beforeDevCommand`, so **do not also run
+step 4** — the second Vite cannot bind 5173 (`strictPort: true`) and prints
+`Port 5173 is already in use`. That message is harmless here (Tauri just polls
+`devUrl`, which the first Vite is serving), but it looks like a failure. Run step
+4 for the browser build, or step 5 for the desktop app, not both.
 
 Recipes: `just db-up`, `just migrate`, `just server`, `just web`, `just tauri`,
-`just search-up`, `just check`.
-
-### If port 5432 is already taken
-
-A local Postgres (Homebrew `postgresql@17`, say) holds 5432, so
-`docker compose up postgres` cannot bind it. Pick one:
-
-```bash
-brew services stop postgresql@17     # free the port for the container, or
-createdb stvdy                       # keep the local server and point .env at it:
-#   DATABASE_URL=postgres://<your-user>@localhost:5432/stvdy
-```
-
-Either works: the schema needs only the `vector` and `pgcrypto` extensions, which
-`sqlx migrate run` creates. CI runs the pinned Postgres 16
-(`pgvector/pgvector:pg16`), so if your local version differs, treat CI's result as
-authoritative — see `docs/ASSUMPTIONS.md` § Local development environment.
+`just search-up`, `just check`, `just prepare`. Run them from the repo root — the
+Tauri CLI resolves `src-tauri` as a subdirectory of the working directory and
+will not find it from `app/`.
 
 ### What needs which service
 
 | Service | Needed for |
 |---|---|
-| Postgres + pgvector | everything (migrations, tests, the API) |
+| Postgres + pgvector | everything (the API, migrations, tests) |
 | MinIO (`docker compose up -d minio minio-init`) | source uploads, Phase 1+ |
-| SearXNG (`just search-up`) | web search only, Phase 3+ |
+| SearXNG (`just search-up`) | web search only, Phase 3+; needs `SEARXNG_SECRET` in `.env` |
 
 The `#[sqlx::test]` suites create a scratch database per test, so **Postgres must
 be reachable before `just check`** — otherwise those tests fail loudly. That is

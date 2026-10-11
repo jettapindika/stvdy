@@ -21,7 +21,6 @@
     "@tauri-apps/plugin-notification": "2.6.0",
     "@tauri-apps/plugin-opener": "2.7.1",
     "@tauri-apps/plugin-os": "2.4.0",
-    "@tauri-apps/plugin-updater": "2.13.3",
     "eventsource-parser": "4.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",

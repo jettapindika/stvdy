@@ -2,7 +2,7 @@
   "$schema": "../app/node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Stvdy",
   "version": "0.1.0",
-  "identifier": "app.stvdy.desktop",
+  "identifier": "app.stvdy",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",

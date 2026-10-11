@@ -113,6 +113,16 @@ mod tests {
     /// machine before any auth code depends on it. On macOS the first run may
     /// prompt for keychain access; that prompt is the expected result to record
     /// in docs/ARCHITECTURE.md.
+    ///
+    /// Gated to platforms that have a store: `init()` returns `NoStore` on Linux,
+    /// so an ungated test would FAIL there (not skip), breaking `just check` for
+    /// any Linux contributor and for any future ubuntu shell job.
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        target_os = "android"
+    ))]
     #[test]
     fn keychain_round_trips_a_refresh_token() {
         init().expect("a secure store must be available on this platform");
@@ -138,5 +148,19 @@ mod tests {
 
         delete(key).expect("delete must remove it");
         assert_eq!(get(key).expect("get after delete must be None"), None);
+    }
+
+    /// The complement: where there is no OS store, `init()` must say so rather
+    /// than appearing to succeed. This exercises the `NoStore` path instead of
+    /// leaving it untested.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        target_os = "android"
+    )))]
+    #[test]
+    fn init_reports_no_store_on_unsupported_platforms() {
+        assert!(matches!(init(), Err(SecretError::NoStore)));
     }
 }

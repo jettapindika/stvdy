@@ -1,7 +1,20 @@
 # SearXNG configuration for the search tier (A3).
 #
+# This file is a TEMPLATE. It is never mounted into the container directly: the
+# `searxng-init` compose service renders `__SEARXNG_SECRET__` from the
+# environment into a named volume, and the `searxng` service mounts that volume.
+#
+# Why the indirection: SearXNG honours no `SEARXNG_SECRET` variable (verified in
+# `container/entrypoint.sh` — it only `sed`s the literal `ultrasecretkey` in the
+# settings file it *creates*, and `searx/settings_loader.py` does a plain
+# `yaml.safe_load` with no `${VAR}` expansion). Because we supply a settings
+# file, the entrypoint's "create from template" branch is skipped entirely, so a
+# committed `secret_key` would be the value that actually runs. A45 deploys this
+# stack to a public-IP VPS, where a known `secret_key` lets anyone forge SearXNG
+# session and CSRF cookies.
+#
 # Only what we must override is here; SearXNG merges this over its own defaults,
-# so an incomplete file is expected rather than a problem.
+# so an incomplete file is expected.
 #
 # The two settings that matter for programmatic use:
 #   formats: [html, json]  — the JSON output is what SearchProvider consumes.
@@ -9,22 +22,20 @@
 #   limiter: false         — the bot-detection limiter would reject our
 #     server-side requests, since they are not a browser session.
 #
-# This service is internal-only: it is reached over the compose network, and
-# nothing outside the server should call it.
+# Internal only: reached over the compose network, and nothing outside the
+# server should call it.
 
 use_default_settings: true
 
 general:
   instance_name: "stvdy-search"
-  # No analytics, no public instance metadata.
   enable_metrics: false
 
 server:
-  # Overridden by SEARXNG_SECRET in the compose environment.
-  secret_key: "change-me-in-compose"
+  # Rendered from SEARXNG_SECRET by searxng-init. Never commit a real value.
+  secret_key: "__SEARXNG_SECRET__"
   limiter: false
   image_proxy: false
-  # Reachable only from the compose network and localhost.
   bind_address: "0.0.0.0:8080"
 
 search:
@@ -32,8 +43,8 @@ search:
   formats:
     - html
     - json
-  # Keep result pages small: we only need the top hits, and the server
-  # truncates and caches them anyway (A40).
+  # Keep result pages small: we only need the top hits, and the server truncates
+  # and caches them anyway (A40).
   max_page: 1
   safe_search: 0
   autocomplete: ""
