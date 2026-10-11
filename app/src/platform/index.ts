@@ -35,6 +35,21 @@ export function formFactorFor(kind: PlatformKind): FormFactor {
 }
 
 /**
+ * Viewport-based layout bucket, used for the tablet two-panel layout.
+ *
+ * Deliberately NOT derived from `PlatformKind`: a tablet is a width, not a
+ * platform (an iPad and a small laptop window are the same problem), and
+ * `formFactorFor` could never return `'tablet'`, which made that variant
+ * unreachable and would have silently rendered tablets as desktop. Callers that
+ * care about tablet pass their own width check.
+ */
+export function formFactorForWidth(width: number): FormFactor {
+  if (width >= 1024) return 'desktop'
+  if (width >= 768) return 'tablet'
+  return 'phone'
+}
+
+/**
  * The active adapter. The web implementation is the default; the Tauri shell
  * installs its own via `installPlatform` during startup, so no module outside
  * `platform/` ever imports a Tauri package (enforced by boundary.test.ts).

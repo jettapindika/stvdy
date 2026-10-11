@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod keychain;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -17,13 +19,28 @@ pub fn run() {
         tracing::warn!(%error, "secure storage unavailable; tokens will not persist");
     }
 
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance MUST be registered first (Tauri's own guidance: "must be
+    // the first one to be registered to work well. This assures that it runs
+    // before other plugins can interfere."). It is also what re-emits a
+    // deep-link event on the surviving instance, via its `deep-link` feature.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    let mut builder = builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             commands::health_ping,
             commands::secret_set,
@@ -33,16 +50,10 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder
-            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-                use tauri::Manager;
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_focus();
-                }
-            }))
-            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
         // The updater is registered in Phase 15 alongside the signing keypair and
-        // the release endpoint; it cannot function before those exist.
+        // the release endpoint; it cannot function before those exist, and
+        // registering it without config panics at startup.
     }
 
     #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -51,13 +62,13 @@ pub fn run() {
     }
 
     builder
-        .setup(|_app| {
+        .setup(|app| {
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 // Registers the `stvdy://` scheme at runtime for dev builds; in a
                 // bundled app the scheme comes from the bundle metadata.
-                let _ = _app.deep_link().register_all();
+                let _ = app.deep_link().register_all();
             }
             Ok(())
         })

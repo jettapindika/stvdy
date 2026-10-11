@@ -7,7 +7,7 @@ use crate::error::{CoreError, CoreResult};
 
 pub use billing_policy::{BillingPolicy, Platform, PlatformPolicy};
 pub use plans::{
-    CreditAction, Credits, ExportFormat, Meta, ModelTier, PlanConfig, PlanId, PlannerMode,
+    CreditAction, Credits, ExportFormat, Limit, Meta, ModelTier, PlanConfig, PlanId, PlannerMode,
     PlansFile, ReminderChannel,
 };
 

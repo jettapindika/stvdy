@@ -51,7 +51,8 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["stvdy"] }
+      "desktop": { "schemes": ["stvdy"] },
+      "mobile": [{ "scheme": "stvdy" }]
     }
   }
 }

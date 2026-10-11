@@ -146,6 +146,82 @@ pub enum ExportFormat {
     Json,
 }
 
+/// A plan limit. Explicit rather than a `0 = unlimited` sentinel, because a
+/// sentinel cannot express a genuine zero and the two are both meaningful:
+/// `free` allows **zero** Google accounts, while `pro`/`power` allow unlimited
+/// workspaces. With a sentinel, `google_accounts_max = 0` deserialized to
+/// "unlimited", so free read as unlimited Google accounts and only the separate
+/// `google_calendar` boolean kept it honest — two fields encoding one policy,
+/// with the numeric one stating the opposite of the intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Limit {
+    Unlimited,
+    Max(u32),
+}
+
+impl Limit {
+    pub fn is_unlimited(self) -> bool {
+        matches!(self, Limit::Unlimited)
+    }
+
+    /// `None` when unlimited.
+    pub fn max(self) -> Option<u32> {
+        match self {
+            Limit::Unlimited => None,
+            Limit::Max(n) => Some(n),
+        }
+    }
+
+    /// Whether `used` is within the limit. Unlimited always passes.
+    pub fn allows(self, used: u32) -> bool {
+        match self {
+            Limit::Unlimited => true,
+            Limit::Max(max) => used < max,
+        }
+    }
+}
+
+/// Accepts either an integer (`0` is a real zero) or the string `"unlimited"`.
+impl<'de> Deserialize<'de> for Limit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LimitVisitor;
+
+        impl serde::de::Visitor<'_> for LimitVisitor {
+            type Value = Limit;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a non-negative integer or the string \"unlimited\"")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Limit, E> {
+                u32::try_from(v)
+                    .map(Limit::Max)
+                    .map_err(|_| E::custom(format!("limit {v} does not fit in u32")))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Limit, E> {
+                u32::try_from(v)
+                    .map(Limit::Max)
+                    .map_err(|_| E::custom(format!("limit {v} must be a non-negative integer")))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Limit, E> {
+                match v {
+                    "unlimited" => Ok(Limit::Unlimited),
+                    other => Err(E::custom(format!(
+                        "expected an integer or \"unlimited\", got {other:?}"
+                    ))),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(LimitVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanConfig {
@@ -154,48 +230,30 @@ pub struct PlanConfig {
     pub price_idr_yearly: i64,
     pub student_percent_off: u8,
 
-    /// `None` (written as `0` in TOML) means unlimited.
-    #[serde(deserialize_with = "limit_of")]
-    pub workspaces: Option<u32>,
-    #[serde(deserialize_with = "limit_of")]
-    pub sources_total: Option<u32>,
+    pub workspaces: Limit,
+    pub sources_total: Limit,
     pub max_file_mb: u32,
     pub storage_mb: u32,
     pub devices_max: u32,
     pub credits_per_month: i64,
-    #[serde(deserialize_with = "limit_of")]
-    pub chat_msgs_per_day: Option<u32>,
+    pub chat_msgs_per_day: Limit,
     pub web_searches_per_day: u32,
-    #[serde(deserialize_with = "limit_of")]
-    pub flashcards_per_month: Option<u32>,
-    #[serde(deserialize_with = "limit_of")]
-    pub quizzes_per_month: Option<u32>,
-    #[serde(deserialize_with = "limit_of")]
-    pub reports_per_month: Option<u32>,
+    pub flashcards_per_month: Limit,
+    pub quizzes_per_month: Limit,
+    pub reports_per_month: Limit,
 
     pub export_formats: Vec<ExportFormat>,
     pub task_ai_breakdown: bool,
     pub quick_capture: bool,
     pub google_calendar: bool,
-    #[serde(deserialize_with = "limit_of")]
-    pub google_accounts_max: Option<u32>,
-    #[serde(deserialize_with = "limit_of")]
-    pub syllabus_imports_total: Option<u32>,
+    pub google_accounts_max: Limit,
+    pub syllabus_imports_total: Limit,
     pub planner: PlannerMode,
     pub agent_actions: bool,
     pub reminder_channels: Vec<ReminderChannel>,
     pub model_tier: ModelTier,
     pub byok: bool,
     pub advanced_analytics: bool,
-}
-
-/// `0` in the TOML means "unlimited" and becomes `None`.
-fn limit_of<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = u32::deserialize(deserializer)?;
-    Ok(if raw == 0 { None } else { Some(raw) })
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -287,6 +345,172 @@ impl PlansFile {
             }
         }
 
+        // Limits must not shrink as the price rises. Checked here rather than only
+        // in a test, because a mis-edited config must fail at boot with the
+        // offending plan pair named — the test can only report it after the fact,
+        // and only if CI runs.
+        let free = self.get(PlanId::Free);
+        let pro = self.get(PlanId::Pro);
+        let power = self.get(PlanId::Power);
+
+        let numeric: [(&str, Limit, Limit, Limit); 7] = [
+            (
+                "workspaces",
+                free.workspaces,
+                pro.workspaces,
+                power.workspaces,
+            ),
+            (
+                "sources_total",
+                free.sources_total,
+                pro.sources_total,
+                power.sources_total,
+            ),
+            (
+                "chat_msgs_per_day",
+                free.chat_msgs_per_day,
+                pro.chat_msgs_per_day,
+                power.chat_msgs_per_day,
+            ),
+            (
+                "flashcards_per_month",
+                free.flashcards_per_month,
+                pro.flashcards_per_month,
+                power.flashcards_per_month,
+            ),
+            (
+                "quizzes_per_month",
+                free.quizzes_per_month,
+                pro.quizzes_per_month,
+                power.quizzes_per_month,
+            ),
+            (
+                "reports_per_month",
+                free.reports_per_month,
+                pro.reports_per_month,
+                power.reports_per_month,
+            ),
+            (
+                "syllabus_imports_total",
+                free.syllabus_imports_total,
+                pro.syllabus_imports_total,
+                power.syllabus_imports_total,
+            ),
+        ];
+        for (field, f, p, pw) in numeric {
+            if !limit_le(f, p) {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "{field}: free must not exceed pro (free={f:?}, pro={p:?})"
+                )));
+            }
+            if !limit_le(p, pw) {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "{field}: pro must not exceed power (pro={p:?}, power={pw:?})"
+                )));
+            }
+        }
+
+        // Concrete maxima that are not Limit-typed.
+        for (field, f, p, pw) in [
+            (
+                "storage_mb",
+                free.storage_mb,
+                pro.storage_mb,
+                power.storage_mb,
+            ),
+            (
+                "devices_max",
+                free.devices_max,
+                pro.devices_max,
+                power.devices_max,
+            ),
+            (
+                "web_searches_per_day",
+                free.web_searches_per_day,
+                pro.web_searches_per_day,
+                power.web_searches_per_day,
+            ),
+        ] {
+            if f > p || p > pw {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "{field} must not decrease as the plan rises (free={f}, pro={p}, power={pw})"
+                )));
+            }
+        }
+
+        if free.credits_per_month > pro.credits_per_month
+            || pro.credits_per_month > power.credits_per_month
+        {
+            return Err(CoreError::ConfigInvalid(
+                "credits_per_month must not decrease as the plan rises".into(),
+            ));
+        }
+
+        // Boolean features must not be available on a cheaper plan only.
+        for (field, f, p, pw) in [
+            (
+                "agent_actions",
+                free.agent_actions,
+                pro.agent_actions,
+                power.agent_actions,
+            ),
+            (
+                "quick_capture",
+                free.quick_capture,
+                pro.quick_capture,
+                power.quick_capture,
+            ),
+            (
+                "task_ai_breakdown",
+                free.task_ai_breakdown,
+                pro.task_ai_breakdown,
+                power.task_ai_breakdown,
+            ),
+        ] {
+            if (f && !p) || (p && !pw) {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "{field} must not be enabled on a cheaper plan only (free={f}, pro={p}, power={pw})"
+                )));
+            }
+        }
+
+        // Features the spec grants to power ONLY. Monotonicity alone cannot
+        // express this: enabling `byok` on pro does not break free <= pro <=
+        // power, because power also has it. Without an explicit rule a config
+        // edit could silently hand pro a power-plan entitlement.
+        for (field, f, p, pw) in [
+            ("byok", free.byok, pro.byok, power.byok),
+            (
+                "advanced_analytics",
+                free.advanced_analytics,
+                pro.advanced_analytics,
+                power.advanced_analytics,
+            ),
+        ] {
+            if f || p || !pw {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "{field} is a power-only feature (free={f}, pro={p}, power={pw})"
+                )));
+            }
+        }
+
+        // `google_calendar` is the one feature where power is not a superset of
+        // pro in the boolean sense, so it is checked separately.
+        if free.google_calendar || !pro.google_calendar || !power.google_calendar {
+            return Err(CoreError::ConfigInvalid(
+                "google_calendar must be off on free and on for pro and power".into(),
+            ));
+        }
+
         Ok(())
+    }
+}
+
+/// `Unlimited` is greater than any `Max`.
+fn limit_le(lo: Limit, hi: Limit) -> bool {
+    match (lo, hi) {
+        (_, Limit::Unlimited) => true,
+        (Limit::Unlimited, Limit::Max(_)) => false,
+        (Limit::Max(a), Limit::Max(b)) => b >= a,
     }
 }

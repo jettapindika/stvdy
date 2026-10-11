@@ -17,15 +17,13 @@ export function Sidebar() {
       <ul className="space-y-1">
         {links.map((link) => (
           <li key={link.to}>
+            {/* `.nav-link` carries the focus-visible ring and the active state
+                (see styles.css), so both live in one place. */}
             <NavLink
               to={link.to}
               end={link.to === '/'}
               className={({ isActive }) =>
-                `block rounded-md px-3 py-2 text-sm ${
-                  isActive
-                    ? 'bg-brand-50 font-medium text-brand-900'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`
+                `nav-link ${isActive ? 'text-brand-900' : 'text-gray-600 hover:bg-gray-50'}`
               }
             >
               {link.label}

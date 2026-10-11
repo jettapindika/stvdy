@@ -61,31 +61,31 @@ fn a_missing_billing_policy_is_reported_with_its_path() {
     assert!(message.contains("nope.toml"), "got: {message}");
 }
 
+fn prod_with_jwt(jwt: &str) -> Vec<(&str, &str)> {
+    vec![
+        ("PLANS_CONFIG", "config/plans.toml"),
+        ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+        ("APP_ENV", "prod"),
+        // prod requires a real encryption key too; supply one, since this test
+        // is about JWT_SECRET.
+        (
+            "ENCRYPTION_KEY_HEX",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ),
+        ("JWT_SECRET", jwt),
+        ("WEB_ORIGIN", "https://app.stvdy.test"),
+    ]
+}
+
 #[test]
 fn prod_requires_a_real_jwt_secret() {
     // A short secret in prod is a full-auth bypass waiting to happen.
-    let err = AppConfig::from_env_at(
-        &root(),
-        &[
-            ("PLANS_CONFIG", "config/plans.toml"),
-            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
-            ("APP_ENV", "prod"),
-            ("JWT_SECRET", "too-short"),
-        ],
-    )
-    .unwrap_err();
+    let err = AppConfig::from_env_at(&root(), &prod_with_jwt("too-short")).unwrap_err();
     assert!(format!("{err:#}").contains("JWT_SECRET"), "got: {err:#}");
 
     // A long one is accepted.
-    let ok = AppConfig::from_env_at(
-        &root(),
-        &[
-            ("PLANS_CONFIG", "config/plans.toml"),
-            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
-            ("APP_ENV", "prod"),
-            ("JWT_SECRET", &"x".repeat(32)),
-        ],
-    );
+    let long = "x".repeat(32);
+    let ok = AppConfig::from_env_at(&root(), &prod_with_jwt(&long));
     assert!(ok.is_ok(), "a 32-char secret must be accepted: {ok:?}");
 }
 
@@ -101,6 +101,76 @@ fn an_invalid_app_env_is_rejected() {
     )
     .unwrap_err();
     assert!(format!("{err:#}").contains("APP_ENV"));
+}
+
+fn prod_overrides(encryption_key_hex: &str) -> Vec<(&str, &str)> {
+    vec![
+        ("PLANS_CONFIG", "config/plans.toml"),
+        ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+        ("APP_ENV", "prod"),
+        ("JWT_SECRET", "0123456789abcdef0123456789abcdef"),
+        ("ENCRYPTION_KEY_HEX", encryption_key_hex),
+        ("WEB_ORIGIN", "https://app.stvdy.test"),
+    ]
+}
+
+#[test]
+fn prod_rejects_the_all_zero_encryption_key() {
+    // This key protects Google OAuth refresh tokens and BYOK API keys at rest.
+    // The all-zero dev default would leave those columns effectively plaintext
+    // while looking encrypted.
+    let zero = "0".repeat(64);
+    let err = AppConfig::from_env_at(&root(), &prod_overrides(&zero)).unwrap_err();
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("ENCRYPTION_KEY_HEX"),
+        "must name the variable: {message}"
+    );
+    assert!(
+        message.contains("all-zero"),
+        "must explain why it is rejected: {message}"
+    );
+}
+
+#[test]
+fn prod_rejects_a_missing_or_short_encryption_key() {
+    for bad in ["", "abcd"] {
+        let err = AppConfig::from_env_at(&root(), &prod_overrides(bad)).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("64 hex characters"),
+            "got: {err:#}"
+        );
+    }
+}
+
+#[test]
+fn a_non_hex_encryption_key_is_rejected_in_every_environment() {
+    // A wrong-length or non-hex key fails much later, at first use, so it is
+    // checked at boot even in dev.
+    let key = "z".repeat(64);
+    let err = AppConfig::from_env_at(
+        &root(),
+        &[
+            ("PLANS_CONFIG", "config/plans.toml"),
+            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+            ("ENCRYPTION_KEY_HEX", &key),
+        ],
+    )
+    .unwrap_err();
+    assert!(format!("{err:#}").contains("hexadecimal"));
+}
+
+#[test]
+fn dev_accepts_the_default_encryption_key() {
+    let cfg = AppConfig::from_env_at(
+        &root(),
+        &[
+            ("PLANS_CONFIG", "config/plans.toml"),
+            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+        ],
+    )
+    .expect("dev must load with defaults");
+    assert_eq!(cfg.encryption_key_hex.len(), 64);
 }
 
 /// Guards that the struct stays usable in the shape the server expects.

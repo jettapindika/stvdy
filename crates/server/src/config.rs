@@ -38,6 +38,10 @@ pub struct AppConfig {
     pub plans: PlansFile,
     pub billing_policy: BillingPolicy,
     pub admin_email: Option<String>,
+    /// The deployed web build's origin, used for the production CORS allowlist.
+    /// The native shell origins are compiled in; this is the only one that
+    /// varies per deployment.
+    pub web_origin: Option<String>,
     /// Directory that relative config paths resolve against: the workspace root
     /// in dev, `/app` in a container.
     pub root: PathBuf,
@@ -95,16 +99,59 @@ impl AppConfig {
         let jwt_secret =
             SecretString::from(jwt_secret_raw.unwrap_or_else(|| "dev-only-change-me".to_string()));
 
+        // The same reasoning as JWT_SECRET, with higher stakes: this key protects
+        // Google OAuth refresh tokens and BYOK API keys at rest. The all-zero
+        // default would leave those columns effectively plaintext while looking
+        // encrypted, so anyone with database or backup access could read them.
+        let encryption_key_hex = get_or("ENCRYPTION_KEY_HEX", &"0".repeat(64));
+        validate_encryption_key(&encryption_key_hex, env)?;
+
+        // Prod must name its web origin: the CORS allowlist would otherwise
+        // contain only the native shell origins, and the deployed web build
+        // (admin, checkout) would be blocked.
+        let web_origin = get("WEB_ORIGIN");
+        if !env.is_dev() {
+            anyhow::ensure!(
+                web_origin.as_deref().is_some_and(|o| !o.is_empty()),
+                "WEB_ORIGIN must be set when APP_ENV=prod: the web build's origin is \
+                 part of the CORS allowlist"
+            );
+        }
+
         Ok(AppConfig {
             env,
             bind_addr,
             database_url,
             jwt_secret,
-            encryption_key_hex: get_or("ENCRYPTION_KEY_HEX", &"0".repeat(64)),
+            encryption_key_hex,
             plans,
             billing_policy,
             admin_email: get("ADMIN_EMAIL"),
+            web_origin,
             root: root.to_path_buf(),
         })
     }
+}
+
+/// A wrong-length key fails much later, at first use, so check it at boot. The
+/// length and hex checks apply everywhere; the "not the dev default" check only
+/// in prod, where shipping it would silently defeat encryption at rest.
+fn validate_encryption_key(key_hex: &str, env: Env) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        key_hex.len() == 64,
+        "ENCRYPTION_KEY_HEX must be 64 hex characters (32 bytes for aes-gcm), got {}",
+        key_hex.len()
+    );
+    anyhow::ensure!(
+        key_hex.chars().all(|c| c.is_ascii_hexdigit()),
+        "ENCRYPTION_KEY_HEX must be hexadecimal"
+    );
+    if !env.is_dev() {
+        anyhow::ensure!(
+            key_hex.chars().any(|c| c != '0'),
+            "ENCRYPTION_KEY_HEX must not be the all-zero dev default when APP_ENV=prod: \
+             it encrypts OAuth refresh tokens and BYOK keys at rest"
+        );
+    }
+    Ok(())
 }

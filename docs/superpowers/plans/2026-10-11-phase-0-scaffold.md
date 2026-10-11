@@ -2239,20 +2239,33 @@ search:
   formats: [html, json]   # REQUIRED. `json` is off by default; without it the API returns 403.
 
 engines:
-  # Measured 2026-10-11 from an Indonesian ISP. Left enabled, these only add
-  # latency to every query and fill the logs with suspensions.
+  # Engine list is tuned for the PRODUCTION host (A45), not the dev laptop.
+  # Measured 2026-10-11 on the VPS: google cse 20 results, mojeek 10, mwmbl 12-55
+  # -> 30-83 results/query at 0.9-1.1s. On the dev laptop the same config yields
+  # only google cse (20), because the ISP intercepts duckduckgo and rate-limits
+  # the rest. Do NOT re-tune this against a laptop.
   - name: brave
-    disabled: true        # -> 429 "Suspended: too many requests"
+    disabled: true        # 429 "too many requests" in BOTH environments -> dead
   - name: duckduckgo
-    disabled: true        # -> TLS interception by the ISP (not a SearXNG fault)
+    disabled: true        # laptop: ISP TLS interception; VPS: CAPTCHA -> dead
   - name: qwant
-    disabled: true        # -> CAPTCHA
-  # `mojeek` and `startpage` are `inactive: true` upstream. Do not enable them
-  # without re-testing: both failed here (mojeek timeout, startpage CAPTCHA).
+    disabled: true        # CAPTCHA in both environments -> dead
+  - name: startpage
+    inactive: false       # upstream default is inactive; enabled then CAPTCHA'd
+    disabled: true        # -> keep off, it is CAPTCHA in both environments
+  # These two ARE the production workhorses. `mojeek` is `inactive: true`
+  # upstream and must be explicitly re-enabled; `mwmbl` is enabled by default.
+  # Both answered consistently across 6 consecutive queries on the VPS.
+  - name: mojeek
+    inactive: false
+  - name: mwmbl
+    disabled: false
   #
-  # The only engine that answered was `google cse` (no API key needed), which
-  # scrapes a third-party CX id. That is a single point of failure and a ToS
-  # question, which is exactly why SearXNG is tier 2 and never the backbone (A3).
+  # `google cse` (enabled by default) is the third production engine, but note
+  # what it is: it scrapes a hardcoded third-party CX id (blackle.com) with no
+  # API key. It is the single largest result contributor AND the one with a ToS
+  # question attached, which is why it must never be the only engine (A3).
+  # Verify after any image upgrade: `just db-search` should show >= 3 engines.
 ```
 
 **Verification for Step 1b** — with the stack up:
@@ -4999,7 +5012,7 @@ Each file gets its headings plus an explicit "filled by phase N" marker, so a la
 
 `docs/RELEASE.md`: `## Desktop distribution`, `## Mobile distribution`, `## Store policy risk` (QRIS-only mobile selling; note the risk that stores may require their own billing for digital subscriptions), `## Privacy labels`, `## Account deletion`, `## Tax and PPN` (unconfirmed; see ASSUMPTIONS B2), `## Versioning`, and the operations sections a *public* launch requires — these are not distribution concerns and must not be skipped, because the app is unreleased today but a paying user is a promise to keep running:
 
-- `## Hosting` (Phase 15) — single VPS, one compose stack, ap-southeast region, sizing floor (4 GB RAM / 40 GB disk; see `docs/ASSUMPTIONS.md` hosting row), and the note that Chromium (Phase 6) is what forces the 4 GB.
+- `## Hosting` (Phase 15) — the provisioned Oracle Cloud VM (`ubuntu@168.110.202.106`, Ubuntu 24.04, 2 vCPU / 11 GB / 45 GB, deployment root `~/stvdy/`), one compose stack, and the sizing note that Chromium (Phase 6) was what set the original 4 GB floor (moot on this box, but the moli-vs-Chromium decision stands on its own merits). **Must include the two-layer firewall fact, because it is the first thing that will look like a broken deploy:** Oracle's VCN security list currently admits only port 22, and the host's own `iptables` INPUT chain (`/etc/iptables/rules.v4`, netfilter-persistent) also accepts only `state NEW tcp dpt:22` and REJECTs everything else. **Both layers need an explicit rule for 80/443** — fixing only one leaves the service unreachable from outside, which is indistinguishable from a crashed app. Also: the instance region supersedes the earlier "ap-southeast" preference, so the UU PDP data-residency line must be updated to name where the data actually lives.
 - `## Backups and restore` (Phase 15) — what is backed up (Postgres dump + object storage), frequency, retention, **where the restore is tested**, and the restore-drill cadence. An untested backup is not a backup.
 - `## Monitoring and alerting` (Phase 15) — the signals that mean the service is broken: job worker stalled (oldest `queued` row age), webhook failures, `unresponsive_engines` on every search (A3 degradation), provider-cost ceiling hits, disk and connection saturation, and the alert route for each.
 - `## Incident response` (Phase 15) — the UU PDP 72-hour breach clock: how a breach is detected, who decides it is reportable, what is logged for the report, and the fact that notification goes to both data subjects **and** the authority. Also the on-call reality: one operator, so the runbook must be executable by a tired person at 03:00.
@@ -5034,7 +5047,7 @@ All must be true before the phase is called done:
 - [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
 - [ ] `npm --prefix app test` and `npm --prefix app run build` green.
 - [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2 — 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
-- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object with a non-empty `results` array (not the `Verifying your browser…` HTML page).
+- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty **and whose `unresponsive_engines` is empty** (not the `Verifying your browser…` HTML page). Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8888/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`) — see A3 for the measured baseline. If only `google cse` answers, the engine list has been re-tuned against a dev laptop, which understates this tier by ~3.6×.
 - [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.

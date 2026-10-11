@@ -39,3 +39,28 @@
 /* Hover styles only where a real pointer exists: Tailwind's hover: sticks on
    touch devices. */
 @custom-variant pointer-fine (@media (pointer: fine));
+
+@layer components {
+  /* Shared interactive surface for nav links.
+     `focus-visible` is specified explicitly rather than relying on the UA ring:
+     preflight resets enough element styling that a default outline disappears
+     the moment anyone adds a background or border, and the spec lists focus
+     states as an accessibility requirement. `focus-visible` (not `focus`) so a
+     mouse click does not leave a ring behind. */
+  .nav-link {
+    display: block;
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    outline: none;
+  }
+  .nav-link:focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  .nav-link[aria-current='page'] {
+    background-color: var(--color-brand-50);
+    font-weight: 500;
+    color: var(--color-brand-900);
+  }
+}

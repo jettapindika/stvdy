@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use stvdy_core::config::{CreditAction, PlanId, load_plans};
+use stvdy_core::config::{CreditAction, Limit, PlanId, load_plans};
 use stvdy_core::error::CoreError;
 
 const PLANS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/plans.toml");
@@ -27,14 +27,35 @@ fn loads_the_shipped_plan_file() {
 }
 
 #[test]
-fn zero_means_unlimited() {
+fn limits_distinguish_unlimited_from_a_real_zero() {
     let plans = shipped();
-    assert_eq!(plans.plans[&PlanId::Free].workspaces, Some(2));
-    assert_eq!(plans.plans[&PlanId::Pro].workspaces, None);
-    assert_eq!(plans.plans[&PlanId::Pro].chat_msgs_per_day, None);
-    assert_eq!(plans.plans[&PlanId::Free].chat_msgs_per_day, Some(20));
-    assert_eq!(plans.plans[&PlanId::Power].google_accounts_max, None);
-    assert_eq!(plans.plans[&PlanId::Pro].google_accounts_max, Some(1));
+
+    assert_eq!(plans.plans[&PlanId::Free].workspaces, Limit::Max(2));
+    assert_eq!(plans.plans[&PlanId::Pro].workspaces, Limit::Unlimited);
+    assert_eq!(
+        plans.plans[&PlanId::Pro].chat_msgs_per_day,
+        Limit::Unlimited
+    );
+    assert_eq!(plans.plans[&PlanId::Free].chat_msgs_per_day, Limit::Max(20));
+
+    // The case a `0 = unlimited` sentinel got wrong: free allows ZERO Google
+    // accounts (ICS import only), power allows unlimited. A sentinel made free
+    // read as unlimited and left the separate boolean to keep it honest.
+    assert_eq!(
+        plans.plans[&PlanId::Free].google_accounts_max,
+        Limit::Max(0)
+    );
+    assert_eq!(plans.plans[&PlanId::Pro].google_accounts_max, Limit::Max(1));
+    assert_eq!(
+        plans.plans[&PlanId::Power].google_accounts_max,
+        Limit::Unlimited
+    );
+
+    // `allows` is the check the entitlements engine will call.
+    assert!(!plans.plans[&PlanId::Free].google_accounts_max.allows(0));
+    assert!(plans.plans[&PlanId::Pro].google_accounts_max.allows(0));
+    assert!(!plans.plans[&PlanId::Pro].google_accounts_max.allows(1));
+    assert!(plans.plans[&PlanId::Power].google_accounts_max.allows(99));
 }
 
 #[test]
@@ -46,11 +67,11 @@ fn plan_limits_are_monotonic_free_le_pro_le_power() {
         &p.plans[&PlanId::Power],
     );
 
-    // A missing value means unlimited, which is >= any concrete value.
-    let ge = |lo: Option<u32>, hi: Option<u32>| match (lo, hi) {
-        (_, None) => true,
-        (None, Some(_)) => false,
-        (Some(a), Some(b)) => b >= a,
+    // Unlimited is greater than any concrete value.
+    let le = |lo: Limit, hi: Limit| match (lo, hi) {
+        (_, Limit::Unlimited) => true,
+        (Limit::Unlimited, Limit::Max(_)) => false,
+        (Limit::Max(a), Limit::Max(b)) => b >= a,
     };
 
     for (field, f, m, pw) in [
@@ -61,26 +82,38 @@ fn plan_limits_are_monotonic_free_le_pro_le_power() {
             power.sources_total,
         ),
         (
+            "chat_msgs_per_day",
+            free.chat_msgs_per_day,
+            pro.chat_msgs_per_day,
+            power.chat_msgs_per_day,
+        ),
+    ] {
+        assert!(le(f, m), "{field}: free must not exceed pro");
+        assert!(le(m, pw), "{field}: pro must not exceed power");
+    }
+
+    for (field, f, m, pw) in [
+        (
             "storage_mb",
-            Some(free.storage_mb),
-            Some(pro.storage_mb),
-            Some(power.storage_mb),
+            free.storage_mb,
+            pro.storage_mb,
+            power.storage_mb,
         ),
         (
             "devices_max",
-            Some(free.devices_max),
-            Some(pro.devices_max),
-            Some(power.devices_max),
+            free.devices_max,
+            pro.devices_max,
+            power.devices_max,
         ),
         (
             "web_searches_per_day",
-            Some(free.web_searches_per_day),
-            Some(pro.web_searches_per_day),
-            Some(power.web_searches_per_day),
+            free.web_searches_per_day,
+            pro.web_searches_per_day,
+            power.web_searches_per_day,
         ),
     ] {
-        assert!(ge(f, m), "{field}: free must not exceed pro");
-        assert!(ge(m, pw), "{field}: pro must not exceed power");
+        assert!(f <= m, "{field}: free must not exceed pro");
+        assert!(m <= pw, "{field}: pro must not exceed power");
     }
 
     assert!(
@@ -134,19 +167,31 @@ fn a_missing_file_is_a_read_error_not_a_panic() {
 
 #[test]
 fn unknown_keys_are_rejected() {
+    // Build from the shipped config so the ONLY problem is the typo. A
+    // hand-written partial fixture fails on missing fields first, which would
+    // make this test pass even with `deny_unknown_fields` removed — verified by
+    // deleting the attribute and watching this test still pass.
+    let shipped = std::fs::read_to_string(PLANS_PATH).unwrap();
+    let mutated = shipped.replace("devices_max = 5", "device_max = 5");
+    assert_ne!(mutated, shipped, "the substitution must have applied");
+
     let dir = std::env::temp_dir().join(format!("stvdy-cfg-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("plans.toml");
-    std::fs::write(
-        &path,
-        "[meta]\nversion = 1\ncurrency = \"IDR\"\n[credits]\nchat_message = 1\n\
-         [plans.free]\nname = \"Free\"\nprice_idr_monthly = 0\nprice_idr_yearly = 0\n\
-         student_percent_off = 0\ntypo_workspaces = 2\n",
-    )
-    .unwrap();
+    std::fs::write(&path, mutated).unwrap();
 
-    let err = load_plans(&path).unwrap_err();
-    assert!(matches!(err, CoreError::ConfigParse { .. }), "got {err:?}");
+    match load_plans(&path).unwrap_err() {
+        CoreError::ConfigParse { source, .. } => {
+            let message = source.to_string();
+            // Naming the key is what proves the failure came from the typo and
+            // not from something else in the file.
+            assert!(
+                message.contains("device_max"),
+                "the error must name the unknown key, got: {message}"
+            );
+        }
+        other => panic!("expected ConfigParse, got {other:?}"),
+    }
 }
 
 #[test]
@@ -234,4 +279,56 @@ fn a_partially_defined_plan_set_names_the_missing_plan() {
         CoreError::ConfigInvalid(msg) => assert!(msg.contains("power"), "got: {msg}"),
         other => panic!("expected ConfigInvalid, got {other:?}"),
     }
+}
+
+#[test]
+fn a_regressing_limit_is_rejected_at_boot() {
+    // The check lives in validate() so a mis-edited config fails at startup with
+    // the offending plan pair named, rather than only in CI.
+    let shipped = std::fs::read_to_string(PLANS_PATH).unwrap();
+    // pro's sources_total drops below free's 20.
+    let mutated = shipped.replace("sources_total = 150", "sources_total = 5");
+    assert_ne!(mutated, shipped);
+
+    let dir = scratch_dir();
+    let path = dir.join("plans.toml");
+    std::fs::write(&path, mutated).unwrap();
+
+    match load_plans(&path).unwrap_err() {
+        CoreError::ConfigInvalid(msg) => {
+            assert!(msg.contains("sources_total"), "got: {msg}");
+            assert!(msg.contains("free"), "must name the plan pair: {msg}");
+        }
+        other => panic!("expected ConfigInvalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_feature_enabled_on_a_cheaper_plan_only_is_rejected() {
+    // byok is power-only. Flip pro's existing value rather than inserting a
+    // second key, which would be a TOML duplicate-key parse error instead.
+    let shipped = std::fs::read_to_string(PLANS_PATH).unwrap();
+    let pro_start = shipped.find("[plans.pro]").expect("pro section");
+    let power_start = shipped.find("[plans.power]").expect("power section");
+    let (head, rest) = shipped.split_at(pro_start);
+    let (pro_block, tail) = rest.split_at(power_start - pro_start);
+
+    let mutated_pro = pro_block.replace("byok = false", "byok = true");
+    assert_ne!(mutated_pro, pro_block, "the substitution must have applied");
+    let mutated = format!("{head}{mutated_pro}{tail}");
+
+    let dir = scratch_dir();
+    let path = dir.join("plans.toml");
+    std::fs::write(&path, mutated).unwrap();
+
+    match load_plans(&path).unwrap_err() {
+        CoreError::ConfigInvalid(msg) => assert!(msg.contains("byok"), "got: {msg}"),
+        other => panic!("expected ConfigInvalid, got {other:?}"),
+    }
+}
+
+fn scratch_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("stvdy-cfg-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }

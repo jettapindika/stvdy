@@ -88,6 +88,23 @@ Deep-link round trip (macOS + iOS simulator), then the mobile capability spike
 (APNs/FCM token registration, iOS document intake and share sheet, Android
 `content://` import). Results are appended here.
 
+## CORS origins
+
+`routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist
+in prod. The non-obvious part is what belongs in that list — the Tauri webviews
+are **not** `http://localhost`:
+
+| Origin | Platform |
+|---|---|
+| `tauri://localhost` | macOS, iOS |
+| `https://tauri.localhost` | Windows |
+| `http://tauri.localhost` | Windows, Android |
+| `WEB_ORIGIN` (env) | the deployed web build |
+
+Omitting the `tauri.*` origins is the classic "works in dev, every desktop
+request fails in prod" bug. They are compiled in; only `WEB_ORIGIN` varies per
+deployment, and prod refuses to boot without it.
+
 ## Local cache
 
 Native clients keep a SQLite cache plus an outbox, owned by the Rust shell

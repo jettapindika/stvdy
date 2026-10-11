@@ -56,6 +56,29 @@ jobs:
       - run: cargo sqlx prepare --workspace --check
       - run: cargo test --workspace
 
+  shell:
+    name: shell lint + test
+    runs-on: macos-15
+    # src-tauri is excluded from the workspace, so `cargo clippy --workspace`
+    # never sees it. Without this job the shell's keychain code, IPC commands and
+    # (from Phase 8) the whole sync engine would accumulate unlinted and
+    # untested while `check` stayed green.
+    #
+    # macOS runner on purpose: the keychain round-trip test needs a real OS
+    # credential store, and the keyring stores are cfg-gated per platform, so a
+    # headless Linux runner has no store to exercise.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
   web:
     name: web build
     runs-on: ubuntu-24.04

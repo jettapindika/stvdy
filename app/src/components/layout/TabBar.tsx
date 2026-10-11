@@ -11,7 +11,7 @@ const tabs = [
 /**
  * Bottom navigation for phones. Each target is at least 44px tall, the minimum
  * comfortable touch target, and the bar clears the home indicator via
- * `pb-safe-bottom`.
+ * `pb-safe-bottom`. The focus-visible ring comes from `.nav-link`.
  */
 export function TabBar() {
   return (
@@ -25,8 +25,8 @@ export function TabBar() {
           to={tab.to}
           end={tab.to === '/'}
           className={({ isActive }) =>
-            `flex min-h-11 flex-1 items-center justify-center text-xs ${
-              isActive ? 'font-semibold text-brand-900' : 'text-gray-500'
+            `nav-link flex min-h-11 flex-1 items-center justify-center text-xs ${
+              isActive ? 'text-brand-900' : 'text-gray-500'
             }`
           }
         >

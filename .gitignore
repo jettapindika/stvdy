@@ -14,9 +14,11 @@
 # BGTaskSchedulerPermittedIdentifiers + UIBackgroundModes, App Group
 # entitlements). Ignoring it would silently drop hand-written native files.
 
-# Local env and scratch
-.env
-.env.local
+# Local env and scratch. `.env*` plus an explicit un-ignore, so a real
+# `.env.prod` cannot be committed by `git add -A` while the template stays
+# tracked.
+.env*
+!.env.example
 var/
 .fastembed_cache/
 
