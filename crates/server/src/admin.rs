@@ -133,8 +133,9 @@ pub async fn switch_plan(
 #[derive(Debug, Deserialize)]
 pub struct GrantRequest {
     pub credits: i64,
-    /// Which bucket to grant into. Only `monthly` exists as a grant path in this phase:
-    /// a purchased pack is a payment (Phase 13), not a manual grant.
+    /// Which bucket the credits land in. `monthly` by default; `purchased` is the case a
+    /// manual grant exists for, because a support fix that put a purchase's credits in
+    /// the expiring bucket would take them away again at the period boundary.
     #[serde(default)]
     pub bucket: Option<String>,
     /// The admin-supplied key that makes a double-click grant once (A152).
@@ -147,6 +148,10 @@ pub struct GrantRequest {
 /// nothing: the key becomes the row's `period_key` (`admin:<key>`), which the partial
 /// unique index on `(user_id, period_key)` refuses to duplicate (A152). Idempotency is
 /// structural, not a check-then-write that a double-click can race.
+///
+/// The row is written through `credits::grant` — the one grant primitive — with the
+/// requested bucket and `reason = 'admin'`, so the margin report can tell an admin's grant
+/// from the recurring job's allowance and from revenue.
 pub async fn grant_credits(
     State(state): State<AppState>,
     _admin: AdminUser,
@@ -162,13 +167,20 @@ pub async fn grant_credits(
             "idempotency_key is required".to_string(),
         ));
     }
-    if let Some(bucket) = body.bucket.as_deref()
-        && bucket != "monthly"
-    {
-        return Err(AppError::Validation(
-            "only the monthly bucket can be granted in this phase".to_string(),
-        ));
-    }
+    // A bucket the ledger cannot hold is a validation error, never a silent default:
+    // granting monthly when a purchase was asked for would expire the credits at the
+    // period boundary, which is the exact support bug this field exists to fix.
+    let bucket =
+        credits::Bucket::parse(body.bucket.as_deref().unwrap_or("monthly")).ok_or_else(|| {
+            AppError::Validation(format!(
+                "bucket must be one of {}",
+                credits::Bucket::ALL
+                    .iter()
+                    .map(|bucket| bucket.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
 
     let plan_id: Option<String> =
         sqlx::query_scalar("select plan_id from users where id = $1 and deleted_at is null")
@@ -185,17 +197,29 @@ pub async fn grant_credits(
         &state.pool,
         user_id,
         PlanId::parse(&plan_id),
-        &period_key,
-        body.credits,
+        credits::Grant {
+            bucket,
+            reason: "admin",
+            period_key: &period_key,
+            credits: body.credits,
+        },
     )
     .await?;
 
-    tracing::info!(%user_id, credits = body.credits, period_key, granted, "admin credit grant");
+    tracing::info!(
+        %user_id,
+        credits = body.credits,
+        bucket = bucket.as_str(),
+        period_key,
+        granted,
+        "admin credit grant"
+    );
 
     Ok(Json(json!({
         "user_id": user_id,
         "granted": granted,
         "credits": body.credits,
+        "bucket": bucket.as_str(),
         "period_key": period_key,
     })))
 }
@@ -221,7 +245,16 @@ pub async fn margin(
         ));
     }
 
-    let report = margin_report(&state.pool, from, to).await?;
+    let mut report = margin_report(&state.pool, from, to).await?;
+
+    // The bound beside the spend. `margin_report` takes only the pool (Phase 13 consumes
+    // that signature by name), so the caller that holds the config attaches the ceiling —
+    // through `credits::ceiling_usd`, the one accessor for `provider_cost_ceiling_usd`
+    // (A148), so the report never reads the config field itself.
+    for row in &mut report.per_plan {
+        row.ceiling_usd = Some(credits::ceiling_usd(&state, PlanId::parse(&row.plan_id)));
+    }
+
     Ok(Json(report))
 }
 
@@ -256,6 +289,13 @@ pub struct PlanMargin {
     pub plan_id: String,
     pub provider_cost_usd: f64,
     pub byok_cost_usd: f64,
+    /// The plan's monthly provider-cost ceiling, so an admin reads "60% of the bound"
+    /// rather than a bare dollar figure. It is read through `credits::ceiling_usd` — the
+    /// one accessor for `provider_cost_ceiling_usd` (A148) — which is why the query below
+    /// leaves it `None` and the route, the only caller that holds the config, fills it.
+    /// `None` therefore means "the caller had no config", never a `0` that reads as a real
+    /// bound.
+    pub ceiling_usd: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -307,6 +347,7 @@ pub async fn margin_report(
             plan_id,
             provider_cost_usd,
             byok_cost_usd,
+            ceiling_usd: None,
         })
         .collect();
 

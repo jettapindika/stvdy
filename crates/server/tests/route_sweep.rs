@@ -1173,16 +1173,46 @@ fn no_file_outside_the_entitlements_layer_reads_a_plan_limit() {
                 violations.push(format!("{}: plans.get(..).{field}", file.display()));
             }
         }
+    }
 
-        // The provider cost ceilings have exactly one reader in this phase (A148), and it
-        // is the credits module. A second one would be a second answer to "how much have
-        // they spent".
-        if source.contains("provider_cost_ceiling_usd") {
-            violations.push(format!(
-                "{}: reads provider_cost_ceiling_usd outside credits.rs",
-                file.display()
-            ));
+    // The provider cost ceiling has **exactly one reader** (A148), and it is `credits.rs`.
+    //
+    // This check is deliberately independent of `ALLOWED`: it scans every source file, so
+    // the property is "one reader", not "no reader outside the entitlement layer". A
+    // second reader of the config *field* would be a second answer to "how much have they
+    // spent", which is the thing the ceiling's single enforcement point exists to prevent.
+    //
+    // A read for display is not a second reader: `GET /admin/margin` reports the bound
+    // beside the spend so an admin can read a percentage rather than a bare dollar figure,
+    // and it does so through `credits::ceiling_usd`, the accessor that owns the field. The
+    // *comparison* still happens once, in `credits::spend_in` under the spend's lock.
+    // A *read* is a field access — `.provider_cost_ceiling_usd` — not the name appearing in
+    // prose, so a doc comment that names the field (which `admin.rs` and `credits.rs` both
+    // do, to say who owns it) is not a second reader.
+    const CEILING_FIELD: &str = ".provider_cost_ceiling_usd";
+    let mut ceiling_readers = Vec::new();
+    for file in source_files() {
+        let source = std::fs::read_to_string(&file).expect("a readable source file");
+        if source.contains(CEILING_FIELD) {
+            ceiling_readers.push(file.display().to_string());
         }
+    }
+    let is_credits = |path: &str| path.ends_with("/credits.rs");
+    // The positive half first, because it is what keeps the scan below non-vacuous: if the
+    // config field were ever renamed, the loop would find no reader at all and pass while
+    // checking nothing.
+    assert!(
+        ceiling_readers.iter().any(|path| is_credits(path)),
+        "no file reads provider_cost_ceiling_usd, so the ceiling is configured but \
+         unenforced (or the field was renamed and this scan now checks nothing): \
+         {ceiling_readers:?}"
+    );
+    for path in &ceiling_readers {
+        assert!(
+            is_credits(path),
+            "{path} reads provider_cost_ceiling_usd; the one reader is credits.rs, and \
+             every other caller goes through credits::ceiling_usd"
+        );
     }
 
     assert!(

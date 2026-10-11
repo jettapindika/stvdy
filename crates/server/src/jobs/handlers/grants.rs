@@ -140,9 +140,14 @@ pub(crate) async fn grant_period(
         .map_err(|error| Failure::transient(format!("expiring the last period: {error}")))?;
     }
 
-    crate::credits::grant_in(&mut tx, user_id, plan, period_key, credits)
-        .await
-        .map_err(|error| Failure::transient(format!("granting the period: {error}")))?;
+    crate::credits::grant_in(
+        &mut tx,
+        user_id,
+        plan,
+        crate::credits::Grant::monthly(period_key, credits),
+    )
+    .await
+    .map_err(|error| Failure::transient(format!("granting the period: {error}")))?;
 
     tx.commit()
         .await

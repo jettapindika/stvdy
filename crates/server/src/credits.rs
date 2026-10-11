@@ -51,7 +51,7 @@ pub async fn grant_monthly(pool: &PgPool, user_id: Uuid, credits: i64) -> AppRes
         "monthly:{}",
         crate::util::local_month_key(&timezone, chrono::Utc::now())
     );
-    grant(pool, user_id, plan, &period_key, credits).await?;
+    grant(pool, user_id, plan, Grant::monthly(&period_key, credits)).await?;
     Ok(())
 }
 
@@ -60,7 +60,82 @@ pub fn monthly_allowance(state: &AppState, plan: stvdy_core::config::PlanId) -> 
     state.config.plans.get(plan).credits_per_month
 }
 
-/// Grants `credits` into the monthly bucket, **once per `period_key`** (A152).
+/// The plan's monthly provider-cost ceiling, in USD.
+///
+/// **The one reader of `provider_cost_ceiling_usd`** (A148), so the config field has
+/// exactly one accessor and the sweep test's invariant is literal. Two callers, one
+/// reader: the spend path compares against it under its lock, and `GET /admin/margin`
+/// reports it beside the spend so an admin reads a percentage rather than a bare dollar
+/// figure. A display read of the same accessor is not a second answer to "how much have
+/// they spent"; a second place reading the *field* would be.
+pub fn ceiling_usd(state: &AppState, plan: stvdy_core::config::PlanId) -> f64 {
+    state
+        .config
+        .plans
+        .provider_cost_ceiling_usd
+        .get(&plan)
+        .copied()
+        .unwrap_or(0.0)
+}
+
+/// Which bucket a grant goes into. The two real buckets, as a type rather than a string,
+/// so a caller cannot grant into a third one and a typo is a validation error at the
+/// parse site instead of a silent default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bucket {
+    Monthly,
+    Purchased,
+}
+
+impl Bucket {
+    pub const ALL: [Bucket; 2] = [Bucket::Monthly, Bucket::Purchased];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Bucket::Monthly => "monthly",
+            Bucket::Purchased => "purchased",
+        }
+    }
+
+    /// `None` for anything that is not one of the two buckets.
+    pub fn parse(raw: &str) -> Option<Bucket> {
+        Bucket::ALL
+            .into_iter()
+            .find(|bucket| bucket.as_str() == raw)
+    }
+}
+
+/// One grant: how much, into which bucket, why, and the key that makes it once-only.
+///
+/// A struct rather than three positional `&str`/`i64` arguments, because `bucket` and
+/// `reason` are both strings and a call site that swapped them would compile and write a
+/// ledger row nothing could read back.
+#[derive(Debug, Clone, Copy)]
+pub struct Grant<'a> {
+    pub bucket: Bucket,
+    /// The `credit_ledger.reason`. `monthly_grant` for an allowance, `admin` for a manual
+    /// grant, which is what keeps an admin's grant distinguishable in the margin report
+    /// from the recurring job's.
+    pub reason: &'a str,
+    pub period_key: &'a str,
+    pub credits: i64,
+}
+
+impl<'a> Grant<'a> {
+    /// A monthly allowance for a period: the shape the signup grant (A64) and the
+    /// `monthly_grant` job both write, so the two callers that already existed are
+    /// unchanged in behaviour.
+    pub fn monthly(period_key: &'a str, credits: i64) -> Self {
+        Self {
+            bucket: Bucket::Monthly,
+            reason: "monthly_grant",
+            period_key,
+            credits,
+        }
+    }
+}
+
+/// Grants `credits` into `grant.bucket`, **once per `period_key`** (A152).
 ///
 /// The returned `bool` says whether *this* call was the one that granted, which is what
 /// lets a caller log a real grant instead of a no-op.
@@ -78,14 +153,13 @@ pub async fn grant(
     pool: &PgPool,
     user_id: Uuid,
     plan: stvdy_core::config::PlanId,
-    period_key: &str,
-    credits: i64,
+    grant: Grant<'_>,
 ) -> AppResult<bool> {
     let mut conn = pool
         .acquire()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("acquiring a connection: {error}")))?;
-    grant_in(&mut conn, user_id, plan, period_key, credits).await
+    grant_in(&mut conn, user_id, plan, grant).await
 }
 
 /// [`grant`] against a connection the caller owns, so the expiry of the previous
@@ -94,10 +168,9 @@ pub async fn grant_in(
     conn: &mut sqlx::PgConnection,
     user_id: Uuid,
     plan: stvdy_core::config::PlanId,
-    period_key: &str,
-    credits: i64,
+    grant: Grant<'_>,
 ) -> AppResult<bool> {
-    if credits <= 0 {
+    if grant.credits <= 0 {
         // A plan with no monthly allowance grants nothing rather than writing a
         // zero row that would confuse a later sum.
         return Ok(false);
@@ -108,22 +181,28 @@ pub async fn grant_in(
     // a conflict target without the same predicate.
     let inserted: Option<Uuid> = sqlx::query_scalar(
         "insert into credit_ledger (user_id, delta, bucket, reason, period_key)
-         values ($1, $2, 'monthly', 'monthly_grant', $3)
+         values ($1, $2, $3, $4, $5)
          on conflict (user_id, period_key) where period_key is not null do nothing
          returning id",
     )
     .bind(user_id)
-    .bind(credits)
-    .bind(period_key)
+    .bind(grant.credits)
+    .bind(grant.bucket.as_str())
+    .bind(grant.reason)
+    .bind(grant.period_key)
     .fetch_optional(&mut *conn)
     .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("granting monthly credits: {error}")))?;
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("granting credits: {error}")))?;
 
     let granted = inserted.is_some();
+    let bucket = grant.bucket.as_str();
+    let reason = grant.reason;
+    let period_key = grant.period_key;
+    let credits = grant.credits;
     if granted {
-        tracing::info!(%user_id, %plan, period_key, credits, "monthly credit grant");
+        tracing::info!(%user_id, %plan, bucket, reason, period_key, credits, "credit grant");
     } else {
-        tracing::debug!(%user_id, %plan, period_key, "monthly credit grant skipped: this period already granted");
+        tracing::debug!(%user_id, %plan, bucket, reason, period_key, "credit grant skipped: this period already granted");
     }
     Ok(granted)
 }
@@ -260,13 +339,7 @@ pub async fn spend_in(
     let timezone = timezone.unwrap_or_else(|| "UTC".to_string());
     let month_start = crate::util::local_month_start(&timezone, state.clock.as_ref());
 
-    let ceiling = state
-        .config
-        .plans
-        .provider_cost_ceiling_usd
-        .get(&plan)
-        .copied()
-        .unwrap_or(0.0);
+    let ceiling = ceiling_usd(state, plan);
     // `byok = false`: a call on the user's own key was paid for with the user's own key,
     // so counting it against our ceiling would pause an account for spending someone
     // else's money (A156).
@@ -829,13 +902,7 @@ pub async fn ceiling_paused(
     user: &crate::auth::extract::AuthUser,
     snapshot: &stvdy_core::entitlements::UsageSnapshot,
 ) -> bool {
-    let ceiling = state
-        .config
-        .plans
-        .provider_cost_ceiling_usd
-        .get(&snapshot.plan)
-        .copied()
-        .unwrap_or(0.0);
+    let ceiling = ceiling_usd(state, snapshot.plan);
     let since = crate::util::local_month_start(&user.timezone, state.clock.as_ref());
     match month_provider_cost(&state.pool, user.user_id, since).await {
         Ok(spent) => spent >= ceiling,
@@ -879,6 +946,23 @@ mod tests {
         // The order is the contract (A9): purchased credits never expire, so
         // spending them first would waste the monthly grant that does.
         assert_eq!(BUCKETS, ["monthly", "purchased"]);
+    }
+
+    #[test]
+    fn a_bucket_is_parsed_or_refused_never_defaulted() {
+        // The admin grant route turns a typo into a validation error with this: a silent
+        // default to monthly would put a purchase's credits in the expiring bucket.
+        assert_eq!(Bucket::parse("monthly"), Some(Bucket::Monthly));
+        assert_eq!(Bucket::parse("purchased"), Some(Bucket::Purchased));
+        assert_eq!(Bucket::parse("bonus"), None);
+        assert_eq!(Bucket::parse(""), None);
+
+        // And the shape the two pre-existing callers keep: the signup grant and the
+        // `monthly_grant` job both write a monthly allowance, and neither changed.
+        let grant = Grant::monthly("monthly:2026-10", 60);
+        assert_eq!(grant.bucket, Bucket::Monthly);
+        assert_eq!(grant.reason, "monthly_grant");
+        assert_eq!(grant.credits, 60);
     }
 
     #[test]

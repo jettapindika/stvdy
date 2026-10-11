@@ -192,9 +192,9 @@ async fn a_manual_grant_writes_one_admin_ledger_row(pool: PgPool) {
     .unwrap();
     assert_eq!(row.0, 50);
     assert_eq!(row.1, "monthly");
-    // `credits::grant` is the one grant primitive in this phase, and it writes the
-    // monthly bucket under `monthly_grant`; the key is what makes the row once-only.
-    assert_eq!(row.2, "monthly_grant");
+    // The reason is what makes an admin's grant distinguishable in the margin report
+    // from the recurring `monthly_grant` job's allowance and from revenue.
+    assert_eq!(row.2, "admin");
 
     // The double-click: the same key is a no-op, so the balance does not move.
     let (status, body) = json(
@@ -330,6 +330,22 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
         "a conversion of 0 would be an invented number (gate 7(a))"
     );
 
+    // The bound beside the spend: without it an admin cannot tell whether an account is
+    // at 40% or 95% of its ceiling, which is the number the report exists for. It comes
+    // from the config through `credits::ceiling_usd`, so it is the same figure the spend
+    // path compares against.
+    //
+    // `margin_report` takes only the pool (Phase 13 consumes that signature by name), so
+    // it holds no config and leaves the ceiling `None` rather than inventing a figure —
+    // the route, the only caller that has the state, attaches it. The wire assertion
+    // below is therefore where the value is checked.
+    let ceiling = stvdy_server::credits::ceiling_usd(&harness.state, PlanId::Free);
+    assert!(ceiling > 0.0, "the free plan has a configured ceiling");
+    assert!(
+        free_row.ceiling_usd.is_none(),
+        "the pool-only query must not fabricate a bound: {free_row:?}"
+    );
+
     // And the same shape over the wire.
     let (status, body) = json(
         &app,
@@ -347,6 +363,107 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
     assert!(body["revenue"].is_null(), "{body}");
     assert!(body["conversion"].is_null(), "{body}");
     assert!(body["provider_cost"]["free_usd"].is_number(), "{body}");
+    // The ceiling reaches the wire, so an admin reads a percentage rather than a bare
+    // dollar figure.
+    let rows = body["per_plan"].as_array().expect("per_plan is an array");
+    let wire_free = rows
+        .iter()
+        .find(|row| row["plan_id"] == "free")
+        .expect("the free plan's row");
+    assert_eq!(wire_free["ceiling_usd"], ceiling, "{body}");
+    let wire_paid = rows
+        .iter()
+        .find(|row| row["plan_id"] == "pro")
+        .expect("the paid plan's row");
+    assert_eq!(
+        wire_paid["ceiling_usd"],
+        stvdy_server::credits::ceiling_usd(&harness.state, PlanId::Pro),
+        "{body}"
+    );
+    assert!(
+        wire_paid["ceiling_usd"].as_f64().unwrap() > ceiling,
+        "a higher plan has a higher ceiling, which is what makes the upgrade a remedy"
+    );
+}
+
+/// A grant can target the **purchased** bucket, and the row says an admin wrote it.
+///
+/// The two properties a support fix needs: the bucket is honoured rather than defaulted,
+/// and the reason is `admin` so the margin report can tell this row from the recurring
+/// job's allowance. Purchased credits never expire, which is exactly why putting a
+/// purchase's credits in the monthly bucket would be a real bug: the period rollover would
+/// expire them.
+///
+/// A bucket the ledger cannot hold is a **validation** error, not a silent monthly grant.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_manual_grant_into_the_purchased_bucket_is_honoured(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let admin = admin_token(&app, &harness, "admin-bucket@example.test").await;
+    let token = signed_up(&app, &harness, "pack@example.test").await;
+    let grantee = user_id_of(&harness, "pack@example.test").await;
+
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/admin/users/{grantee}/credits"),
+        &admin,
+        serde_json::json!({ "credits": 100, "bucket": "purchased", "idempotency_key": "pack-1" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["granted"], true, "{body}");
+    assert_eq!(body["bucket"], "purchased", "{body}");
+
+    let row: (i32, String, String) = sqlx::query_as(
+        "select delta, bucket, reason from credit_ledger
+          where user_id = $1 and period_key = 'admin:pack-1'",
+    )
+    .bind(grantee)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, 100);
+    assert_eq!(row.1, "purchased", "the requested bucket, not the default");
+    assert_eq!(row.2, "admin");
+
+    // The purchased bucket really holds it, and the monthly bucket did not move.
+    let purchased: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = $1 and bucket = 'purchased'",
+    )
+    .bind(grantee)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(purchased, 100);
+
+    // And the balance the usage view reports has the purchased bucket in it.
+    let (status, usage) = json(&app, "GET", "/usage", &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{usage}");
+    assert_eq!(usage["credits"]["purchased"], 100, "{usage}");
+
+    // A bucket that is neither of the two is refused rather than defaulted to monthly:
+    // silently granting monthly would expire a purchase at the period boundary.
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/admin/users/{grantee}/credits"),
+        &admin,
+        serde_json::json!({ "credits": 5, "bucket": "bonus", "idempotency_key": "pack-2" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "validation", "{body}");
+
+    let written: i64 =
+        sqlx::query_scalar("select count(*)::bigint from credit_ledger where period_key = $1")
+            .bind("admin:pack-2")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(written, 0, "a rejected bucket writes nothing");
 }
 
 /// Every admin route is 404 for a non-admin (A7).
