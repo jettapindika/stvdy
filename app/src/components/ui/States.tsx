@@ -19,15 +19,22 @@ export function EmptyState({
   title,
   reason,
   action,
+  padded = true,
 }: {
   title: string
   /** Why it is empty. Required, so no state can ship without a cause. */
   reason: string
   /** The one thing that fills it. */
   action?: ReactNode
+  /**
+   * Whether to supply its own padding. The default suits a bare `.panel`, which
+   * has none. Set `false` when the caller already pads the container, or the two
+   * paddings stack and the text no longer lines up with a sibling element.
+   */
+  padded?: boolean
 }) {
   return (
-    <div className="flex flex-col items-start gap-2 px-4 py-6">
+    <div className={`flex flex-col items-start gap-2 ${padded ? 'px-4 py-6' : ''}`}>
       <p className="font-medium text-ink">{title}</p>
       <p className="max-w-prose text-sm text-ink-muted">{reason}</p>
       {action && <div className="mt-1">{action}</div>}

@@ -39,8 +39,11 @@ export function StyleguideScreen() {
 
       <Section title="Palette">
         <p className="max-w-prose text-sm text-ink-muted">
-          Two cores plus one accent. The accent is rationed to the provenance
-          layer and the single primary action per screen.
+          Two cores plus two functional colours. Blue is the identity, carried
+          by the wordmark, links, the citation marks, and the illustration. Black
+          is the action: the primary button is near-black, never blue, which is
+          the design's most distinctive decision. Teal is reserved for a positive
+          mark and red for errors.
         </p>
         <ul className="flex flex-col divide-y divide-rule border-y border-rule">
           {SWATCHES.map((swatch) => (

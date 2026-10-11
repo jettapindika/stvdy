@@ -52,12 +52,12 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #12141a;
-    --card: #1a1d24;
+    --card: #22262e;
     --surface-sunk: #0e1015;
     --ink: #f2f4f8;
     --ink-muted: #9aa5b8;
-    --rule: #2b3038;
-    --rule-strong: #3d434e;
+    --rule: #353b47;
+    --rule-strong: #454c59;
     --accent: #6db4e8;
     --accent-text: #6db4e8;
     --accent-soft: #16232f;
@@ -104,8 +104,6 @@
   --radius-pill: 999px;
   --radius-card: 14px;
   --radius-field: 8px;
-
-  --shadow-card: var(--shadow-card);
 
   /* Safe-area insets as spacing tokens -> pt-safe-top / pb-safe-bottom. */
   --spacing-safe-top: env(safe-area-inset-top, 0px);
@@ -182,6 +180,15 @@
     background-color: var(--card);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
+  }
+  /* In dark mode the shadow cannot do the work (a black shadow on a near-black
+     ground is invisible), so the card gets a hairline as well. That is the one
+     place the design's borderless-card rule is adapted rather than copied, and
+     the reason is elevation: without it the card reads as a flat rectangle. */
+  @media (prefers-color-scheme: dark) {
+    .card {
+      border: 1px solid var(--rule);
+    }
   }
 
   /* A flat region: no elevation, no shadow, separated by a hairline. Used for
@@ -273,9 +280,10 @@
 
   /* --- Navigation --------------------------------------------------------- */
 
-  /* Sidebar items. The active item is marked by weight and an ink bar, never by
-     the accent: the accent is the identity colour, and spending it on navigation
-     state would leave nothing for the wordmark and links. */
+  /* Sidebar items. The active item is marked by weight plus a short azure bar
+     (`.nav-item[aria-current]::before` below). Azure is right here because
+     DESIGN.md makes it the identity colour and forbids it in exactly one place, a
+     button; a blue navigation marker is not a blue action. */
   .nav-item {
     position: relative;
     display: flex;
@@ -388,8 +396,15 @@
      tracks the real difference in behaviour (R-26). */
   a.cite:hover,
   button.cite:hover {
-    background-color: var(--accent);
-    color: var(--card);
+    /* `--accent-text` rather than `--accent`: the raw brand azure with light text
+       is 3.81:1, which fails AA at the chip's ~11px size.
+       The text colour must invert with the fill, not be hardcoded. `--accent-text`
+       is dark in light mode and light in dark mode, and `--on-action` is exactly
+       its opposite in both (5.72:1 light, 8.19:1 dark). Hardcoding white here
+       measured 2.25:1 in dark mode, which is the same class of mistake as the
+       original. */
+    background-color: var(--accent-text);
+    color: var(--on-action);
   }
 
   /* --- Labels and state --------------------------------------------------- */

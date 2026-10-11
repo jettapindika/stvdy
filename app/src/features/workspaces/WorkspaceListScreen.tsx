@@ -27,7 +27,11 @@ export function WorkspaceListScreen() {
         <div className="card px-5 py-6">
           <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
             <BrandIllustration className="w-44 shrink-0 sm:w-52" />
+            {/* `padded={false}`: the card supplies the padding, and the
+                illustration sits beside the text, so a second set of padding
+                would push the text off the illustration's left edge. */}
             <EmptyState
+              padded={false}
               title="No workspaces yet"
               reason="Create one per course, then add its material: a PDF, slide deck, document, or link. Answers will cite the page they came from, and the sources stay searchable together rather than in separate notebooks."
             />

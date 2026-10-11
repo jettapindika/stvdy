@@ -48,10 +48,18 @@ Sampled from the frame. Two cores plus two functional colours, per R-29.
 | `danger` | `#b3261e` | `#f2b8b5` | Errors only. Not in the design; borrowed from the same cool family so it does not clash. |
 | `on-action` | `#ffffff` | `#12141a` | Text on the action fill. |
 
-Verified in the rendered DOM: `ink` on `paper` 17.74:1, `accent-text` 5.33:1,
-`success-text` 4.56:1, `ink-muted` 5.06:1, `on-action` on `ink` 19.03:1. The
-brand `accent` at 3.56:1 is used only for fills, illustration, and text at 18px+
-where AA-large applies.
+Verified by measuring the **rendered DOM** on `/styleguide`, in both themes, not
+by arithmetic on the token values: `ink` on `paper` 17.74:1 (light) / 16.72:1
+(dark), body on ground 5.06:1 / 7.41:1, `accent-text` 5.33:1 / 8.19:1,
+`success-text` 4.56:1 / 8.13:1, `on-action` on `action` 19.03:1 / 16.72:1, and the
+citation chip 5.04:1 / 7.10:1. The brand `accent` at 3.56:1 is used only for
+fills, illustration, and text at 18px and above, where AA-large applies.
+
+That distinction is load-bearing rather than pedantic: arithmetic on token values
+cannot catch a token **misapplied**, and measuring the DOM did catch two such
+defects. The citation chip's hover state had `--card` text on the raw `--accent`
+fill (3.81:1 on an 11px chip, a fail), and it now uses `--accent-text` (5.72:1).
+The dark-mode card had no usable separation at all, see below.
 
 ## Typography
 
@@ -79,8 +87,17 @@ Scale, from the design's proportions: hero `2.25rem/1.15`, page title
 - **Inputs and small controls are `8px`.** The pill is reserved for buttons and
   status chips so shape keeps meaning: rounded rectangle means "field", pill means
   "action or count".
-- **No borders where a shadow or a tone shift will do.** The design separates the
-  card from the ground with white-on-tint plus a shadow, not a hard outline.
+- **No borders where a shadow or a tone shift will do.** In light mode the design
+  separates the card from the ground with white-on-tint plus a shadow, not a hard
+  outline.
+- **Exception, dark mode only: the card carries a hairline.** The design is
+  light-only, so this is derived rather than copied. In light mode the card's
+  elevation comes from its shadow; a black shadow on a near-black ground is
+  invisible, and the surface step alone measured 1.09:1, so the card read as a
+  barely-different rectangle. Dark mode therefore lifts `--card` to `#22262e`
+  (1.21:1 against the ground) **and** adds a 1px `--rule` hairline for a second,
+  independent signal. Without both, the one thing the design actually relies on
+  disappears in the theme half the users are in at night.
 
 ## Dials
 

@@ -32,12 +32,12 @@ export function Section({
 }) {
   const id = sectionId(title)
   return (
-    <section aria-labelledby={`${id}-heading`} className="flex flex-col gap-2">
+    <section aria-labelledby={id} className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 id={`${id}-heading`} className="flex items-baseline gap-2 scroll-mt-4">
-          {/* The id lives on an inner span rather than on the h2 in a way that
-              would break the heading outline, so an anchor lands here. */}
-          <span id={id} className="scroll-mt-20" />
+        {/* The anchor target IS the heading, so an in-page link lands on visible
+            content rather than on an empty spacer, and `scroll-mt` applies to the
+            element the browser actually scrolls to. */}
+        <h2 id={id} className="flex items-baseline gap-2 scroll-mt-4">
           {title}
           {count !== undefined && <span className="meta">{count}</span>}
         </h2>
