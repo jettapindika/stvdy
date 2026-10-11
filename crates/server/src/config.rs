@@ -125,6 +125,9 @@ pub struct EmbedderConfig {
     /// `EMBEDDER=http` only.
     pub base_url: Option<String>,
     pub api_key: Option<SecretString>,
+    /// The query convention the endpoint's model needs, e.g. `query: ` for E5.
+    /// Empty means none. See `HttpEmbedder`.
+    pub query_prefix: String,
 }
 
 /// The first `LlmProvider` (A1): an [OI]-compatible endpoint. Optional as a
@@ -161,7 +164,15 @@ impl AppConfig {
                 .map(|(_, v)| (*v).to_string())
                 .or_else(|| std::env::var(key).ok())
         };
-        let get_or = |key: &str, default: &str| get(key).unwrap_or_else(|| default.to_string());
+        // An empty value counts as absent. The env template ships keys blank
+        // (`LLM_MODEL=`, `SMTP_URL=`), and `unwrap_or_else` would keep the empty
+        // string, so a default would never fire: the documented way to enable chat
+        // is to set `LLM_BASE_URL` alone, and it would have posted `"model": ""`.
+        let get_or = |key: &str, default: &str| {
+            get(key)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| default.to_string())
+        };
 
         let env = Env::parse(&get_or("APP_ENV", "dev"))?;
 
@@ -250,6 +261,7 @@ impl AppConfig {
                 api_key: get("EMBEDDER_API_KEY")
                     .filter(|s| !s.is_empty())
                     .map(SecretString::from),
+                query_prefix: get_or("EMBEDDER_QUERY_PREFIX", ""),
             },
             pdfium_lib_path: get("PDFIUM_LIB_PATH")
                 .filter(|s| !s.is_empty())

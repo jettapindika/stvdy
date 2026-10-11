@@ -395,13 +395,86 @@ Deviations and discoveries from running the plan.
     pinned the double space was asserting the artifact rather than the intent and
     now asserts a clean sentence plus the absence of any surviving marker.
 
+### Review round: defects found after the first Phase 2 summary
+
+A review of the first summary produced findings that were checked against the tree
+rather than taken on faith. Eleven were real and are fixed here.
+
+11. **A rejected citation was visible to the user while the answer streamed.** The
+    token loop yielded every token verbatim and stripped only the *stored* copy, so
+    a fabricated `[9]` was on screen from the token carrying it until `done`
+    replaced the live turn with the refetched copy. `docs/API.md` claims a reply
+    "can never show a citation the user cannot open", which was false on the
+    streaming path. The server now holds back at most one marker's length
+    (`citations::streamable_end`) and emits a marker only once it is complete and
+    known, so the fabricated one is dropped before the user sees it and the
+    client's unmatched-marker branch becomes unreachable. A partial-marker hold
+    needs the client's spacing preserved, hence
+    `strip_unknown_preserving_spacing`, which does not trim the seam that
+    `strip_unknown` tidies.
+12. **The gate-6 UI row recorded a false PASS.** It quoted
+    `log.textContent.includes('[9]') === false`, sampled *after* `done`, so it
+    measured the persisted copy rather than the streaming path. Replaced with the
+    token-event assertion above, and the smoke run now samples the stream itself.
+13. **An empty answer left the stream unterminated.** The branch only logged, so a
+    client waited for a `done` that never came, since `done` is the turn's end.
+    Every exit path now emits exactly one terminator.
+14. **`use_web` was accepted and then claimed.** The flag reached the prompt as
+    "Web search: on" with no web context, was stored as `used_web: true`, and
+    invited the model to say it had searched. Now refused with 400 `validation`
+    until Phase 3 implements the arm (A65 is superseded).
+15. **A server with no provider spent a credit per request.** The `state.llm`
+    check sat after the spend and after the user message was written, so a fresh
+    checkout (whose `.env.example` has no `LLM_BASE_URL`) charged for a request
+    that could never succeed. The check now runs before the spend, and retrieval
+    and composition were moved ahead of it too: they are a database read and a
+    pure function, so doing them first costs nothing and shrinks the window in
+    which a credit can be lost.
+16. **`insufficient_credits` put the wrong numbers in `limit`/`used`.** Those
+    fields carry the plan-matrix sense, so a client rendering them would print
+    "the limit is 1, you have 59" on a 402, and `min_plan` was `None`, so a
+    spent-out user was offered no upgrade at all. Now `limit`/`used` are null (the
+    numbers are in the message) and `min_plan` names the plan with the bigger
+    allowance, or `None` on the top plan.
+17. **A blank env value defeated its own default.** `get_or` used
+    `unwrap_or_else`, so `LLM_MODEL=` (which the template ships blank) produced an
+    empty model name and the default never fired: the documented way to enable
+    chat, setting `LLM_BASE_URL` alone, would have posted `"model": ""` and taken
+    a credit before the provider's 400. An empty value now counts as absent, which
+    is the pattern the rest of the file already used with `.filter(|s| !s.is_empty())`.
+18. **`HttpEmbedder` had no query convention.** It inherited the trait default,
+    which is `embed`, so pointing `EMBEDDER=http` at an E5 endpoint reproduced the
+    exact silent degradation the Indonesian gate had just caught on the fastembed
+    side. It now takes `EMBEDDER_QUERY_PREFIX` and applies it in `embed_query`.
+    The now-dead free function `embed_query(model, text)` was deleted: it applied
+    the prefix unconditionally, which is the second divergent path the trait method
+    exists to remove.
+19. **The client's post-stream refetch had no `.catch()`.** TanStack Query's
+    `invalidateQueries` rejects when the refetch fails, so a network blip at the
+    moment the answer completed left an unhandled rejection and never cleared the
+    live turn, which kept the raw-token copy (and any marker the server had
+    dropped) on screen indefinitely.
+20. **Gate 6 could not catch a regression in the retrieval path.** Its vector
+    assertion ran its own SQL against `embed_query`, while the chat half ran
+    through `retrieve` with the harness's hash embedder, where `embed` and
+    `embed_query` are identical by definition. A regression inside `retrieve`
+    would have passed everything. There is now a `TestState::with_embedder` seam,
+    and a `ConventionRecorder` test asserts that `retrieve` calls `embed_query` and
+    never `embed`. Proved non-vacuous by re-injecting the regression: it fails.
+21. **The smoke run could not be re-run by anyone else.** It drove an
+    already-running server but never said how to start it, and the server's
+    `LLM_BASE_URL` had to point at the stub's port with nothing in the repo
+    recording the pairing, so a re-runner saw an opaque 502 (or a burned credit).
+    Three `justfile` recipes now state it, and the script diagnoses a missing
+    server and an unconfigured provider by name.
+
 ### Phase 2 verification (as executed)
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace` | **216 passing**, 0 failing |
+| `cargo test --workspace` | **230 passing**, 0 failing |
 | `npm --prefix app test` | **137 passing** (19 files) |
 | `npm --prefix app run build` | clean (419 kB / 130 kB gzip) |
 | `src-tauri` fmt + clippy + test | clean; 17 passing |
@@ -412,6 +485,12 @@ Deviations and discoveries from running the plan.
 
 Method: the built bundle in headless Chromium, measured with `getComputedStyle`
 and `getBoundingClientRect` after real key presses. Not a stylesheet reading.
+
+**Cost of the target-size fix, recorded rather than only the pass:** the citation
+chip's phone-width rule (`min-height: 2.75rem`) makes the line holding a citation
+taller at phone width. An absolute-positioned hit area was rejected because the
+box would stay 15px, which passes only an audit that measures something other than
+the target.
 
 | Requirement | Result |
 |---|---|
@@ -437,7 +516,8 @@ region is asserted structurally, the announcement itself is not observed);
 | Vector arm retrieves it with the **real** embedder | **PASS** (6.2 s, real model) |
 | `embed_query` applies the model's query convention | **PASS**, and it caught the missing override (execution note 1) |
 | The citation resolves to the Indonesian source | **PASS** |
-| The UI half: an Indonesian question typed into the real screen | **PASS.** Account created through the UI and verified from the `var/mail` link; workspace "Jaringan Komputer"; the Indonesian fixture ingested to `ready` (1 chunk); the question typed into the chat panel. The answer streamed in, the visible text contains no `[9]` (`log.textContent.includes('[9]') === false`), and exactly **one** citation chip rendered, labelled "Open source: Topologi Jaringan, page unknown". Clicking it opened a panel with the fixture chunk text. "page unknown" is honest: pasted text has no pages |
+| The UI half: an Indonesian question typed into the real screen | **PASS**, with a corrected measurement. Account created through the UI and verified from the `var/mail` link; workspace "Jaringan Komputer"; the Indonesian fixture ingested to `ready` (1 chunk); the question typed into the chat panel. Exactly **one** citation chip rendered, labelled "Open source: Topologi Jaringan, page unknown", and clicking it opened a panel with the fixture chunk text. "page unknown" is honest: pasted text has no pages |
+| The streamed text, sampled **while the stream is open** | **PASS, and this row replaces a false one.** The first browser run sampled `log.textContent` *after* `done`, so it recorded the persisted copy and reported a pass the streaming path did not earn: the token loop yielded every token verbatim, so `[9]` was on screen from the token that carried it until the refetch replaced the live turn. The server now holds back a partial marker and drops an unknown one before emitting, and the smoke run asserts it on the token events: `'Mitochondria produce ATP through oxidative phosphorylation [1], and also .'`, with `[9]` absent and the sent label present |
 | The pre-stream error path, against the real server | **PASS.** With the stub provider down, the 502 arrived as a JSON body *before* the stream opened and the screen rendered it as "Service unavailable" with an "Ask again" retry and no assistant turn. A distinct case from a mid-stream `error`, where the user's turn is stored |
 
 ## Self-Review

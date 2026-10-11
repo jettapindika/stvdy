@@ -84,13 +84,32 @@ pub fn monthly_allowance(state: &AppState, plan: stvdy_core::config::PlanId) -> 
     state.config.plans.get(plan).credits_per_month
 }
 
+/// The plan whose monthly allowance is larger than `plan`'s, for an upgrade hint.
+///
+/// `None` on the top plan: there is no higher tier, so suggesting one would be a
+/// dead end. This mirrors `limits::upgrade_from`, which does the same for the
+/// countable limits.
+fn plan_for_more_credits(plan: stvdy_core::config::PlanId) -> Option<&'static str> {
+    match plan {
+        stvdy_core::config::PlanId::Free => Some("pro"),
+        stvdy_core::config::PlanId::Pro => Some("power"),
+        stvdy_core::config::PlanId::Power => None,
+    }
+}
+
 /// Spends `credits` for `action`, returning the remaining balance.
 ///
 /// The advisory lock is taken **first**, before any read of the ledger: without
 /// it two concurrent requests can both see a sufficient balance and both insert,
 /// which is a double spend. It is transaction-scoped, so it is released at
 /// commit or rollback with no cleanup path to get wrong.
-pub async fn spend(pool: &PgPool, user_id: Uuid, action: &str, credits: i64) -> AppResult<i64> {
+pub async fn spend(
+    pool: &PgPool,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+    action: &str,
+    credits: i64,
+) -> AppResult<i64> {
     if credits < 0 {
         return Err(AppError::Internal(anyhow::anyhow!(
             "a spend must not be negative (action {action}, credits {credits})"
@@ -128,10 +147,19 @@ pub async fn spend(pool: &PgPool, user_id: Uuid, action: &str, credits: i64) -> 
     if available < credits {
         return Err(AppError::Entitlement {
             code: "insufficient_credits",
+            // `limit` and `used` mean the plan-matrix sense ("the free plan allows
+            // 2 workspaces and you have 2"), so they stay empty here: putting this
+            // action's cost and the balance in them would make a client render
+            // "the limit is 1, you have 59", which is the opposite of the truth.
+            // The numbers are in the message instead.
+            //
+            // `min_plan` is the plan that would raise the allowance, which is what
+            // a spent-out user needs to be told. It is `None` on the top plan
+            // because there is nothing left to sell.
             message: format!("this action costs {credits} credits and you have {available}"),
-            min_plan: None,
-            limit: Some(credits),
-            used: Some(available),
+            min_plan: plan_for_more_credits(plan),
+            limit: None,
+            used: None,
         });
     }
 

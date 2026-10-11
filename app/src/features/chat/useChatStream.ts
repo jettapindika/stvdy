@@ -109,6 +109,12 @@ export function useChatStream(workspaceId: string): ChatStreamState {
               // swaps from the streamed copy to the persisted one in one paint.
               void queryClient
                 .invalidateQueries({ queryKey: chatKeys.messages(workspaceId) })
+                // The refetch is what replaces the live turn with the persisted
+                // copy, and it rejects on a network blip. Without this catch the
+                // live turn would stay on screen indefinitely and the rejection
+                // would be unhandled, so dropping the turn is correct either way:
+                // the answer is already on screen from the stream.
+                .catch(() => undefined)
                 .then(() => {
                   if (isCurrent()) setTurn(null)
                 })

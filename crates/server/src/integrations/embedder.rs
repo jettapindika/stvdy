@@ -196,10 +196,6 @@ impl Embedder for FastembedEmbedder {
 }
 
 /// Query-side embedding, which is the only caller that needs the other prefix.
-pub fn embed_query(_model: &dyn Embedder, text: &str) -> String {
-    format!("{QUERY_PREFIX}{text}")
-}
-
 /// An HTTP embedder, for a deployment that would rather call a hosted model than
 /// bake 1.06 GB into the image. Same trait, so nothing else changes.
 pub struct HttpEmbedder {
@@ -208,16 +204,32 @@ pub struct HttpEmbedder {
     api_key: Option<String>,
     model_id: String,
     dim: usize,
+    /// The query convention of the model behind the endpoint, from
+    /// `EMBEDDER_QUERY_PREFIX`. Empty means none.
+    ///
+    /// This is configuration rather than a constant because the HTTP arm cannot
+    /// know what model it is talking to. Leaving it unset against an E5 endpoint
+    /// reproduces exactly the silent degradation the Indonesian gate caught on
+    /// the fastembed side: queries land in the passage region and the wrong chunk
+    /// wins with no error.
+    query_prefix: String,
 }
 
 impl HttpEmbedder {
-    pub fn new(base_url: String, api_key: Option<String>, model: String, dim: usize) -> Self {
+    pub fn new(
+        base_url: String,
+        api_key: Option<String>,
+        model: String,
+        dim: usize,
+        query_prefix: String,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
             model_id: model,
             dim,
+            query_prefix,
         }
     }
 }
@@ -230,6 +242,19 @@ impl Embedder for HttpEmbedder {
 
     fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    /// Applies the configured convention, so an E5 endpoint behaves the same as
+    /// the built-in model rather than silently searching the passage region.
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        if self.query_prefix.is_empty() {
+            return self.embed(texts).await;
+        }
+        let prefixed: Vec<String> = texts
+            .iter()
+            .map(|text| format!("{}{text}", self.query_prefix))
+            .collect();
+        self.embed(&prefixed).await
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {

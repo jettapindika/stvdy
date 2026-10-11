@@ -134,13 +134,23 @@ fn prod_rejects_the_all_zero_encryption_key() {
 
 #[test]
 fn prod_rejects_a_missing_or_short_encryption_key() {
-    for bad in ["", "abcd"] {
-        let err = AppConfig::from_env_at(&root(), &prod_overrides(bad)).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("64 hex characters"),
-            "got: {err:#}"
-        );
-    }
+    // A key that is set but the wrong length is rejected for its length.
+    let err = AppConfig::from_env_at(&root(), &prod_overrides("abcd")).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("64 hex characters"),
+        "got: {err:#}"
+    );
+
+    // An empty value counts as absent, so it takes the dev default and is then
+    // rejected for being that default. The outcome is what matters: prod must not
+    // boot either way, and both messages name the variable. Asserting the exact
+    // wording here would pin which of the two checks happened to fire.
+    let err = AppConfig::from_env_at(&root(), &prod_overrides("")).unwrap_err();
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("ENCRYPTION_KEY_HEX"),
+        "must name the variable: {message}"
+    );
 }
 
 #[test]
@@ -186,4 +196,60 @@ fn config_is_cloneable_and_shares_into_state() {
     .unwrap();
     let shared = Arc::new(cfg);
     assert_eq!(shared.plans.plans.len(), 3);
+}
+
+/// The env template ships several keys blank (`LLM_MODEL=`, `SMTP_URL=`), and a
+/// blank value must mean "absent" so the default fires. `unwrap_or_else` alone
+/// would keep the empty string, and the documented way to enable chat is to set
+/// `LLM_BASE_URL` alone, so the first request would post `"model": ""` and get a
+/// 400 from the provider after a credit had already been spent.
+#[test]
+fn an_empty_env_value_falls_back_to_its_default() {
+    let config = AppConfig::from_env_at(
+        &root(),
+        &[
+            ("APP_ENV", "dev"),
+            ("PLANS_CONFIG", "config/plans.toml"),
+            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+            ("LLM_BASE_URL", "http://localhost:9/v1"),
+            ("LLM_MODEL", ""),
+            ("LLM_API_KEY", ""),
+        ],
+    )
+    .expect("config loads");
+
+    let llm = config
+        .llm
+        .expect("a base URL is enough to configure a provider");
+    assert_eq!(
+        llm.model, "deepseek-v4.1-flash",
+        "an empty LLM_MODEL must fall back to the default, not be sent as an empty string"
+    );
+    assert_eq!(llm.api_key, "", "an empty key is legitimately empty");
+}
+
+/// The same shape for the storage and embedder keys the template ships blank.
+#[test]
+fn blank_storage_and_embedder_keys_take_their_defaults() {
+    let config = AppConfig::from_env_at(
+        &root(),
+        &[
+            ("APP_ENV", "dev"),
+            ("PLANS_CONFIG", "config/plans.toml"),
+            ("BILLING_POLICY_CONFIG", "config/billing_policy.toml"),
+            ("S3_ENDPOINT", ""),
+            ("S3_BUCKET", ""),
+            ("EMBEDDER_QUERY_PREFIX", ""),
+            ("EMBEDDER_MODEL", ""),
+        ],
+    )
+    .expect("config loads");
+
+    assert!(
+        config.storage.endpoint.is_none(),
+        "a blank endpoint is no endpoint"
+    );
+    assert_eq!(config.storage.bucket, "stvdy-sources");
+    assert_eq!(config.embedder.query_prefix, "");
+    assert_eq!(config.embedder.model, "intfloat/multilingual-e5-base");
 }

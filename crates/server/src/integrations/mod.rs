@@ -81,6 +81,7 @@ impl Providers {
                         .map(|key| key.expose_secret().to_string()),
                     cfg.embedder.model.clone(),
                     cfg.embedder.dim,
+                    cfg.embedder.query_prefix.clone(),
                 ))
             }
         };

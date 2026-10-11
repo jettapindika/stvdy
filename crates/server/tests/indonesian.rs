@@ -249,9 +249,19 @@ async fn an_indonesian_question_is_answered_with_a_resolved_citation(pool: PgPoo
     }
 
     // The answer, streamed through the real route with a scripted model.
+    //
+    // The embedder is swapped for the real one when it is available, so the
+    // retrieval the chat path performs is the one under test. With the harness's
+    // hash embedder, `embed` and `embed_query` are identical by definition, so a
+    // regression from `embed_query` back to `embed` inside `retrieve` would pass
+    // every assertion above while Indonesian retrieval silently degraded.
     let llm = Arc::new(ScriptedLlm::new(vec![
         "Perangkat pusat itu disebut switch [1].".to_string(),
     ]));
+    let harness = match real_embedder(&harness) {
+        Some(embedder) => harness.with_embedder(Arc::new(embedder)),
+        None => harness,
+    };
     let harness = harness.with_llm(llm.clone());
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
 
@@ -303,5 +313,103 @@ async fn an_indonesian_question_is_answered_with_a_resolved_citation(pool: PgPoo
     assert_eq!(
         messages[1]["citations"][0]["source_id"].as_str().unwrap(),
         source_id
+    );
+}
+
+/// Records which embedding convention the retrieval path used.
+///
+/// The semantic check above needs the real model and a fixture where the two
+/// conventions disagree, which is fragile. This asserts the mechanism instead:
+/// `retrieve` must call `embed_query`, not `embed`. It needs no model, so it runs
+/// everywhere, and it fails the moment the call site regresses, which is the
+/// silent degradation this gate exists for.
+#[derive(Default)]
+struct ConventionRecorder {
+    query_calls: std::sync::atomic::AtomicUsize,
+    passage_calls: std::sync::atomic::AtomicUsize,
+}
+
+impl ConventionRecorder {
+    fn query_calls(&self) -> usize {
+        self.query_calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn passage_calls(&self) -> usize {
+        self.passage_calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl stvdy_core::traits::embedder::Embedder for ConventionRecorder {
+    fn dim(&self) -> usize {
+        768
+    }
+
+    fn model_id(&self) -> &str {
+        "convention-recorder"
+    }
+
+    async fn embed(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>, stvdy_core::traits::embedder::EmbedError> {
+        self.passage_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // A deterministic vector, so the arm returns something rather than
+        // erroring; the assertion is about which method ran, not about ranking.
+        Ok(texts.iter().map(|_| vec![0.1f32; 768]).collect())
+    }
+
+    async fn embed_query(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>, stvdy_core::traits::embedder::EmbedError> {
+        self.query_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(texts.iter().map(|_| vec![0.1f32; 768]).collect())
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn retrieval_embeds_the_query_with_the_query_convention(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "convention@example.test").await;
+    let (workspace_id, _) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Catatan", DOKUMEN).await;
+
+    let recorder = Arc::new(ConventionRecorder::default());
+    let llm = Arc::new(ScriptedLlm::new(vec!["jawaban [1]".to_string()]));
+    let harness = harness.with_embedder(recorder.clone()).with_llm(llm);
+
+    let workspace_uuid = uuid::Uuid::parse_str(&workspace_id).unwrap();
+    let user_id: uuid::Uuid = sqlx::query_scalar("select id from users limit 1")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+
+    // Call the shipped retrieval function directly, which is what the chat route
+    // calls, so this is the real path and not a parallel query.
+    stvdy_server::chat::retrieve::retrieve(
+        &harness.state,
+        user_id,
+        workspace_uuid,
+        PERTANYAAN,
+        &[],
+    )
+    .await
+    .expect("retrieval runs");
+
+    assert_eq!(
+        recorder.query_calls(),
+        1,
+        "retrieval must embed the query through embed_query"
+    );
+    assert_eq!(
+        recorder.passage_calls(),
+        0,
+        "embedding a query as a passage puts it in the wrong region of the space and \
+         the wrong chunk wins with no error: that is the failure this asserts against"
     );
 }

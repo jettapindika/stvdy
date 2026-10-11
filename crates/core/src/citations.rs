@@ -260,3 +260,58 @@ fn tidy_removal(text: &str) -> String {
 
     out.trim_end().to_string()
 }
+
+/// The largest marker the scanner recognises: `[999]` and `[W99]` are both five
+/// bytes, with a byte of margin for a wider label later.
+pub const MAX_MARKER_BYTES: usize = 8;
+
+/// How much of `text` is safe to show the user right now.
+///
+/// Returns the index up to which every citation marker is *complete*, so the
+/// caller never emits a marker that is still being assembled. The only ambiguous
+/// tail is a `[` with no `]` after it; that is held back, but never more than a
+/// marker's worth, because a prose `[` (a footnote, a code snippet) would
+/// otherwise stall the stream for the rest of the answer.
+///
+/// This exists because streaming raw tokens leaks citations: a model that writes
+/// `[9]` for a label the server never sent would show the user a marker it has
+/// already decided to drop, and then that marker would vanish when the persisted
+/// copy replaced it.
+pub fn streamable_end(text: &str) -> usize {
+    match text.rfind('[') {
+        Some(open) if !text[open..].contains(']') => {
+            let held = text.len() - open;
+            if held <= MAX_MARKER_BYTES {
+                open
+            } else {
+                text.len()
+            }
+        }
+        _ => text.len(),
+    }
+}
+
+/// Removes unknown markers without touching the surrounding whitespace.
+///
+/// The streaming path needs this rather than [`strip_unknown`]: that one tidies
+/// the removal seam, which includes trimming a trailing space, and a streamed
+/// fragment ending in a space would lose it, joining two words when the next
+/// fragment arrived.
+pub fn strip_unknown_preserving_spacing(text: &str, labels: &ContextLabels) -> String {
+    let markers = scan(text);
+    if markers.is_empty() {
+        return text.to_string();
+    }
+
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for marker in markers {
+        if is_known(marker.label, labels) {
+            continue;
+        }
+        output.push_str(&text[cursor..marker.start]);
+        cursor = marker.end;
+    }
+    output.push_str(&text[cursor..]);
+    output
+}

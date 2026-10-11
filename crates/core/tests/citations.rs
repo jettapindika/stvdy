@@ -7,7 +7,8 @@
 use uuid::Uuid;
 
 use stvdy_core::citations::{
-    Citation, ContextLabels, LabeledChunk, LabeledWeb, resolve, strip_unknown,
+    Citation, ContextLabels, LabeledChunk, LabeledWeb, resolve, streamable_end, strip_unknown,
+    strip_unknown_preserving_spacing,
 };
 
 fn labels(chunk_labels: &[u32]) -> ContextLabels {
@@ -257,4 +258,80 @@ fn context_labels_expose_their_entries() {
     assert_eq!(context.chunk(1).unwrap().page, Some(3));
     assert_eq!(context.web(1).unwrap().title, "TCP overview");
     assert!(context.chunk(2).is_none());
+}
+
+#[test]
+fn a_complete_marker_is_streamable_but_a_partial_one_is_not() {
+    // Nothing to hold back: no bracket at all.
+    assert_eq!(streamable_end("a plain sentence"), "a plain sentence".len());
+
+    // A complete marker is safe: the caller can validate it and drop it.
+    assert_eq!(streamable_end("claim [1]"), "claim [1]".len());
+
+    // A marker still being assembled is not: `[9` may yet become `[9]`, which
+    // must be validated rather than shown.
+    assert_eq!(streamable_end("claim [9"), "claim ".len());
+    assert_eq!(streamable_end("claim ["), "claim ".len());
+    assert_eq!(streamable_end("claim [W"), "claim ".len());
+
+    // A prose bracket with no close within a marker's length is emitted rather
+    // than stalling the stream for the rest of the answer.
+    let long = "see the note [see appendix for the full derivation";
+    assert_eq!(streamable_end(long), long.len());
+}
+
+#[test]
+fn streaming_strips_an_unknown_marker_and_keeps_the_spacing() {
+    let context = labels_with_web();
+
+    // The exact case the browser run caught: a fabricated label must not reach
+    // the user, and the words around it must stay separated.
+    assert_eq!(
+        strip_unknown_preserving_spacing("a claim [9] and", &context),
+        "a claim  and",
+        "the marker goes; the surrounding spacing is the caller's to manage"
+    );
+    // A known label survives byte for byte.
+    assert_eq!(
+        strip_unknown_preserving_spacing("a claim [1] and", &context),
+        "a claim [1] and"
+    );
+    // Crucially, a trailing space is NOT trimmed: the next streamed fragment
+    // would otherwise join the two words.
+    assert_eq!(
+        strip_unknown_preserving_spacing("Mitochondria ", &context),
+        "Mitochondria "
+    );
+}
+
+#[test]
+fn the_streaming_path_never_emits_an_unknown_marker() {
+    // Simulates the token loop: a model streaming an answer that cites a
+    // fabricated label one character at a time.
+    let context = labels_with_web();
+    let answer = "ATP is made here [1], and also [9].";
+    let mut emitted = String::new();
+    let mut cursor = 0;
+
+    for (index, _) in answer.char_indices() {
+        let end = index + 1;
+        let safe = streamable_end(&answer[..end]);
+        if safe > cursor {
+            emitted.push_str(&strip_unknown_preserving_spacing(
+                &answer[cursor..safe],
+                &context,
+            ));
+            cursor = safe;
+        }
+    }
+    emitted.push_str(&strip_unknown_preserving_spacing(
+        &answer[cursor..],
+        &context,
+    ));
+
+    assert_eq!(emitted, "ATP is made here [1], and also .");
+    assert!(
+        !emitted.contains("[9]"),
+        "a fabricated marker must never reach the screen: {emitted:?}"
+    );
 }

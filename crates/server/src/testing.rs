@@ -138,6 +138,18 @@ impl TestState {
         self
     }
 
+    /// The same state with a different embedder.
+    ///
+    /// Needed by the Indonesian gate: the harness's `HashEmbedder` treats a query
+    /// and a passage identically, so a test that ran retrieval through it could
+    /// not catch a regression from `embed_query` back to `embed`, which is the
+    /// silent failure that gate exists for. Swapping in the real model makes the
+    /// assertion run on the path that ships.
+    pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
+        self.state.embedder = embedder;
+        self
+    }
+
     /// The most recent verification link the recording mailer captured.
     pub fn last_verification_link(&self) -> Option<String> {
         self.mailer.sent().iter().rev().find_map(|message| {

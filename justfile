@@ -56,6 +56,33 @@ server-supabase:
 web:
     npm --prefix app run dev
 
+# --- Phase 2 smoke: the server, a stub model, and the end-to-end chat run ---
+#
+# The pairing that matters and is otherwise invisible: the SERVER must be started
+# with LLM_BASE_URL pointing at the stub's port, because the server is what talks
+# to the model. `scripts/smoke-phase2.sh` drives the server and starts its own
+# stub on the same port, so this recipe exists to make the pairing explicit
+# instead of leaving a re-runner to see an opaque 502 (or a burned credit) at the
+# chat step.
+#
+# Two terminals: `just smoke-llm` then `just smoke-server`, then
+# `just smoke-phase2`.
+
+# The stub model server. Speaks real HTTP and SSE, and logs every request body so
+# the smoke run can assert on the prompt the model actually received.
+smoke-llm:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-requests.jsonl
+
+# The server, pointed at the stub. Started separately from `server` so the real
+# provider configuration is never overwritten by a test one.
+smoke-server:
+    LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+# Drives the running server. Needs `just smoke-llm` and `just smoke-server` up.
+smoke-phase2:
+    BASE=http://localhost:8099 bash scripts/smoke-phase2.sh
+
 # The Tauri CLI resolves `src-tauri` as a subfolder of the working directory, so
 # these must run from the repo root. The CLI binary is the one npm installed.
 tauri:

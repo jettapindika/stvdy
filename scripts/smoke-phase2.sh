@@ -66,7 +66,8 @@ fi
 nc -z 127.0.0.1 "$STUB_PORT" 2>/dev/null || fail "no stub model server on $STUB_PORT"
 
 say "health"
-curl -fsS "$BASE/health" > "$TMP/health.json"
+curl -fsS "$BASE/health" > "$TMP/health.json" 2>/dev/null \
+  || fail "no server at $BASE. Start the stub with 'just smoke-llm' and the server with 'just smoke-server'."
 field '["status"]' < "$TMP/health.json" | grep -qx ok || fail "health is not ok"
 
 say "signup and verify ($EMAIL)"
@@ -101,6 +102,11 @@ cat "$TMP/status.json"
 [ "$STATUS" = "ready" ] || fail "the Indonesian source did not reach ready"
 
 say "chat: streamed answer, Indonesian query, citation validated"
+# The server must have a provider configured, or every chat step below fails
+# with an opaque 502. Checked here, with the fix named.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/workspaces/$WS/chat" \
+  -H "authorization: Bearer $ACCESS" -H 'content-type: application/json' -d '{"message":""}')
+[ "$CODE" != "502" ] || fail "the server has no model provider; restart it with LLM_BASE_URL=$STUB_URL/v1 (just smoke-server)"
 # The stub answers with [1] (sent) and [9] (never sent). The server must resolve
 # the first and drop the second.
 curl -fsS -N -X POST "$BASE/workspaces/$WS/chat" \
@@ -146,6 +152,24 @@ assert spent == 1, spent
 print(f"streamed {len(events['token'])} token events, {len(citations)} citation, "
       f"spent {spent}, {remaining} left")
 PY
+
+say "no rejected marker ever reached the streamed text"
+# The invariant is about what the user sees WHILE the answer arrives, not only
+# what is stored: the token loop holds back a partial marker and drops an unknown
+# one before emitting it. Asserted on the token events themselves.
+python3 - "$TMP/stream.txt" <<'PYEOF'
+import json, sys
+
+raw = open(sys.argv[1], encoding="utf-8").read()
+streamed = ""
+for block in raw.split("\n\n"):
+    if block.startswith("event: token"):
+        streamed += json.loads(block.split("data:", 1)[1].strip())["t"]
+
+assert "[9]" not in streamed, f"a rejected marker reached the streamed text: {streamed!r}"
+assert "[1]" in streamed, f"a sent label must still reach the user: {streamed!r}"
+print("streamed text:", repr(streamed[:80]))
+PYEOF
 
 say "the fabricated label is gone from the stored text"
 curl -fsS "$BASE/workspaces/$WS/messages" -H "authorization: Bearer $ACCESS" > "$TMP/thread.json"

@@ -83,24 +83,32 @@ pub async fn chat(
         ));
     }
 
+    // Web search arrives in Phase 3. Accepting the flag now would make three
+    // things untrue at once: the prompt tells the model "Web search: on" with no
+    // web context, the stored turn asserts `used_web: true`, and the model will
+    // claim to have searched. Refusing is the only honest option, and it is
+    // refused before anything is spent or written.
+    if body.use_web {
+        return Err(AppError::Validation(
+            "web search arrives in Phase 3; this chat has no web context".to_string(),
+        ));
+    }
+
     let workspace_name = owned_workspace_name(&state, user.user_id, workspace_id).await?;
 
-    // Cap, then spend, then write: a request that fails any check must leave no
-    // credit spent and no message behind.
+    // Every check that can fail runs before the spend and before anything is
+    // written, so a refused request leaves no credit spent and no message behind.
+    // The provider check is here for the same reason: a server with no
+    // `LLM_BASE_URL` can never succeed on retry, so charging for it would take a
+    // credit for a request that could not have worked.
+    let provider = state.llm.clone().ok_or_else(|| {
+        AppError::Provider(
+            "no model provider is configured on this server (LLM_BASE_URL is unset)".to_string(),
+        )
+    })?;
+
     credits::enforce_daily_chat_cap(&state, &user).await?;
     let cost = credits::chat_message_cost(&state);
-    let remaining = credits::spend(&state.pool, user.user_id, ACTION, cost).await?;
-
-    let user_message_id = insert_message(
-        &state,
-        user.user_id,
-        workspace_id,
-        "user",
-        &message,
-        &[],
-        body.use_web,
-    )
-    .await?;
 
     let chunks = retrieve::retrieve(
         &state,
@@ -123,11 +131,23 @@ pub async fn chat(
 
     let labels = composed.labels.clone();
     let prompt_version = composed.prompt_version.clone();
-    let provider = state.llm.clone().ok_or_else(|| {
-        AppError::Provider(
-            "no model provider is configured on this server (LLM_BASE_URL is unset)".to_string(),
-        )
-    })?;
+
+    // The spend comes after every read that can fail, and immediately before the
+    // provider is called: retrieval and composition are a database read and a
+    // pure function, so doing them first costs nothing and shrinks the window in
+    // which a credit can be spent on a request that never reaches a model.
+    let remaining = credits::spend(&state.pool, user.user_id, user.plan(), ACTION, cost).await?;
+
+    let user_message_id = insert_message(
+        &state,
+        user.user_id,
+        workspace_id,
+        "user",
+        &message,
+        &[],
+        body.use_web,
+    )
+    .await?;
 
     // History is deliberately just the prompt plus the user's turn: the prompt
     // carries the sources, and replaying prior turns would send a second copy of
@@ -162,6 +182,10 @@ pub async fn chat(
     let events = async_stream::stream! {
         let mut answer = String::new();
         let mut usage = None;
+        // How much of `answer` has already been shown. Only complete markers are
+        // emitted, so a fabricated one is dropped before the user sees it rather
+        // than disappearing when the persisted copy replaces the live turn.
+        let mut emitted = 0usize;
 
         tokio::pin!(stream);
         loop {
@@ -176,7 +200,21 @@ pub async fn chat(
             match next {
                 Some(StreamEvent::Token(text)) => {
                     answer.push_str(&text);
-                    yield Ok(sse::token(&text));
+
+                    // Emit only up to the last complete marker. The hold-back is
+                    // at most a marker's length, so this does not delay ordinary
+                    // prose.
+                    let safe = stvdy_core::citations::streamable_end(&answer);
+                    if safe > emitted {
+                        let slice = &answer[emitted..safe];
+                        let visible = stvdy_core::citations::strip_unknown_preserving_spacing(
+                            slice, &labels,
+                        );
+                        if !visible.is_empty() {
+                            yield Ok(sse::token(&visible));
+                        }
+                        emitted = safe;
+                    }
                 }
                 Some(StreamEvent::Usage(reported)) => {
                     usage = Some(reported);
@@ -188,6 +226,18 @@ pub async fn chat(
                     tracing::warn!("ignoring a tool call: tools arrive in Phase 12");
                 }
                 Some(StreamEvent::Done) | None => break,
+            }
+        }
+
+        // Flush whatever the hold-back was keeping, so the last marker of an
+        // answer still reaches the client.
+        if emitted < answer.len() {
+            let visible = stvdy_core::citations::strip_unknown_preserving_spacing(
+                &answer[emitted..],
+                &labels,
+            );
+            if !visible.is_empty() {
+                yield Ok(sse::token(&visible));
             }
         }
 
@@ -223,8 +273,15 @@ pub async fn chat(
         // Persisted after the stream, so a client that disconnects mid-answer
         // leaves a user message and no half-answer. A blank answer is not
         // persisted either: an empty assistant turn is worse than none.
+        //
+        // Every exit path must emit exactly one terminator. Returning here without
+        // one would leave a client waiting for a `done` that never arrives, since
+        // the contract makes `done` the end of the turn.
         if cleaned.trim().is_empty() {
             tracing::warn!(%user_message_id, "the model returned an empty answer");
+            yield Ok(sse::error(&AppError::Provider(
+                "the model returned an empty answer".to_string(),
+            )));
         } else {
             match insert_message(
                 &state_for_stream,

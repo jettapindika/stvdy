@@ -763,3 +763,297 @@ async fn the_source_filter_narrows_retrieval(pool: PgPool) {
         "the unselected source must not be: {system}"
     );
 }
+
+/// The streamed text must never contain a marker the server has rejected.
+///
+/// This is the invariant `docs/API.md` states and the browser run caught being
+/// false: the token loop used to yield every token verbatim and strip only the
+/// persisted copy, so a fabricated `[9]` was on screen from the token that carried
+/// it until `done` replaced the live turn. Asserted on the token events, which is
+/// what the user actually sees while the answer arrives.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_fabricated_marker_never_reaches_the_streamed_text(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "stream-labels@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // Label 9 was never sent. The answer is scripted as one string, which the
+    // double streams as a single token, so this also covers the case where the
+    // whole marker arrives at once rather than one character at a time.
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        "A grounded claim [1] and a fabricated one [9].".to_string(),
+    ]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("Tell me about the cell"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let streamed: String = events
+        .iter()
+        .filter(|event| event.kind() == "token")
+        .filter_map(|event| event.json()["t"].as_str().map(str::to_string))
+        .collect();
+
+    assert!(
+        !streamed.contains("[9]"),
+        "the streamed text must not contain a rejected marker: {streamed:?}"
+    );
+    assert!(
+        streamed.contains("[1]"),
+        "a label that was sent must still reach the user: {streamed:?}"
+    );
+    assert!(
+        streamed.contains("grounded claim") && streamed.contains("fabricated one"),
+        "no ordinary text may be lost to the hold-back: {streamed:?}"
+    );
+    // The hold-back must not have swallowed the sentence's end either.
+    assert!(streamed.trim_end().ends_with('.'), "{streamed:?}");
+}
+
+/// A marker split across two tokens is held back until it is complete, then
+/// either emitted or dropped. The client never sees a half-marker.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_marker_split_across_tokens_is_never_shown_partial(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "split-marker@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // Explicit fragments, because the double's default tokenisation splits on
+    // whitespace and so can never put a marker across a boundary. A real provider
+    // does, which is the case the hold-back exists for.
+    let llm = Arc::new(ScriptedLlm::with_tokens(vec![
+        "The claim [".to_string(),
+        "9".to_string(),
+        "] is not grounded.".to_string(),
+    ]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("anything"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let streamed: String = events
+        .iter()
+        .filter(|event| event.kind() == "token")
+        .filter_map(|event| event.json()["t"].as_str().map(str::to_string))
+        .collect();
+
+    assert!(
+        !streamed.contains("[9]"),
+        "a split marker must not appear once assembled: {streamed:?}"
+    );
+    // The answer has no known labels, so no bracket may survive at all: not the
+    // assembled marker, and not the partial one the hold-back is holding.
+    assert!(
+        !streamed.contains('['),
+        "no partial or rejected marker may reach the user: {streamed:?}"
+    );
+    assert!(
+        streamed.contains("The claim") && streamed.contains("not grounded"),
+        "no ordinary text may be lost to the hold-back: {streamed:?}"
+    );
+}
+
+/// A spent-out account's 402 carries the plan-matrix sense of `limit`/`used`,
+/// which is "not applicable", and names the plan that would lift it. Putting the
+/// action's cost and the balance in those fields would make the client render
+/// "the limit is 1, you have 59".
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_spent_out_account_gets_an_upgrade_hint_and_no_confusing_numbers(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "hint@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    let user_id: uuid::Uuid = sqlx::query_scalar("select id from users limit 1")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into credit_ledger (user_id, delta, bucket, reason) values ($1, -1000, 'monthly', 'test')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let llm = Arc::new(ScriptedLlm::new(vec!["unused".to_string()]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, rejected) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("anything"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{rejected}");
+    assert_eq!(rejected["code"], "insufficient_credits");
+    assert_eq!(
+        rejected["min_plan"], "pro",
+        "a spent-out free user must be told which plan has a bigger allowance"
+    );
+    assert!(
+        rejected["limit"].is_null() && rejected["used"].is_null(),
+        "these fields are the plan-matrix sense, not this action's cost and balance: {rejected}"
+    );
+    // The numbers the user needs are in the message.
+    let message = rejected["message"].as_str().unwrap();
+    assert!(message.contains("1 credit"), "{message}");
+}
+
+/// A server with no model configured cannot succeed on retry, so it must not
+/// charge for the attempt. The shipped `.env.example` has no `LLM_BASE_URL`, so
+/// this is the default state of a fresh checkout.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unconfigured_provider_refuses_before_spending(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    // `TestState` defaults to `llm: None`, which is the case under test.
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "no-provider@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    let (status, rejected) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("hello"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{rejected}");
+    assert_eq!(rejected["code"], "provider_error");
+
+    // Nothing spent, nothing written: the check runs before both.
+    let ledger: i64 =
+        sqlx::query_scalar("select coalesce(sum(delta), 0)::bigint from credit_ledger")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    let allowance = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .credits_per_month;
+    assert_eq!(ledger, allowance, "an unconfigured server must not spend");
+
+    let messages: i64 = sqlx::query_scalar("select count(*) from messages")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(messages, 0, "and must not leave a turn with no answer");
+}
+
+/// `use_web` is refused until Phase 3 rather than accepted and ignored: accepting
+/// it would tell the model it has web context, store `used_web: true`, and let the
+/// model claim to have searched, none of which happened.
+#[sqlx::test(migrations = "../../migrations")]
+async fn use_web_is_refused_until_the_search_arm_exists(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "web@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    let llm = Arc::new(ScriptedLlm::new(vec!["unused".to_string()]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, rejected) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "look this up", "use_web": true }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+    assert_eq!(rejected["code"], "validation");
+    assert!(llm.requests().is_empty(), "the model must not be called");
+
+    let ledger: i64 =
+        sqlx::query_scalar("select coalesce(sum(delta), 0)::bigint from credit_ledger")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    let allowance = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .credits_per_month;
+    assert_eq!(ledger, allowance, "a refused request must not spend");
+
+    let messages: i64 = sqlx::query_scalar("select count(*) from messages")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(messages, 0, "and must not store a turn claiming web use");
+}
+
+/// An empty answer must still terminate the stream. Without a terminator a client
+/// waits for a `done` that never arrives, because `done` is the end of the turn.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_empty_answer_still_terminates_the_stream(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "empty-answer@example.test").await;
+    let (workspace_id, _) = workspace_with_source(&app, &harness, &token, NOTES).await;
+
+    // Whitespace only: nothing is persisted, so `done` cannot be sent, but the
+    // stream must still say what happened.
+    let llm = Arc::new(ScriptedLlm::new(vec!["   ".to_string()]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        chat_body("anything"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let kinds: Vec<&str> = events.iter().map(SseEvent::kind).collect();
+    assert!(
+        kinds.contains(&"error") || kinds.contains(&"done"),
+        "every exit path must emit exactly one terminator, got {kinds:?}"
+    );
+    if let Some(error) = events.iter().find(|event| event.kind() == "error") {
+        assert_eq!(error.json()["code"], "provider_error");
+    }
+
+    // And no assistant turn was stored for an answer that had nothing in it.
+    let messages: Vec<String> = sqlx::query_scalar("select role from messages order by created_at")
+        .fetch_all(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(messages, vec!["user".to_string()]);
+}

@@ -214,6 +214,13 @@ impl Mailer for RecordingMailer {
 #[derive(Debug)]
 pub struct ScriptedLlm {
     responses: Mutex<Vec<String>>,
+    /// When set, `stream` yields exactly these fragments for the next call
+    /// instead of splitting a response on whitespace.
+    ///
+    /// Needed because whitespace splitting can never put a citation marker across
+    /// a token boundary, and a real provider does exactly that. The streaming
+    /// hold-back exists for that case, so a test has to be able to produce it.
+    tokens: Option<Vec<String>>,
     /// When set, every call fails with `LlmError::Provider` and this message:
     /// a provider that is down stays down for the duration of a test.
     failure: Option<String>,
@@ -224,6 +231,21 @@ impl ScriptedLlm {
     pub fn new(responses: Vec<String>) -> Self {
         Self {
             responses: Mutex::new(responses),
+            tokens: None,
+            failure: None,
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Streams exactly these fragments for the next call.
+    ///
+    /// Use it when the *boundary* is what the test is about: a citation marker
+    /// split across two tokens, or a marker that arrives one character at a time.
+    /// Concatenating the fragments is the answer the caller sees.
+    pub fn with_tokens(tokens: Vec<String>) -> Self {
+        Self {
+            responses: Mutex::new(Vec::new()),
+            tokens: Some(tokens),
             failure: None,
             requests: Mutex::new(Vec::new()),
         }
@@ -233,6 +255,7 @@ impl ScriptedLlm {
     pub fn failing(message: &str) -> Self {
         Self {
             responses: Mutex::new(Vec::new()),
+            tokens: None,
             failure: Some(message.to_string()),
             requests: Mutex::new(Vec::new()),
         }
@@ -294,11 +317,20 @@ impl LlmProvider for ScriptedLlm {
 
     async fn stream(&self, req: ChatRequest) -> Result<ChatStream, LlmError> {
         self.record(req)?;
-        let text = self.next_response()?;
 
-        // One token per whitespace-delimited segment, separators included, so
-        // concatenating the tokens reproduces the scripted text exactly.
-        let tokens: Vec<&str> = text.split_inclusive(char::is_whitespace).collect();
+        let scripted: Vec<String> = match &self.tokens {
+            Some(tokens) => tokens.clone(),
+            None => {
+                let text = self.next_response()?;
+                // One token per whitespace-delimited segment, separators
+                // included, so concatenating the tokens reproduces the scripted
+                // text exactly.
+                text.split_inclusive(char::is_whitespace)
+                    .map(str::to_string)
+                    .collect()
+            }
+        };
+        let tokens = scripted;
         // Capacity covers every token plus `Done`, so no send is dropped and no
         // spawned task or runtime is needed: a double must work in a plain test.
         let (sender, receiver) = mpsc::channel(tokens.len() + 1);

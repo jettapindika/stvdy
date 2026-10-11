@@ -282,12 +282,16 @@ Answers `text/event-stream`.
 
 Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
 "study_mode"?: bool}`. `source_ids` narrows retrieval to the selected sources; an
-absent or empty list searches the whole workspace. `use_web` is recorded on the
-message; the search arm itself arrives in Phase 3.
+absent or empty list searches the whole workspace.
+
+`use_web` is **refused** with 400 `validation` until Phase 3 implements the search
+arm. Accepting it would make three things untrue at once: the prompt would tell the
+model web search is on with no web context, the stored turn would assert
+`used_web: true`, and the model would claim to have searched.
 
 Order of operations, which is the contract rather than an implementation detail:
-verified email, owned workspace, daily message cap, credit spend, persist the user
-message, retrieve, compose, stream. Every check that can fail therefore fails
+verified email, owned workspace, `use_web` refusal, provider configured, daily
+message cap, retrieve, compose, credit spend, persist the user message, stream. Every check that can fail therefore fails
 *before* a credit is spent and before anything is written, so a refused request
 leaves no trace and can be retried safely. That is why `insufficient_credits`
 arrives as a normal HTTP 402 rather than as a mid-stream event.
@@ -303,15 +307,19 @@ event: error      data: {"code":"...","message":"...","min_plan":null,"limit":nu
 ```
 
 `citations` is sent even when the array is empty, so a client can tell "no
-citations" from "the stream died". `error` can also arrive **mid-stream**, after
+citations" from "the stream died". Every exit path emits exactly one terminator
+(`done` or `error`): an answer that came back empty yields `error`, because there
+is no message id to report and the turn produced nothing. `error` can also arrive **mid-stream**, after
 tokens, if the assistant message fails to persist: a client must handle an `error`
 at any position. A `: heartbeat` comment line is sent every 15 seconds to keep a
 proxy from closing an idle stream, and a client's parser must ignore comment
 lines rather than read them as events.
 
 Citation labels are numeric (`[1]`, `[2]`) and resolve against the context the
-server sent. A label the model invents is dropped from both the citations and the
-stored text (A17), so a reply can never show a citation the user cannot open.
+server sent. A label the model invents is dropped from the **streamed** text as
+well as the stored copy (A17): the server holds back a partial marker and emits a
+complete one only if the label is known, so a rejected marker never reaches the
+screen. The client therefore never sees a citation it cannot open.
 
 The assistant message is persisted **after** the stream completes, with the
 resolved citations. A client that disconnects mid-answer therefore leaves the
