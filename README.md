@@ -27,28 +27,63 @@ behind traits, so a provider is configuration rather than code.
 ## Prerequisites
 
 - Rust 1.94.1 (`rust-toolchain.toml` pins it; sqlx 0.9 needs ≥1.94.0)
-- Node 24 (≥22.22 required by React Router 8)
-- Docker (Postgres + pgvector, MinIO)
+- Node 24 (`.nvmrc`; ≥22.22 required by React Router 8)
+- **Postgres with pgvector** — Docker, a local install, or hosted Supabase
+- `just` (`brew install just`) for the dev recipes
 - For mobile later: Xcode (iOS), Android Studio + NDK (Android)
 
 ## Quick start
 
 ```bash
-docker compose up -d                 # Postgres 16 + pgvector, MinIO
-cp .env.example .env                 # dev defaults are usable as-is
+cp .env.example .env          # the server loads this automatically (dotenvy)
+
+# Database: Docker, an existing local Postgres with pgvector, or Supabase.
+docker compose up -d postgres
+
 cargo install sqlx-cli --no-default-features --features postgres,rustls
-sqlx migrate run                     # 17 migrations
+sqlx migrate run              # 17 migrations
 
-cargo run -p stvdy-server            # API on 127.0.0.1:8080
-curl localhost:8080/health           # {"status":"ok","plans":3,...}
+cargo run -p stvdy-server
+curl localhost:8080/health    # {"env":"dev","plans":3,"status":"ok","version":"0.1.0"}
 
+# Web app (separate terminal)
 npm --prefix app install
-npm --prefix app run dev             # web on localhost:5173
-./app/node_modules/.bin/tauri dev    # desktop shell (from the repo root)
+npm --prefix app run dev      # http://localhost:5173
+
+# Desktop app (separate terminal, from the repo root)
+just tauri                    # or: ./app/node_modules/.bin/tauri dev
 ```
 
-If you already run Postgres locally on 5432, point `DATABASE_URL` at it (it must
-have pgvector available) or stop it before `docker compose up`.
+Recipes: `just db-up`, `just migrate`, `just server`, `just web`, `just tauri`,
+`just search-up`, `just check`.
+
+### If port 5432 is already taken
+
+A local Postgres (Homebrew `postgresql@17`, say) holds 5432, so
+`docker compose up postgres` cannot bind it. Pick one:
+
+```bash
+brew services stop postgresql@17     # free the port for the container, or
+createdb stvdy                       # keep the local server and point .env at it:
+#   DATABASE_URL=postgres://<your-user>@localhost:5432/stvdy
+```
+
+Either works: the schema needs only the `vector` and `pgcrypto` extensions, which
+`sqlx migrate run` creates. CI runs the pinned Postgres 16
+(`pgvector/pgvector:pg16`), so if your local version differs, treat CI's result as
+authoritative — see `docs/ASSUMPTIONS.md` § Local development environment.
+
+### What needs which service
+
+| Service | Needed for |
+|---|---|
+| Postgres + pgvector | everything (migrations, tests, the API) |
+| MinIO (`docker compose up -d minio minio-init`) | source uploads, Phase 1+ |
+| SearXNG (`just search-up`) | web search only, Phase 3+ |
+
+The `#[sqlx::test]` suites create a scratch database per test, so **Postgres must
+be reachable before `just check`** — otherwise those tests fail loudly. That is
+deliberate: a skipped test would look green.
 
 ## Supabase dev database
 
@@ -96,14 +131,24 @@ alter default privileges in schema public revoke all on functions from anon, aut
 ## Quality gates
 
 ```bash
-just check          # fmt --check, clippy -D warnings, cargo test
-npm --prefix app test
-npm --prefix app run build
+just check          # all three areas: rust, web AND shell
 ```
 
-Every phase must leave all of these green. `cargo clippy --all-targets` compiles
-test code too, so `clippy.toml` relaxes `unwrap_used`/`expect_used`/`panic`
-inside tests while non-test code is denied them.
+| Target | Covers |
+|---|---|
+| `check-rust` | `fmt --check`, `clippy -D warnings`, `cargo test` (workspace) |
+| `check-web` | `npm test`, `npm run build` |
+| `check-shell` | `fmt`, `clippy`, `cargo test` for `src-tauri` |
+
+`src-tauri` is excluded from the Cargo workspace so `tauri_build::build()` never
+runs during workspace clippy — which means the workspace commands skip it
+entirely, hence the separate target. `check-shell` depends on `check-web` because
+`generate_context!()` panics at compile time when `app/dist` is missing, and
+`dist/` is gitignored.
+
+`cargo clippy --all-targets` compiles test code too, so `clippy.toml` relaxes
+`unwrap_used`/`expect_used`/`panic` inside tests while non-test code is denied
+them.
 
 ## Layout
 
