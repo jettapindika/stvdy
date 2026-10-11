@@ -1206,7 +1206,9 @@ fn a_label_that_was_never_sent_is_dropped_and_recorded() {
     )
     .unwrap();
     let outcome = resolve_cards(cards, &labels());
-    assert_eq!(outcome.cards.len(), 2);
+    // Three cards in, three cards out: the label costs the card its link, not its
+    // life (see the exit checklist), so only `dropped_labels` records the loss.
+    assert_eq!(outcome.cards.len(), 3);
     assert_eq!(outcome.cards[0].chunk_id, Some(Uuid::from_u128(11)));
     // Dropped, never rewritten to a nearby label, and counted once.
     assert_eq!(outcome.cards[1].chunk_id, None);
