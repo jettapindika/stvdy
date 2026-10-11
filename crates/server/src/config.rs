@@ -57,6 +57,8 @@ pub struct AppConfig {
     /// silently does nothing is worse than an absent one.
     pub pdfium_lib_path: Option<PathBuf>,
     pub google_login: Option<GoogleLoginConfig>,
+    /// The chat and generation model. `None` means no provider is configured.
+    pub llm: Option<LlmConfig>,
 }
 
 /// Token lifetimes and the verification-link window.
@@ -123,6 +125,16 @@ pub struct EmbedderConfig {
     /// `EMBEDDER=http` only.
     pub base_url: Option<String>,
     pub api_key: Option<SecretString>,
+}
+
+/// The first `LlmProvider` (A1): an [OI]-compatible endpoint. Optional as a
+/// whole, because a deployment without a model can still serve everything that
+/// does not generate, and chat answers `provider_error` rather than panicking.
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone)]
@@ -243,8 +255,24 @@ impl AppConfig {
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),
             google_login: google_login_config(&get)?,
+            llm: llm_config(&get_or, &get),
         })
     }
+}
+
+/// The model provider. Optional as a whole: with no base URL there is no chat,
+/// and the routes say so rather than failing at the first request with a
+/// transport error that looks like an outage.
+fn llm_config(
+    get_or: &impl Fn(&str, &str) -> String,
+    get: &impl Fn(&str) -> Option<String>,
+) -> Option<LlmConfig> {
+    let base_url = get("LLM_BASE_URL").filter(|s| !s.is_empty())?;
+    Some(LlmConfig {
+        base_url,
+        api_key: get_or("LLM_API_KEY", ""),
+        model: get_or("LLM_MODEL", "deepseek-v4.1-flash"),
+    })
 }
 
 /// Google login is optional as a whole: without a client id there is no

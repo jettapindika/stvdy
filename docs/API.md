@@ -272,9 +272,57 @@ stored, so an over-quota file never occupies the bucket.
   the client's point of view. 403 for a bad or expired signature; 404 on the S3
   backend, where this route is not part of the contract.
 
-## Chat (Phase 2)
+## Chat (Phase 2, implemented)
 
-`GET /workspaces/:id/messages`, `POST /workspaces/:id/chat` (SSE).
+### `POST /workspaces/:id/chat`
+
+Auth (and the email must be verified: chat is one of the four actions A43 keeps
+locked until then, so an unverified account gets 403 `email_not_verified`).
+Answers `text/event-stream`.
+
+Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
+"study_mode"?: bool}`. `source_ids` narrows retrieval to the selected sources; an
+absent or empty list searches the whole workspace. `use_web` is recorded on the
+message; the search arm itself arrives in Phase 3.
+
+Order of operations, which is the contract rather than an implementation detail:
+verified email, owned workspace, daily message cap, credit spend, persist the user
+message, retrieve, compose, stream. Every check that can fail therefore fails
+*before* a credit is spent and before anything is written, so a refused request
+leaves no trace and can be retried safely. That is why `insufficient_credits`
+arrives as a normal HTTP 402 rather than as a mid-stream event.
+
+Events, in this order:
+
+```
+event: token      data: {"t":"..."}                    # repeated; concatenate in order
+event: citations  data: {"citations":[...]}            # always sent, even when empty
+event: usage      data: {"credits_spent":1,"credits_remaining":412}
+event: done       data: {"message_id":"...","used_web":false}
+event: error      data: {"code":"...","message":"...","min_plan":null,"limit":null,"used":null}
+```
+
+`citations` is sent even when the array is empty, so a client can tell "no
+citations" from "the stream died". `error` can also arrive **mid-stream**, after
+tokens, if the assistant message fails to persist: a client must handle an `error`
+at any position. A `: heartbeat` comment line is sent every 15 seconds to keep a
+proxy from closing an idle stream, and a client's parser must ignore comment
+lines rather than read them as events.
+
+Citation labels are numeric (`[1]`, `[2]`) and resolve against the context the
+server sent. A label the model invents is dropped from both the citations and the
+stored text (A17), so a reply can never show a citation the user cannot open.
+
+The assistant message is persisted **after** the stream completes, with the
+resolved citations. A client that disconnects mid-answer therefore leaves the
+user's turn and no half-answer.
+
+### `GET /workspaces/:id/messages`
+
+Auth. 200 `{"messages":[{"id","workspace_id","role","content","citations",
+"used_web","created_at"}]}`, oldest first, where `role` is `user` or `assistant`
+and `citations` is the same array shape as the event. This is what makes a thread
+visible on the account's other devices. Another account's workspace is a 404.
 
 ## Flashcards (Phase 4)
 

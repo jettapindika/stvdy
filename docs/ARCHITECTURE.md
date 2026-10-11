@@ -389,6 +389,81 @@ the delete-workspace confirmation moves focus to the confirming button (so a
 keyboard user cannot confirm by accident), and cancelling it restores focus to the
 trigger.
 
+## Retrieval and chat (Phase 2)
+
+Two arms over `chunks`, merged by reciprocal rank fusion. Hybrid because a study
+app is asked for exact terms as often as for meaning: "what does the syllabus say
+about UTS" wants the keyword arm, "why does entropy increase" wants the vector
+arm, and neither alone answers both.
+
+| Arm | Query | Index |
+|---|---|---|
+| Vector | `order by embedding <=> $query limit 20` | HNSW, `vector_cosine_ops` |
+| Keyword | `ts_rank(tsv, websearch_to_tsquery('simple', $q)) desc` | GIN on `tsv` |
+
+`k = 60` for the fusion, 20 candidates per arm, 12 chunks merged. RRF needs each
+arm to contribute candidates the other missed, which is why the per-arm count is
+larger than the merged limit. Ties break by chunk id, so the order is total and
+two runs of the same query return the same ranking.
+
+Two details that are load-bearing rather than incidental:
+
+- **The keyword arm uses `simple`, matching the generated column.** `simple` does
+  not stem, which is what makes Indonesian match; a stemming config would stop
+  finding Indonesian words while every English test stayed green. Roadmap gate 6
+  asserts the column's definition, not just the query, so a later migration that
+  changed it fails in the suite rather than in production.
+- **`chunks` has no `user_id`.** Ownership is `chunks.source_id -> sources.user_id`,
+  so every arm joins through `sources` and filters on the caller. A query that
+  forgot the join would be a cross-tenant read, which is the threat model's "read
+  another user's rows" row. A unit test counts the joins and the scopes in the
+  source, because the mistake is invisible in review.
+
+### Citations: labels, not ids
+
+The model is given `[1]`, `[2]` for chunks (and `[W1]` from Phase 3 for web
+results) and cites those. The server keeps a per-request `label -> chunk` map,
+resolves the labels it actually sent, and **drops anything else**. Raw UUIDs in
+the prompt would cost roughly 40 tokens per citation and would let a model
+fabricate a plausible-looking id; a numeric label is cheap and an unknown one is
+trivially rejected against the context the server sent.
+
+The unknown marker is removed from the text as well as from the citations, so a
+reply cannot show the user a citation they cannot open. Labels are per-request and
+never persisted; `messages.citations` stores the resolved structured array.
+
+### Prompt composition
+
+Chat uses the other of the two composition shapes: `base.v1.md` plus a
+`<sources>` block, rendered by `crates/core/src/prompts/` from the compiled-in
+registry. No prompt sentence is written in the server: a string literal in a
+handler could not be versioned or reviewed as prose, and a unit test asserts the
+assembly module contains none.
+
+The composer treats user-controlled values (`user_name`, `workspace_name`) as
+data, escaping them so they cannot close the `<user_context_data>` block, and it
+errors rather than leaving an unfilled `{{variable}}` in the text.
+
+### Credits at the message level
+
+Roadmap § 3's spend, in one transaction: `pg_advisory_xact_lock(hashtext(user_id))`
+first, then the bucket sums, then reject or insert the negative `credit_ledger`
+row and the `usage_events` row. The lock is taken before the read, because two
+concurrent requests that both read a sufficient balance would both spend it.
+Monthly bucket first, then purchased (A9): purchased credits never expire, so
+spending them first would waste the grant that does.
+
+The daily message cap is counted from `usage_events` for the user's local day
+through `chrono-tz` (A6), not from a counter column: a counter can drift from the
+events that produced it and the drift is invisible until a user is wrongly
+blocked.
+
+The monthly allowance is granted at **signup**, because that is when the first
+period starts. Phase 7 adds the recurring `monthly_grant` job for renewals; a job
+that runs at period start cannot help the account whose period starts at signup,
+and without the signup grant a new account has a zero balance and cannot send a
+single message. The chat suite caught exactly that.
+
 ## CORS origins
 
 `routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist

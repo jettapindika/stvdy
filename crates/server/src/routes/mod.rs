@@ -19,6 +19,7 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::auth;
+use crate::chat;
 use crate::chunks;
 use crate::config::AppConfig;
 use crate::devices;
@@ -113,6 +114,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(devices::routes())
         .merge(workspaces::routes())
         .merge(chunks::routes())
+        .merge(chat::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )));

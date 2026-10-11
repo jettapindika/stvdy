@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         embedder: providers.embedder,
         mailer: providers.mailer,
         clock: providers.clock,
+        llm: providers.llm,
         jobs: jobs::Queue::new(),
     };
 

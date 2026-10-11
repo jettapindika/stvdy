@@ -102,6 +102,18 @@ function renderWorkspace() {
   )
 }
 
+/**
+ * The sources panel, as an element.
+ *
+ * Needed wherever a source's title is asserted on: a ready source is listed here
+ * and again in the chat panel's picker, so a bare document-wide text query finds
+ * two of them. Both are real, so the query is scoped rather than the markup
+ * changed.
+ */
+async function sourcesPanel(): Promise<HTMLElement> {
+  return await screen.findByRole('tabpanel', { name: 'Sources' })
+}
+
 describe('the sources panel', () => {
   it('lists the sources with their real status and chunk count', async () => {
     sources = [source({ id: 's1', title: 'Lecture 3' })]
@@ -117,10 +129,13 @@ describe('the sources panel', () => {
     serve()
     renderWorkspace()
 
-    expect(await screen.findByText('Lecture 3')).toBeInTheDocument()
-    expect(screen.getByText('PDF')).toBeInTheDocument()
-    expect(await screen.findByText('Ready')).toBeInTheDocument()
-    expect(screen.getByText('7 chunks')).toBeInTheDocument()
+    // Scoped to the sources panel: a ready source's title also appears in the
+    // chat panel's source picker, which is the same fact shown twice on purpose.
+    const panel = await sourcesPanel()
+    expect(await within(panel).findByText('Lecture 3')).toBeInTheDocument()
+    expect(within(panel).getByText('PDF')).toBeInTheDocument()
+    expect(await within(panel).findByText('Ready')).toBeInTheDocument()
+    expect(within(panel).getByText('7 chunks')).toBeInTheDocument()
   })
 
   it('polls a processing source until it is ready, then stops', async () => {
@@ -258,14 +273,15 @@ describe('the sources panel', () => {
     const user = userEvent.setup()
     renderWorkspace()
 
-    const row = (await screen.findByText('Lecture 3')).closest('li')
+    const panel = await sourcesPanel()
+    const row = (await within(panel).findByText('Lecture 3')).closest('li')
     expect(row).not.toBeNull()
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'Remove' }))
 
-    expect(screen.getByText('Remove this source?')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Remove it' }))
+    expect(within(panel).getByText('Remove this source?')).toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Remove it' }))
 
-    expect(await screen.findByText('No sources yet')).toBeInTheDocument()
+    expect(await within(panel).findByText('No sources yet')).toBeInTheDocument()
     expect(calls.some((call) => call.init.method === 'DELETE')).toBe(true)
   })
 })

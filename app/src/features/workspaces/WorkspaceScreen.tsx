@@ -15,6 +15,7 @@ import {
 import { useWorkspace } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
 import { ApiErrorNotice, EmptyState, SkeletonRows, NotBuiltYet } from '@/components/ui/States'
+import { ChatScreen } from '@/features/chat/ChatScreen'
 
 /**
  * The workspace view: Sources, Chat, and Studio.
@@ -36,10 +37,11 @@ import { ApiErrorNotice, EmptyState, SkeletonRows, NotBuiltYet } from '@/compone
  * The root fills the space the shell gives it (`min-h-0 flex-1`) rather than the
  * viewport, so panels scroll internally without an outer page scroll.
  *
- * Sources is the panel Phase 1 built, so it is the one that opens. Chat and
- * Studio say which phase brings them instead of showing a mock: an empty panel
- * that looks like a working chat is the most expensive kind of lie in this
- * product, because the whole point of it is that answers are grounded.
+ * Sources is the panel Phase 1 built, so it is the one that opens. Chat is the
+ * panel Phase 2 built. Studio says which phase brings it instead of showing a
+ * mock: an empty panel that looks like a working studio is the most expensive
+ * kind of lie in this product, because the whole point of it is that what it
+ * produces is grounded in the student's own material.
  */
 
 type Panel = 'sources' | 'chat' | 'studio'
@@ -155,13 +157,7 @@ export function WorkspaceScreen() {
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {panel.id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
-                  {panel.id === 'chat' && (
-                    <NotBuiltYet
-                      level={2}
-                      title="Chat"
-                      what="answers drawn from this workspace's sources, with a citation on every claim and a switch for outside results"
-                    />
-                  )}
+                  {panel.id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
                   {panel.id === 'studio' && (
                     <NotBuiltYet
                       level={2}

@@ -127,6 +127,105 @@ export function jsonResponse(status: number, body?: unknown): Response {
   } as Response
 }
 
+/**
+ * A response whose body arrives in the chunks given, for the SSE reader.
+ *
+ * The chunk list is the test's, not the platform's: a reader hands back whatever
+ * byte boundaries it happens to produce, and the boundary that matters is the one
+ * in the middle of a frame. Here the test chooses it.
+ *
+ * Only `ok`, `status` and `body` are implemented, for the same reason
+ * `jsonResponse` implements three members: the code under test must not depend on
+ * a global `Response` that the environment may not provide.
+ */
+export function streamResponse(chunks: string[], status = 200): Response {
+  const encoder = new TextEncoder()
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+        controller.close()
+      },
+    }),
+    text: async () => chunks.join(''),
+  } as unknown as Response
+}
+
+/**
+ * A response the test pushes into, one frame at a time, and can fail on demand.
+ *
+ * Needed wherever the assertion is about *when* a chunk arrives rather than about
+ * what the frames mean. A body that is enqueued all at once is read in a single
+ * microtask chain, so React batches every token into one render and the
+ * intermediate states a streaming screen exists to show are never observable.
+ * Here the test decides the moment.
+ *
+ * `fail` exists because erroring a `ReadableStream` discards whatever is still
+ * queued, so a body that enqueues a token and then errors never delivers the
+ * token: a dropped connection has to be delivered *after* the chunks, not with
+ * them.
+ */
+export interface ManualStream {
+  response: Response
+  push(chunk: string): void
+  close(): void
+  fail(error: Error): void
+  /** Fails the body when this request's signal aborts, as a real fetch does. */
+  attach(signal: AbortSignal | null | undefined): void
+}
+
+export function manualStreamResponse(status = 200): ManualStream {
+  const encoder = new TextEncoder()
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+  let finished = false
+
+  const response = {
+    ok: status >= 200 && status < 300,
+    status,
+    body: new ReadableStream<Uint8Array>({
+      start(inner) {
+        controller = inner
+      },
+    }),
+    text: async () => '',
+  } as unknown as Response
+
+  function terminal(action: (inner: ReadableStreamDefaultController<Uint8Array>) => void) {
+    if (controller === null || finished) return
+    finished = true
+    action(controller)
+  }
+
+  return {
+    response,
+    push(chunk) {
+      if (controller === null || finished) return
+      controller.enqueue(encoder.encode(chunk))
+    },
+    close() {
+      terminal((inner) => {
+        inner.close()
+      })
+    },
+    fail(error) {
+      terminal((inner) => {
+        inner.error(error)
+      })
+    },
+    attach(signal) {
+      signal?.addEventListener('abort', () => {
+        // The name is what the reader checks: a cancellation is the caller's own
+        // action, not a failure to report.
+        const aborted = new Error('the request was aborted')
+        aborted.name = 'AbortError'
+        this.fail(aborted)
+      })
+    },
+  }
+}
+
 export interface RecordedCall {
   url: string
   init: RequestInit

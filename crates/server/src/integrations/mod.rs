@@ -5,6 +5,7 @@
 pub mod clock;
 pub mod documents;
 pub mod embedder;
+pub mod llm;
 pub mod mailer;
 pub mod storage;
 
@@ -25,6 +26,8 @@ pub struct Providers {
     pub clock: Arc<dyn Clock>,
     /// Present only for the S3 backend, so `main` can create the bucket.
     s3: Option<Arc<storage::S3Storage>>,
+    /// `None` when `LLM_BASE_URL` is unset.
+    pub llm: Option<Arc<dyn stvdy_core::traits::llm::LlmProvider>>,
 }
 
 impl Providers {
@@ -86,12 +89,21 @@ impl Providers {
 
         embedder::assert_dimensions(pool, embedder.as_ref(), cfg.embedder.dim).await?;
 
+        let llm: Option<Arc<dyn stvdy_core::traits::llm::LlmProvider>> = match &cfg.llm {
+            Some(llm_config) => Some(Arc::new(llm::OpenAiCompatLlm::new(llm_config)?)),
+            None => {
+                tracing::warn!("LLM_BASE_URL is unset; chat and generation are unavailable");
+                None
+            }
+        };
+
         Ok(Self {
             storage,
             embedder,
             mailer,
             clock: Arc::new(clock::SystemClock),
             s3,
+            llm,
         })
     }
 }

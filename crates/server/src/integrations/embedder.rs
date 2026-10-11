@@ -56,6 +56,26 @@ fn model_for(name: &str) -> Option<(fastembed::EmbeddingModel, &'static str, usi
 }
 
 impl FastembedEmbedder {
+    /// Shared by both sides of the E5 convention: the only difference between a
+    /// query and a passage is the prefix.
+    fn embed_prefixed(&self, texts: &[String], prefix: &str) -> Result<Vec<Vec<f32>>, EmbedError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prefixed: Vec<String> = texts.iter().map(|t| format!("{prefix}{t}")).collect();
+
+        // `fastembed` is synchronous and CPU-bound; the server's ingestion path
+        // already runs on a job worker, so this blocks that task rather than the
+        // runtime's other tasks (spawn_blocking would copy the batch).
+        let mut guard = self
+            .model
+            .lock()
+            .map_err(|_| EmbedError::Provider("embedding model poisoned".to_string()))?;
+        guard
+            .embed(prefixed, None)
+            .map_err(|error| EmbedError::Provider(error.to_string()))
+    }
+
     pub fn new(cfg: &EmbedderConfig) -> anyhow::Result<Self> {
         let (model, model_id, native_dim) = model_for(&cfg.model).ok_or_else(|| {
             anyhow::anyhow!(
@@ -145,24 +165,18 @@ impl Embedder for FastembedEmbedder {
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
-        }
-        let prefixed: Vec<String> = texts
-            .iter()
-            .map(|t| format!("{PASSAGE_PREFIX}{t}"))
-            .collect();
+        self.embed_prefixed(texts, PASSAGE_PREFIX)
+    }
 
-        // `fastembed` is synchronous and CPU-bound; the server's ingestion path
-        // already runs on a job worker, so this blocks that task rather than the
-        // runtime's other tasks (spawn_blocking would copy the batch).
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|_| EmbedError::Provider("embedding model poisoned".to_string()))?;
-        guard
-            .embed(prefixed, None)
-            .map_err(|error| EmbedError::Provider(error.to_string()))
+    /// The `query: ` side of the E5 convention.
+    ///
+    /// This override is load-bearing and its absence was a real defect: the
+    /// default delegates to `embed`, which prefixes `passage: `, so every search
+    /// query was embedded as if it were a document. E5 puts the two in different
+    /// regions of the space, so retrieval silently returns the wrong chunk with no
+    /// error. The Indonesian gate caught it by asserting the two differ.
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.embed_prefixed(texts, QUERY_PREFIX)
     }
 
     /// The model's own count. `encode` adds the special tokens (CLS/SEP) unless

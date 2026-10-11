@@ -8,6 +8,8 @@ use stvdy_core::traits::embedder::Embedder;
 use stvdy_core::traits::mailer::Mailer;
 use stvdy_core::traits::storage::Storage;
 
+use stvdy_core::traits::llm::LlmProvider;
+
 use crate::config::AppConfig;
 use crate::jobs::Queue;
 
@@ -22,6 +24,10 @@ pub struct AppState {
     pub embedder: Arc<dyn Embedder>,
     pub mailer: Arc<dyn Mailer>,
     pub clock: Arc<dyn Clock>,
+    /// `None` when no model provider is configured: chat answers
+    /// `provider_error` rather than failing at the first request with a
+    /// transport error that looks like an outage.
+    pub llm: Option<Arc<dyn LlmProvider>>,
     pub jobs: Queue,
 }
 

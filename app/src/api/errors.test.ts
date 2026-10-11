@@ -9,6 +9,7 @@ import {
   codeForStatus,
   planLabel,
   planLimitMessage,
+  statusForCode,
   validationMessage,
 } from './errors'
 
@@ -57,6 +58,7 @@ describe('mapping a response body', () => {
   it('maps the documented statuses', () => {
     expect(codeForStatus(400)).toBe('validation')
     expect(codeForStatus(401)).toBe('unauthorized')
+    expect(codeForStatus(402)).toBe('insufficient_credits')
     expect(codeForStatus(403)).toBe('plan_required')
     expect(codeForStatus(404)).toBe('not_found')
     expect(codeForStatus(409)).toBe('conflict')
@@ -64,6 +66,38 @@ describe('mapping a response body', () => {
     expect(codeForStatus(429)).toBe('rate_limited')
     expect(codeForStatus(502)).toBe('provider_error')
     expect(codeForStatus(500)).toBe('internal')
+  })
+
+  it('reconstructs the status a streamed error would have arrived with', () => {
+    // The SSE `error` event carries the same envelope but no status, so the code
+    // is the only signal. This is the inverse of `codeForStatus`, and it has to
+    // stay the inverse or a streamed refusal would render with the wrong
+    // treatment (an upgrade prompt for a wrong password, say).
+    expect(statusForCode('insufficient_credits')).toBe(402)
+    expect(statusForCode('email_not_verified')).toBe(403)
+    expect(statusForCode('plan_required')).toBe(403)
+    expect(statusForCode('feature_locked')).toBe(403)
+    expect(statusForCode('not_found')).toBe(404)
+    expect(statusForCode('conflict')).toBe(409)
+    expect(statusForCode('limit_reached')).toBe(422)
+    expect(statusForCode('rate_limited')).toBe(429)
+    expect(statusForCode('unauthorized')).toBe(401)
+    expect(statusForCode('provider_error')).toBe(502)
+    expect(statusForCode('internal')).toBe(500)
+    // Client-side only: there is no status to reconstruct.
+    expect(statusForCode('network')).toBe(0)
+  })
+
+  it('does not treat a spent-out account as a plan limit', () => {
+    const credits = apiErrorFromBody(402, { code: 'insufficient_credits' })
+    expect(credits.isPlanLimit).toBe(false)
+    expect(credits.status).toBe(402)
+
+    // Nor an unverified one: the remedy is an inbox, not an upgrade.
+    const unverified = apiErrorFromBody(403, { code: 'email_not_verified' })
+    expect(unverified.isPlanLimit).toBe(false)
+    expect(unverified.isAuthFailure).toBe(false)
+    expect(apiErrorTitle(unverified)).toBe('Email not verified')
   })
 
   it('turns an unknown throw into a renderable error', () => {
@@ -80,9 +114,11 @@ describe('mapping a response body', () => {
       'token_expired',
       'plan_required',
       'feature_locked',
+      'email_not_verified',
       'not_found',
       'conflict',
       'limit_reached',
+      'insufficient_credits',
       'rate_limited',
       'provider_error',
       'internal',

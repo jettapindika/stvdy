@@ -40,6 +40,20 @@ async fn hash_embedder_is_deterministic_and_unit_norm() {
     assert_ne!(first, other, "different text must give a different vector");
 }
 
+/// The default `embed_query` must delegate to `embed`, or an embedder with no
+/// query convention would silently embed queries differently from passages and
+/// retrieval would degrade with no error.
+#[tokio::test]
+async fn embed_query_defaults_to_embed() {
+    let embedder = HashEmbedder::new();
+    let texts = vec!["how does TCP connect".to_string()];
+
+    let query = embedder.embed_query(&texts).await.unwrap();
+    let passage = embedder.embed(&texts).await.unwrap();
+
+    assert_eq!(query, passage);
+}
+
 #[tokio::test]
 async fn in_memory_storage_round_trips_and_reports_not_found() {
     let storage = InMemoryStorage::new();

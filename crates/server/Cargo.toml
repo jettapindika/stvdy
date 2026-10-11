@@ -29,6 +29,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+# Local-day maths for the daily caps goes through a real IANA zone (A6).
+chrono-tz.workspace = true
 secrecy.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
@@ -36,6 +38,7 @@ base64.workspace = true
 hex.workspace = true
 rand.workspace = true
 futures.workspace = true
+async-stream.workspace = true
 
 # Phase 1
 jsonwebtoken.workspace = true

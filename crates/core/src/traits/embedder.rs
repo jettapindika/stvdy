@@ -37,4 +37,19 @@ pub trait Embedder: Send + Sync {
     fn token_count(&self, text: &str) -> usize {
         crate::chunk::heuristic_tokens(text)
     }
+
+    /// Embeds search queries, applying whatever convention this model requires.
+    ///
+    /// A separate method rather than a flag on `embed` because the convention
+    /// is a property of the model, not of the caller: E5 puts a query and a
+    /// passage in different regions of the space and needs the `query: `
+    /// prefix, while another model may need none. Hardcoding the prefix at the
+    /// call site is how a query silently lands in the wrong region and
+    /// retrieval degrades with no error.
+    ///
+    /// The default is no convention, so an embedder with none needs no
+    /// override.
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.embed(texts).await
+    }
 }

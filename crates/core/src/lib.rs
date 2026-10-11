@@ -6,6 +6,9 @@
 //! the document renderer.
 
 pub mod chunk;
+pub mod citations;
 pub mod config;
 pub mod error;
+pub mod prompts;
+pub mod retrieval;
 pub mod traits;

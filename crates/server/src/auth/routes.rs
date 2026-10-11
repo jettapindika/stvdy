@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::{email_verify, extract::AuthUser, password, tokens};
+use crate::credits;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -285,6 +286,17 @@ pub async fn signup(
     tx.commit()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a signup: {error}")))?;
+
+    // The first period starts now, so the monthly allowance is granted now. The
+    // recurring grant is a Phase 7 job; a job that runs at period start cannot
+    // help the account whose period starts at signup, and without this a new
+    // account has a zero balance and cannot send a single message.
+    credits::grant_monthly(
+        &state.pool,
+        user_id,
+        credits::monthly_allowance(&state, stvdy_core::config::PlanId::Free),
+    )
+    .await?;
 
     let device_id = resolve_device(&state, user_id, "free", &body.device).await?;
     let pair = tokens::issue_pair(&state.pool, &state.config, user_id, device_id).await?;

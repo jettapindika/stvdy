@@ -18,9 +18,13 @@ export const API_ERROR_CODES = [
   'token_expired',
   'plan_required',
   'feature_locked',
+  /** A verified email is required before any action that costs money (A43). */
+  'email_not_verified',
   'not_found',
   'conflict',
   'limit_reached',
+  /** The account's credit balance is short of what the action costs. */
+  'insufficient_credits',
   'rate_limited',
   'provider_error',
   'internal',
@@ -92,6 +96,8 @@ export function codeForStatus(status: number): ApiErrorCode {
       return 'validation'
     case 401:
       return 'unauthorized'
+    case 402:
+      return 'insufficient_credits'
     case 403:
       return 'plan_required'
     case 404:
@@ -106,6 +112,46 @@ export function codeForStatus(status: number): ApiErrorCode {
       return 'provider_error'
     default:
       return status >= 500 ? 'internal' : 'validation'
+  }
+}
+
+/**
+ * The status a code would have arrived with, for a body that never had one.
+ *
+ * The SSE `error` event carries the same five-key envelope as every other route
+ * but no HTTP status: it is a frame inside a 200 response. Reconstructing the
+ * status here keeps one error type across the whole client instead of a second
+ * one for streams, and it stays honest because this is the exact inverse of
+ * `codeForStatus` for the codes a stream can carry.
+ */
+export function statusForCode(code: ApiErrorCode): number {
+  switch (code) {
+    case 'insufficient_credits':
+      return 402
+    case 'email_not_verified':
+    case 'plan_required':
+    case 'feature_locked':
+      return 403
+    case 'not_found':
+      return 404
+    case 'conflict':
+      return 409
+    case 'limit_reached':
+      return 422
+    case 'rate_limited':
+      return 429
+    case 'unauthorized':
+    case 'token_expired':
+      return 401
+    case 'provider_error':
+      return 502
+    case 'internal':
+      return 500
+    /** Client-side only: the request never reached the server, so there is no status. */
+    case 'network':
+      return 0
+    default:
+      return 400
   }
 }
 
@@ -147,9 +193,11 @@ const REASON_BY_CODE: Record<ApiErrorCode, string> = {
   token_expired: 'Your session has ended. Sign in again to continue.',
   plan_required: 'This is not part of your current plan.',
   feature_locked: 'This is not part of your current plan.',
+  email_not_verified: 'Verify your email address first. Check your inbox for the link.',
   not_found: 'It is no longer there. It may have been deleted, or it belongs to another account.',
   conflict: 'Something else changed this first. Reload and try again.',
   limit_reached: 'Your plan has reached its limit for this.',
+  insufficient_credits: 'Your credit balance is short of what this costs.',
   rate_limited: 'Too many attempts in a row. Wait a minute and try again.',
   provider_error: 'A service this depends on is failing. Nothing was saved. Try again shortly.',
   internal: 'The server failed on this request. Nothing was saved. Try again shortly.',
@@ -167,9 +215,11 @@ const TITLE_BY_CODE: Record<ApiErrorCode, string> = {
   token_expired: 'Signed out',
   plan_required: 'Not on your plan',
   feature_locked: 'Not on your plan',
+  email_not_verified: 'Email not verified',
   not_found: 'Not found',
   conflict: 'Changed elsewhere',
   limit_reached: 'Plan limit reached',
+  insufficient_credits: 'Not enough credits',
   rate_limited: 'Too many attempts',
   provider_error: 'Service unavailable',
   internal: 'Server error',

@@ -8,11 +8,16 @@
 
 pub mod clock;
 pub mod embedder;
+pub mod llm;
 pub mod mailer;
 pub mod storage;
 pub mod testing;
 
 pub use clock::Clock;
 pub use embedder::{EmbedError, Embedder};
+pub use llm::{
+    ChatMsg, ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, Role, StreamEvent,
+    ToolCall, ToolSpec, Usage,
+};
 pub use mailer::{Email, MailError, Mailer};
 pub use storage::{Storage, StorageError};

@@ -77,6 +77,7 @@ pub fn state(pool: PgPool) -> AppState {
         embedder: Arc::new(HashEmbedder),
         mailer: Arc::new(RecordingMailer::default()),
         clock: Arc::new(FixedClock::at(chrono::Utc::now())),
+        llm: None,
         jobs: Queue::new(),
     }
 }
@@ -114,6 +115,7 @@ impl TestState {
                 embedder: Arc::new(HashEmbedder),
                 mailer: mailer.clone(),
                 clock: clock.clone(),
+                llm: None,
                 jobs: Queue::new(),
             },
             storage,
@@ -126,6 +128,14 @@ impl TestState {
     /// `#[sqlx::test]` scratch database.
     pub async fn seed_plans(&self) -> anyhow::Result<()> {
         crate::db::seed_plans(&self.state.pool, &self.state.config.plans).await
+    }
+
+    /// The same state with a scripted model provider, so the chat suite runs
+    /// without a network. `ScriptedLlm` records the requests it received, which
+    /// is what lets a test assert on the prompt the model actually saw.
+    pub fn with_llm(mut self, llm: Arc<dyn stvdy_core::traits::llm::LlmProvider>) -> Self {
+        self.state.llm = Some(llm);
+        self
     }
 
     /// The most recent verification link the recording mailer captured.

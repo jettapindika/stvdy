@@ -12,9 +12,13 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use tokio::sync::mpsc;
 
 use super::clock::Clock;
 use super::embedder::{EmbedError, Embedder};
+use super::llm::{
+    ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, StreamEvent, Usage,
+};
 use super::mailer::{Email, MailError, Mailer};
 use super::storage::{Storage, StorageError};
 
@@ -196,5 +200,117 @@ impl Mailer for RecordingMailer {
             .map_err(|_| MailError::Transport("recording mailer lock poisoned".into()))?;
         sent.push(msg);
         Ok(())
+    }
+}
+
+/// A scripted provider: yields the next queued response per call and records
+/// every request it received, so a test can assert on the prompt the model
+/// actually saw rather than only on the response path.
+///
+/// That recorded request is the point. A double that only returns canned text
+/// lets a composer bug ship green, which is exactly how a defect reaches the
+/// tree: the response path is asserted, the input path is not. Here the input
+/// is inspectable.
+#[derive(Debug)]
+pub struct ScriptedLlm {
+    responses: Mutex<Vec<String>>,
+    /// When set, every call fails with `LlmError::Provider` and this message:
+    /// a provider that is down stays down for the duration of a test.
+    failure: Option<String>,
+    requests: Mutex<Vec<ChatRequest>>,
+}
+
+impl ScriptedLlm {
+    pub fn new(responses: Vec<String>) -> Self {
+        Self {
+            responses: Mutex::new(responses),
+            failure: None,
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A provider whose every call fails with `LlmError::Provider`.
+    pub fn failing(message: &str) -> Self {
+        Self {
+            responses: Mutex::new(Vec::new()),
+            failure: Some(message.to_string()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Every request this double was handed, in order.
+    pub fn requests(&self) -> Vec<ChatRequest> {
+        self.requests
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn record(&self, request: ChatRequest) -> Result<(), LlmError> {
+        let mut requests = self
+            .requests
+            .lock()
+            .map_err(|_| LlmError::Provider("scripted llm lock poisoned".into()))?;
+        requests.push(request);
+        Ok(())
+    }
+
+    fn next_response(&self) -> Result<String, LlmError> {
+        if let Some(message) = &self.failure {
+            return Err(LlmError::Provider(message.clone()));
+        }
+        let mut responses = self
+            .responses
+            .lock()
+            .map_err(|_| LlmError::Provider("scripted llm lock poisoned".into()))?;
+        if responses.is_empty() {
+            return Err(LlmError::Provider(
+                "scripted llm has no queued response left".into(),
+            ));
+        }
+        Ok(responses.remove(0))
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for ScriptedLlm {
+    fn name(&self) -> &'static str {
+        "scripted"
+    }
+
+    fn supports_tools(&self) -> bool {
+        false
+    }
+
+    async fn complete(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
+        self.record(req)?;
+        let text = self.next_response()?;
+        Ok(ChatResponse {
+            text,
+            tool_calls: Vec::new(),
+            usage: Usage::default(),
+        })
+    }
+
+    async fn stream(&self, req: ChatRequest) -> Result<ChatStream, LlmError> {
+        self.record(req)?;
+        let text = self.next_response()?;
+
+        // One token per whitespace-delimited segment, separators included, so
+        // concatenating the tokens reproduces the scripted text exactly.
+        let tokens: Vec<&str> = text.split_inclusive(char::is_whitespace).collect();
+        // Capacity covers every token plus `Done`, so no send is dropped and no
+        // spawned task or runtime is needed: a double must work in a plain test.
+        let (sender, receiver) = mpsc::channel(tokens.len() + 1);
+        for token in tokens {
+            if sender
+                .try_send(StreamEvent::Token(token.to_string()))
+                .is_err()
+            {
+                break;
+            }
+        }
+        let _ = sender.try_send(StreamEvent::Done);
+        Ok(receiver)
     }
 }

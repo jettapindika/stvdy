@@ -542,6 +542,14 @@ async fn resolve_user(state: &AppState, claims: &IdTokenClaims) -> AppResult<Uui
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("creating a Google account: {error}")))?;
 
+    // Same grant as a password signup: the first period starts now.
+    crate::credits::grant_monthly(
+        &state.pool,
+        user_id,
+        crate::credits::monthly_allowance(state, stvdy_core::config::PlanId::Free),
+    )
+    .await?;
+
     tracing::info!(%user_id, "account created through Google");
     Ok(user_id)
 }

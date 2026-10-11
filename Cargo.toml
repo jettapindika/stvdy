@@ -43,6 +43,12 @@ base64 = "0.23.1"
 rand = "0.10.3"
 secrecy = "0.10.3"
 async-trait = "0.1.92"
+# The chat SSE stream is written as an `async_stream::stream!` block: the
+# alternative is a hand-written `Stream` impl whose poll function has to keep the
+# provider receiver, the accumulated answer and the heartbeat timer in one state
+# machine. That is a lot of unsafe-adjacent code for a stream that is a `loop`
+# with `yield`s.
+async-stream = "0.3.6"
 futures = "0.3.34"
 bytes = "1.12.1"
 tokio-util = "0.7.20"
