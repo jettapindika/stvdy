@@ -53,6 +53,30 @@ search:
 ui:
   static_use_hash: true
 
-# Engines are left at SearXNG's defaults; the composite provider picks the
-# academic APIs directly (OpenAlex, Crossref, arXiv, ...) and uses SearXNG as
-# the general-web tier.
+# Engine list tuned for the PRODUCTION host (A45), not the dev laptop.
+# Measured 2026-10-11 on the VPS: google cse 20 results, mojeek 10, mwmbl 12-55
+# -> 30-83 results/query at 0.9-1.1s. On the dev laptop the same config yields
+# only google cse (20), because the ISP intercepts duckduckgo and rate-limits the
+# rest. Do NOT re-tune this against a laptop.
+#
+# Why the disables matter: a dead engine still appears in `unresponsive_engines`,
+# which is what the Phase 0 exit check reads. Leaving the defaults on made that
+# check unsatisfiable on every machine.
+engines:
+  - name: brave
+    disabled: true        # 429 "too many requests" in BOTH environments -> dead
+  - name: duckduckgo
+    disabled: true        # laptop: ISP TLS interception; VPS: CAPTCHA -> dead
+  - name: qwant
+    disabled: true        # CAPTCHA in both environments -> dead
+  - name: startpage
+    inactive: false       # upstream default is inactive; enabled then CAPTCHA'd
+    disabled: true        # -> keep off, it is CAPTCHA in both environments
+  # These two ARE the production workhorses. `mojeek` is `inactive: true`
+  # upstream and must be explicitly re-enabled; `mwmbl` is enabled by default.
+  - name: mojeek
+    inactive: false
+  - name: mwmbl
+  #
+  # The composite provider also picks the academic APIs directly (OpenAlex,
+  # Crossref, arXiv, ...) and uses SearXNG as the general-web tier.

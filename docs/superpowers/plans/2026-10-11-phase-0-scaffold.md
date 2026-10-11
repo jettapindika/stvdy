@@ -2204,7 +2204,7 @@ services:
 
   # Search tier 2 (A3). Internal only: there is deliberately NO `ports:` mapping,
   # so the container is reachable only by the server over the compose network at
-  # http://searxng:8080. Add `ports: ["8888:8080"]` locally only to poke the UI.
+  # http://searxng:8080. Add `ports: ["8088:8080"]` locally only to poke the UI.
   searxng:
     image: docker.io/searxng/searxng:latest   # dev only; pin a digest in prod
     environment:
@@ -2279,7 +2279,7 @@ engines:
 
 **Verification for Step 1b**. With the stack up:
 ```bash
-curl -s "http://127.0.0.1:8888/search?q=spaced+repetition&format=json" | head -c 200   # only with the dev port mapping
+curl -s "http://127.0.0.1:8088/search?q=spaced+repetition&format=json" | head -c 200   # only with the dev port mapping
 docker compose exec searxng wget -qO- "http://127.0.0.1:8080/search?q=test&format=json" | head -c 200
 ```
 Expected: a JSON object with a `results` array, not the `Verifying your browser…` HTML page (which is what a *public* SearXNG instance returns to an unauthenticated JSON client).
@@ -5075,7 +5075,7 @@ All must be true before the phase is called done:
 - [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
 - [ ] `npm --prefix app test` and `npm --prefix app run build` green.
 - [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2. 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
-- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty **and whose `unresponsive_engines` is empty** (not the `Verifying your browser…` HTML page). Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8888/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`). See A3 for the measured baseline. If only `google cse` answers, the engine list has been re-tuned against a dev laptop, which understates this tier by ~3.6×.
+- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty **and whose `unresponsive_engines` is empty** (not the `Verifying your browser…` HTML page). Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8088/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`). See A3 for the measured baseline. If only `google cse` answers, the engine list has been re-tuned against a dev laptop, which understates this tier by ~3.6×.
 - [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
