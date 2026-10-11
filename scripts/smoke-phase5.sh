@@ -235,6 +235,71 @@ print(f"one topic: {topics[0]['source_title']} page {topics[0]['page']} "
       f"({topics[0]['correct']}/{topics[0]['graded']})")
 PY
 
+say "the quiz is resumable: the questions come back with what was already answered"
+# The attempt is stored, so a reload or a second device must be able to pick the quiz up
+# rather than restart at question 1. `GET /quizzes/:id` is the call the screen makes on
+# load, so the evidence is that it returns the attempt alongside the question.
+curl -fsS "$BASE/quizzes/$QUIZ" -H "authorization: Bearer $ACCESS" > "$TMP/resume.json"
+python3 - "$TMP/resume.json" <<'PY'
+import json, sys
+
+quiz = json.load(open(sys.argv[1]))
+mcq, short = quiz["questions"][0], quiz["questions"][1]
+
+assert mcq["attempt"] is not None, "the answered MCQ must carry its attempt back"
+assert mcq["attempt"]["user_answer"] == "Menutup koneksi TCP.", mcq["attempt"]
+assert mcq["attempt"]["correct"] is False, "the server's grade is what is stored"
+assert short["attempt"] is not None, "the marked short answer must carry its attempt back"
+assert short["attempt"]["correct"] is True, short["attempt"]
+print("resumed: mcq answered and graded, short answer answered and marked")
+PY
+
+say "an attempt carries the device's clock, and that clock decides which is latest"
+# The attempt already stored was stamped by the server (no `answered_at` was sent). This
+# posts a *later* answer with an explicit client timestamp and asserts the client's clock
+# is what orders them: without the field, both would carry the server's instant and the
+# winner would be a coin flip.
+python3 - "$TMP/resume.json" "$TMP/next_clock.txt" <<'PY'
+import json, sys
+from datetime import datetime, timedelta
+
+attempt = json.load(open(sys.argv[1]))["questions"][0]["attempt"]
+stored = datetime.fromisoformat(attempt["answered_at"].replace("Z", "+00:00"))
+# An hour later, which is inside the 24h tolerance and later than anything the server
+# has stamped, so it must become the reported attempt.
+later = stored + timedelta(hours=1)
+open(sys.argv[2], "w").write(later.strftime("%Y-%m-%dT%H:%M:%SZ"))
+print(f"the stored attempt is stamped {attempt['answered_at']}; sending {later.isoformat()}")
+PY
+LATER_CLOCK="$(cat "$TMP/next_clock.txt")"
+
+curl -fsS -X POST "$BASE/quizzes/$QUIZ/attempts" -H "authorization: Bearer $ACCESS" \
+  -H 'content-type: application/json' \
+  -d "{\"question_id\":\"$MCQ_ID\",\"user_answer\":\"Membuka koneksi TCP.\",\"answered_at\":\"$LATER_CLOCK\"}" \
+  > "$TMP/clock.json"
+[ "$(field '["attempt"]["answered_at"]' < "$TMP/clock.json")" = "$LATER_CLOCK" ] \
+  || fail "the device's clock must be stored as given: $(cat "$TMP/clock.json")"
+
+curl -fsS "$BASE/quizzes/$QUIZ" -H "authorization: Bearer $ACCESS" > "$TMP/resume2.json"
+python3 - "$TMP/resume2.json" "$LATER_CLOCK" <<'PY'
+import json, sys
+
+attempt = json.load(open(sys.argv[1]))["questions"][0]["attempt"]
+assert attempt["answered_at"] == sys.argv[2], (
+    "the attempt stamped latest must be the one reported: " + json.dumps(attempt)
+)
+assert attempt["user_answer"] == "Membuka koneksi TCP.", attempt
+assert attempt["correct"] is True, "the server grades the MCQ it was just sent"
+print(f"latest attempt: answered_at={attempt['answered_at']} correct={attempt['correct']}")
+PY
+
+# A device whose clock is years ahead must not be able to pin itself to the top of every
+# read.
+FUTURE_STATUS=$(curl -s -o "$TMP/future.json" -w '%{http_code}' -X POST "$BASE/quizzes/$QUIZ/attempts" \
+  -H "authorization: Bearer $ACCESS" -H 'content-type: application/json' \
+  -d "{\"question_id\":\"$MCQ_ID\",\"user_answer\":\"Membuka koneksi TCP.\",\"answered_at\":\"2099-01-01T00:00:00Z\"}")
+[ "$FUTURE_STATUS" = "400" ] || fail "an attempt years in the future must be refused, got $FUTURE_STATUS"
+
 say "a replayed attempt id applies once"
 ATTEMPT_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
 REPLAY_BODY="{\"id\":\"$ATTEMPT_ID\",\"question_id\":\"$MCQ_ID\",\"user_answer\":\"Membuka koneksi TCP.\"}"

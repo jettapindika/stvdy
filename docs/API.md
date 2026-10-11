@@ -507,6 +507,14 @@ own `idx`, which is stored rather than re-derived: every question of one
 generation is inserted in one transaction, so they share a `created_at` to the
 microsecond and the order would otherwise fall through to a random uuid.
 
+Each question carries **the student's latest attempt** as `attempt`, or null when
+it has none. This is what makes a quiz resumable: a reload, or a second device,
+picks the quiz up where it was left rather than at question 1. A graded attempt
+supersedes an ungraded one for the same question, and the order is total (grade,
+then `answered_at`, then id), so this view and `GET /quizzes/:id/results` cannot
+disagree. `attempt = {"id", "user_answer", "correct", "answered_at"}`, where a null
+`correct` means answered but not yet judged.
+
 Another account's quiz is 404, not 403: the id must not confirm that it exists.
 `Quiz.status` is `generating | ready | failed`; a `failed` quiz carries a readable
 `error` and its credits are refunded (A98).
@@ -514,7 +522,15 @@ Another account's quiz is 404, not 403: the id must not confirm that it exists.
 ### `POST /quizzes/:id/attempts`
 
 Auth. Body: `{"question_id": uuid, "user_answer": string, "id": uuid?,
-"correct": bool?}`.
+"answered_at": rfc3339?, "correct": bool?}`.
+
+`answered_at` is the **device's** clock, and absent means the server's. An attempt
+is one of the five kinds a client may write offline, so the moment the student
+answered is the client's to report: stamping an offline answer with the server's
+sync time would put it in the wrong place in their history and would make two
+attempts land in the same instant. A timestamp more than 24 h in the future is
+refused, because a device with a wrong clock would otherwise pin itself to the top
+of every "latest attempt" read.
 
 **The answer is the option *text*, never a letter or an index** (A93). The prompt
 tells the model to copy the correct option verbatim into `answer`, so text is the
@@ -533,9 +549,10 @@ judged" (A91).
 insert is `on conflict (id) do nothing` and the response says whether it applied
 (A92).
 
-200 `{"applied": bool, "attempt": {"id", "question_id", "correct"}}`.
-`correct` is `null` for an unmarked short answer.
-- 400 `validation` when `user_answer` is empty.
+200 `{"applied": bool, "attempt": {"id", "question_id", "correct",
+"answered_at"}}`. `correct` is `null` for an unmarked short answer.
+- 400 `validation` when `user_answer` is empty, or `answered_at` is more than 24 h
+  in the future.
 - 404 when the quiz or the question is not this user's.
 
 ### `GET /quizzes/:id/results`

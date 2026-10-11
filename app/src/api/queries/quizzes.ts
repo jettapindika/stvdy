@@ -62,6 +62,20 @@ export interface QuizQuestion {
   key_points: string[] | null
   /** The chunk this question came from, or null when the label was not sent. */
   chunk_id: string | null
+  /**
+   * What the student already answered, or null. This is what makes a quiz resumable:
+   * an attempt is stored server-side, so a reload or a second device picks the quiz up
+   * where it was left rather than at question 1.
+   */
+  attempt: QuizAttempt | null
+}
+
+export interface QuizAttempt {
+  id: string
+  user_answer: string
+  /** Null means answered but not yet judged, which is not the same as wrong. */
+  correct: boolean | null
+  answered_at: string
 }
 
 export interface TopicRow {
@@ -164,6 +178,8 @@ export function useCreateQuiz(workspaceId: string) {
 export interface AttemptInput {
   questionId: string
   userAnswer: string
+  /** The device's clock; absent means the server's. */
+  answeredAt?: string
   /** Only meaningful for a short answer; the server grades an mcq itself. */
   correct?: boolean
   /** Client-generated, so a retry after a lost response cannot apply twice. */
@@ -182,6 +198,7 @@ export function useRecordAttempt(quizId: string) {
         question_id: input.questionId,
         user_answer: input.userAnswer,
         correct: input.correct,
+        answered_at: input.answeredAt,
       }),
     // `exact` matters: query keys match by prefix, so an inexact invalidation of
     // `['quizzes', id]` also matches `['quizzes', id, 'results']` and would refetch

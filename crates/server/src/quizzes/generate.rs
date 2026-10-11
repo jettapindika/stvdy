@@ -30,9 +30,14 @@ const MAX_TOKENS: u32 = 3000;
 /// commits immediately before the quiz row, so this only absorbs that gap.
 const USAGE_LOOKBACK: chrono::Duration = chrono::Duration::minutes(5);
 
-/// What the second attempt says. Short and specific: the model has the bad reply in its
-/// own context, so repeating the whole instruction is what makes a model answer the same
-/// way again.
+/// What the second attempt says when the reply was not JSON at all.
+///
+/// Unlike the deck's constant, the quiz's correction is **appended to**, not fixed: quiz
+/// validation is far richer than a card's (the kind, exactly four options, an answer
+/// that is one of them, key points on a short answer), and every one of those messages
+/// names the question's index. A constant correction would leave that index in the logs
+/// and tell the model nothing about what to fix, so the single retry would not converge.
+/// The divergence from `flashcards::generate::CORRECTION` is deliberate.
 const CORRECTION: &str = "Your previous reply was not a valid JSON object matching the schema. Reply with only the \
      JSON object, with no prose before or after it and no markdown fences.";
 
@@ -143,9 +148,12 @@ pub async fn generate(state: &AppState, quiz: &QuizRow) -> Result<Generation, Fa
                 role: Role::Assistant,
                 content: first.text.clone(),
             });
+            // The parse error is appended so the model is told which question was
+            // wrong and why. `is_retryable` is only true for a `Json` or `Schema`
+            // error, and both carry their own description.
             retry.messages.push(ChatMsg {
                 role: Role::User,
-                content: CORRECTION.to_string(),
+                content: format!("{CORRECTION}\n\nThe problem was: {error}"),
             });
             let second = match provider.complete(retry).await {
                 Ok(second) => second,

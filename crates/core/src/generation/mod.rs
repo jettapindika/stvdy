@@ -14,15 +14,19 @@ pub enum GenerationError {
     Json(String),
     #[error("the model's reply did not match the schema: {0}")]
     Schema(String),
-    #[error("the model returned no cards")]
+    #[error("the model returned nothing to store")]
     Empty,
 }
 
 /// True when a second attempt is worth making.
 ///
-/// A parse failure is worth one retry with a corrective message; an empty deck is
+/// A parse failure is worth one retry with a corrective message; an empty reply is
 /// not, because the model answered the question it was asked and the answer was
-/// "no cards", and retrying would spend a second call to be told the same thing.
+/// "nothing", and retrying would spend a second call to be told the same thing.
+///
+/// The message is deliberately content-neutral: both the deck and the quiz contract
+/// reuse this variant, so naming one of them ("no cards") would report the wrong thing
+/// to the other's user.
 pub fn is_retryable(error: &GenerationError) -> bool {
     matches!(error, GenerationError::Json(_) | GenerationError::Schema(_))
 }

@@ -53,6 +53,7 @@ const MCQ: QuizQuestion = {
   explanation: 'Handshake menegosiasikan parameter sebelum data dikirim.',
   key_points: null,
   chunk_id: null,
+  attempt: null,
 }
 
 const SHORT: QuizQuestion = {
@@ -65,6 +66,7 @@ const SHORT: QuizQuestion = {
   explanation: 'Tanpa handshake, tidak ada putaran tambahan sebelum data.',
   key_points: ['tidak ada handshake', 'tidak menjamin urutan'],
   chunk_id: null,
+  attempt: null,
 }
 
 const RESULTS = {
@@ -238,12 +240,21 @@ describe('grading, per question kind', () => {
     const user = userEvent.setup()
     renderQuiz()
 
-    // Focus the screen, then press `1`: the first option is selected without a mouse,
-    // which is what makes a quiz takeable by keyboard alone.
-    await user.click(await screen.findByRole('radio', { name: /Membuka koneksi TCP\./ }))
+    // The key is pressed, not clicked: this is the only coverage of the number-key
+    // contract, and it is the evidence gate 5's "reach every control by keyboard
+    // alone" claim rests on. The handler listens on `window`, so it fires without
+    // focusing a control first.
+    await screen.findByText('Apa fungsi three-way handshake?')
+    await user.keyboard('1')
     expect(screen.getByRole('radio', { name: /Membuka koneksi TCP\./ })).toBeChecked()
 
+    // Submit by keyboard too, so the whole path is exercised without a pointer.
     await user.click(screen.getByRole('button', { name: 'Submit answer' }))
     expect(await screen.findByText('Correct')).toBeInTheDocument()
+
+    // And once answered, a number key changes nothing: re-grading a question the
+    // student already submitted would record a second judgement for one answer.
+    await user.keyboard('2')
+    expect(screen.getByRole('radio', { name: /Membuka koneksi TCP\./ })).toBeChecked()
   })
 })
