@@ -212,20 +212,31 @@ assert due == later + timedelta(days=interval), due
 print("the schedules agree, and the due date is dated from the later review")
 PY
 
-say "the generation's usage row names the action and the prompt version"
-# The stub's reply may or may not carry a `usage` block, so token counts and cost
-# are not asserted: a `None` cost is the honest record when the provider omits one
-# (A41), and `record_usage` is a no-op when the row cannot be found. The fields the
-# job controls are the action and the prompt version.
+say "the generation's usage row names the action, the prompt version, and the cost"
+# `record_usage` is best-effort for the *reporting* half, so this asserts it ran:
+# the action and the prompt version are the fields the job controls, and the
+# provider cost is the one the margin report reads (A41). `scripts/stub-llm.py`
+# answers a non-streaming request with a `usage` block
+# (`{prompt_tokens, completion_tokens, cost}`), so the cost must be present; a
+# provider that omits one leaves it null, which is why this is asserted here
+# against a stub whose reply is known.
 if [ -n "$PSQL" ]; then
+  # `.env` supplies DATABASE_URL when the caller did not, and must not override an
+  # explicit one: a run against a scratch database (whose migration set matches
+  # this branch) would otherwise be answered from the shared dev database and
+  # report a missing row that is present.
+  EXPLICIT_DATABASE_URL="${DATABASE_URL:-}"
   set -a
   # shellcheck source=/dev/null
   . ./.env
   set +a
-  ROW=$("$PSQL" "$DATABASE_URL" -tAc "select action || '|' || coalesce(prompt_version, '') from usage_events where user_id = (select id from users where email = '$EMAIL') and action = 'generate_flashcards' order by created_at desc limit 1")
+  if [ -n "$EXPLICIT_DATABASE_URL" ]; then
+    DATABASE_URL="$EXPLICIT_DATABASE_URL"
+  fi
+  ROW=$("$PSQL" "$DATABASE_URL" -tAc "select action || '|' || coalesce(prompt_version, '') || '|' || case when provider_cost_usd is null then 'no-cost' else 'cost' end || '|' || case when credits_spent > 0 then 'still-charged' else 'consumed' end from usage_events ue join decks d on d.usage_event_id = ue.id where ue.user_id = (select id from users where email = '$EMAIL') and ue.action = 'generate_flashcards' order by ue.created_at desc limit 1")
   [ -n "$ROW" ] || fail "the generation left no usage row for generate_flashcards"
-  [ "$ROW" = "generate_flashcards|flashcards.v1" ] \
-    || fail "the usage row does not name the action and prompt version: $ROW"
+  [ "$ROW" = "generate_flashcards|flashcards.v1|cost|consumed" ] \
+    || fail "the usage row is not the expected one: $ROW (want generate_flashcards|flashcards.v1|cost|consumed)"
   printf 'usage row: %s\n' "$ROW"
 else
   echo "no psql on PATH; skipped the usage-row assertion"
