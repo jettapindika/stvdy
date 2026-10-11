@@ -52,7 +52,7 @@ sources; reviews arriving from two clients replay to identical ease/interval/due
 - **Entitlements:** every handler calls `check`/the Phase 1 shim; no limit is
   hardcoded. Errors serialize to `{ code, message, min_plan?, limit?, used? }`.
 - **Quality gate:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, `npm --prefix app test`, `npm run build`, the `src-tauri` trio,
+  `cargo test`, `npm --prefix app test`, `npm --prefix app run build`, the `src-tauri` trio,
   `cargo sqlx prepare --workspace --check`.
 - **UI language English**, but Indonesian documents and queries must work end to end
   (`simple` tsvector config + multilingual embeddings).
@@ -3298,8 +3298,12 @@ export function StudyScreen() {
 ```
 
 Behaviour, exactly:
-- Reveal: a `Show answer` button and the `Space` key. The back, and the citation chip
-  (`Citation` with the chunk from `useChunk(card.chunk_id)`) appear only after reveal.
+- Reveal: a `Show answer` button and the `Space` key. The back, and the citation chip,
+  appear only after reveal. The chip is `<Citation citation={{ type: 'chunk', label: 1,
+  chunk_id: card.chunk_id, source_id: '', page: null }} onOpen={...} />` — check
+  `app/src/components/ui/Citation.tsx` for the exact `ChunkCitation` field list before
+  writing it, and pass only fields that type accepts. The `label` is a display number
+  here, not a prompt label: nothing is being cited back to a model.
 - Grade: four buttons — `Again` `1`, `Hard` `2`, `Good` `3`, `Easy` `4`. Each posts
   `{ id: crypto.randomUUID(), rating, reviewed_at: new Date().toISOString() }`.
 - On success: `setIndex(index + 1)`, `setRevealed(false)`, focus `cardRef.current`.
@@ -3331,7 +3335,9 @@ header comment, which currently says Studio "says which phase brings it".
 
 - [ ] **Step 9: Run the frontend suite and the build**
 
-Run: `npm --prefix app test && npm run build`
+Run: `npm --prefix app test && npm --prefix app run build` (the repo's convention, per
+`justfile`. There is no vitest config file to create: the config is inline in
+`app/vite.config.ts`, `include: ['src/**/*.{test,spec}.{ts,tsx}']`.)
 Expected: all tests pass (138 existing + the new ones) and the build is clean.
 
 - [ ] **Step 10: Commit**
@@ -3428,7 +3434,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --workspace
 npm --prefix app test
-npm run build
+npm --prefix app run build
 cargo sqlx prepare --workspace --check
 bash scripts/smoke-phase4.sh
 ```
