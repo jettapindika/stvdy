@@ -59,6 +59,7 @@ pub struct AppConfig {
     pub google_login: Option<GoogleLoginConfig>,
     /// The chat and generation model. `None` means no provider is configured.
     pub llm: Option<LlmConfig>,
+    pub search: SearchConfig,
 }
 
 /// Token lifetimes and the verification-link window.
@@ -128,6 +129,35 @@ pub struct EmbedderConfig {
     /// The query convention the endpoint's model needs, e.g. `query: ` for E5.
     /// Empty means none. See `HttpEmbedder`.
     pub query_prefix: String,
+}
+
+/// Which search tier or tiers answer (A3).
+///
+/// `Composite` walks the tiers in order and is the default; naming one tier pins
+/// it, which is what makes a tier testable in isolation and lets a deployment run
+/// without the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchTier {
+    Composite,
+    Academic,
+    Searxng,
+    Exa,
+    Tavily,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchConfig {
+    pub tier: SearchTier,
+    /// The self-hosted SearXNG service. `None` means the tier is not built.
+    pub searxng_url: Option<String>,
+    pub exa_api_key: Option<SecretString>,
+    /// Tavily's key is `SEARCH_API_KEY` for historical reasons: the env template
+    /// named it before the composite existed.
+    pub tavily_api_key: Option<SecretString>,
+    /// How long a cached result set serves without a provider call (A40).
+    pub cache_ttl: std::time::Duration,
+    /// Results requested per tier, and the merged cap.
+    pub max_results: u8,
 }
 
 /// The first `LlmProvider` (A1): an [OI]-compatible endpoint. Optional as a
@@ -268,6 +298,7 @@ impl AppConfig {
                 .map(|s| root.join(s)),
             google_login: google_login_config(&get)?,
             llm: llm_config(&get_or, &get),
+            search: search_config(&get, &get_or)?,
         })
     }
 }
@@ -284,6 +315,58 @@ fn llm_config(
         base_url,
         api_key: get_or("LLM_API_KEY", ""),
         model: get_or("LLM_MODEL", "deepseek-v4.1-flash"),
+    })
+}
+
+/// The search configuration. The composite needs no keys at all: the academic
+/// tier is keyless and SearXNG is self-hosted, so a deployment with no paid
+/// fallback still has a working web tier.
+fn search_config(
+    get: &impl Fn(&str) -> Option<String>,
+    get_or: &impl Fn(&str, &str) -> String,
+) -> anyhow::Result<SearchConfig> {
+    let tier = match get_or("SEARCH_PROVIDER", "composite").as_str() {
+        "composite" => SearchTier::Composite,
+        "academic" => SearchTier::Academic,
+        "searxng" => SearchTier::Searxng,
+        "exa" => SearchTier::Exa,
+        "tavily" => SearchTier::Tavily,
+        other => anyhow::bail!(
+            "SEARCH_PROVIDER must be composite, academic, searxng, exa or tavily, got {other}"
+        ),
+    };
+
+    let exa_api_key = get("EXA_API_KEY").filter(|value| !value.is_empty());
+    let tavily_api_key = get("SEARCH_API_KEY").filter(|value| !value.is_empty());
+
+    // A pinned tier with no key is a startup failure, not a first-query 401: the
+    // operator asked for that tier specifically, so booting without it would
+    // silently serve nothing.
+    match tier {
+        SearchTier::Exa if exa_api_key.is_none() => {
+            anyhow::bail!("SEARCH_PROVIDER=exa requires EXA_API_KEY")
+        }
+        SearchTier::Tavily if tavily_api_key.is_none() => {
+            anyhow::bail!("SEARCH_PROVIDER=tavily requires SEARCH_API_KEY")
+        }
+        _ => {}
+    }
+
+    let ttl_hours = get_or("SEARCH_CACHE_TTL_HOURS", "24")
+        .parse::<i64>()
+        .map_err(|error| anyhow::anyhow!("SEARCH_CACHE_TTL_HOURS must be an integer: {error}"))?;
+    anyhow::ensure!(
+        ttl_hours > 0,
+        "SEARCH_CACHE_TTL_HOURS must be positive, got {ttl_hours}"
+    );
+
+    Ok(SearchConfig {
+        tier,
+        searxng_url: get("SEARXNG_URL").filter(|value| !value.is_empty()),
+        exa_api_key: exa_api_key.map(SecretString::from),
+        tavily_api_key: tavily_api_key.map(SecretString::from),
+        cache_ttl: std::time::Duration::from_secs(ttl_hours as u64 * 3600),
+        max_results: 8,
     })
 }
 

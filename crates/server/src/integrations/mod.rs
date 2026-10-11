@@ -7,6 +7,7 @@ pub mod documents;
 pub mod embedder;
 pub mod llm;
 pub mod mailer;
+pub mod search;
 pub mod storage;
 
 use std::sync::Arc;
