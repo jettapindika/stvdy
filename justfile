@@ -83,6 +83,15 @@ smoke-server:
 smoke-phase2:
     BASE=http://localhost:8099 bash scripts/smoke-phase2.sh
 
+# Phase 4's run. Same stub and server, and the stub must answer with a cards JSON:
+# the generation job asks for a strict-JSON reply, so the phase 2 default (a prose
+# answer) would fail the job for good. `smoke-llm` above serves prose; start the
+# stub by hand for this one:
+#   python3 scripts/stub-llm.py --port 8100 --log var/stub-requests.jsonl \
+#     --answer '{"cards":[{"front":"Apa fungsi three-way handshake?","back":"Membuka koneksi TCP.","label":1}]}'
+smoke-phase4:
+    BASE=http://localhost:8099 bash scripts/smoke-phase4.sh
+
 # The Tauri CLI resolves `src-tauri` as a subfolder of the working directory, so
 # these must run from the repo root. The CLI binary is the one npm installed.
 tauri:
