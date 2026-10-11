@@ -1003,6 +1003,66 @@ async fn another_users_card_is_not_found(pool: PgPool) {
     assert_eq!(reviews, 0, "a refused review must not be stored");
 }
 
+/// The guard rail inspects the *template*, never the data interpolated into it.
+///
+/// A workspace named `{{Project}}` and a source containing `{{user_name}}` are both
+/// data: the marker-looking text must survive into the prompt verbatim and the deck
+/// must generate. While the guard scanned the rendered text, either one made
+/// composition return `Invalid`, which `generate` maps to `Failure::permanent` — the
+/// deck failed, the credits came back, and that material could never produce a deck.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_marker_looking_workspace_and_source_still_generate(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply(
+        "Apa itu three-way handshake?",
+        "Membuka koneksi TCP.",
+        1,
+    )]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "braces@example.test").await;
+    let (workspace_id, source_id) = workspace_with_text(
+        &app,
+        &harness,
+        &token,
+        "{{Project}}",
+        "{{cards}} notes",
+        "Render {{user_name}} to show the deck. TCP memakai three-way handshake.",
+    )
+    .await;
+
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    let (status, deck) = json(
+        &app,
+        "GET",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    assert_eq!(
+        deck["deck"]["status"], "ready",
+        "a marker-looking workspace and source must still generate: {deck}"
+    );
+    assert!(
+        deck["deck"]["card_count"].as_i64().unwrap() >= 1,
+        "the deck must carry at least one card: {deck}"
+    );
+
+    // The prompt that produced it carried the data verbatim, not an error.
+    let requests = llm.requests();
+    assert_eq!(requests.len(), 1);
+    let prompt = &requests[0].messages[0].content;
+    assert!(prompt.contains("{{Project}}"), "{prompt}");
+    assert!(prompt.contains("{{user_name}}"), "{prompt}");
+}
+
 /// The 201 body is the same `DeckJson` every other route serialises, so it carries
 /// `created_at` — the SPA's `Deck` declares it, and the hand-built body that
 /// omitted it made that a false type assertion.

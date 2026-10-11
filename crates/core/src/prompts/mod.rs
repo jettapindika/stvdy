@@ -127,7 +127,7 @@ pub enum PromptError {
     MissingVariable(String),
     #[error("prompt variable {{{0}}} is derived and must not be supplied")]
     DerivedSupplied(String),
-    #[error("prompt module uses {{{0}}} without declaring it")]
+    #[error("the prompt template uses {{{0}}} without declaring it")]
     UndeclaredVariable(String),
     #[error("the trimmed base prompt lost <{0}>, which every task prompt must keep")]
     MissingSection(String),
@@ -144,19 +144,6 @@ pub fn compose_chat(
 ) -> Result<Composed, PromptError> {
     let values = values_of(vars);
     let mut text = render(registry::BASE_V1, &values)?;
-
-    // The last guard rail: an undeclared `{{var}}` in the template is left
-    // intact by `render` precisely so it trips this check instead of shipping.
-    // It runs on the rendered template *before* the data block is appended: a
-    // source may legitimately contain a `{{...}}` snippet (Jinja, Handlebars,
-    // Vue), and the data block is not a template, so a marker there must not
-    // turn a composable prompt into a failure.
-    if text.contains("{{") {
-        return Err(PromptError::Invalid(
-            "composed prompt still contains an unfilled {{variable}}".to_string(),
-        ));
-    }
-
     text.push_str("\n\n");
     text.push_str(&render_sources(chunks));
     text.push_str("\n\n");
@@ -315,10 +302,9 @@ pub fn compose_task(
 ) -> Result<Composed, PromptError> {
     let table = module.variables();
 
-    // An undeclared name is refused here rather than left in the text: `render_with`
-    // would leave `{{typo}}` intact and the no-`{{` assertion below would report it
-    // as an unfilled variable, which reads as a caller mistake when it is a
-    // declaration mistake.
+    // An undeclared *caller* name is refused here rather than by `render_with`:
+    // the module's template does not mention it, so the renderer would never see
+    // it, and a caller that supplies `typo` has made a mistake worth naming.
     let mut values = values_of(base);
     for (name, value) in module_vars {
         if !table.iter().any(|(declared, _)| declared == name) {
@@ -333,16 +319,6 @@ pub fn compose_task(
     text.push_str(&render_with(registry::JSON_CONTRACT_V1, &values, table)?);
     text.push_str("\n\n");
     text.push_str(&render_with(module.text(), &values, table)?);
-
-    // As in `compose_chat`, the guard runs on the rendered templates only: a
-    // source that contains a `{{...}}` snippet is data, not an unfilled
-    // variable, and must not make the deck permanently ungeneratable.
-    if text.contains("{{") {
-        return Err(PromptError::Invalid(
-            "composed task prompt still contains an unfilled {{variable}}".to_string(),
-        ));
-    }
-
     text.push_str("\n\n");
     text.push_str(&render_sources(chunks));
 
@@ -385,10 +361,12 @@ fn render_with(
         output.push_str(&rest[..open]);
         let after_open = &rest[open + 2..];
         let Some(close) = after_open.find("}}") else {
-            // An unclosed `{{` is not a variable; keep the tail and let the
-            // caller's no-`{{` assertion report it.
-            output.push_str(&rest[open..]);
-            return Ok(output);
+            // An unclosed `{{` is a defect in the *template*, and this walk is
+            // the only place that can tell a template from the data interpolated
+            // into it: a value is never scanned here.
+            return Err(PromptError::Invalid(
+                "unclosed {{ in the prompt template".to_string(),
+            ));
         };
         let name = &after_open[..close];
         rest = &after_open[close + 2..];
@@ -407,10 +385,13 @@ fn render_with(
                 _ => output.push_str(default),
             },
             None => {
-                // Undeclared: leave it so the caller's assertion trips.
-                output.push_str("{{");
-                output.push_str(name);
-                output.push_str("}}");
+                // Undeclared: an unfilled variable must never reach a model, and
+                // this is the only place that can tell a *template* variable from a
+                // value that merely looks like one. Checking the rendered output
+                // instead (which this used to do) cannot: a workspace named
+                // `{{Project}}` is data, and it would be refused as if it were an
+                // unrendered marker.
+                return Err(PromptError::UndeclaredVariable(name.to_string()));
             }
         }
     }
@@ -520,19 +501,28 @@ mod tests {
         );
     }
 
-    /// An undeclared variable survives rendering and is caught downstream, so a
-    /// prompt edit that adds `{{new_thing}}` without declaring it fails loudly.
+    /// An undeclared variable in a *template* is refused at the point the
+    /// renderer sees it. This replaces the earlier contract, which let the marker
+    /// survive so a caller could catch it: that mechanism could not tell a
+    /// template variable from a value that merely looks like one, so a workspace
+    /// named `{{Project}}` was refused as if it were an unrendered marker.
     #[test]
-    fn undeclared_variable_leaves_the_marker() {
+    fn undeclared_variable_in_a_template_is_refused() {
         let values = BTreeMap::new();
-        let rendered = render("hello {{mystery}}", &values).unwrap();
-        assert!(rendered.contains("{{mystery}}"));
+        let error = render("hello {{mystery}}", &values).unwrap_err();
+        assert!(
+            matches!(&error, PromptError::UndeclaredVariable(name) if name == "mystery"),
+            "{error:?}"
+        );
     }
 
+    /// An unclosed marker is a template defect too, and it is reported as one
+    /// rather than being confused with data. The no-panic property is part of the
+    /// contract: the error is returned, never a panic.
     #[test]
-    fn unclosed_marker_does_not_panic() {
+    fn an_unclosed_marker_in_a_template_is_an_error() {
         let values = BTreeMap::new();
-        let rendered = render("lone {{ here", &values).unwrap();
-        assert!(rendered.contains("{{"));
+        let error = render("lone {{ here", &values).unwrap_err();
+        assert!(matches!(error, PromptError::Invalid(_)), "{error:?}");
     }
 }

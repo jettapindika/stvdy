@@ -186,6 +186,30 @@ fn a_source_containing_a_template_marker_still_composes() {
     assert!(composed.text.contains("{{Project}}"), "{}", composed.text);
 }
 
+/// A user-controlled value is data even when it looks exactly like a marker.
+/// `{{workspace_name}}` is a *declared* variable, so its value — whatever the user
+/// typed — is substituted and never re-scanned. The guard lives in the template
+/// walk, which is the only place that can tell the two apart.
+#[test]
+fn a_user_context_value_that_looks_like_a_marker_still_composes() {
+    let mut vars = vars();
+    vars.workspace_name = "{{Project}}".to_string();
+    vars.user_name = "{{user_name}}".to_string();
+
+    let composed = compose_chat(&vars, &[], &[]).unwrap();
+
+    assert!(
+        composed.text.contains("{{Project}}"),
+        "the workspace name is the user's literal text: {}",
+        composed.text
+    );
+    assert!(
+        composed.text.contains("{{user_name}}"),
+        "the display name is the user's literal text: {}",
+        composed.text
+    );
+}
+
 #[test]
 fn the_plan_gate_sentence_follows_allow_upgrade_hint() {
     let mut permissive = vars();
@@ -564,6 +588,31 @@ mod task_composition {
             "the source text must be quoted verbatim"
         );
         assert!(composed.text.contains("{{Project}}"), "{}", composed.text);
+    }
+
+    /// The task path's user-context values are data too: a workspace named
+    /// `{{Project}}` must compose, not be refused as an unrendered marker.
+    #[test]
+    fn a_user_context_value_that_looks_like_a_marker_still_composes() {
+        let mut base = base();
+        base.workspace_name = "{{Project}}".to_string();
+        base.user_name = "{{user_name}}".to_string();
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert("count", "10".to_string());
+
+        let composed =
+            compose_task(ModuleId::FlashcardsV1, &base, &module_vars, &[chunk(1)]).unwrap();
+
+        assert!(
+            composed.text.contains("{{Project}}"),
+            "the workspace name is the user's literal text: {}",
+            composed.text
+        );
+        assert!(
+            composed.text.contains("{{user_name}}"),
+            "the display name is the user's literal text: {}",
+            composed.text
+        );
     }
 
     /// `prompts/README.md` promises that every JSON module's documented example
