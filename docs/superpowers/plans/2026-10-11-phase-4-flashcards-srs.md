@@ -2920,27 +2920,163 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
     let _ = user_id;
 }
 
+/// A client that retries a review it already sent must not move the card twice.
+///
+/// This is what makes an offline outbox safe: the review id is the client's, and a
+/// duplicate is ignored rather than applied. Phase 8's push replay depends on the
+/// same rule.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_replayed_review_id_applies_once(pool: PgPool) {
-    // ... create a deck and a card as above, then send the same review id twice and
-    // assert `applied: false` on the second with an unchanged `due_at`.
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Apa itu TCP?", "Protokol.", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "replay@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (_, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    let (_, deck) = json(&app, "GET", &format!("/decks/{deck_id}"), &token, serde_json::Value::Null).await;
+    let card_id = deck["cards"][0]["id"].as_str().unwrap().to_string();
+
+    let review_id = uuid::Uuid::new_v4().to_string();
+    let body = serde_json::json!({
+        "id": review_id,
+        "rating": "good",
+        "reviewed_at": "2026-10-11T09:00:00Z",
+    });
+
+    let (status, first) = json(
+        &app,
+        "POST",
+        &format!("/flashcards/{card_id}/review"),
+        &token,
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["applied"], true, "{first}");
+    let first_due = first["card"]["due_at"].clone();
+
+    let (status, second) = json(
+        &app,
+        "POST",
+        &format!("/flashcards/{card_id}/review"),
+        &token,
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["applied"], false, "the replay must not apply: {second}");
+    assert_eq!(second["card"]["due_at"], first_due, "and must not move the card");
+
+    // The row count is the real assertion: an implementation that inserted and
+    // replayed would report `applied: true` above, but one that inserted without
+    // replaying would leave two rows behind.
+    let reviews: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from flashcard_reviews where flashcard_id = $1::uuid",
+    )
+    .bind(&card_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(reviews, 1);
 }
 
+/// The study queue is the cards that are due, and a card graded `good` is not due
+/// again for a day.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_due_queue_excludes_a_card_scheduled_for_later(pool: PgPool) {
-    // ... review a card `easy`, then assert `GET /decks/:id/due` returns nothing
-    // while `GET /decks/:id` still lists the card with its new `due_at`.
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Apa itu TCP?", "Protokol.", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "due@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (_, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    // A fresh card is due at the injected clock's instant, which is why
+    // `insert_cards` must bind `state.clock.now()` and not the database's `now()`.
+    let (status, due) = json(&app, "GET", &format!("/decks/{deck_id}/due"), &token, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{due}");
+    assert_eq!(due["cards"].as_array().unwrap().len(), 1, "{due}");
+    let card_id = due["cards"][0]["id"].as_str().unwrap().to_string();
+
+    // Graded `good` on the first repetition: one day, so tomorrow.
+    let (status, reviewed) = json(
+        &app,
+        "POST",
+        &format!("/flashcards/{card_id}/review"),
+        &token,
+        serde_json::json!({ "rating": "good", "reviewed_at": "2026-10-11T09:00:00Z" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reviewed}");
+    assert_eq!(reviewed["card"]["interval_days"], 1, "{reviewed}");
+
+    let (_, after) = json(&app, "GET", &format!("/decks/{deck_id}/due"), &token, serde_json::Value::Null).await;
+    assert!(
+        after["cards"].as_array().unwrap().is_empty(),
+        "a card due tomorrow is not in today's queue: {after}"
+    );
+
+    // And it is still in the deck, with its new schedule: leaving the queue is not
+    // the same as being deleted.
+    let (_, deck) = json(&app, "GET", &format!("/decks/{deck_id}"), &token, serde_json::Value::Null).await;
+    assert_eq!(deck["cards"].as_array().unwrap().len(), 1, "{deck}");
+    assert_eq!(deck["cards"][0]["due_at"], reviewed["card"]["due_at"]);
 }
 
+/// Ownership is enforced on the card, not only on the deck: a card id from another
+/// account is a 404, and so is that account's deck.
 #[sqlx::test(migrations = "../../migrations")]
 async fn another_users_card_is_not_found(pool: PgPool) {
-    // ... two accounts; account B reviewing account A's card is 404, and so is
-    // reading A's deck.
-}
-```
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Apa itu TCP?", "Protokol.", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
 
-Write the three elided tests in full, following the setup of the first (they are
-short: create deck → drain → review → assert).
+    let owner = signed_up(&app, &harness, "owner@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &owner, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (_, body) = deck_created(&app, &workspace_id, &owner, &source_id, 1).await;
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    let (_, deck) = json(&app, "GET", &format!("/decks/{deck_id}"), &owner, serde_json::Value::Null).await;
+    let card_id = deck["cards"][0]["id"].as_str().unwrap().to_string();
+
+    let stranger = signed_up(&app, &harness, "stranger@example.test").await;
+
+    let (status, _) = json(&app, "GET", &format!("/decks/{deck_id}"), &stranger, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "another account's deck");
+    let (status, _) = json(&app, "GET", &format!("/decks/{deck_id}/due"), &stranger, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "another account's due queue");
+    let (status, _) = json(
+        &app,
+        "POST",
+        &format!("/flashcards/{card_id}/review"),
+        &stranger,
+        serde_json::json!({ "rating": "good" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "another account's card");
+    let (status, _) = json(&app, "GET", &format!("/workspaces/{workspace_id}/decks"), &stranger, serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "another account's workspace");
+}
+
+/// The test clock is `FixedClock::at(Utc::now())` (`crates/server/src/testing.rs`),
+/// not a date in the past, so every absolute `reviewed_at` above must be a time that
+/// has already happened, and every "is it due" assertion must hold against the real
+/// clock. A test that pins a future instant would depend on the day it runs.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
