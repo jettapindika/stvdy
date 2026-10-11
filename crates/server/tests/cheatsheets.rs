@@ -345,10 +345,23 @@ async fn the_pdf_is_plan_gated_and_reports_a_missing_print(pool: PgPool) {
     // Pro: allowed, and the print genuinely does not exist — no renderer in a test, which is
     // the state a deployment without Chromium is in too. 409 rather than 404: the cheatsheet
     // is there, and the remedy is a re-render once a renderer is available.
+    //
+    // The subscription row is part of the fixture, not decoration: the decision honours
+    // `users.plan_id` only while a subscription grants paid limits (A146), so a plan written
+    // without a live subscription is a free account with a misleading column.
     sqlx::query("update users set plan_id = 'pro' where email = 'cheatpdf@example.test'")
         .execute(&harness.state.pool)
         .await
         .unwrap();
+    sqlx::query(
+        "insert into subscriptions
+            (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+         select id, 'pro', 'active', 'monthly', now(), now() + interval '30 days'
+           from users where email = 'cheatpdf@example.test'",
+    )
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
 
     let (status, body) = json(
         &app,
