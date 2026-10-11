@@ -5039,7 +5039,7 @@ All must be true before the phase is called done:
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
 - [ ] `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md` exist with their headings and phase markers; `docs/THREAT_MODEL.md` exists and is linked from `docs/ARCHITECTURE.md` § Trust boundary and from `README.md`.
-- [ ] The SPA shell passes the accessibility gate (roadmap § Verification Gates 6) on the screens it has: keyboard-only navigation reaches every control with a visible focus ring, the default theme meets contrast, and no interactive element is below the 44px touch target on a phone-width viewport.
+- [ ] The SPA shell passes the accessibility gate (roadmap § Verification Gates 5) on the screens it has: keyboard-only navigation reaches every control with a visible focus ring, the default theme meets contrast, and no interactive element is below the 44px touch target on a phone-width viewport.
 - [ ] Phase summary posted; wait for "continue".
 
 ## Self-Review
