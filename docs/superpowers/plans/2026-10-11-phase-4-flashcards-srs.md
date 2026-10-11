@@ -1137,7 +1137,8 @@ git commit -m "feat(core): the strict-JSON task composer, with the grounding gua
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use stvdy_core::citations::{ContextLabels, LabeledChunk};
-use stvdy_core::generation::flashcards::{GenerationError, parse_cards, resolve_cards};
+use stvdy_core::generation::GenerationError;
+use stvdy_core::generation::flashcards::{parse_cards, resolve_cards};
 use uuid::Uuid;
 
 fn labels() -> ContextLabels {
@@ -1177,7 +1178,10 @@ fn a_fenced_reply_parses_because_a_provider_sometimes_adds_one() {
 #[test]
 fn prose_around_the_object_is_not_guessed_at() {
     let raw = "Here are your cards:\n{\"cards\":[]}";
-    assert!(matches!(parse_cards(raw), Err(GenerationError::Schema(_))));
+    // serde classifies leading prose as a syntax error, not a schema error, so this
+    // is `Json` and not `Schema`. What matters for the caller is that both are
+    // retryable and neither is guessed at.
+    assert!(matches!(parse_cards(raw), Err(GenerationError::Json(_))));
 }
 
 #[test]
@@ -3429,11 +3433,22 @@ Indonesian and the citation chip opens the Indonesian chunk. Record the output.
 - [ ] **Step 6: The smoke script**
 
 `scripts/smoke-phase4.sh`, modelled on `scripts/smoke-phase2.sh`: start the server
-against the dev database with the stub LLM (`scripts/stub-llm.py`), sign up, create a
-workspace, add an Indonesian text source, create a deck, poll until `ready`, review
-the first card twice with two different `reviewed_at` values, and print the card's
+against the dev database with the stub LLM, sign up, create a workspace, add an
+Indonesian text source, create a deck, poll until `ready`, review the first card twice
+with two different `reviewed_at` values, and print the card's
 `ease`/`interval_days`/`due_at` beside a local replay of the same two rows. Print
 `PASS` only when the two agree.
+
+Three facts about the stub that this script depends on (`scripts/stub-llm.py`):
+- It already serves a **non-streaming** request (`if not body.get("stream")` returns
+  `{"choices":[{"message":{"content": Handler.answer}}]}`), which is the shape
+  `generate_flashcards` uses. No stub change is needed.
+- Its reply is the fixed `--answer` string, so start it with the cards JSON:
+  `python3 scripts/stub-llm.py --port "$STUB_PORT" --log "$STUB_LOG" --answer '{"cards":[{"front":"Apa fungsi three-way handshake?","back":"Membuka koneksi TCP.","label":1}]}'`
+- Its reply carries no `usage` object, so token counts and cost are absent on this
+  path. The script must **not** assert on them: `record_usage` is a no-op when the
+  row cannot be found, and a `None` cost is the honest record (A41). Assert the
+  prompt version and the action instead, which are the fields the job controls.
 
 - [ ] **Step 7: Run the full gate**
 
