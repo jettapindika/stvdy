@@ -449,3 +449,123 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 - **Type consistency.** `Storage`, `Embedder`, `Clock`, `Mailer`, `TokenPair`,
   `AccessClaims`, `AppError::Entitlement`, `Queue` are defined once and
   referenced by name in every later task and phase.
+
+## Execution notes (Phase 1, as built)
+
+Deviations and discoveries from running the plan. The plan text above is left as
+written so the next phase can see what changed and why.
+
+1. **`pdfium-render` binds once per process, so the handle is bound at boot.**
+   `Pdfium::bind_to_library` returns `PdfiumLibraryBindingsAlreadyInitialized`
+   on a second call, because the bindings live in a process-wide slot. A
+   per-document bind therefore works for the first PDF and fails for every one
+   after it. The Phase 1 smoke run caught it (the second uploaded PDF came back
+   `failed: PdfiumLibraryBindingsAlreadyInitialized`), and the fix moved the
+   failure from first use to boot: `integrations::documents::init` binds once and
+   `handle()` shares the result. A52/A51 record the policy.
+2. **The `jobs.dedupe_key` index is partial, so the `ON CONFLICT` target must
+   repeat the predicate.** `on conflict (dedupe_key) do update` fails with
+   "there is no unique or exclusion constraint matching the ON CONFLICT
+   specification"; the working form is `on conflict (dedupe_key) where dedupe_key
+   is not null`. A test would not have caught this (the enqueue path is
+   exercised only at runtime), which is why it was found by the smoke run.
+3. **`sum(bigint)` is `numeric` in Postgres and sqlx will not decode it into
+   `i64`.** The storage-quota query needs an explicit `::bigint` cast. Caught by
+   the sources suite on the first upload.
+4. **Axum's default body limit is 2 MB.** A multipart upload over it is rejected
+   as a *parse* error, not as a plan limit, which would report a 20 MB plan as
+   "invalid multipart". The sources router raises the limit to the largest plan's
+   `max_file_mb` plus framing, so the per-plan check is what produces the precise
+   error.
+5. **`lettre`'s `tokio1-rustls` feature is not sufficient on its own.** Without a
+   crypto provider and a certificate store the build fails with "feature `rustls`
+   also requires ...". `tokio1-rustls-tls` is the feature that pulls both.
+6. **`secrecy` 0.10 renamed `expose()` to `expose_secret()`**, and
+   `argon2` 0.6 moved `SaltString` into the `phc` crate with a different
+   `hash_password` signature (it now generates its own salt). `crates/core`'s
+   doubles and `crates/server/src/auth/password.rs` reflect the 0.6 API.
+7. **The auth extractor must check `auth_sessions.revoked_at`.** The first
+   version joined the family without that predicate, so `logout-all` and
+   refresh-token reuse revocation returned 200 on the very next request. The auth
+   suite caught it (`logout_all_revokes_every_session_of_the_account`); the
+   clause is now load-bearing and commented as such.
+8. **A retryable/permanent failure split was necessary, not cosmetic.** A missing
+   pdfium library fails identically on every attempt, so retrying it five times
+   left the source `processing` for half a minute and blocked the queue behind
+   it. `jobs::Failure` now carries the flag and a permanent failure ends the job
+   immediately (A55).
+9. **The dev mail sink is what makes the auth suite possible.** `RecordingMailer`
+   (a double) captures the message, so a test reads the verification link from
+   memory. The file sink (`var/mail/*.eml`) is what the smoke script reads, and
+   both exist because B3 keeps real SMTP credentials an operational blocker.
+10. **The local storage backend needed a signed URL shape that is honest about
+    itself.** The download route is `/objects/:id?exp=&sig=` rather than
+    overloading `/sources/:id/file`, because the latter is the authenticated JSON
+    endpoint that hands out a URL: two different things must not share a path in
+    a log. The signature covers `source_id:exp`, not the host, so a deployment
+    behind a different origin can rewrite the host without invalidating it.
+11. **`#[sqlx::test]` cases run in parallel threads, so an `AppError::Internal`
+    reaches a test as a bare 500.** `testing::TestState::new` installs a
+    best-effort tracing subscriber with `with_test_writer()` for that reason; it
+    is what turned the `sum(...)::bigint` failure into a readable cause instead of
+    a mystery.
+12. **The workspace now has runtime SQL only.** Every Phase 1 query is
+    `sqlx::query`/`query_as` with an explicit column list, so `.sqlx` stays empty
+    and `cargo sqlx prepare --workspace --check` passes with `SQLX_OFFLINE=true`.
+    That is the consequence of decision 1, and it is why the CI lint job can keep
+    compiling without a database.
+
+### Phase 1 verification (as executed)
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | **136 passing**, 0 failing |
+| `npm --prefix app test` | **85 passing** (15 files) |
+| `npm --prefix app run build` | clean (399 kB / 124 kB gzip) |
+| `src-tauri` fmt + clippy + test | clean; **12 passing** (10 deep-link, 2 keychain) |
+| `cargo sqlx prepare --workspace --check` (`SQLX_OFFLINE=true`) | exits 0, `.sqlx` empty |
+| Fresh DB `sqlx migrate run` | 18 migrations apply; **34** sync triggers; no trigger on the two new tables |
+| End-to-end smoke (`scripts/smoke-phase1.sh`) | PASS: signup, verification mail, second device, workspace, text source and a **real PDF** (cupsfilter) both `ready` with chunks, `GET /chunks/:id`, signed download byte-identical to the upload, tampered signature 403, cross-account 404, refresh rotation, reuse revocation |
+| Native shell | `stvdy://` round trip **PASS** on macOS for a running instance and cold start; iOS simulator **BLOCKED** (missing simulator runtime); keychain webview-to-Rust hop **PARTIAL** |
+
+### Mobile capability spike (roadmap Phase 1, do not defer to 14)
+
+| Probe | Result |
+|---|---|
+| Deep-link round trip, macOS, running instance | **PASS** (`action="auth_callback" stage="event"`) |
+| Deep-link round trip, macOS, cold start | **PASS** (`action="auth_callback" stage="launch"`) |
+| Foreign scheme / unknown route ignored, no credential logged | **PASS** |
+| Keychain adapter -> command -> OS keychain | **PARTIAL**: both hops verified separately; the live webview IPC hop was not observable from the CLI |
+| iOS simulator build | **BLOCKED**: no simulator runtime installed on this machine |
+| APNs / FCM token registration | **NOT ATTEMPTED**: needs a device build, which needs the simulator or a physical device |
+| iOS document intake / share sheet | **NOT ATTEMPTED**: same prerequisite |
+
+The three `NOT ATTEMPTED` probes are the roadmap's "Phase 14 prerequisite"
+category and are recorded as such rather than assumed. They need either a
+simulator runtime or a physical device to answer, which is a user-side
+prerequisite, not a code change.
+
+### Phase 1 exit checklist
+
+- [x] `cargo fmt --all -- --check` clean.
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- [x] `cargo test --workspace` green (136).
+- [x] `npm --prefix app test` and `npm --prefix app run build` green.
+- [x] `src-tauri` fmt/clippy/test green; keychain round trip still passes.
+- [x] Fresh DB: `sqlx migrate run` applies `0001`-`0019`, **34** sync triggers
+  still exist, and neither new table has one.
+- [x] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
+- [x] Signup -> verify -> login on two devices, with both visible in
+  `GET /devices`.
+- [x] Refresh rotation: a replayed refresh token kills its family (suite + smoke).
+- [x] PDF upload -> `ready` with chunks and 768-dim embeddings (smoke output
+  quoted in the phase summary).
+- [x] Same content twice reuses embeddings; no cross-tenant read anywhere.
+- [x] Deep-link round trip recorded in `docs/ARCHITECTURE.md`.
+- [x] Mobile capability spike: every probe recorded, and the three that need a
+  device are named as such.
+- [x] Accessibility gate result stated, not asserted (SPA report: keyboard-only
+  walk with measured focus rings, 44px targets, contrast, 200% text scale).
+- [ ] Phase summary posted; wait for "continue".
