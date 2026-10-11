@@ -11,4 +11,5 @@ pub mod config;
 pub mod error;
 pub mod prompts;
 pub mod retrieval;
+pub mod sm2;
 pub mod traits;
