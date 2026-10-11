@@ -198,7 +198,12 @@ export function StudyScreen() {
         )}
       </header>
 
-      {deckError !== null && (
+      {/* A deck that never loaded blocks the session. Once the queue is seeded,
+          though, the deck query refetches in the background after every review
+          (`useReviewCard` invalidates the deck key), and TanStack keeps `data`
+          while setting `error` on a failed refetch — so a background failure must
+          only surface a notice, never unmount the card mid-session. */}
+      {deckError !== null && queue === null && (
         <ApiErrorNotice
           error={deckError}
           noun="this deck"
@@ -210,7 +215,7 @@ export function StudyScreen() {
         />
       )}
 
-      {deckError === null && dueError !== null && (
+      {dueError !== null && queue === null && (
         <ApiErrorNotice
           error={dueError}
           noun="the due cards"
@@ -222,11 +227,17 @@ export function StudyScreen() {
         />
       )}
 
-      {deckError === null && dueError === null && (deck.isPending || due.isPending || queue === null) && (
+      {deckError !== null && queue !== null && (
+        <p className="note note-danger text-sm" role="status">
+          Could not refresh this deck. Your session is unaffected.
+        </p>
+      )}
+
+      {deckError === null && dueError === null && queue === null && (
         <LoadingState label="Loading this deck's due cards" />
       )}
 
-      {deckError === null && dueError === null && queue !== null && card !== null && (
+      {queue !== null && card !== null && (
         <>
           <p className="meta" role="status">
             Card {index + 1} of {queue.length}
@@ -321,7 +332,7 @@ export function StudyScreen() {
         </>
       )}
 
-      {deckError === null && dueError === null && finished && (
+      {finished && (
         // Focusable, because the card region held focus a moment ago: when the
         // last card unmounts this is where the session's focus has to land, or it
         // falls to the body and the next Tab restarts at the top of the document.

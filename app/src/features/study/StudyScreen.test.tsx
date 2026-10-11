@@ -45,6 +45,17 @@ const CARD: Flashcard = {
   due_at: '2026-10-10T09:00:00Z',
 }
 
+const CARD2: Flashcard = {
+  id: 'c2',
+  deck_id: 'd1',
+  front: 'Apa itu simpul?',
+  back: 'Titik pada graf.',
+  chunk_id: null,
+  ease: 2.5,
+  interval_days: 0,
+  due_at: '2026-10-10T09:00:00Z',
+}
+
 beforeEach(() => {
   installFakePlatform('macos')
   setAccessToken('access-1')
@@ -181,5 +192,65 @@ describe('the invalidation after a review', () => {
       expect(calls.filter((call) => new URL(call.url).pathname === '/decks/d1')).toHaveLength(2)
     })
     expect(calls.filter((call) => new URL(call.url).pathname === '/decks/d1/due')).toHaveLength(1)
+  })
+})
+
+describe('a background deck error mid-session', () => {
+  it('keeps the card and the queue, and only surfaces a notice', async () => {
+    // `useReviewCard` invalidates the deck key after every review, so the deck
+    // query refetches mid-session. TanStack keeps `data` while setting `error` on
+    // a failed refetch, so a gate on `deckError === null` would replace the card,
+    // the revealed answer and the review's own error notice with a deck error.
+    let deckCalls = 0
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/decks/d1') {
+        deckCalls += 1
+        if (deckCalls === 1) return jsonResponse(200, { deck: DECK, cards: [CARD, CARD2] })
+        return jsonResponse(500, {
+          code: 'internal',
+          message: 'refetch failed',
+          min_plan: null,
+          limit: null,
+          used: null,
+        })
+      }
+      if (path === '/decks/d1/due') {
+        return jsonResponse(200, { cards: [CARD, CARD2], now: '2026-10-11T09:00:00Z' })
+      }
+      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
+      if (path === '/flashcards/c1/review') {
+        return jsonResponse(200, {
+          applied: true,
+          card: { id: 'c1', ease: 2.5, interval_days: 1, due_at: '2026-10-12T09:00:00Z' },
+        })
+      }
+      return jsonResponse(404, {
+        code: 'not_found',
+        message: 'no such route',
+        min_plan: null,
+        limit: null,
+        used: null,
+      })
+    })
+
+    const user = userEvent.setup()
+    renderWithProviders(
+      <Routes>
+        <Route path="/study/:deckId" element={<StudyScreen />} />
+      </Routes>,
+      { route: '/study/d1' },
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Show answer' }))
+    await user.click(screen.getByRole('button', { name: 'Good' }))
+
+    // The background failure is surfaced without tearing the session down: the
+    // next card is still there and can still be revealed.
+    expect(
+      await screen.findByText('Could not refresh this deck. Your session is unaffected.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Apa itu simpul?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show answer' })).toBeInTheDocument()
   })
 })

@@ -46,6 +46,11 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
   const readySources = (sources.data ?? []).filter((source) => source.status === 'ready')
   const error = asApiError(create.error)
   const ready = title.trim().length > 0 && selected.length > 0 && !create.isPending
+  const decksList = decks.data?.decks
+  // The cost and the request cap are the server's: the panel renders what
+  // `GET /workspaces/:id/decks` serves rather than a literal that can drift from
+  // the plan matrix.
+  const cost = decks.data?.cost
 
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
@@ -91,17 +96,19 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
           className="field"
           type="number"
           min={1}
-          max={50}
+          max={cost?.max_cards}
           value={count}
           onChange={(event) => {
             const next = event.target.valueAsNumber
             setCount(Number.isNaN(next) ? 0 : next)
           }}
         />
-        <p className="text-xs text-ink-muted">
-          Costs 4 credits per 10 cards. The deck appears here while it is generated, usually
-          within a minute.
-        </p>
+        {cost !== undefined && (
+          <p className="text-xs text-ink-muted">
+            Costs {cost.per_batch} credits per {cost.batch_size} cards. The deck appears here while
+            it is generated, usually within a minute.
+          </p>
+        )}
         <button type="submit" className="btn btn-primary self-start" disabled={!ready}>
           {create.isPending ? 'Starting' : 'Generate deck'}
         </button>
@@ -110,16 +117,16 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
 
       {decks.isPending && <SkeletonRows rows={2} label="Loading this workspace's decks" />}
 
-      {decks.data !== undefined && decks.data.length === 0 && (
+      {decksList !== undefined && decksList.length === 0 && (
         <EmptyState
           title="No decks yet"
           reason="Pick the sources above and generate one. Every card is linked to the passage it came from."
         />
       )}
 
-      {decks.data !== undefined && decks.data.length > 0 && (
+      {decksList !== undefined && decksList.length > 0 && (
         <ul className="flex flex-col divide-y divide-rule border-y border-rule">
-          {decks.data.map((deck) => (
+          {decksList.map((deck) => (
             <DeckRow key={deck.id} deck={deck} />
           ))}
         </ul>

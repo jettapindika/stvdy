@@ -36,6 +36,14 @@ pub(crate) const GENERATE_ACTION: &str = "generate_flashcards";
 /// than truncated.
 pub const MAX_REQUESTED_CARDS: u32 = 50;
 
+/// How many cards one credit batch covers.
+///
+/// The price in `config/plans.toml` is per batch (`flashcard_batch_10`), so the
+/// quote is `ceil(count / CARDS_PER_BATCH)` batches. It is named rather than
+/// written as `10` in two places so the descriptor the SPA renders and the cost
+/// the route charges cannot drift.
+pub const CARDS_PER_BATCH: i64 = 10;
+
 /// The most sources one deck may draw on. A deck from twenty sources is a topic,
 /// not a deck, and the prompt has a chunk budget.
 const MAX_SOURCES: usize = 20;
@@ -153,15 +161,15 @@ pub async fn create_deck(
     // batch price, and asking for 21 cards is three batches.
     // `i64::div_ceil` is still unstable, and `count` is positive here, so this is
     // an exact ceiling division.
-    let batches = (i64::from(body.count) + 9) / 10;
+    let batches = (i64::from(body.count) + CARDS_PER_BATCH - 1) / CARDS_PER_BATCH;
     let cost = batches * state.config.plans.credits.flashcard_batch_10;
     let spent = credits::spend(&state, user.user_id, plan, GENERATE_ACTION, cost, None).await?;
 
-    let deck_id: Uuid = match sqlx::query_scalar(
+    let (deck_id, created_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         "insert into decks
             (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent, usage_event_id)
          values ($1, $2, $3, $4, 'generating', $5, $6, $7)
-         returning id",
+         returning id, created_at",
     )
     .bind(user.user_id)
     .bind(workspace_id)
@@ -173,7 +181,7 @@ pub async fn create_deck(
     .fetch_one(&state.pool)
     .await
     {
-        Ok(deck_id) => deck_id,
+        Ok(row) => row,
         Err(error) => {
             // The credit is already spent and there is no deck to fail, so the
             // charge must come back here rather than in a job that will never run.
@@ -221,20 +229,24 @@ pub async fn create_deck(
         )));
     }
 
+    // Built from `DeckJson`, the same type every other route serialises, so the
+    // 201 body cannot drift from `GET /decks/:id`. The hand-built body omitted
+    // `created_at`, which the SPA's `Deck` declares: a false type assertion.
+    let deck = DeckJson {
+        id: deck_id,
+        workspace_id,
+        title,
+        source_ids: body.source_ids,
+        status: "generating".to_string(),
+        error: None,
+        requested_count: body.count as i32,
+        card_count: 0,
+        created_at,
+    };
+
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::json!({
-            "deck": {
-                "id": deck_id,
-                "workspace_id": workspace_id,
-                "title": title,
-                "source_ids": body.source_ids,
-                "status": "generating",
-                "error": serde_json::Value::Null,
-                "requested_count": body.count,
-                "card_count": 0,
-            }
-        })),
+        Json(serde_json::json!({ "deck": deck })),
     ))
 }
 
@@ -264,7 +276,18 @@ pub async fn list_decks(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("listing decks: {error}")))?;
 
     let decks: Vec<DeckJson> = rows.iter().map(deck_from_row).collect();
-    Ok(Json(serde_json::json!({ "decks": decks })))
+    // The cost descriptor the SPA's panel renders, from the config rather than a
+    // literal: the roadmap forbids a hardcoded limit or cost in the client, so
+    // the price and the request cap are served with the decks the panel already
+    // fetches. A client that ignores the field still reads `decks`.
+    Ok(Json(serde_json::json!({
+        "decks": decks,
+        "cost": {
+            "per_batch": state.config.plans.credits.flashcard_batch_10,
+            "batch_size": CARDS_PER_BATCH,
+            "max_cards": MAX_REQUESTED_CARDS,
+        }
+    })))
 }
 
 /// `GET /decks/:id`: the deck, its cards, and its generation state.

@@ -683,7 +683,8 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
         ],
     );
 
-    // The response the second device got, and the row a third device would fetch.
+    // The response to the second request — the earlier review — and the row a
+    // third device would fetch.
     let responded: (f32, i32, chrono::DateTime<chrono::Utc>) = (
         earlier["card"]["ease"].as_f64().unwrap() as f32,
         earlier["card"]["interval_days"].as_i64().unwrap() as i32,
@@ -720,6 +721,11 @@ async fn reviews_from_two_devices_replay_to_identical_state(pool: PgPool) {
         now + chrono::Duration::days(6),
         "the schedule is dated from the last review in (reviewed_at, id) order"
     );
+    // Implied by the `assert_eq!` above, and kept deliberately: it names the
+    // incremental answer at the failure point. If the route dated the schedule
+    // from the review that happened to arrive last, this is the value it would
+    // have produced, and the message says so rather than leaving the reader to
+    // work out what `ten_min_ago + 6 days` means.
     assert_ne!(
         due_at,
         ten_min_ago + chrono::Duration::days(6),
@@ -995,4 +1001,242 @@ async fn another_users_card_is_not_found(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(reviews, 0, "a refused review must not be stored");
+}
+
+/// The 201 body is the same `DeckJson` every other route serialises, so it carries
+/// `created_at` — the SPA's `Deck` declares it, and the hand-built body that
+/// omitted it made that a false type assertion.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_created_deck_body_carries_every_deck_field(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply(
+        "Apa itu TCP?",
+        "Protokol.",
+        1,
+    )]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "created@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 5).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let deck = &body["deck"];
+    for field in [
+        "id",
+        "workspace_id",
+        "title",
+        "source_ids",
+        "status",
+        "error",
+        "requested_count",
+        "card_count",
+        "created_at",
+    ] {
+        assert!(
+            deck.get(field).is_some(),
+            "the 201 body must carry {field}: {deck}"
+        );
+    }
+    assert!(
+        deck["created_at"].is_string(),
+        "created_at must be the real timestamp, not null: {deck}"
+    );
+}
+
+/// Every workspace-scoped query in the generation path is owner-scoped, and the
+/// chunk load is one of them. The route validates ownership when it creates the
+/// deck, so this constructs the row directly: the defence is against a future
+/// caller that skips that check. Without the owner predicate the model would be
+/// handed another account's material and the deck would generate from it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deck_cannot_read_another_accounts_chunks(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Stolen?", "Yes.", 1)]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    // Account A owns the source the deck will name.
+    let owner = signed_up(&app, &harness, "chunk-owner@example.test").await;
+    let (_, foreign_source) =
+        workspace_with_text(&app, &harness, &owner, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    // Account B has their own workspace and a deck that names A's source.
+    let stranger = signed_up(&app, &harness, "chunk-stranger@example.test").await;
+    let (workspace_b, _) = workspace_with_text(
+        &app,
+        &harness,
+        &stranger,
+        "Sendiri",
+        "Modul 1",
+        "Isi sendiri.",
+    )
+    .await;
+
+    let (user_b,): (Uuid,) = sqlx::query_as("select id from users where email = $1")
+        .bind("chunk-stranger@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let deck_id: Uuid = sqlx::query_scalar(
+        "insert into decks (user_id, workspace_id, title, source_ids, status, requested_count)
+         values ($1, $2, 'Curi', array[$3::uuid], 'generating', 1)
+         returning id",
+    )
+    .bind(user_b)
+    .bind(Uuid::parse_str(&workspace_b).unwrap())
+    .bind(Uuid::parse_str(&foreign_source).unwrap())
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "insert into jobs (kind, payload)
+         values ('generate_flashcards', jsonb_build_object('deck_id', $1::text))",
+    )
+    .bind(deck_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    drain_jobs(&harness).await;
+
+    assert!(
+        llm.requests().is_empty(),
+        "the model must not be called for a deck whose only source belongs to another account"
+    );
+    let cards: i64 =
+        sqlx::query_scalar("select count(*)::bigint from flashcards where deck_id = $1")
+            .bind(deck_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(cards, 0, "a foreign source's text must not become a deck");
+
+    let status: String = sqlx::query_scalar("select status from decks where id = $1")
+        .bind(deck_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "failed",
+        "the deck must fail rather than stay generating"
+    );
+}
+
+/// The refund and the claim that zeroes `credits_spent` are one transaction, so a
+/// failure between them cannot charge a user for a deck they never received with
+/// nothing left for a retry to fix.
+///
+/// The ledger insert is forced to fail with a `user_id` that violates
+/// `credit_ledger`'s foreign key; the point under test is the rollback, not the
+/// trigger. Without the atomic fix the claim has already committed and
+/// `credits_spent` is 0, which is exactly the unrecoverable state.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_failed_refund_rolls_the_claim_back(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "atomic@example.test").await;
+    let (workspace_id, _source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (user_id,): (Uuid,) = sqlx::query_as("select id from users where email = $1")
+        .bind("atomic@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let deck_id: Uuid = sqlx::query_scalar(
+        "insert into decks
+            (user_id, workspace_id, title, source_ids, status, requested_count, credits_spent)
+         values ($1, $2, 'Jaringan', '{}'::uuid[], 'generating', 10, 4)
+         returning id",
+    )
+    .bind(user_id)
+    .bind(Uuid::parse_str(&workspace_id).unwrap())
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // A user id that does not exist violates the ledger's foreign key, so the
+    // refund insert fails.
+    stvdy_server::jobs::handlers::generate::fail_and_refund(
+        &harness.state,
+        deck_id,
+        Uuid::from_u128(0xdead),
+        4,
+        "boom",
+    )
+    .await;
+
+    let (status, credits_spent): (String, i32) =
+        sqlx::query_as("select status, credits_spent from decks where id = $1")
+            .bind(deck_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        credits_spent, 4,
+        "a failed refund must leave the charge refundable, not zeroed"
+    );
+    assert_eq!(
+        status, "generating",
+        "the claim must roll back with the refund it could not complete"
+    );
+
+    let refunds: i64 =
+        sqlx::query_scalar("select count(*)::bigint from credit_ledger where reason = 'refund'")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(refunds, 0, "no refund row was written");
+}
+
+/// The studio panel's cost copy and its `max` come from the plan matrix, not from
+/// a literal in the SPA. Serving them with the decks the panel already fetches
+/// keeps the two in step: a config change cannot leave the UI quoting a stale
+/// price or a stale request cap.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_deck_cost_descriptor_matches_the_config(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "cost@example.test").await;
+    let (workspace_id, _source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/decks"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let cost = &body["cost"];
+    assert_eq!(
+        cost["per_batch"].as_i64().unwrap(),
+        harness.state.config.plans.credits.flashcard_batch_10,
+        "the quoted batch price must be the plan matrix's"
+    );
+    assert_eq!(
+        cost["batch_size"].as_i64().unwrap(),
+        stvdy_server::flashcards::routes::CARDS_PER_BATCH
+    );
+    assert_eq!(
+        cost["max_cards"].as_u64().unwrap(),
+        u64::from(stvdy_server::flashcards::routes::MAX_REQUESTED_CARDS)
+    );
+    assert!(
+        body["decks"].is_array(),
+        "the existing shape stays valid for a client that ignores cost: {body}"
+    );
 }

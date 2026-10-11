@@ -138,18 +138,26 @@ pub async fn fail_and_refund(
         }
     }
 
+    if claimed.is_some() {
+        // The ledger row is issued inside the same transaction as the claim that
+        // zeroed `credits_spent`, so a crash between the two cannot charge a user
+        // for a deck they never received with no retry left to fix it. A failure
+        // here rolls the claim back, leaving `credits_spent` in place so a later
+        // call can still refund.
+        if let Err(error) =
+            crate::credits::refund_in(&mut tx, user_id, i64::from(credits), deck_id, "refund").await
+        {
+            tracing::error!(%error, %deck_id, "could not refund a failed generation");
+            return;
+        }
+    }
+
     if let Err(error) = tx.commit().await {
         tracing::error!(%error, %deck_id, "could not commit the deck failure");
         return;
     }
 
     if claimed.is_some() {
-        if let Err(error) =
-            crate::credits::refund(&state.pool, user_id, i64::from(credits), deck_id, "refund")
-                .await
-        {
-            tracing::error!(%error, %deck_id, "could not refund a failed generation");
-        }
         tracing::warn!(%deck_id, credits, "generation failed permanently; credits refunded");
     }
 }

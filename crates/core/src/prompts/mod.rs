@@ -144,18 +144,23 @@ pub fn compose_chat(
 ) -> Result<Composed, PromptError> {
     let values = values_of(vars);
     let mut text = render(registry::BASE_V1, &values)?;
-    text.push_str("\n\n");
-    text.push_str(&render_sources(chunks));
-    text.push_str("\n\n");
-    text.push_str(&render_web(web));
 
     // The last guard rail: an undeclared `{{var}}` in the template is left
     // intact by `render` precisely so it trips this check instead of shipping.
+    // It runs on the rendered template *before* the data block is appended: a
+    // source may legitimately contain a `{{...}}` snippet (Jinja, Handlebars,
+    // Vue), and the data block is not a template, so a marker there must not
+    // turn a composable prompt into a failure.
     if text.contains("{{") {
         return Err(PromptError::Invalid(
             "composed prompt still contains an unfilled {{variable}}".to_string(),
         ));
     }
+
+    text.push_str("\n\n");
+    text.push_str(&render_sources(chunks));
+    text.push_str("\n\n");
+    text.push_str(&render_web(web));
 
     let labels = labels_of(chunks, web);
 
@@ -328,14 +333,18 @@ pub fn compose_task(
     text.push_str(&render_with(registry::JSON_CONTRACT_V1, &values, table)?);
     text.push_str("\n\n");
     text.push_str(&render_with(module.text(), &values, table)?);
-    text.push_str("\n\n");
-    text.push_str(&render_sources(chunks));
 
+    // As in `compose_chat`, the guard runs on the rendered templates only: a
+    // source that contains a `{{...}}` snippet is data, not an unfilled
+    // variable, and must not make the deck permanently ungeneratable.
     if text.contains("{{") {
         return Err(PromptError::Invalid(
             "composed task prompt still contains an unfilled {{variable}}".to_string(),
         ));
     }
+
+    text.push_str("\n\n");
+    text.push_str(&render_sources(chunks));
 
     Ok(Composed {
         text,

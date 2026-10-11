@@ -326,6 +326,27 @@ pub async fn refund(
     ref_id: Uuid,
     reason: &str,
 ) -> AppResult<()> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("refunding credits: {error}")))?;
+    refund_in(&mut conn, user_id, credits, ref_id, reason).await
+}
+
+/// [`refund`] against an existing connection, so a caller that must issue the
+/// compensating ledger row and the state change it compensates in one
+/// transaction can.
+///
+/// `fail_and_refund` is that caller: the claim that zeroes `decks.credits_spent`
+/// and the refund row must commit together, or a failure between them charges a
+/// user for a deck they never received with nothing left to retry.
+pub async fn refund_in(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    credits: i64,
+    ref_id: Uuid,
+    reason: &str,
+) -> AppResult<()> {
     if credits <= 0 {
         return Ok(());
     }
@@ -337,7 +358,7 @@ pub async fn refund(
     .bind(credits)
     .bind(reason)
     .bind(ref_id)
-    .execute(pool)
+    .execute(conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("refunding credits: {error}")))?;
     Ok(())

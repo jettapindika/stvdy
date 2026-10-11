@@ -18,6 +18,9 @@ use stvdy_core::prompts::{
 /// compiles it from, so this test checks the *file* and not a copy of it.
 const BASE_FILE: &str = include_str!("../../../prompts/base.v1.md");
 
+/// The flashcards module file, for the documented-schema check.
+const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
+
 fn vars() -> ChatVars {
     ChatVars {
         assistant_name: "Stvdy".to_string(),
@@ -156,6 +159,31 @@ fn the_composed_prompt_has_no_unfilled_variable() {
     assert_eq!(composed.prompt_version, "base.v1");
     assert!(composed.text.contains("Jetta"));
     assert!(composed.text.contains("Jaringan Komputer"));
+}
+
+/// A source is data, not a template: a programming document legitimately contains
+/// `{{...}}` snippets (Jinja, Handlebars, Vue), and a workspace can be named
+/// `{{Project}}`. The unfilled-variable guard must run on the rendered templates
+/// only, or such material could never compose a prompt.
+#[test]
+fn a_source_containing_a_template_marker_still_composes() {
+    let composed = compose_chat(
+        &vars(),
+        &[chunk(
+            1,
+            "{{Project}} notes",
+            None,
+            "Render {{cards}} to show the deck.",
+        )],
+        &[],
+    )
+    .unwrap();
+
+    assert!(
+        composed.text.contains("Render {{cards}}"),
+        "the source text must be quoted verbatim"
+    );
+    assert!(composed.text.contains("{{Project}}"), "{}", composed.text);
 }
 
 #[test]
@@ -322,10 +350,13 @@ fn the_label_map_resolves_a_citation_from_the_composed_prompt() {
 /// Both are checked here rather than trusted to the composer's implementation.
 mod task_composition {
     use std::collections::BTreeMap;
+    use stvdy_core::generation::flashcards::CardsFile;
     use stvdy_core::prompts::{
         ChatVars, ModuleId, PromptChunk, PromptError, compose_task, module_variables, trim_base,
     };
     use uuid::Uuid;
+
+    use crate::FLASHCARDS_FILE;
 
     fn base() -> ChatVars {
         ChatVars {
@@ -509,5 +540,50 @@ mod task_composition {
             "{}",
             composed.text
         );
+    }
+
+    /// The task path's guard runs on the rendered templates only, for the same
+    /// reason as chat's: a source containing `{{cards}}` is data, and a permanent
+    /// `Invalid` would make that material unable to produce a deck at all.
+    #[test]
+    fn a_source_containing_a_template_marker_still_composes() {
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert("count", "10".to_string());
+        let source = PromptChunk {
+            label: 1,
+            chunk_id: Uuid::from_u128(1),
+            source_id: Uuid::from_u128(99),
+            source_title: "{{Project}} notes".to_string(),
+            page: Some(4),
+            content: "Render {{cards}} to show the deck.".to_string(),
+        };
+        let composed =
+            compose_task(ModuleId::FlashcardsV1, &base(), &module_vars, &[source]).unwrap();
+        assert!(
+            composed.text.contains("Render {{cards}}"),
+            "the source text must be quoted verbatim"
+        );
+        assert!(composed.text.contains("{{Project}}"), "{}", composed.text);
+    }
+
+    /// `prompts/README.md` promises that every JSON module's documented example
+    /// parses into its Rust struct. The schema line is the contract the model is
+    /// shown; parsing it here means a prompt edit that renames a field fails the
+    /// build rather than a user's generation.
+    #[test]
+    fn the_documented_schema_parses_into_the_rust_struct() {
+        let schema = FLASHCARDS_FILE
+            .split_once("Schema:")
+            .expect("flashcards.v1.md documents a Schema line")
+            .1
+            .trim()
+            .lines()
+            .next()
+            .expect("the Schema line is followed by the example");
+        // `deny_unknown_fields` is in force on `CardsFile`, so an example that
+        // grows a field the struct does not have is a failure here too.
+        let parsed: CardsFile =
+            serde_json::from_str(schema).expect("the documented example must parse");
+        assert_eq!(parsed.cards.len(), 1, "the example carries one card");
     }
 }

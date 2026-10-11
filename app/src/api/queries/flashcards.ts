@@ -25,6 +25,21 @@ export interface Deck {
   created_at: string
 }
 
+/**
+ * The credit price descriptor `GET /workspaces/:id/decks` serves alongside the
+ * decks, so the panel quotes the plan matrix's price rather than a literal.
+ */
+export interface DeckCost {
+  per_batch: number
+  batch_size: number
+  max_cards: number
+}
+
+export interface DecksResponse {
+  decks: Deck[]
+  cost: DeckCost
+}
+
 export interface Flashcard {
   id: string
   deck_id: string
@@ -46,15 +61,13 @@ export const flashcardKeys = {
 export function useDecks(workspaceId: string) {
   return useQuery({
     queryKey: flashcardKeys.decks(workspaceId),
-    queryFn: async ({ signal }) => {
-      const body = await api.get<{ decks: Deck[] }>(`/workspaces/${workspaceId}/decks`, { signal })
-      return body.decks
-    },
+    queryFn: async ({ signal }) =>
+      api.get<DecksResponse>(`/workspaces/${workspaceId}/decks`, { signal }),
     enabled: workspaceId.length > 0,
     // A deck in flight is the only reason to poll; once every deck has settled the
     // interval is off, so a parked tab stops asking.
     refetchInterval: (query) =>
-      (query.state.data ?? []).some((deck) => deck.status === 'generating') ? 1500 : false,
+      (query.state.data?.decks ?? []).some((deck) => deck.status === 'generating') ? 1500 : false,
   })
 }
 

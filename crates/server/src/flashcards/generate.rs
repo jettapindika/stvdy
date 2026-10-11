@@ -340,12 +340,13 @@ async fn load_chunks(state: &AppState, deck: &DeckRow) -> Result<Vec<PromptChunk
         "select c.id, c.source_id, c.page, c.content, s.title
            from chunks c
            join sources s on s.id = c.source_id
-          where c.source_id = any($1)
+          where c.source_id = any($1) and s.user_id = $3
           order by c.source_id, c.idx
           limit $2",
     )
     .bind(&deck.source_ids)
     .bind(GENERATION_CHUNK_LIMIT)
+    .bind(deck.user_id)
     .fetch_all(&state.pool)
     .await
     .map_err(|error| Failure::transient(format!("loading the deck's chunks: {error}")))?;

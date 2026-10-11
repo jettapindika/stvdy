@@ -190,11 +190,7 @@ pub(crate) async fn enforce_device_limit(
     user_id: Uuid,
     plan_id: &str,
 ) -> AppResult<()> {
-    let plan = match plan_id {
-        "pro" => stvdy_core::config::PlanId::Pro,
-        "power" => stvdy_core::config::PlanId::Power,
-        _ => stvdy_core::config::PlanId::Free,
-    };
+    let plan = stvdy_core::config::PlanId::parse(plan_id);
     let limit = stvdy_core::config::Limit::Max(state.config.plans.get(plan).devices_max);
 
     let used: i64 = sqlx::query_scalar(

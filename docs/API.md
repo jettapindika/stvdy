@@ -359,7 +359,9 @@ Body: `{"title": string, "source_ids": [uuid], "count": number}`. `count` is how
 many cards to ask for; the generator may return fewer and is told never to pad.
 
 201 `{"deck": {"id", "workspace_id", "title", "source_ids", "status":
-"generating", "error": null, "requested_count", "card_count": 0}}`.
+"generating", "error": null, "requested_count", "card_count": 0, "created_at"}}`.
+The body is the same `Deck` shape every other route serialises, `created_at`
+included.
 
 - 400 `validation` when the title is empty or over 120 characters, `count` is
   outside `1..=50`, `source_ids` is empty or longer than 20, or a source is not
@@ -379,10 +381,15 @@ costs nothing.
 
 ### `GET /workspaces/:id/decks`
 
-Auth. 200 `{"decks": [Deck]}`, newest first, tombstones excluded. **This route is
-a deliberate addition beyond the spec's route list** (A75): without it a deck is
-unreachable after a page reload, which makes the phase's own exit gate untestable
-by hand.
+Auth. 200 `{"decks": [Deck], "cost": {"per_batch", "batch_size",
+"max_cards"}}`, newest first, tombstones excluded. `cost` is the credit price
+descriptor the studio panel renders — `per_batch` is the plan matrix's
+`flashcard_batch_10`, `batch_size` the number of cards one batch covers, and
+`max_cards` the request cap `POST /workspaces/:id/decks` enforces — so the client
+never quotes a hardcoded price or limit. A client that ignores `cost` still reads
+`decks` unchanged. **This route is a deliberate addition beyond the spec's route
+list** (A75): without it a deck is unreachable after a page reload, which makes
+the phase's own exit gate untestable by hand.
 
 ### `GET /decks/:id`
 
