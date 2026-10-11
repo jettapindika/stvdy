@@ -19,6 +19,7 @@ import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
 import { QuizPanel } from '@/features/studio/QuizPanel'
+import { ReportPanel } from '@/features/studio/ReportPanel'
 
 /**
  * The workspace view: Sources, Chat, and Studio.
@@ -41,14 +42,14 @@ import { QuizPanel } from '@/features/studio/QuizPanel'
  * viewport, so panels scroll internally without an outer page scroll.
  *
  * Sources is the panel Phase 1 built, so it is the one that opens. Chat is the
- * panel Phase 2 built. Studio is the flashcard panel Phase 4 built: it generates
- * a deck from the sources the student picks, and every card it produces is linked
- * to the passage it came from.
+ * panel Phase 2 built. Studio is the generated material: flashcards (Phase 4),
+ * quizzes (Phase 5), and the report and cheatsheet this workspace's sources
+ * become (Phase 6).
  */
 
 type Panel = 'sources' | 'chat' | 'studio'
 
-type StudioSection = 'flashcards' | 'quiz'
+type StudioSection = 'flashcards' | 'quiz' | 'report'
 
 const STATUS_CHIP: Record<SourceStatusName, string> = {
   pending: 'chip',
@@ -186,6 +187,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
   const sections: { id: StudioSection; label: string }[] = [
     { id: 'flashcards', label: t('workspaces.studio.flashcards') },
     { id: 'quiz', label: t('workspaces.studio.quiz') },
+    { id: 'report', label: t('workspaces.studio.report') },
   ]
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -251,6 +253,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
         >
           {entry.id === 'flashcards' && <FlashcardsPanel workspaceId={workspaceId} />}
           {entry.id === 'quiz' && <QuizPanel workspaceId={workspaceId} />}
+          {entry.id === 'report' && <ReportPanel workspaceId={workspaceId} />}
         </div>
       ))}
     </div>

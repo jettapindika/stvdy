@@ -224,7 +224,8 @@
     "studio": {
       "sections": "Bagian Studio",
       "flashcards": "Flashcard",
-      "quiz": "Quiz"
+      "quiz": "Quiz",
+      "report": "Laporan"
     },
     "sources": {
       "loading": "Memuat sumber ruang belajar ini",
@@ -327,7 +328,12 @@
       "results": "hasilmu",
       "answer": "jawaban ini",
       "decks": "dek",
-      "quizzes": "kuis"
+      "quizzes": "kuis",
+      "report": "laporan ini",
+      "reports": "laporan",
+      "cheatsheet": "contekan ini",
+      "cheatsheets": "contekan",
+      "export": "ekspor ini"
     }
   },
   "study": {
@@ -442,6 +448,43 @@
       "untitled": "Kuis tanpa judul",
       "questions_other": "{{count}} pertanyaan",
       "take": "Kerjakan kuis"
+    },
+    "report": {
+      "topicLabel": "Topik laporan",
+      "topicHint": "Isi laporan ini tentang apa.",
+      "styleLabel": "Gaya",
+      "styleHint": "Untuk siapa laporan ini dan seformal apa bahasanya.",
+      "lengthLabel": "Panjang",
+      "lengthHint": "Seberapa panjang, misalnya \"sekitar 1500 kata\".",
+      "cost": "Butuh {{outline}} kredit untuk kerangkanya, lalu {{section}} kredit untuk setiap bagian yang kamu buat.",
+      "generate": "Usulkan kerangka",
+      "loading": "Memuat laporan di ruang belajar ini",
+      "reportsHeading": "Laporan",
+      "empty": {
+        "title": "Belum ada laporan",
+        "reason": "Pilih sumber di atas lalu usulkan kerangka. Kerangkanya kamu sunting dulu sebelum ada bagian yang ditulis, dan setiap bagian menyebut kutipan asalnya."
+      },
+      "untitled": "Laporan tanpa judul",
+      "written": "{{written}} dari {{total}} sudah ditulis",
+      "open": "Buka laporan",
+      "status": {
+        "draft": "Baru kerangka"
+      }
+    },
+    "cheatsheet": {
+      "heading": "Contekan",
+      "scopeLabel": "Cakupan",
+      "scopeHint": "Isi contekan ini, misalnya \"UTS Jaringan Komputer\".",
+      "examDateLabel": "Tanggal ujian",
+      "examDateHint": "Opsional. Kosongkan kalau contekan ini tidak terikat satu ujian.",
+      "depthLabel": "Kedalaman",
+      "depth": {
+        "brief": "ringkas",
+        "normal": "normal",
+        "thorough": "menyeluruh"
+      },
+      "cost": "Butuh {{credits}} kredit. Contekan muncul di sini saat dibuat.",
+      "generate": "Buat contekan"
     }
   },
   "styleguide": {
@@ -550,5 +593,89 @@
   "planner": {
     "rebalance": "Seimbangkan ulang mingguku",
     "rebalanceReason": "Memindahkan dan memecah blok belajar saat satu minggu terlalu padat."
+  },
+  "reports": {
+    "loading": "Memuat laporan ini",
+    "backToWorkspaces": "Kembali ke ruang belajar",
+    "failed": {
+      "title": "Laporan ini gagal dibuat",
+      "reason": "Pembuatannya gagal. Kreditmu dikembalikan."
+    },
+    "noOutline": {
+      "title": "Laporan ini belum punya kerangka",
+      "reason": "Usulkan kerangka dari Studio, lalu sunting di sini sebelum membuat bagian mana pun."
+    },
+    "sectionProgress": "{{written}} dari {{total}} bagian sudah ditulis",
+    "outline": {
+      "title": "Kerangka",
+      "what": "kerangka",
+      "hint": "Diusulkan dari sumbermu. Ganti nama, urutkan ulang, atau hapus bagiannya sebelum kamu buat.",
+      "titleLabel": "Judul laporan",
+      "headingLabel": "Bagian {{position}}",
+      "supports_other": "{{count}} kutipan pendukung",
+      "moveUp": "Naikkan",
+      "moveDown": "Turunkan",
+      "remove": "Hapus",
+      "save": "Simpan kerangka",
+      "saving": "Menyimpan"
+    },
+    "sections": {
+      "title": "Bagian",
+      "hint": "Buat satu per satu. Membuat ulang satu bagian hanya mengganti bagian itu.",
+      "heading": "{{position}}. {{heading}}",
+      "writing": "Sedang ditulis",
+      "written": "Sudah ditulis",
+      "notWritten": "Belum ditulis",
+      "cost": "{{credits}} kredit",
+      "generate": "Buat",
+      "regenerate": "Buat ulang"
+    },
+    "export": {
+      "title": "Ekspor",
+      "filename": "laporan",
+      "loading": "Memeriksa format ekspor di paketmu",
+      "preparing": "Menyiapkan",
+      "none": "Tidak ada format ekspor di paketmu.",
+      "format": {
+        "md": "Unduh Markdown",
+        "pdf": "Unduh PDF"
+      }
+    },
+    "locked": {
+      "md": "Ekspor Markdown",
+      "mdReason": "Menyimpan laporan sebagai berkas Markdown yang bisa kamu simpan.",
+      "pdf": "Ekspor PDF",
+      "pdfReason": "Mencetak laporan jadi PDF berhalaman."
+    }
+  },
+  "cheatsheet": {
+    "loading": "Memuat contekan ini",
+    "backToWorkspaces": "Kembali ke ruang belajar",
+    "generating": "Contekan ini masih dibuat",
+    "failed": {
+      "title": "Contekan ini gagal dibuat",
+      "reason": "Pembuatannya gagal. Kreditmu dikembalikan."
+    },
+    "preview": {
+      "title": "Pratinjau",
+      "loading": "Memuat halaman yang sudah dirender",
+      "pages_other": "{{count}} halaman"
+    },
+    "actions": {
+      "title": "Cetak dan render ulang",
+      "hint": "Unduh PDF-nya, atau render ulang dokumen ini dari isi yang tersimpan."
+    },
+    "pdf": {
+      "download": "Unduh PDF",
+      "preparing": "Menyiapkan",
+      "pages": "PDF-nya {{pages}} halaman."
+    },
+    "pdfFilename": "contekan",
+    "rerender": {
+      "action": "Render ulang",
+      "pending": "Merender ulang",
+      "free": "Render ulang memakai isi yang tersimpan: tanpa panggilan model, dan tanpa kredit."
+    },
+    "template": "Dirender dengan template {{version}}"
   }
 }

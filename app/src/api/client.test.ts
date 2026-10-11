@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { API_BASE_URL, api, apiRequest, ensureFreshSession } from './client'
+import { API_BASE_URL, api, apiRaw, apiRequest, ensureFreshSession } from './client'
 import { ApiError, apiErrorReason, networkReason } from './errors'
 import { getAccessToken, saveSession, setAccessToken } from '../lib/tokens'
 import { bearerOf, installFakePlatform, jsonResponse, mockFetch } from '../test/harness'
@@ -270,5 +270,54 @@ describe('error mapping', () => {
     setAccessToken('access-1')
 
     await expect(api.delete('/workspaces/w1')).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * The document path, added for the exports and the cheatsheet preview.
+ *
+ * Those routes answer a document rather than JSON — `text/markdown`,
+ * `application/pdf`, a whole `text/html` — and the request for one still has to
+ * carry the bearer token and still has to go through the single-flight refresh. A
+ * hand-rolled `fetch` at the call site would be a second place for the auth
+ * contract to live, and the failure would be a download that 401s the first time
+ * an access token expired.
+ */
+describe('requests whose body is a document', () => {
+  it('returns the response untouched, with the bearer attached', async () => {
+    const calls = mockFetch(() => ({
+      ok: true,
+      status: 200,
+      text: async () => '# Jaringan',
+    }) as Response)
+    setAccessToken('access-1')
+
+    const response = await apiRaw('/reports/r1/export?format=md')
+
+    expect(await response.text()).toBe('# Jaringan')
+    expect(calls[0]?.url).toBe(`${API_BASE_URL}/reports/r1/export?format=md`)
+    expect(authorizationOf(calls[0]?.init ?? {})).toBe('Bearer access-1')
+  })
+
+  it('still turns a refusal into the typed error the screens branch on', async () => {
+    mockFetch(() =>
+      jsonResponse(403, {
+        code: 'plan_required',
+        message: 'pdf is not in this plan',
+        min_plan: 'Pro',
+        limit: null,
+        used: null,
+      }),
+    )
+    setAccessToken('access-1')
+
+    // The document routes are plan-gated too, so a refusal has to arrive as the
+    // same `ApiError` every other route produces: a screen that could only see a
+    // status code would have to invent the copy for it.
+    await expect(apiRaw('/reports/r1/export?format=pdf')).rejects.toMatchObject({
+      code: 'plan_required',
+      status: 403,
+      minPlan: 'Pro',
+    })
   })
 })

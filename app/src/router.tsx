@@ -9,6 +9,8 @@ import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
+import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
+import { ReportScreen } from './features/reports/ReportScreen'
 import { QuizScreen } from './features/quiz/QuizScreen'
 import { StudyScreen } from './features/study/StudyScreen'
 import { TodayScreen } from './features/today/TodayScreen'
@@ -73,6 +75,11 @@ export const router = createBrowserRouter([
           { path: 'workspaces/:workspaceId', element: <WorkspaceScreen /> },
           { path: 'study/:deckId', element: <StudyScreen /> },
           { path: 'quiz/:quizId', element: <QuizScreen /> },
+          // The two printable documents. A report is edited in two steps and a
+          // cheatsheet is read in a sandboxed frame, so neither is a panel: each
+          // needs the whole width and its own URL to come back to.
+          { path: 'reports/:reportId', element: <ReportScreen /> },
+          { path: 'cheatsheets/:cheatsheetId', element: <CheatsheetScreen /> },
           {
             path: 'calendar',
             element: <NotBuiltRoute titleKey="nav.calendar" whatKey="routes.calendar.what" />,

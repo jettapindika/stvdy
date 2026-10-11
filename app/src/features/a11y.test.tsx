@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { screen } from '@testing-library/react'
+import { Route, Routes } from 'react-router'
 
 import { ChatScreen } from '@/features/chat/ChatScreen'
+import { CheatsheetScreen } from '@/features/reports/CheatsheetScreen'
+import { ReportScreen } from '@/features/reports/ReportScreen'
 import { StudyScreen } from '@/features/study/StudyScreen'
 import { TodayScreen } from '@/features/today/TodayScreen'
 import { WorkspaceListScreen } from '@/features/workspaces/WorkspaceListScreen'
@@ -90,6 +94,24 @@ const notFound = () =>
     used: null,
   })
 
+/**
+ * The signed-in user the two document screens read their plan from.
+ *
+ * `plan_id` decides which export formats exist, so a screen rendered without it
+ * would show neither format and hide the very controls these checks are here to
+ * look at.
+ */
+const USER = {
+  id: 'u1',
+  email: 'student@example.com',
+  email_verified: true,
+  email_verified_at: '2026-10-11T08:00:00Z',
+  plan_id: 'pro',
+  timezone: 'Asia/Jakarta',
+  student_verified: false,
+  created_at: '2026-10-11T08:00:00Z',
+}
+
 beforeEach(() => {
   installFakePlatform('macos')
   setAccessToken('access-1')
@@ -123,6 +145,9 @@ describe('screen accessibility', () => {
       if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [SOURCE] })
       if (path === '/workspaces/w1/messages') return jsonResponse(200, { messages: [] })
       if (path === '/workspaces/w1/decks') return jsonResponse(200, { decks: [DECK] })
+      // The Studio's third sub-tab mounts with the other two, so the workspace
+      // screen requests the report list whether or not it is the visible panel.
+      if (path === '/workspaces/w1/reports') return jsonResponse(200, { reports: [] })
       return notFound()
     })
     // The workspace screen takes its id from the route, so the route is the prop.
@@ -183,5 +208,96 @@ describe('screen accessibility', () => {
     })
     const { container } = renderWithProviders(<StudyScreen />, { route: '/study/d1' })
     await expectAccessible(container, () => heading(container, 'the flashcard review'))
+  })
+
+  it('the report screen has no axe violations', async () => {
+    // The outline editor is the composition most likely to break a rule: a list of
+    // inputs whose labels are generated, a caveat that must be readable without its
+    // tone, and buttons whose names repeat per row.
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, { ...USER, plan_id: 'pro' })
+      if (path === '/reports/r1') {
+        return jsonResponse(200, {
+          report: {
+            id: 'r1',
+            workspace_id: 'w1',
+            title: 'Jaringan Komputer',
+            status: 'draft',
+            error: null,
+            outline: {
+              title: 'Jaringan Komputer',
+              sections: [
+                { heading: 'Pendahuluan', purpose: 'Ruang lingkup.', labels: [1], gaps: false },
+                { heading: 'Keamanan', purpose: 'WPA3.', labels: [], gaps: true },
+              ],
+            },
+            body_md: null,
+            sections: [
+              { heading: 'Pendahuluan', body_md: null, generating: false, error: null },
+              { heading: 'Keamanan', body_md: null, generating: false, error: null },
+            ],
+            created_at: '2026-10-11T08:00:00Z',
+            updated_at: '2026-10-11T08:00:00Z',
+          },
+        })
+      }
+      return notFound()
+    })
+    // The screen takes its id from the route, so the route is what renders it:
+    // `useParams` needs a real match, not just a location.
+    const { container } = renderWithProviders(
+      <Routes>
+        <Route path="/reports/:reportId" element={<ReportScreen />} />
+      </Routes>,
+      { route: '/reports/r1' },
+    )
+    // The screen needs its report before it renders anything: an empty container
+    // passes every rule, so the check waits for the content it is checking.
+    await screen.findByRole('heading', { name: 'Jaringan Komputer' })
+    await expectAccessible(container, () => heading(container, 'the report screen'))
+  })
+
+  it('the cheatsheet preview has no axe violations', async () => {
+    // axe cannot evaluate an `iframe` in jsdom ("Respondable target must be a frame
+    // in the current window"), so the frame is left out of this run and its own two
+    // properties — that it is named, and that its sandbox is empty — are asserted
+    // directly in `CheatsheetScreen.test.tsx`, where the frame's contents can be
+    // driven. What this check covers is the rest of the screen: the headings, the
+    // action buttons, the locked-format block, and the labels on all of them.
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, { ...USER, plan_id: 'pro' })
+      if (path === '/cheatsheets/c1') {
+        return jsonResponse(200, {
+          cheatsheet: {
+            id: 'c1',
+            workspace_id: 'w1',
+            title: 'Jaringan Komputer',
+            scope: 'UTS Jaringan Komputer',
+            exam_date: '2026-10-20',
+            depth: 'normal',
+            source_ids: ['s1'],
+            status: 'ready',
+            error: null,
+            template_version: 'v1',
+            page_count: 6,
+            created_at: '2026-10-11T08:00:00Z',
+            updated_at: '2026-10-11T08:00:00Z',
+          },
+        })
+      }
+      // Deliberately unanswered: no frame is created, and the screen's own error
+      // state for the preview is what renders in its place.
+      return notFound()
+    })
+    const { container } = renderWithProviders(
+      <Routes>
+        <Route path="/cheatsheets/:cheatsheetId" element={<CheatsheetScreen />} />
+      </Routes>,
+      { route: '/cheatsheets/c1' },
+    )
+    await screen.findByRole('heading', { name: 'Jaringan Komputer' })
+    await expectAccessible(container, () => heading(container, 'the cheatsheet preview'))
   })
 })

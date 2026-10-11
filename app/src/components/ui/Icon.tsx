@@ -22,6 +22,7 @@ export type IconName =
   | 'search'
   | 'plus'
   | 'close'
+  | 'alert'
 
 const PATHS: Record<IconName, string> = {
   // A closed padlock: the locked-feature mark, and the read-only mark on a
@@ -40,6 +41,10 @@ const PATHS: Record<IconName, string> = {
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM17 17l4 4',
   plus: 'M12 5v14M5 12h14',
   close: 'M6 6l12 12M18 6L6 18',
+  // A triangle with an exclamation: the "not covered in your sources" caveat on a
+  // report outline. A caveat, not a failure, so it is drawn as a warning sign
+  // rather than as anything that reads as an error.
+  alert: 'M12 4l9 16H3zM12 10v4M12 17h.01',
 }
 
 export function Icon({

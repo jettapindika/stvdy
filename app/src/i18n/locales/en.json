@@ -225,7 +225,8 @@
     "studio": {
       "sections": "Studio sections",
       "flashcards": "Flashcards",
-      "quiz": "Quiz"
+      "quiz": "Quiz",
+      "report": "Report"
     },
     "sources": {
       "loading": "Loading this workspace's sources",
@@ -331,7 +332,12 @@
       "results": "your results",
       "answer": "this answer",
       "decks": "decks",
-      "quizzes": "quizzes"
+      "quizzes": "quizzes",
+      "report": "this report",
+      "reports": "reports",
+      "cheatsheet": "this cheatsheet",
+      "cheatsheets": "cheatsheets",
+      "export": "this export"
     }
   },
   "study": {
@@ -451,6 +457,43 @@
       "questions_one": "{{count}} question",
       "questions_other": "{{count}} questions",
       "take": "Take quiz"
+    },
+    "report": {
+      "topicLabel": "Report topic",
+      "topicHint": "What this report is about.",
+      "styleLabel": "Style",
+      "styleHint": "Who it is for and how formal it should read.",
+      "lengthLabel": "Length",
+      "lengthHint": "How long it should be, for example \"about 1500 words\".",
+      "cost": "Costs {{outline}} credits for the outline, then {{section}} credits for each section you generate.",
+      "generate": "Propose outline",
+      "loading": "Loading this workspace's reports",
+      "reportsHeading": "Reports",
+      "empty": {
+        "title": "No reports yet",
+        "reason": "Pick the sources above and propose an outline. You edit the outline before any section is written, and every section cites the passages it came from."
+      },
+      "untitled": "Untitled report",
+      "written": "{{written}} of {{total}} written",
+      "open": "Open report",
+      "status": {
+        "draft": "Outline only"
+      }
+    },
+    "cheatsheet": {
+      "heading": "Cheatsheet",
+      "scopeLabel": "Scope",
+      "scopeHint": "What this sheet covers, for example \"UTS Jaringan Komputer\".",
+      "examDateLabel": "Exam date",
+      "examDateHint": "Optional. Leave it empty for a sheet that is not tied to one exam.",
+      "depthLabel": "Depth",
+      "depth": {
+        "brief": "brief",
+        "normal": "normal",
+        "thorough": "thorough"
+      },
+      "cost": "Costs {{credits}} credits. The cheatsheet appears here while it is generated.",
+      "generate": "Generate cheatsheet"
     }
   },
   "styleguide": {
@@ -559,5 +602,91 @@
   "planner": {
     "rebalance": "Rebalance my week",
     "rebalanceReason": "Moves and splits study blocks when a week is overloaded."
+  },
+  "reports": {
+    "loading": "Loading this report",
+    "backToWorkspaces": "Back to workspaces",
+    "failed": {
+      "title": "This report could not be generated",
+      "reason": "The generation failed. Your credits were refunded."
+    },
+    "noOutline": {
+      "title": "This report has no outline",
+      "reason": "Propose an outline from the Studio, then edit it here before generating any section."
+    },
+    "sectionProgress": "{{written}} of {{total}} sections written",
+    "outline": {
+      "title": "Outline",
+      "what": "outline",
+      "hint": "Proposed from your sources. Rename, reorder or remove sections before you generate them.",
+      "titleLabel": "Report title",
+      "headingLabel": "Section {{position}}",
+      "supports_one": "{{count}} supporting passage",
+      "supports_other": "{{count}} supporting passages",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "remove": "Remove",
+      "save": "Save outline",
+      "saving": "Saving"
+    },
+    "sections": {
+      "title": "Sections",
+      "hint": "Generate one at a time. Regenerating a section replaces only that section.",
+      "heading": "{{position}}. {{heading}}",
+      "writing": "Writing",
+      "written": "Written",
+      "notWritten": "Not written yet",
+      "cost": "{{credits}} credits",
+      "generate": "Generate",
+      "regenerate": "Regenerate"
+    },
+    "export": {
+      "title": "Export",
+      "filename": "report",
+      "loading": "Checking which export formats your plan includes",
+      "preparing": "Preparing",
+      "none": "No export format is included in your plan.",
+      "format": {
+        "md": "Download Markdown",
+        "pdf": "Download PDF"
+      }
+    },
+    "locked": {
+      "md": "Markdown export",
+      "mdReason": "Saves the report as a Markdown file you can keep.",
+      "pdf": "PDF export",
+      "pdfReason": "Prints the report to a paginated PDF."
+    }
+  },
+  "cheatsheet": {
+    "loading": "Loading this cheatsheet",
+    "backToWorkspaces": "Back to workspaces",
+    "generating": "This cheatsheet is still being generated",
+    "failed": {
+      "title": "This cheatsheet could not be generated",
+      "reason": "The generation failed. Your credits were refunded."
+    },
+    "preview": {
+      "title": "Preview",
+      "loading": "Loading the rendered page",
+      "pages_one": "{{count}} page",
+      "pages_other": "{{count}} pages"
+    },
+    "actions": {
+      "title": "Print and re-render",
+      "hint": "Download the PDF, or re-render this document from its stored content."
+    },
+    "pdf": {
+      "download": "Download PDF",
+      "preparing": "Preparing",
+      "pages": "The PDF is {{pages}} pages long."
+    },
+    "pdfFilename": "cheatsheet",
+    "rerender": {
+      "action": "Re-render",
+      "pending": "Re-rendering",
+      "free": "Re-rendering uses the stored content: no model call, and no credits."
+    },
+    "template": "Rendered with template {{version}}"
   }
 }

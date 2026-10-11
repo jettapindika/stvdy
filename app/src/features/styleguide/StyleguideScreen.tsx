@@ -228,7 +228,7 @@ export function StyleguideScreen() {
           <li className="chip chip-source">{t('styleguide.chips.source')}</li>
         </ul>
         <ul className="flex flex-wrap items-center gap-4">
-          {(['lock', 'streak', 'check', 'clock', 'cards', 'chevron-right', 'external', 'search', 'plus', 'close'] as const).map(
+          {(['lock', 'streak', 'check', 'clock', 'cards', 'chevron-right', 'external', 'search', 'plus', 'close', 'alert'] as const).map(
             (name) => (
               <li key={name} className="flex items-center gap-2 text-muted">
                 <Icon name={name} />
@@ -247,6 +247,14 @@ export function StyleguideScreen() {
             whatKey="planner.rebalance"
             minPlan="Power"
             reasonKey="planner.rebalanceReason"
+          />
+          {/* The plan-gated export this phase adds: the format is in Pro's
+              `export_formats` and not in Free's, so the locked state is the one a
+              free account sees beside the export menu. */}
+          <LockedFeature
+            whatKey="reports.locked.pdf"
+            minPlan="Pro"
+            reasonKey="reports.locked.pdfReason"
           />
         </div>
       </Section>

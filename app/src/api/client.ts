@@ -182,7 +182,11 @@ export function ensureFreshSession(): Promise<boolean> {
   return attempt
 }
 
-async function send<T>(path: string, options: RequestOptions, mayRefresh: boolean): Promise<T> {
+async function sendRaw(
+  path: string,
+  options: RequestOptions,
+  mayRefresh: boolean,
+): Promise<Response> {
   let response: Response
   try {
     response = await fetch(
@@ -197,16 +201,39 @@ async function send<T>(path: string, options: RequestOptions, mayRefresh: boolea
     const error = apiErrorFromBody(response.status, await readJson(response))
     const isRefusedSession = error.isAuthFailure && options.auth !== false
     if (isRefusedSession && mayRefresh && (await ensureFreshSession())) {
-      return send<T>(path, options, false)
+      return sendRaw(path, options, false)
     }
     throw error
   }
 
-  return (await readJson(response)) as T
+  return response
+}
+
+async function send<T>(path: string, options: RequestOptions, mayRefresh: boolean): Promise<T> {
+  return (await readJson(await sendRaw(path, options, mayRefresh))) as T
 }
 
 export function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   return send<T>(path, options, true)
+}
+
+/**
+ * A response whose body is the document itself, not JSON.
+ *
+ * The export routes answer `text/markdown` and `application/pdf`, and the
+ * cheatsheet preview answers a whole HTML document. All three still need the
+ * bearer token and the single-flight refresh, which is why this goes through the
+ * same `sendRaw` every other request does rather than opening a second, private
+ * `fetch`: a download that skipped the refresh would 401 the first time an access
+ * token had expired, and one that attached the token by hand would be a second
+ * place for the auth contract to live.
+ *
+ * The caller decides how to read the body (`.text()`, `.blob()`), because what it
+ * does with the bytes is the caller's business: an export becomes a download, a
+ * preview becomes a frame's `srcdoc`.
+ */
+export function apiRaw(path: string): Promise<Response> {
+  return sendRaw(path, { method: 'GET' }, true)
 }
 
 /**
