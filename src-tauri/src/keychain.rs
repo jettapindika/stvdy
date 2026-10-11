@@ -26,8 +26,34 @@ pub enum SecretError {
     Backend(String),
 }
 
+/// Whether this OS has an OS credential store we can use.
+///
+/// Pure data rather than `cfg`, so the answer is testable on every platform. The
+/// `cfg`-gated wiring in `init()` can only be compiled on the platforms it
+/// targets, which means the "no store here" branch was previously exercised
+/// nowhere: every job that builds `src-tauri` runs macOS or Windows, and the
+/// ubuntu jobs use `--workspace`, which excludes it. A later refactor could have
+/// broken the `NoStore` arm without failing anything.
+pub fn has_secure_store(os: &str) -> bool {
+    matches!(os, "macos" | "ios" | "windows" | "android")
+}
+
 /// Installs the platform store exactly once, before any Entry is created.
 pub fn init() -> Result<(), SecretError> {
+    // Keeps the pure mapping above and the cfg-gated wiring below from drifting:
+    // if they disagree, this fires on the first call rather than in production.
+    debug_assert_eq!(
+        has_secure_store(std::env::consts::OS),
+        cfg!(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "windows",
+            target_os = "android"
+        )),
+        "has_secure_store and the cfg gates disagree for {}",
+        std::env::consts::OS
+    );
+
     #[cfg(target_os = "macos")]
     {
         // The legacy keychain works for unsigned dev builds; the protected data
@@ -162,5 +188,22 @@ mod tests {
     #[test]
     fn init_reports_no_store_on_unsupported_platforms() {
         assert!(matches!(init(), Err(SecretError::NoStore)));
+    }
+
+    /// The platform matrix, checked everywhere rather than only on the platforms
+    /// that happen to have a store. This is what makes the `NoStore` branch
+    /// covered: on Linux it asserts the mapping says "no store"; on macOS it
+    /// asserts the mapping agrees with the cfg that actually compiled.
+    #[test]
+    fn secure_store_availability_matches_the_platform_matrix() {
+        for os in ["macos", "ios", "windows", "android"] {
+            assert!(has_secure_store(os), "{os} has an OS credential store");
+        }
+        for os in ["linux", "freebsd", "openbsd", "netbsd", "dragonfly", ""] {
+            assert!(
+                !has_secure_store(os),
+                "{os} has no store, so init() must return NoStore"
+            );
+        }
     }
 }

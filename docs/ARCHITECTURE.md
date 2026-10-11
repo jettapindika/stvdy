@@ -37,10 +37,10 @@ phase adds its first implementation.
 
 ## Config
 
-- `config/plans.toml` — plans, limits, credit costs, provider cost ceilings.
+- `config/plans.toml`. Plans, limits, credit costs, provider cost ceilings.
   Loaded and validated at startup; `plans.toml` is the authority for
   entitlements, and the `plans` table is a mirror for FK integrity and auditing.
-- `config/billing_policy.toml` — per-platform purchase policy. `validate()`
+- `config/billing_policy.toml`. Per-platform purchase policy. `validate()`
   rejects a mobile entry that enables purchase UI, prices, or a CTA, so the file
   cannot be edited into an app-store policy violation.
 
@@ -69,7 +69,7 @@ Decisions recorded from that research:
 
 ## Native prototypes
 
-### Phase 0 — keychain round trip (macOS): PASS
+### Phase 0. Keychain round trip (macOS): PASS
 
 `src-tauri/src/keychain.rs` has a test that stores, reads, overwrites and
 deletes a refresh token through the OS keychain. Result on macOS 27 (arm64):
@@ -82,7 +82,7 @@ No keychain prompt appeared for the locally built binary. The shell also builds
 and launches: `tauri build --debug --no-bundle` produces
 `src-tauri/target/debug/stvdy-shell`, which runs and holds a window.
 
-### Phase 1 — pending
+### Phase 1. Pending
 
 Deep-link round trip (macOS + iOS simulator), then the mobile capability spike
 (APNs/FCM token registration, iOS document intake and share sheet, Android
@@ -91,7 +91,7 @@ Deep-link round trip (macOS + iOS simulator), then the mobile capability spike
 ## CORS origins
 
 `routes/mod.rs` gates CORS on `APP_ENV`: permissive in dev, an explicit allowlist
-in prod. The non-obvious part is what belongs in that list — the Tauri webviews
+in prod. The non-obvious part is what belongs in that list. The Tauri webviews
 are **not** `http://localhost`:
 
 | Origin | Platform |
@@ -108,6 +108,6 @@ deployment, and prod refuses to boot without it.
 ## Local cache
 
 Native clients keep a SQLite cache plus an outbox, owned by the Rust shell
-(`rusqlite`, `bundled`) — never by JS, so the sync engine and the database live
+(`rusqlite`, `bundled`). Never by JS, so the sync engine and the database live
 on the same side of the boundary. The web build has no local database and is
 online-first. SQLCipher encryption is a config flag, off by default.

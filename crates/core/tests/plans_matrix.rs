@@ -169,7 +169,7 @@ fn a_missing_file_is_a_read_error_not_a_panic() {
 fn unknown_keys_are_rejected() {
     // Build from the shipped config so the ONLY problem is the typo. A
     // hand-written partial fixture fails on missing fields first, which would
-    // make this test pass even with `deny_unknown_fields` removed — verified by
+    // make this test pass even with `deny_unknown_fields` removed. Verified by
     // deleting the attribute and watching this test still pass.
     let shipped = std::fs::read_to_string(PLANS_PATH).unwrap();
     let mutated = shipped.replace("devices_max = 5", "device_max = 5");
@@ -374,7 +374,7 @@ fn a_cheaper_model_on_a_higher_plan_is_rejected() {
 fn the_whole_config_round_trips_through_json() {
     // `plans.entitlements` mirrors the config for auditing (the spec requires the
     // blob to match plans.toml). A `Limit` whose Serialize and Deserialize
-    // disagree stored `{"Max":2}` — a blob its own reader rejects — and nothing
+    // disagree stored `{"Max":2}`. A blob its own reader rejects. And nothing
     // round-tripped, so no test caught it. This asserts the symmetry for the
     // entire file, which is what the audit snapshot actually serialises.
     let plans = shipped();

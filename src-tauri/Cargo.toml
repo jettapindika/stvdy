@@ -43,7 +43,7 @@ tauri-plugin-global-shortcut = "2.4.1"
 # The `deep-link` feature forwards a second process's CLI arguments (i.e. a
 # `stvdy://` URL) to the deep-link plugin on the surviving instance. Without it,
 # a Windows/Linux OAuth callback launches a second process, single-instance
-# terminates it, and the URL is never delivered — so the `state`/PKCE handoff is
+# terminates it, and the URL is never delivered. So the `state`/PKCE handoff is
 # lost and login silently fails whenever the app is already open. macOS routes
 # `open url` to the running app and does not need this path, which makes the bug
 # look platform-specific.

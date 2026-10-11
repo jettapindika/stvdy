@@ -5,7 +5,7 @@
 # environment into a named volume, and the `searxng` service mounts that volume.
 #
 # Why the indirection: SearXNG honours no `SEARXNG_SECRET` variable (verified in
-# `container/entrypoint.sh` — it only `sed`s the literal `ultrasecretkey` in the
+# `container/entrypoint.sh`. It only `sed`s the literal `ultrasecretkey` in the
 # settings file it *creates*, and `searx/settings_loader.py` does a plain
 # `yaml.safe_load` with no `${VAR}` expansion). Because we supply a settings
 # file, the entrypoint's "create from template" branch is skipped entirely, so a
@@ -17,9 +17,9 @@
 # so an incomplete file is expected.
 #
 # The two settings that matter for programmatic use:
-#   formats: [html, json]  — the JSON output is what SearchProvider consumes.
+#   formats: [html, json]. The JSON output is what SearchProvider consumes.
 #     It is NOT enabled by default, and without it the API returns HTML.
-#   limiter: false         — the bot-detection limiter would reject our
+#   limiter: false. The bot-detection limiter would reject our
 #     server-side requests, since they are not a browser session.
 #
 # Internal only: reached over the compose network, and nothing outside the

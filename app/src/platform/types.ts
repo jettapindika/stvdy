@@ -16,8 +16,7 @@ export interface NotificationsApi {
   notify(title: string, body: string): Promise<void>
   /**
    * Schedules a local notification. Mobile honours `at` and fires while the app
-   * is closed; desktop and web cannot schedule, so they deliver immediately —
-   * callers must treat scheduling as best-effort and not assume parity.
+   * is closed; desktop and web cannot schedule, so they deliver immediately. * callers must treat scheduling as best-effort and not assume parity.
    */
   schedule(title: string, body: string, at: Date): Promise<void>
 }

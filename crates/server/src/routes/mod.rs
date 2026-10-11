@@ -27,7 +27,7 @@ fn cors_layer(config: &AppConfig) -> CorsLayer {
     if config.env.is_dev() {
         // Dev only: the Vite dev server and the Tauri webviews vary by machine
         // and port. Note `permissive()` sets no `allow_credentials`, so browsers
-        // will not attach cookies even with a wildcard origin — and auth here is
+        // will not attach cookies even with a wildcard origin. And auth here is
         // a bearer header, not a cookie.
         return CorsLayer::permissive();
     }

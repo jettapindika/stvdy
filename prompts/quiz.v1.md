@@ -15,7 +15,7 @@ Rules:
   "key_points" lists the specific ideas a grader should look for.
 - Every question has a 1-3 sentence explanation of why the answer is correct, grounded
   in the sources, and the chunk label it came from.
-- For MCQ, "answer" is the exact text of the correct option — copied verbatim from
+- For MCQ, "answer" is the exact text of the correct option. Copied verbatim from
   "options", not a letter. Do not include the letter prefix in either field.
 - Use only facts present in the sources. If the sources cannot support {{count}}
   questions, return fewer rather than inventing material.

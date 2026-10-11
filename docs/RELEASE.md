@@ -12,7 +12,7 @@ installer. No Mac App Store, no Microsoft Store.
 - Windows: `nsis` installer, `perMachine` install mode, code-signed.
 - Updater: arrives with the release pipeline, because it needs a signing keypair
   and an HTTPS endpoint for signed manifests. It is deliberately not registered
-  before then — the plugin panics at startup if its config is absent, and an
+  before then. The plugin panics at startup if its config is absent, and an
   updater that cannot check for updates is a fake capability.
 
 ## Mobile distribution
@@ -30,7 +30,7 @@ syncs to their account on every device.
 
 This is enforced in three places rather than by convention:
 
-1. `config/billing_policy.toml` — `validate()` rejects a mobile entry that
+1. `config/billing_policy.toml`. `validate()` rejects a mobile entry that
    enables purchase UI, prices, or an upgrade CTA, so the file cannot be edited
    into a violation.
 2. `GET /plans` omits prices on those platforms.

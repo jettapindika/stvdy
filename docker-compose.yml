@@ -41,7 +41,7 @@ services:
       "
 
   # Search tier 2 (A3): the self-hosted general-web provider behind
-  # SearchProvider. Internal only — nothing outside the server calls it, and it
+  # SearchProvider. Internal only. Nothing outside the server calls it, and it
   # is not exposed on a public interface.
   #
   # The settings file is rendered into a volume rather than mounted from the repo

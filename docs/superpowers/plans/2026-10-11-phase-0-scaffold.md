@@ -1,4 +1,4 @@
-# Phase 0 — Scaffold Implementation Plan
+# Phase 0. Scaffold Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -72,11 +72,11 @@ Inherited from `docs/superpowers/plans/2026-10-11-study-os-master-roadmap.md` §
 
 | File | Contents | Deltas vs spec |
 |---|---|---|
-| `0001_extensions.sql` | `create extension if not exists vector;` `pgcrypto;` | — |
-| `0002_plans.sql` | `plans` | — |
+| `0001_extensions.sql` | `create extension if not exists vector;` `pgcrypto;` |. |
+| `0002_plans.sql` | `plans` |. |
 | `0003_users.sql` | `users` | `+ is_admin boolean not null default false` |
 | `0004_devices_auth_push.sql` | `devices`, `auth_sessions`, `push_tokens` | `+ index on auth_sessions(refresh_token_hash)`, `+ index on auth_sessions(user_id, revoked_at)` |
-| `0005_change_log_mutation_log.sql` | `change_log`, `mutation_log` | — |
+| `0005_change_log_mutation_log.sql` | `change_log`, `mutation_log` |. |
 | `0006_sync_functions.sql` | `touch_updated_at()`, `log_change()`, `log_change_by_user()` | new (spec mandates the behaviour) |
 | `0007_workspaces_sources_chunks.sql` | `workspaces`, `sources`, `chunks` + HNSW/GIN/hash indexes | `+ index sources(user_id, workspace_id)`, `+ index sources(status)`, `+ chunks.embedder text not null`, and the spec's `content_hash` index becomes a **non-unique** `index on chunks (embedder, content_hash)`. It must not be unique: `chunks` has no `user_id`, so a global constraint would let the first user to upload a shared textbook break ingestion for every other user, and would leak content existence across tenants. Dedupe is a per-user lookup that copies the existing embedding (A2). |
 | `0008_messages.sql` | `messages` | `+ index messages(user_id, workspace_id, created_at)` |
@@ -87,7 +87,7 @@ Inherited from `docs/superpowers/plans/2026-10-11-study-os-master-roadmap.md` §
 | `0013_calendar_events.sql` | `calendar_connections`, `events` | `events.task_id uuid references tasks(id) on delete set null`; `+ index events(user_id, starts_at)`, `+ unique(connection_id, external_id)` |
 | `0014_billing.sql` | `subscriptions`, `payments`, `webhook_events`, `credit_ledger`, `usage_events`, `discount_codes`, `user_api_keys` | `+ index credit_ledger(user_id, bucket)`, `+ index usage_events(user_id, action, created_at)` |
 | `0015_jobs.sql` | `jobs` | `+ dedupe_key text` + `unique index on jobs(dedupe_key) where dedupe_key is not null` |
-| `0016_cheatsheets.sql` | `cheatsheets` (+sync metadata) + indexes | new — the print-PDF feature needs a persisted document. Artifacts (rendered HTML, PDF) live in object storage and are referenced by key, not stored in Postgres. |
+| `0016_cheatsheets.sql` | `cheatsheets` (+sync metadata) + indexes | new. The print-PDF feature needs a persisted document. Artifacts (rendered HTML, PDF) live in object storage and are referenced by key, not stored in Postgres. |
 | `0017_sync_triggers.sql` | Trigger attachment for every `+sync` table, including `cheatsheets` | new. **This migration must always be last**, because it attaches triggers to every table created before it; a new `+sync` table is added by inserting a migration *above* it and appending the table name to its array. |
 
 `0012` must precede `0013` because `events.task_id` references `tasks`. `0017` must be last. No other ordering constraint exists.
@@ -196,7 +196,7 @@ var/
 .fastembed_cache/
 ```
 
-Note: `/src-tauri/gen` is deliberately **not** ignored. Tauri's CLI writes its own `.gitignore` containing `*` inside `gen/<project>/.tauri/`, which implies the surrounding generated project tree is meant to be tracked — and it is where the Phase 14 native work lives (iOS Share Extension target, `Info.plist` `BGTaskSchedulerPermittedIdentifiers` + `UIBackgroundModes`, App Group entitlements). Ignoring it would silently drop hand-written native files.
+Note: `/src-tauri/gen` is deliberately **not** ignored. Tauri's CLI writes its own `.gitignore` containing `*` inside `gen/<project>/.tauri/`, which implies the surrounding generated project tree is meant to be tracked. And it is where the Phase 14 native work lives (iOS Share Extension target, `Info.plist` `BGTaskSchedulerPermittedIdentifiers` + `UIBackgroundModes`, App Group entitlements). Ignoring it would silently drop hand-written native files.
 
 `clippy.toml`:
 ```toml
@@ -420,7 +420,7 @@ fn main() -> anyhow::Result<()> {
 - [ ] **Step 4: Verify the workspace compiles**
 
 Run: `cargo build --workspace`
-Expected: compiles; `Cargo.lock` created. If a pinned version does not exist, the error names the crate and the available versions — fix the pin rather than loosening it to `*`.
+Expected: compiles; `Cargo.lock` created. If a pinned version does not exist, the error names the crate and the available versions. Fix the pin rather than loosening it to `*`.
 
 - [ ] **Step 5: Verify lints are enforced**
 
@@ -720,7 +720,7 @@ fn validation_requires_free_pro_and_power() {
 - [ ] **Step 3: Run the tests to confirm they fail**
 
 Run: `cargo test -p stvdy-core --test plans_matrix`
-Expected: FAIL to compile — `unresolved import stvdy_core::config`. `uuid` must also be added as a dev-dependency of `stvdy-core` for the test (add `uuid.workspace = true` under `[dev-dependencies]`).
+Expected: FAIL to compile. `unresolved import stvdy_core::config`. `uuid` must also be added as a dev-dependency of `stvdy-core` for the test (add `uuid.workspace = true` under `[dev-dependencies]`).
 
 - [ ] **Step 4: Implement the loader**
 
@@ -868,7 +868,7 @@ pub enum CreditAction {
 pub enum PlannerMode {
     Manual,
     Auto,
-    /// `auto+balancer+weakness_blocks` — parsed as one variant so the config
+    /// `auto+balancer+weakness_blocks`. Parsed as one variant so the config
     /// string is copied verbatim from the spec.
     #[serde(rename = "auto+balancer+weakness_blocks")]
     AutoBalancerWeaknessBlocks,
@@ -888,7 +888,7 @@ pub enum ReminderChannel {
 #[serde(rename_all = "lowercase")]
 pub enum ModelTier {
     /// Free only. The cheapest model that still passes the citation/grounding
-    /// contract — a free user costs real money and has no revenue behind them,
+    /// contract. A free user costs real money and has no revenue behind them,
     /// so this tier exists to cap that exposure (A41).
     Cheapest,
     Cheap,
@@ -1024,7 +1024,7 @@ impl PlansFile {
 }
 ```
 
-`crates/core/src/config/billing_policy.rs` — declared in `mod.rs`, implemented in Task 3. For this task add a temporary stub so the module compiles, then Task 3 replaces it:
+`crates/core/src/config/billing_policy.rs`. Declared in `mod.rs`, implemented in Task 3. For this task add a temporary stub so the module compiles, then Task 3 replaces it:
 ```rust
 // replaced in Task 3
 pub struct BillingPolicy;
@@ -1173,7 +1173,7 @@ fn mobile_must_not_be_more_permissive_than_desktop() {
 - [ ] **Step 3: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-core --test billing_policy`
-Expected: FAIL to compile — `load_billing_policy` does not exist.
+Expected: FAIL to compile. `load_billing_policy` does not exist.
 
 - [ ] **Step 4: Implement the loader**
 
@@ -1327,7 +1327,7 @@ git commit -m "feat(core): billing_policy loader that structurally forbids mobil
 
 - [ ] **Step 1: Create migrations 0001–0005**
 
-`docs/SPEC.md` § DATABASE SCHEMA is a **sketch, not a script** — it says so in its own heading ("create as migrations; add sensible indexes and FKs"), states the sync columns as a *rule* rather than writing them into each table body, and describes the trigger behaviour in prose. So: **copy each `create table` body as the source, then apply the deltas below *and* the sync-column rule.** Do not copy the section verbatim — a verbatim copy produces tables with no `user_id`/`updated_at`/`deleted_at`, and Task 7's schema test plus the exit checklist (32 triggers, three sync columns on every `+sync` table) would both fail.
+`docs/SPEC.md` § DATABASE SCHEMA is a **sketch, not a script**. It says so in its own heading ("create as migrations; add sensible indexes and FKs"), states the sync columns as a *rule* rather than writing them into each table body, and describes the trigger behaviour in prose. So: **copy each `create table` body as the source, then apply the deltas below *and* the sync-column rule.** Do not copy the section verbatim. A verbatim copy produces tables with no `user_id`/`updated_at`/`deleted_at`, and Task 7's schema test plus the exit checklist (32 triggers, three sync columns on every `+sync` table) would both fail.
 
 **The sync-column rule, applied to every table marked `-- +sync` in this and the following two tasks:**
 ```sql
@@ -1605,7 +1605,7 @@ create index on cheatsheets (user_id, created_at desc);
 
 This migration **must be last**, because it attaches triggers to every synced table
 created before it. A future `+sync` table is added by inserting its migration above this
-one and appending its name to the array below — never by creating a new migration after
+one and appending its name to the array below. Never by creating a new migration after
 this one.
 
 ```sql
@@ -1649,7 +1649,7 @@ Run:
 sqlx migrate run
 psql "$DATABASE_URL" -c "select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal order by 1,2;"
 ```
-Expected: 34 rows (17 tables × 2 triggers), with `user_settings` showing `user_settings_touch_updated_at` and `user_settings_log_change`. The only tables with no triggers are the non-sync ones: `change_log`, `mutation_log`, `chunks`, `jobs`, the billing tables, and `report_revisions`. `cheatsheets` **does** carry both triggers like every other sync table — it is created by `0016_cheatsheets.sql`, which runs before this migration.
+Expected: 34 rows (17 tables × 2 triggers), with `user_settings` showing `user_settings_touch_updated_at` and `user_settings_log_change`. The only tables with no triggers are the non-sync ones: `change_log`, `mutation_log`, `chunks`, `jobs`, the billing tables, and `report_revisions`. `cheatsheets` **does** carry both triggers like every other sync table. It is created by `0016_cheatsheets.sql`, which runs before this migration.
 
 Then confirm the sync columns actually landed, since the spec states them as a rule and it is easy to copy a table body without them:
 ```bash
@@ -1662,7 +1662,7 @@ where c.relkind = 'r' and a.attnum > 0 and not a.attisdropped
                     'goals','events','study_sessions','pending_actions')
 group by 1 having count(*) filter (where a.attname in ('user_id','updated_at','deleted_at')) <> 3;"
 ```
-Expected: **zero rows.** Any row returned is a `+sync` table missing one of the three columns, which Task 7's schema test would catch later — better to see it here.
+Expected: **zero rows.** Any row returned is a `+sync` table missing one of the three columns, which Task 7's schema test would catch later. Better to see it here.
 
 - [ ] **Step 5: Commit**
 
@@ -1673,7 +1673,7 @@ git commit -m "feat(db): study OS, calendar, billing, jobs, cheatsheets tables a
 
 ---
 
-## Task 7: Schema integration test — sync columns, triggers, change_log behaviour
+## Task 7: Schema integration test. Sync columns, triggers, change_log behaviour
 
 **Files:**
 - Create: `crates/server/tests/schema.rs`
@@ -2129,7 +2129,7 @@ async fn deleting_a_user_cascades_its_change_log(pool: PgPool) {
 - [ ] **Step 2: Run the tests to confirm the sync contract holds**
 
 Run: `cargo test -p stvdy-server --test schema`
-Expected: PASS (9 tests). If `every_sync_table_has_the_sync_columns` fails, the named table is missing a column in its migration — fix the migration, do not weaken the test.
+Expected: PASS (9 tests). If `every_sync_table_has_the_sync_columns` fails, the named table is missing a column in its migration. Fix the migration, do not weaken the test.
 
 - [ ] **Step 3: Commit**
 
@@ -2172,7 +2172,7 @@ services:
       retries: 20
 
   minio:
-    # `minio/minio` was REMOVED from Docker Hub (A15) — verified 404 on both the
+    # `minio/minio` was REMOVED from Docker Hub (A15). Verified 404 on both the
     # Hub API and `docker manifest inspect`. This is the community fork/mirror;
     # same S3 API, same `server /data` CLI, amd64+arm64. Verified working:
     # bucket create + object put/get via the matching `pgsty/mc`.
@@ -2209,7 +2209,7 @@ services:
     image: docker.io/searxng/searxng:latest   # dev only; pin a digest in prod
     environment:
       # SearXNG maps `SEARXNG_*` env vars onto settings paths, so this sets
-      # server.secret_key and is the ONE source of that value — settings.yml
+      # server.secret_key and is the ONE source of that value. Settings.yml
       # deliberately omits it so no secret is ever committed. Verified: the
       # container starts with no `secret_key` in settings.yml as long as this
       # variable is present.
@@ -2277,7 +2277,7 @@ engines:
   # Verify after any image upgrade: `just db-search` should show >= 3 engines.
 ```
 
-**Verification for Step 1b** — with the stack up:
+**Verification for Step 1b**. With the stack up:
 ```bash
 curl -s "http://127.0.0.1:8888/search?q=spaced+repetition&format=json" | head -c 200   # only with the dev port mapping
 docker compose exec searxng wget -qO- "http://127.0.0.1:8080/search?q=test&format=json" | head -c 200
@@ -2295,7 +2295,7 @@ RUST_LOG=info,stvdy_server=debug,tower_http=debug
 # --- database / storage ---
 # Dev: either the compose postgres (below) or Supabase. If Supabase, use the
 # TRANSACTION POOLER (port 6543) and note that db.rs must set
-# statement_cache_capacity(0) — see A47. Production must NOT be Supabase free
+# statement_cache_capacity(0). See A47. Production must NOT be Supabase free
 # (500 MB cannot hold a pgvector workload; ~7 paying users would fill it).
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy
 # Supabase example (pooler, transaction mode):
@@ -2303,7 +2303,7 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy
 
 # --- object storage (A15: minio/* images were REMOVED from Docker Hub) ---
 # Dev: the compose service uses pgsty/minio (community mirror, same S3 API).
-# Prod: Cloudflare R2 free tier — 10 GB storage, 1M Class A / 10M Class B ops, $0 egress.
+# Prod: Cloudflare R2 free tier. 10 GB storage, 1M Class A / 10M Class B ops, $0 egress.
 S3_ENDPOINT=http://localhost:9000
 S3_REGION=us-east-1
 S3_BUCKET=stvdy-sources
@@ -2411,7 +2411,7 @@ fn a_missing_plans_file_is_reported_with_its_path() {
 - [ ] **Step 4: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-server --test config`
-Expected: FAIL to compile — `stvdy_server::config::AppConfig` does not exist.
+Expected: FAIL to compile. `stvdy_server::config::AppConfig` does not exist.
 
 - [ ] **Step 5: Implement `config.rs`**
 
@@ -2573,7 +2573,7 @@ pub async fn seed_plans(pool: &PgPool, plans: &PlansFile) -> anyhow::Result<()> 
 }
 ```
 
-`PlanConfig` must derive `Serialize` for `seed_plans` — add `Serialize` to its derive list and to `PlansFile`'s, and `#[serde(serialize_with)]` is not needed because `limit_of` only affects deserialization.
+`PlanConfig` must derive `Serialize` for `seed_plans`. Add `Serialize` to its derive list and to `PlansFile`'s, and `#[serde(serialize_with)]` is not needed because `limit_of` only affects deserialization.
 
 - [ ] **Step 7: Run the tests**
 
@@ -2707,7 +2707,7 @@ fn error_mapping_matches_the_documented_table() {
 - [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-server --test health`
-Expected: FAIL to compile — `stvdy_server::routes` does not exist.
+Expected: FAIL to compile. `stvdy_server::routes` does not exist.
 
 - [ ] **Step 3: Implement `error.rs`**
 
@@ -3219,7 +3219,7 @@ fn mutation_results_carry_the_rejection_reason() {
 - [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-sync`
-Expected: FAIL to compile — the `proto` modules are empty.
+Expected: FAIL to compile. The `proto` modules are empty.
 
 - [ ] **Step 3: Implement the DTOs**
 
@@ -3735,7 +3735,7 @@ describe('time helpers', () => {
 - [ ] **Step 5: Run the test to confirm it fails**
 
 Run: `cd app && npm install && npm test`
-Expected: FAIL — `./time` cannot be resolved. (`npm install` may need `npm install --force` if a peer range conflicts; resolve by aligning versions rather than disabling peer checks.)
+Expected: FAIL. `./time` cannot be resolved. (`npm install` may need `npm install --force` if a peer range conflicts; resolve by aligning versions rather than disabling peer checks.)
 
 - [ ] **Step 6: Implement the helpers and the app shell**
 
@@ -3972,7 +3972,7 @@ export function TabBar() {
 - [ ] **Step 7: Run the tests and the build**
 
 Run: `cd app && npm test && npm run build`
-Expected: 3 tests PASS; `dist/` created. Then `npm run dev` and load `http://localhost:5173` — the shell renders with the sidebar and the "Today" placeholder.
+Expected: 3 tests PASS; `dist/` created. Then `npm run dev` and load `http://localhost:5173`. The shell renders with the sidebar and the "Today" placeholder.
 
 - [ ] **Step 8: Commit**
 
@@ -4026,7 +4026,7 @@ describe('form factor', () => {
 - [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `cd app && npm test -- platform`
-Expected: FAIL — cannot resolve `./index`.
+Expected: FAIL. Cannot resolve `./index`.
 
 - [ ] **Step 3: Implement the adapter**
 
@@ -4633,7 +4633,7 @@ pub fn init() -> Result<(), SecretError> {
         // own README lists Tauri Mobile as a framework that already provides
         // that initialization. Calling it ourselves would be a SECOND call,
         // and ndk-context asserts the call happens exactly once
-        // (`assert!(previous.is_none())`) — i.e. it would panic at startup.
+        // (`assert!(previous.is_none())`). I.e. it would panic at startup.
         // If a device prototype ever shows Store::new() returning Err here,
         // that is the trigger to revisit (see docs/ASSUMPTIONS.md A30).
         let store: Arc<CredentialStore> = android_native_keyring_store::Store::new()
@@ -4858,7 +4858,7 @@ Expected: a release binary under `src-tauri/target/release/`. Then:
 ```bash
 npm run tauri dev
 ```
-Expected: the window opens showing the shell; in the devtools console `await window.__TAURI_INTERNALS__.invoke('health_ping')` returns `stvdy-shell 0.1.0`, and `secret_set`/`secret_get` round-trip a value (on macOS this may prompt for keychain access the first time — that is expected and is the Phase 1 prototype data point).
+Expected: the window opens showing the shell; in the devtools console `await window.__TAURI_INTERNALS__.invoke('health_ping')` returns `stvdy-shell 0.1.0`, and `secret_set`/`secret_get` round-trip a value (on macOS this may prompt for keychain access the first time. That is expected and is the Phase 1 prototype data point).
 
 - [ ] **Step 8: Commit**
 
@@ -4889,7 +4889,7 @@ sqlx migrate run
 cargo sqlx prepare --workspace
 git add .sqlx
 ```
-Expected: `.sqlx/` contains one JSON file per compile-time-checked query. Phase 0 has none yet, so the directory may be created empty — that is fine and later phases add entries. `cargo sqlx prepare --check --workspace` must exit 0.
+Expected: `.sqlx/` contains one JSON file per compile-time-checked query. Phase 0 has none yet, so the directory may be created empty. That is fine and later phases add entries. `cargo sqlx prepare --check --workspace` must exit 0.
 
 - [ ] **Step 2: Write the workflow**
 
@@ -5021,7 +5021,7 @@ Expected: all four jobs green. The `desktop` job is the phase's macOS/Windows pr
 
 **Files:**
 - Create: `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md`
-- Verify in place: `docs/THREAT_MODEL.md` — already written; this task only confirms it is present and linked from `docs/ARCHITECTURE.md` and `README.md`, so it cannot drift out of the doc set
+- Verify in place: `docs/THREAT_MODEL.md`. Already written; this task only confirms it is present and linked from `docs/ARCHITECTURE.md` and `README.md`, so it cannot drift out of the doc set
 - Modify: `README.md`
 
 **Interfaces:**
@@ -5034,19 +5034,19 @@ Each file gets its headings plus an explicit "filled by phase N" marker, so a la
 
 `docs/ARCHITECTURE.md`: `## Layers`, `## Provider traits`, `## Config`, `## Trust boundary` (one paragraph + a link to `docs/THREAT_MODEL.md`, which is the normative statement), `## Native capability matrix` (link `docs/research/2026-10-11-tauri-2-capability-matrix.md`), `## Native prototypes` (Phase 1: keychain, deep link; Phase 14: push, share target, background sync), `## Local cache` (SQLCipher flag, default off).
 
-`docs/API.md`: `## Conventions` (auth header, error shape, pagination, SSE event names), `## Auth`, `## Devices`, `## Sync`, `## Workspaces`, `## Sources`, `## Chat`, `## Flashcards`, `## Quiz`, `## Reports`, `## Tasks`, `## Events`, `## Goals and planner`, `## Syllabus`, `## Calendar`, `## Actions`, `## Study`, `## Settings`, `## Account`, `## Billing`, `## Admin` — each with a "Phase N" note.
+`docs/API.md`: `## Conventions` (auth header, error shape, pagination, SSE event names), `## Auth`, `## Devices`, `## Sync`, `## Workspaces`, `## Sources`, `## Chat`, `## Flashcards`, `## Quiz`, `## Reports`, `## Tasks`, `## Events`, `## Goals and planner`, `## Syllabus`, `## Calendar`, `## Actions`, `## Study`, `## Settings`, `## Account`, `## Billing`, `## Admin`. Each with a "Phase N" note.
 
 `docs/SYNC.md`: `## Cursor model`, `## Pull`, `## Push and idempotency`, `## Realtime hint`, `## Conflict rules` (copy the normative table from the roadmap), `## Offline scope`, `## Compaction and resync`, `## Local cache contents`.
 
-`docs/RELEASE.md`: `## Desktop distribution`, `## Mobile distribution`, `## Store policy risk` (QRIS-only mobile selling; note the risk that stores may require their own billing for digital subscriptions), `## Privacy labels`, `## Account deletion`, `## Tax and PPN` (unconfirmed; see ASSUMPTIONS B2), `## Versioning`, and the operations sections a *public* launch requires — these are not distribution concerns and must not be skipped, because the app is unreleased today but a paying user is a promise to keep running:
+`docs/RELEASE.md`: `## Desktop distribution`, `## Mobile distribution`, `## Store policy risk` (QRIS-only mobile selling; note the risk that stores may require their own billing for digital subscriptions), `## Privacy labels`, `## Account deletion`, `## Tax and PPN` (unconfirmed; see ASSUMPTIONS B2), `## Versioning`, and the operations sections a *public* launch requires. These are not distribution concerns and must not be skipped, because the app is unreleased today but a paying user is a promise to keep running:
 
-- `## Hosting` (Phase 15) — the provisioned Oracle Cloud VM (`ubuntu@168.110.202.106`, Ubuntu 24.04, 2 vCPU / 11 GB / 45 GB, deployment root `~/stvdy/`), one compose stack, and the sizing note that Chromium (Phase 6) was what set the original 4 GB floor (moot on this box, but the moli-vs-Chromium decision stands on its own merits). **Must include the two-layer firewall fact, because it is the first thing that will look like a broken deploy:** Oracle's VCN security list currently admits only port 22, and the host's own `iptables` INPUT chain (`/etc/iptables/rules.v4`, netfilter-persistent) also accepts only `state NEW tcp dpt:22` and REJECTs everything else. **Both layers need an explicit rule for 80/443** — fixing only one leaves the service unreachable from outside, which is indistinguishable from a crashed app. Also: the instance region supersedes the earlier "ap-southeast" preference, so the UU PDP data-residency line must be updated to name where the data actually lives.
-- `## Backups and restore` (Phase 15) — what is backed up (Postgres dump + object storage), frequency, retention, **where the restore is tested**, and the restore-drill cadence. An untested backup is not a backup.
-- `## Monitoring and alerting` (Phase 15) — the signals that mean the service is broken: job worker stalled (oldest `queued` row age), webhook failures, `unresponsive_engines` on every search (A3 degradation), provider-cost ceiling hits, disk and connection saturation, and the alert route for each.
-- `## Incident response` (Phase 15) — the UU PDP 72-hour breach clock: how a breach is detected, who decides it is reportable, what is logged for the report, and the fact that notification goes to both data subjects **and** the authority. Also the on-call reality: one operator, so the runbook must be executable by a tired person at 03:00.
-- `## Abuse control` (Phase 7) — the A43 controls as deployed values: signup rate limits (per IP, per domain), the per-account global cap, the verification-before-spending rule, and the manual unblock path for R5 false positives.
-- `## Data retention` (Phase 15) — per-category retention (change_log 90 days per A19; uploads and chunks for the life of the workspace; `usage_events` and billing rows as required for margin and tax; account deletion semantics and the scheduled hard delete). UU PDP requires a stated schedule, not just a delete button.
-- `## Data processing agreements` (Phase 15) — the vendor list needing a DPA before public launch: LLM provider, Exa/Tavily (A3), VPS host, object storage, SMTP, and the payment gateway (B1). UU PDP explicitly requires formalized vendor contracts.
+- `## Hosting` (Phase 15). The provisioned Oracle Cloud VM (`ubuntu@168.110.202.106`, Ubuntu 24.04, 2 vCPU / 11 GB / 45 GB, deployment root `~/stvdy/`), one compose stack, and the sizing note that Chromium (Phase 6) was what set the original 4 GB floor (moot on this box, but the moli-vs-Chromium decision stands on its own merits). **Must include the two-layer firewall fact, because it is the first thing that will look like a broken deploy:** Oracle's VCN security list currently admits only port 22, and the host's own `iptables` INPUT chain (`/etc/iptables/rules.v4`, netfilter-persistent) also accepts only `state NEW tcp dpt:22` and REJECTs everything else. **Both layers need an explicit rule for 80/443**. Fixing only one leaves the service unreachable from outside, which is indistinguishable from a crashed app. Also: the instance region supersedes the earlier "ap-southeast" preference, so the UU PDP data-residency line must be updated to name where the data actually lives.
+- `## Backups and restore` (Phase 15). What is backed up (Postgres dump + object storage), frequency, retention, **where the restore is tested**, and the restore-drill cadence. An untested backup is not a backup.
+- `## Monitoring and alerting` (Phase 15). The signals that mean the service is broken: job worker stalled (oldest `queued` row age), webhook failures, `unresponsive_engines` on every search (A3 degradation), provider-cost ceiling hits, disk and connection saturation, and the alert route for each.
+- `## Incident response` (Phase 15). The UU PDP 72-hour breach clock: how a breach is detected, who decides it is reportable, what is logged for the report, and the fact that notification goes to both data subjects **and** the authority. Also the on-call reality: one operator, so the runbook must be executable by a tired person at 03:00.
+- `## Abuse control` (Phase 7). The A43 controls as deployed values: signup rate limits (per IP, per domain), the per-account global cap, the verification-before-spending rule, and the manual unblock path for R5 false positives.
+- `## Data retention` (Phase 15). Per-category retention (change_log 90 days per A19; uploads and chunks for the life of the workspace; `usage_events` and billing rows as required for margin and tax; account deletion semantics and the scheduled hard delete). UU PDP requires a stated schedule, not just a delete button.
+- `## Data processing agreements` (Phase 15). The vendor list needing a DPA before public launch: LLM provider, Exa/Tavily (A3), VPS host, object storage, SMTP, and the payment gateway (B1). UU PDP explicitly requires formalized vendor contracts.
 
 - [ ] **Step 2: Write `README.md`**
 
@@ -5074,8 +5074,8 @@ All must be true before the phase is called done:
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean, **and** the `unwrap_used`/`expect_used` lint demonstrably fires (Task 1 Step 5).
 - [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
 - [ ] `npm --prefix app test` and `npm --prefix app run build` green.
-- [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2 — 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
-- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty **and whose `unresponsive_engines` is empty** (not the `Verifying your browser…` HTML page). Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8888/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`) — see A3 for the measured baseline. If only `google cse` answers, the engine list has been re-tuned against a dev laptop, which understates this tier by ~3.6×.
+- [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2. 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
+- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty **and whose `unresponsive_engines` is empty** (not the `Verifying your browser…` HTML page). Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8888/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`). See A3 for the measured baseline. If only `google cse` answers, the engine list has been re-tuned against a dev laptop, which understates this tier by ~3.6×.
 - [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
 - [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
@@ -5085,31 +5085,31 @@ All must be true before the phase is called done:
 
 ## Self-Review
 
-**Spec coverage for Phase 0's scope** — the spec's Phase 0 line asks for: Cargo workspace ✓ (Task 1), React+Vite app ✓ (Task 11), Tauri 2 shell building for macOS and Windows ✓ (Task 13 + CI matrix in Task 14), docker-compose with Postgres+pgvector and MinIO ✓ (Task 8), migrations ✓ (Tasks 4–6), plans.toml + billing_policy.toml loaders ✓ (Tasks 2–3), health endpoint ✓ (Task 9), CI with fmt/clippy/test and the web + macOS + Windows build matrix ✓ (Task 14), `platform` adapter skeleton ✓ (Task 12). The full schema is created in Phase 0 rather than Phase 1 because the spec's sync columns and triggers must exist "from the start" and retrofitting triggers onto live tables is the expensive mistake this ordering avoids.
+**Spec coverage for Phase 0's scope**. The spec's Phase 0 line asks for: Cargo workspace ✓ (Task 1), React+Vite app ✓ (Task 11), Tauri 2 shell building for macOS and Windows ✓ (Task 13 + CI matrix in Task 14), docker-compose with Postgres+pgvector and MinIO ✓ (Task 8), migrations ✓ (Tasks 4–6), plans.toml + billing_policy.toml loaders ✓ (Tasks 2–3), health endpoint ✓ (Task 9), CI with fmt/clippy/test and the web + macOS + Windows build matrix ✓ (Task 14), `platform` adapter skeleton ✓ (Task 12). The full schema is created in Phase 0 rather than Phase 1 because the spec's sync columns and triggers must exist "from the start" and retrofitting triggers onto live tables is the expensive mistake this ordering avoids.
 
-**Placeholders** — none in the sense of unfinished work. Two honest qualifications: (1) migration bodies are authored from `docs/SPEC.md` § DATABASE SCHEMA, which is a *sketch* — its own heading says "create as migrations; add sensible indexes and FKs", it states the sync columns as a rule rather than writing them into each table body, and it describes the trigger behaviour in prose. Tasks 4–6 therefore carry the sync-column rule, the index/FK deltas and a verification query, and the exit checklist asserts the resulting counts (34 triggers, three sync columns on every `+sync` table) rather than trusting the copy. This is deliberate: one authoritative sketch plus explicit deltas is stronger than duplicating 400 lines that would drift, but it is not "copy the file". (2) `docs/THREAT_MODEL.md` is written and normative; `docs/ARCHITECTURE.md`, `API.md`, `SYNC.md` and `RELEASE.md` are created as stubs in Task 15 with the headings and phase markers later phases must fill.
+**Placeholders**. None in the sense of unfinished work. Two honest qualifications: (1) migration bodies are authored from `docs/SPEC.md` § DATABASE SCHEMA, which is a *sketch*. Its own heading says "create as migrations; add sensible indexes and FKs", it states the sync columns as a rule rather than writing them into each table body, and it describes the trigger behaviour in prose. Tasks 4–6 therefore carry the sync-column rule, the index/FK deltas and a verification query, and the exit checklist asserts the resulting counts (34 triggers, three sync columns on every `+sync` table) rather than trusting the copy. This is deliberate: one authoritative sketch plus explicit deltas is stronger than duplicating 400 lines that would drift, but it is not "copy the file". (2) `docs/THREAT_MODEL.md` is written and normative; `docs/ARCHITECTURE.md`, `API.md`, `SYNC.md` and `RELEASE.md` are created as stubs in Task 15 with the headings and phase markers later phases must fill.
 
-**Type consistency** — `PlanId`, `PlanConfig`, `BillingPolicy`, `Platform`, `AppConfig`, `AppState`, `AppError`, `Entity`, `Op`, `Change`, `Mutation`, `MutationResult`, `PullResponse`, `PushRequest/Response`, `Platform`/`PlatformKind`/`FormFactor` are each defined exactly once and referenced by name thereafter. `Entity::ALL` has 17 variants and `dependency_rank()` returns a dense 1..=17, asserted by the wire test. The schema test's `SYNC_TABLES` list (16 tables) plus `user_settings` matches `0017_sync_triggers.sql` exactly, and `tables_added_beyond_the_spec_are_deliberate` carries `report_revisions` + `cheatsheets` as the documented deviations.
+**Type consistency**. `PlanId`, `PlanConfig`, `BillingPolicy`, `Platform`, `AppConfig`, `AppState`, `AppError`, `Entity`, `Op`, `Change`, `Mutation`, `MutationResult`, `PullResponse`, `PushRequest/Response`, `Platform`/`PlatformKind`/`FormFactor` are each defined exactly once and referenced by name thereafter. `Entity::ALL` has 17 variants and `dependency_rank()` returns a dense 1..=17, asserted by the wire test. The schema test's `SYNC_TABLES` list (16 tables) plus `user_settings` matches `0017_sync_triggers.sql` exactly, and `tables_added_beyond_the_spec_are_deliberate` carries `report_revisions` + `cheatsheets` as the documented deviations.
 
-**Known risks carried into execution** — (1) exact crate versions are pinned to values verified on 2026-10-11; if one is unavailable on the target platform the fix is to re-verify that pin, never to loosen it to `*`; (2) `keyring-core` + per-platform store wiring is the Phase 1 prototype precisely because the research flagged iOS/Android cross-compilation as unverified — the API surface itself is now verified from crate sources, and the Android `ndk-context` initialization is settled (android-activity provides it; do **not** add a shim, which would be a second call and panic); (3) `#[sqlx::test]` needs a superuser connection to `create extension vector` — the CI service and the compose file both use `postgres`, which is superuser; (4) the `desktop` CI job builds `--no-bundle` so unsigned artifacts are produced without certificates, which arrive in Phase 15; (5) `npm run tauri init` output is a starting point, not gospel — Task 13 Step 2 replaces `tauri.conf.json` wholesale, so review the generated file rather than trusting it.
+**Known risks carried into execution**. (1) exact crate versions are pinned to values verified on 2026-10-11; if one is unavailable on the target platform the fix is to re-verify that pin, never to loosen it to `*`; (2) `keyring-core` + per-platform store wiring is the Phase 1 prototype precisely because the research flagged iOS/Android cross-compilation as unverified. The API surface itself is now verified from crate sources, and the Android `ndk-context` initialization is settled (android-activity provides it; do **not** add a shim, which would be a second call and panic); (3) `#[sqlx::test]` needs a superuser connection to `create extension vector`. The CI service and the compose file both use `postgres`, which is superuser; (4) the `desktop` CI job builds `--no-bundle` so unsigned artifacts are produced without certificates, which arrive in Phase 15; (5) `npm run tauri init` output is a starting point, not gospel. Task 13 Step 2 replaces `tauri.conf.json` wholesale, so review the generated file rather than trusting it.
 
 ## Execution notes (Phase 0, as built)
 
 Deviations and discoveries from actually running the plan. The plan text above is left as written so the next phase can see what changed and why.
 
 1. **`sqlx-cli` feature name.** The plan said `--features postgres,rustls-ring`; the real feature is `rustls`. Also `cargo install --locked sqlx-cli` no longer works in 0.9.
-2. **`src-tauri` placement.** `tauri init` creates `app/src-tauri`, but the CLI resolves `src-tauri` only as a *subfolder of the working directory* — it does not search upward. The shell lives at the repo root and `justfile` invokes `./app/node_modules/.bin/tauri` from there, which is what makes `frontendDist: "../app/dist"` and the `beforeBuildCommand` cwd (A36) correct.
+2. **`src-tauri` placement.** `tauri init` creates `app/src-tauri`, but the CLI resolves `src-tauri` only as a *subfolder of the working directory*. It does not search upward. The shell lives at the repo root and `justfile` invokes `./app/node_modules/.bin/tauri` from there, which is what makes `frontendDist: "../app/dist"` and the `beforeBuildCommand` cwd (A36) correct.
 3. **`protocol-asset` needs config.** Enabling the feature without `app.security.assetProtocol` fails the build ("features do not match the allowlist").
-4. **The updater cannot ship in Phase 0.** It panics at startup without a `plugins.updater` config, and it needs a signing keypair plus a release endpoint. Registering it with placeholder config would be a fake capability, so it moved to Phase 15 — along with `createUpdaterArtifacts: true`, which needs `TAURI_SIGNING_PRIVATE_KEY` at build time.
+4. **The updater cannot ship in Phase 0.** It panics at startup without a `plugins.updater` config, and it needs a signing keypair plus a release endpoint. Registering it with placeholder config would be a fake capability, so it moved to Phase 15. Along with `createUpdaterArtifacts: true`, which needs `TAURI_SIGNING_PRIVATE_KEY` at build time.
 5. **`plans` must be seeded by the migration, not only at boot.** `users.plan_id` is `not null default 'free'` and references `plans`, so the default must be satisfiable by the schema alone; otherwise every `insert into users` fails with `users_plan_id_fkey` (10 tests caught this).
-6. **Cascade deletes must not be logged.** Deleting a user cascades to its rows, whose AFTER DELETE triggers then tried to insert a `change_log` row for a user that no longer exists — FK violation, making account deletion impossible. `log_change()` now skips the log when the owner is gone; the rows cascade away anyway, so those tombstones could never be pulled.
+6. **Cascade deletes must not be logged.** Deleting a user cascades to its rows, whose AFTER DELETE triggers then tried to insert a `change_log` row for a user that no longer exists. FK violation, making account deletion impossible. `log_change()` now skips the log when the owner is gone; the rows cascade away anyway, so those tombstones could never be pulled.
 7. **`PlansFile.plans` is `#[serde(default)]`** so a config with no plan tables reports "must define a [free] plan" instead of serde's "missing field `plans`".
 8. **TypeScript 7 removed `baseUrl`.** `paths` now resolves relative to `tsconfig.json`.
-9. **Haptics exports are `impactFeedback`/`notificationFeedback`**, not `hapticImpact`/`hapticNotification` — caught by `tsc`.
+9. **Haptics exports are `impactFeedback`/`notificationFeedback`**, not `hapticImpact`/`hapticNotification`. Caught by `tsc`.
 10. **`i64::div_ceil` is unstable**; the long-document multiplier uses manual ceiling division.
 11. **Tests must not mutate the process environment** (it is global and racy), so `AppConfig::from_env_at` takes explicit overrides.
 12. **Plugin config in `tauri.conf.json` is validated only by the Tauri CLI, and only when the plugin is rebuilt.** The CLI sets `TAURI_{PLUGIN}_PLUGIN_CONFIG` for every plugin in the config with no target gating, and each plugin's `build.rs` calls `plugin_config::<Config>("...")`, which panics on a shape mismatch. Two consequences:
-    - `cargo build`/`cargo clippy` can never catch it — they do not set the variable.
+    - `cargo build`/`cargo clippy` can never catch it. They do not set the variable.
     - **Changing `tauri.conf.json` does not re-run the plugin's `build.rs`.** Cargo re-runs the *shell's* build script (it declares `rerun-if-changed` on the config), but nothing tells cargo the plugin's script depends on our config, so a wrong shape can sit undetected until a fresh checkout or `cargo clean -p <plugin>`.
 
     Verified the hard way: `"mobile": [{ "scheme": "stvdy" }]` built cleanly on an incremental `tauri build`, then panicked with `failed to parse configuration: Error("invalid type: string \"stvdy\", expected a sequence")` once `cargo clean -p tauri-plugin-deep-link` forced the script to re-run. `AssociatedDomain.scheme` is `Vec<String>`.

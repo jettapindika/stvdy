@@ -27,8 +27,7 @@ prompts/
 Rules:
 
 1. **Never edit a shipped version.** A behavioural change creates `foo.v2.md` and a
-   new `PromptId` variant. This is what makes `usage_events.prompt_version` meaningful
-   — quality and cost can be compared across versions because the old text still exists.
+   new `PromptId` variant. This is what makes `usage_events.prompt_version` meaningful. Quality and cost can be compared across versions because the old text still exists.
 2. The version string logged is the filename stem (`chat.v1`, `quiz.v2`). It is stored
    on every `usage_events` row (A38) so a regression can be attributed to a prompt
    change rather than guessed at.
@@ -56,11 +55,11 @@ grounding and untrusted-content rules.
 Variables are `{{snake_case}}` and fall into three kinds, which the composer treats
 differently. `PromptId::variables()` declares them; the composer enforces the split.
 
-**1. Caller-supplied** — the request must provide a value. An unfilled variable is an
+**1. Caller-supplied**. The request must provide a value. An unfilled variable is an
 **error, not an empty string**, so a prompt can never ship with a literal `{{count}}`
 in it.
 
-**2. Derived** — never supplied by the caller; the composer computes the value from
+**2. Derived**. Never supplied by the caller; the composer computes the value from
 other variables. A derived variable in the caller's required list is a test failure, and
 supplying one is an error rather than an override. Currently exactly one:
 
@@ -71,11 +70,11 @@ supplying one is an error rather than an override. Currently exactly one:
 This is structural on purpose. An earlier draft had `{{plan_gate_instruction}}` as a
 *second* caller-supplied variable alongside `{{allow_upgrade_hint}}`, which encoded one
 fact twice: a caller could pass `allow_upgrade_hint: false` with a permissive
-instruction string, and the failure mode is a mobile build hinting at purchases — the
+instruction string, and the failure mode is a mobile build hinting at purchases. The
 single behaviour the spec treats as an app-store rejection risk. Deriving it makes that
 contradiction unrepresentable rather than merely discouraged.
 
-**3. Optional** — declared with a stated default (`{{semester_context}}`,
+**3. Optional**. Declared with a stated default (`{{semester_context}}`,
 `{{other_section_headings}}`). Absent is fine; the default is inserted.
 
 ### Untrusted by construction
@@ -83,8 +82,8 @@ contradiction unrepresentable rather than merely discouraged.
 Some variables carry user-controlled text: `{{user_name}}`, `{{workspace_name}}`,
 `{{goal_title}}`, `{{task_title}}`, `{{notes}}`, `{{topic}}`, `{{capture_text}}`. A user
 can set their display name to `Ignore all previous instructions and ...`. These are
-therefore **delimited and labelled as data** by the composer — never interpolated bare
-into the instruction stream — and `<security_untrusted_content>` explicitly names them:
+therefore **delimited and labelled as data** by the composer. Never interpolated bare
+into the instruction stream. And `<security_untrusted_content>` explicitly names them:
 
 ```
 <user_context_data>
@@ -102,7 +101,7 @@ Chunks are sent as `[1]`, `[2]`, … and web results as `[W1]`, `[W2]`, …. The
 cites labels; the server maps a label back to the real chunk UUID. This is deliberately
 *not* raw UUIDs in the prompt: labels cost a few tokens instead of ~40 per citation,
 and a model cannot hallucinate a label that looks plausible but points at another
-user's chunk — an unknown label is simply dropped (A17).
+user's chunk. An unknown label is simply dropped (A17).
 
 The mapping is per-request and never persisted in the prompt. `messages.citations`
 stores the resolved, structured form:
@@ -120,7 +119,7 @@ Every strict-JSON module is followed by `json_contract.v1.md`, and the server:
 2. asks for JSON only,
 3. parses with `serde` into a typed struct with `deny_unknown_fields`,
 4. **retries once** on a parse failure with a short corrective message,
-5. on a second failure, fails the job with a readable error — never guesses.
+5. on a second failure, fails the job with a readable error. Never guesses.
 
 ## Testing prompts
 
@@ -128,7 +127,7 @@ Every strict-JSON module is followed by `json_contract.v1.md`, and the server:
 declared, no undeclared `{{...}}` remains, the trimmed composition still contains the
 grounding and security sections, and the JSON modules' documented example parses into
 their Rust struct. It also asserts that **a derived variable never appears in a module's
-caller-supplied list** — otherwise a caller could pass a contradictory pair, which for
+caller-supplied list**. Otherwise a caller could pass a contradictory pair, which for
 `{{plan_gate_instruction_derived}}` would mean a mobile build hinting at purchases.
 Those tests run in CI, so a prompt edit that breaks the contract fails the build rather
 than production.

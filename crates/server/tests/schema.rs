@@ -85,7 +85,7 @@ async fn the_protocol_entity_list_matches_the_schema_trigger_set(pool: PgPool) {
     // `Entity::ALL` (the wire contract) and the trigger array in
     // 0017_sync_triggers.sql are two hand-maintained lists. If they drift, a
     // synced table exists that no client can name, or the client names a table
-    // that is never logged — either way sync silently loses data.
+    // that is never logged. Either way sync silently loses data.
     let triggered: BTreeSet<String> = sqlx::query_scalar(
         "select distinct c.relname from pg_trigger t
          join pg_class c on c.oid = t.tgrelid

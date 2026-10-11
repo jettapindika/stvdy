@@ -15,7 +15,7 @@
 row becomes visible only at COMMIT time. Two concurrent transactions for one user
 can therefore be assigned seq 10 and 11 and commit in the opposite order. A
 client that reads `seq > cursor`, sees 11 and advances to 11 would never receive
-10 — a permanently skipped change on that device.
+10. A permanently skipped change on that device.
 
 **Both trigger functions take `pg_advisory_xact_lock(hashtext(user_id::text))`
 before inserting the change_log row.** The lock is held to commit, so for any
@@ -120,7 +120,7 @@ platform.
 Native clients can **read** all synced data offline, and **write** offline only
 tasks, events, flashcard reviews, quiz attempts, study sessions and settings.
 Chat, generation, web search, uploads/ingestion, checkout and calendar connect
-require connectivity and queue nothing — they show an offline state instead.
+require connectivity and queue nothing. They show an offline state instead.
 
 ## Local cache contents
 
@@ -133,4 +133,4 @@ A job trims `change_log` older than the retention window (default 90 days) but
 keeps tombstones at least as long. A client whose cursor is older than the
 retained window gets `410 resync_required` and restarts from 0. Account deletion
 cascades its `change_log` rows away, and the trigger deliberately does **not**
-log deletes whose owner no longer exists — those tombstones could never be pulled.
+log deletes whose owner no longer exists. Those tombstones could never be pulled.

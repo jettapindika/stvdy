@@ -113,7 +113,7 @@ pub enum CreditAction {
 pub enum PlannerMode {
     Manual,
     Auto,
-    /// `auto+balancer+weakness_blocks` — one variant so the config string is
+    /// `auto+balancer+weakness_blocks`. One variant so the config string is
     /// copied verbatim from the spec.
     #[serde(rename = "auto+balancer+weakness_blocks")]
     AutoBalancerWeaknessBlocks,
@@ -155,7 +155,7 @@ pub enum ExportFormat {
 /// `free` allows **zero** Google accounts, while `pro`/`power` allow unlimited
 /// workspaces. With a sentinel, `google_accounts_max = 0` deserialized to
 /// "unlimited", so free read as unlimited Google accounts and only the separate
-/// `google_calendar` boolean kept it honest — two fields encoding one policy,
+/// `google_calendar` boolean kept it honest. Two fields encoding one policy,
 /// with the numeric one stating the opposite of the intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Limit {
@@ -189,7 +189,7 @@ impl Limit {
 /// string `"unlimited"` for `Unlimited`.
 ///
 /// This must be hand-written. The derived form produced `{"Max":2}` and
-/// `"Unlimited"`, which the hand-written visitor cannot read back — so
+/// `"Unlimited"`, which the hand-written visitor cannot read back. So
 /// `plans.entitlements` (which mirrors the config for auditing, per the spec)
 /// stored a blob that could never be parsed again. Nothing round-tripped, so no
 /// test noticed.
@@ -371,7 +371,7 @@ impl PlansFile {
 
         // Limits must not shrink as the price rises. Checked here rather than only
         // in a test, because a mis-edited config must fail at boot with the
-        // offending plan pair named — the test can only report it after the fact,
+        // offending plan pair named. The test can only report it after the fact,
         // and only if CI runs.
         let free = self.get(PlanId::Free);
         let pro = self.get(PlanId::Pro);

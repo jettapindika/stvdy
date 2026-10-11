@@ -28,7 +28,7 @@ behind traits, so a provider is configuration rather than code.
 
 - Rust 1.94.1 (`rust-toolchain.toml` pins it; sqlx 0.9 needs ≥1.94.0)
 - Node 24 (`.nvmrc`; ≥22.22 required by React Router 8)
-- **Postgres with pgvector** — one of: Docker, a local install, or hosted Supabase
+- **Postgres with pgvector**. One of: Docker, a local install, or hosted Supabase
 - `just` (`brew install just`) for the dev recipes
 - For mobile later: Xcode (iOS), Android Studio + NDK (Android)
 
@@ -42,7 +42,7 @@ needed for `just migrate` and `just prepare`.
 machine.
 
 ```bash
-# (a) Docker — needs port 5432 free
+# (a) Docker. Needs port 5432 free
 brew services stop postgresql@17   # if a local Postgres holds 5432
 just db-up                         # postgres + pgvector, MinIO, bucket
 
@@ -55,13 +55,16 @@ createdb stvdy                     # once
 **2. Configuration.**
 
 ```bash
-cp .env.example .env
+# .env already exists on this machine and is configured. Do NOT overwrite it:
+# .env.example holds the Docker DATABASE_URL, so copying over a working file
+# reintroduces `role "postgres" does not exist`.
+[ -f .env ] || cp .env.example .env
 ```
 
 Then **check `DATABASE_URL` in `.env` matches the path you chose above.** The
 template ships `postgres://postgres:postgres@localhost:5432/stvdy`, which is
 correct for Docker and wrong for a local Homebrew Postgres (its role is your
-username, and there is no `postgres` role) — the symptom is
+username, and there is no `postgres` role). The symptom is
 `role "postgres" does not exist`.
 
 **3. Server** → http://localhost:8080
@@ -89,13 +92,13 @@ just tauri
 ```
 
 `just tauri` starts its own frontend via `beforeDevCommand`, so **do not also run
-step 4** — the second Vite cannot bind 5173 (`strictPort: true`) and prints
+step 4**. The second Vite cannot bind 5173 (`strictPort: true`) and prints
 `Port 5173 is already in use`. That message is harmless here (Tauri just polls
 `devUrl`, which the first Vite is serving), but it looks like a failure. Run step
 4 for the browser build, or step 5 for the desktop app, not both.
 
 Recipes: `just db-up`, `just migrate`, `just server`, `just web`, `just tauri`,
-`just search-up`, `just check`, `just prepare`. Run them from the repo root — the
+`just search-up`, `just check`, `just prepare`. Run them from the repo root. The
 Tauri CLI resolves `src-tauri` as a subdirectory of the working directory and
 will not find it from `app/`.
 
@@ -108,13 +111,13 @@ will not find it from `app/`.
 | SearXNG (`just search-up`) | web search only, Phase 3+; needs `SEARXNG_SECRET` in `.env` |
 
 The `#[sqlx::test]` suites create a scratch database per test, so **Postgres must
-be reachable before `just check`** — otherwise those tests fail loudly. That is
+be reachable before `just check`**. Otherwise those tests fail loudly. That is
 deliberate: a skipped test would look green.
 
 ## Supabase dev database
 
 Dev and early staging can run against a hosted Supabase Postgres instead of the
-compose one — project `stvdy` (`kugefzknygvjmgwanjkk`, `ap-southeast-1`, org
+compose one. Project `stvdy` (`kugefzknygvjmgwanjkk`, `ap-southeast-1`, org
 Jetta). Per A47 this is **never** the production database: the free tier's 500 MB
 cannot hold this pgvector workload.
 
@@ -132,14 +135,14 @@ uses the **session pooler** on 5432, because sqlx prepares statements (the
 transaction pooler on 6543 does not carry them across statements) and the direct
 host `db.<ref>.supabase.co` is IPv6-only.
 
-Migrations are sqlx's, and `supabase db push` cannot see them — it only reads
+Migrations are sqlx's, and `supabase db push` cannot see them. It only reads
 `supabase/migrations/`, which does not exist here, so it reports "Remote database
 is up to date" while pushing nothing. Use `just migrate-supabase` (or start the
 server, which migrates on boot). The CLI's `db query`, `db dump`, `db lint` and
 `db advisors` all work against the linked project and are useful as-is.
 
 `crates/server` connects as `postgres` and does its own auth, so nothing here
-uses the PostgREST Data API — but Supabase grants `anon` and `authenticated` full
+uses the PostgREST Data API. But Supabase grants `anon` and `authenticated` full
 access to every table in `public` and enables RLS on none of them, which would
 expose all 36 tables over HTTPS to anyone holding the project's anon key. A
 recreated or restored project re-applies those grants, so after any such change
@@ -167,7 +170,7 @@ just check          # all three areas: rust, web AND shell
 | `check-shell` | `fmt`, `clippy`, `cargo test` for `src-tauri` |
 
 `src-tauri` is excluded from the Cargo workspace so `tauri_build::build()` never
-runs during workspace clippy — which means the workspace commands skip it
+runs during workspace clippy. Which means the workspace commands skip it
 entirely, hence the separate target. `check-shell` depends on `check-web` because
 `generate_context!()` panics at compile time when `app/dist` is missing, and
 `dist/` is gitignored.
@@ -193,10 +196,10 @@ docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md, RELE
 
 ## Documentation
 
-- `docs/SPEC.md` — the requirement document of record.
-- `docs/ASSUMPTIONS.md` — every decision the spec left open, plus blockers.
-- `docs/ARCHITECTURE.md` — layers, provider traits, native capability matrix,
+- `docs/SPEC.md`. The requirement document of record.
+- `docs/ASSUMPTIONS.md`. Every decision the spec left open, plus blockers.
+- `docs/ARCHITECTURE.md`. Layers, provider traits, native capability matrix,
   prototype results.
-- `docs/API.md` — routes, conventions, SSE event shapes.
-- `docs/SYNC.md` — cursor model, push allowlist, conflict rules, offline scope.
-- `docs/superpowers/plans/` — the master roadmap and per-phase plans.
+- `docs/API.md`. Routes, conventions, SSE event shapes.
+- `docs/SYNC.md`. Cursor model, push allowlist, conflict rules, offline scope.
+- `docs/superpowers/plans/`. The master roadmap and per-phase plans.

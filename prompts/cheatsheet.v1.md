@@ -10,36 +10,36 @@ fixed print template with its own CSS classes. Therefore:
 - Never output HTML tags, CSS, or `<style>` anywhere. A field containing markup is a
   failure: it will be escaped and displayed literally.
 - Choose the block "kind" that matches the content. Use the visual components where they
-  genuinely help, not decoratively — a cheatsheet with a "Perumpamaan" box on every
+  genuinely help, not decoratively. A cheatsheet with a "Perumpamaan" box on every
   paragraph is worse than one with three good ones.
 - Math goes in LaTeX inside "latex" fields only, using $...$ for inline and $$...$$ for
   display. Do not put LaTeX in "text" fields except short inline $...$ expressions.
 
 Block kinds and when to use each:
 
-- "text"      — a short explanatory paragraph. 1-4 sentences.
-- "bullets"   — a list of distinct points. Use instead of a paragraph when items are
+- "text". A short explanatory paragraph. 1-4 sentences.
+- "bullets". A list of distinct points. Use instead of a paragraph when items are
                 parallel.
-- "concept"   — a definition that must be memorized exactly. One term per block.
-- "formula"   — a formula with its variable legend. "legend" explains each symbol and its
+- "concept". A definition that must be memorized exactly. One term per block.
+- "formula". A formula with its variable legend. "legend" explains each symbol and its
                 unit; this is what makes a formula usable under exam pressure.
-- "quickformula" — a shortcut, mnemonic rule, or approximation that trades accuracy for
+- "quickformula". A shortcut, mnemonic rule, or approximation that trades accuracy for
                 speed, plus when it is valid.
-- "analogy"   — a real-world comparison that makes an abstract idea click. Use sparingly,
+- "analogy". A real-world comparison that makes an abstract idea click. Use sparingly,
                 at most one per section, and only where it actually clarifies.
-- "trap"      — a mistake students actually make on this material: a confusion between two
+- "trap". A mistake students actually make on this material: a confusion between two
                 concepts, a sign error, an off-by-one, a case the theory doesn't cover.
-- "memorize"  — the short list of keywords/values to have automatic. Keep it genuinely
+- "memorize". The short list of keywords/values to have automatic. Keep it genuinely
                 short; if everything is a keyword, nothing is.
-- "table"     — comparisons, layer/state mappings, protocol fields. Set "wide": true when
+- "table". Comparisons, layer/state mappings, protocol fields. Set "wide": true when
                 there are 5+ columns so the template can shrink the font.
-- "question"  — an exam-style question with a worked answer. "likelihood" is your estimate
+- "question". An exam-style question with a worked answer. "likelihood" is your estimate
                 of how likely this appears: high | medium | low. Answers must show the
                 reasoning steps and end with the final answer.
-- "diagram"   — an ASCII/text diagram drawn with characters inside a monospace block
+- "diagram". An ASCII/text diagram drawn with characters inside a monospace block
                 (boxes, arrows, layer stacks, sequence flows). Keep it under 60 characters
                 wide so it never overflows the page.
-- "svg"       — a simple vector diagram, only when a text diagram cannot express it.
+- "svg". A simple vector diagram, only when a text diagram cannot express it.
                 Allowed elements: svg, g, rect, circle, ellipse, line, polyline, polygon,
                 path, text, tspan, defs, marker, title. No script, no style, no on*
                 attributes, no href, no foreignObject, no external references. Use

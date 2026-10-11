@@ -1,7 +1,7 @@
 # Controls where purchase UI may appear. iOS and Android must never sell:
 # QRIS checkout is web/desktop only, and the plan then syncs to the account on
 # every device. `validate()` rejects a mobile entry that enables purchase UI,
-# shows prices, or allows a CTA — so this file cannot be edited into an
+# shows prices, or allows a CTA. So this file cannot be edited into an
 # app-store policy violation.
 
 [platforms.web]

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Cheatsheet print template — v1
+  Cheatsheet print template. V1
   ==========================================================================
   One reusable template for every cheatsheet. Placeholders in {{braces}} are
   filled by the server renderer (crates/core/src/render/cheatsheet.rs) from the
@@ -38,7 +38,7 @@
   For hermetic server-side rendering the renderer rewrites ASSET_BASE (below) to
   a local mount, so a PDF never depends on a CDN being reachable. If KaTeX fails
   to load for any reason, formulas fall back to the literal text between the
-  delimiters — which is why every formula is also written to be readable as
+  delimiters. Which is why every formula is also written to be readable as
   plain text.
 -->
 <html lang="{{lang}}">
@@ -51,13 +51,13 @@
      vendors katex + the woff2 fonts into the image. The CDN URLs are the
      browser-print fallback; a PDF export must not depend on a third-party CDN at
      render time, because a slow or blocked CDN leaves every formula as literal
-     $...$ text in the PDF — a silent, plausible-looking failure, and a cheatsheet
+     $...$ text in the PDF. A silent, plausible-looking failure, and a cheatsheet
      is mostly math.
 
      No `integrity` attribute on purpose: these are placeholder-free CDN URLs and
      a hand-written SRI hash would be a guess. A wrong hash does not degrade, it
      BLOCKS the script. If SRI is wanted, copy the real published hashes from the
-     jsdelivr package page — never write one by hand. -->
+     jsdelivr package page. Never write one by hand. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css">
 <!-- `defer` so these execute after parsing, in order, before the `load` event
      the render script below waits for. A non-deferred inline script in <head>
@@ -79,7 +79,7 @@
   margin: 18mm 16mm;
 
   /* Declarative header/footer. Supported by Prince and WeasyPrint.
-     Chrome ignores these — the server supplies them via CDP instead. */
+     Chrome ignores these. The server supplies them via CDP instead. */
   @top-center {
     content: "Cheatsheet UTS Jaringan Komputer";
     font-family: "Inter", "Segoe UI", Arial, sans-serif;
@@ -143,7 +143,7 @@ code, kbd, samp { font-family: var(--font-mono); font-size: 9.5pt; }
    This list is per-class and enforced by hand, so a new standalone box class
    must be added here or it will split. `.qa` wraps a question together with its
    answer: `.soal` and `.jawaban` are separate elements, so `break-inside: avoid`
-   on each of them cannot stop a break landing BETWEEN them — a student would
+   on each of them cannot stop a break landing BETWEEN them. A student would
    flip the page to find the answer. The renderer emits one `.qa` per question
    block, and this rule is what keeps the pair together. */
 table, .box, figure, pre, .qa, .gap-note, .toc li, svg {
@@ -317,7 +317,7 @@ h4 {
 .konsep .box__title { color: var(--ink-soft); }
 .konsep__term { font-weight: 600; color: var(--ink); }
 
-/* 📦 Perumpamaan — a real-world analogy. */
+/* 📦 Perumpamaan. A real-world analogy. */
 .analogi {
   background: #eff6ff;
   border: 1pt solid #bfdbfe;
@@ -369,7 +369,7 @@ h4 {
 }
 .rumus__legend .sym { font-family: var(--font-mono); font-weight: 600; }
 
-/* ⚠️ Jebakan — a mistake students make. */
+/* ⚠️ Jebakan. A mistake students make. */
 .jebakan {
   background: #fef2f2;
   border: 1pt solid #fecaca;
@@ -377,7 +377,7 @@ h4 {
 }
 .jebakan .box__title { color: #b91c1c; }
 
-/* 🎯 Kata Kunci Hafalan — the short list to have automatic. */
+/* 🎯 Kata Kunci Hafalan. The short list to have automatic. */
 .hafalan {
   background: #f0fdf4;
   border: 1pt solid #bbf7d0;
@@ -386,7 +386,7 @@ h4 {
 .hafalan .box__title { color: #15803d; }
 .hafalan ul { margin-bottom: 0; }
 
-/* ⚡ Rumus Cepat — a shortcut that trades accuracy for speed. */
+/* ⚡ Rumus Cepat. A shortcut that trades accuracy for speed. */
 .trik {
   background: #faf5ff;
   border: 1pt solid #e9d5ff;
@@ -395,7 +395,7 @@ h4 {
 .trik .box__title { color: #7e22ce; }
 .trik__note { font-size: 9pt; color: var(--ink-soft); margin-top: 3pt; }
 
-/* SOAL — an exam-style question with a likelihood badge.
+/* SOAL. An exam-style question with a likelihood badge.
    Always emitted inside `.qa`, which owns the break-avoidance for the
    question+answer pair. Do NOT add break-after: avoid here: it fights the
    wrapper, and when the answer then does not fit Chrome resolves the conflict
@@ -434,7 +434,7 @@ h4 {
 .badge--medium { background: #f59e0b; color: #422006; }
 .badge--low    { background: #e5e7eb; color: #374151; }
 
-/* JAWABAN — worked steps, final answer highlighted. */
+/* JAWABAN. Worked steps, final answer highlighted. */
 .jawaban {
   border: 1pt solid var(--rule);
   border-top: none;
@@ -720,7 +720,7 @@ pre.diagram {
    Network       +---------------------------+
    Access        |   Ethernet  |   Wi-Fi     |
                  +---------------------------+</pre>
-    <figcaption>Gambar 1.1 — Susunan lapisan TCP/IP dan protokol utamanya.</figcaption>
+    <figcaption>Gambar 1.1. Susunan lapisan TCP/IP dan protokol utamanya.</figcaption>
   </figure>
 
   <!--
@@ -751,7 +751,7 @@ pre.diagram {
         </marker>
       </defs>
     </svg>
-    <figcaption>Gambar 1.2 — Three-way handshake TCP.</figcaption>
+    <figcaption>Gambar 1.2. Three-way handshake TCP.</figcaption>
   </figure>
 
   <div class="gap-note">
@@ -775,7 +775,7 @@ pre.diagram {
 
   <!--
     A question and its answer are ONE wrapper: <div class="qa">. They must never
-    be emitted as siblings — `break-inside: avoid` on each element cannot stop a
+    be emitted as siblings. `break-inside: avoid` on each element cannot stop a
     page break landing between them, so the student would flip the page to find
     the answer. `.qa` is in the break-inside list at the top of this stylesheet.
     This mirrors the JSON contract: prompts/cheatsheet.v1.md models a question as
@@ -879,7 +879,7 @@ pre.diagram {
     };
 
     // Sentinel the server renderer waits for. Without the gate, print_to_pdf can
-    // run before KaTeX finishes and silently emit raw $...$ text in the PDF — a
+    // run before KaTeX finishes and silently emit raw $...$ text in the PDF. A
     // plausible-looking failure, and a cheatsheet is mostly math. The renderer
     // polls for data-math-ready === "1" and FAILS THE JOB on any other value
     // rather than shipping a document full of LaTeX source.
