@@ -24,6 +24,9 @@ use common::{SseEvent, json, signed_up, sse_events, workspace_with_text};
 
 /// A tier that returns one academic hit with a DOI, and counts its calls so the
 /// cache can be observed.
+///
+/// Its hit URL varies with the query, so two *different* queries are two cache
+/// misses and each consumes the daily search allowance.
 struct StubTier {
     calls: Arc<AtomicUsize>,
     doi: Option<String>,
@@ -35,16 +38,19 @@ impl SearchProvider for StubTier {
         "stub_academic"
     }
 
-    async fn search(&self, _q: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
+    async fn search(&self, q: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let mut hit = SearchHit::new(
             "Attention Is All You Need",
-            "https://arxiv.org/abs/1706.03762",
+            // Per-query, so a different query is a different cache key and therefore
+            // a real search.
+            format!("https://arxiv.org/abs/1706.03762?q={}", q.len()),
             "The dominant sequence transduction models are based on complex recurrent networks.",
             SourceKind::Academic,
             "stub_academic",
         );
+        let _ = q;
         hit.doi = self.doi.clone();
         hit.published_at = Some(Utc::now());
         Ok(vec![hit])
@@ -109,9 +115,15 @@ async fn a_web_turn_cites_a_url_and_a_doi(pool: PgPool) {
     let array = citations.as_array().expect("an array");
     assert_eq!(array.len(), 1, "one web citation: {citations}");
 
-    // The gate is URLs *and* DOIs, so both are asserted by name.
+    // The gate is URLs *and* DOIs, so both are asserted. The stub appends the query
+    // length to its URL so distinct queries are distinct cache keys, so the
+    // assertion is on the address rather than the whole string.
     assert_eq!(array[0]["type"], "web");
-    assert_eq!(array[0]["url"], "https://arxiv.org/abs/1706.03762");
+    let url = array[0]["url"].as_str().unwrap();
+    assert!(
+        url.starts_with("https://arxiv.org/abs/1706.03762"),
+        "the citation must carry the hit's URL: {url}"
+    );
     assert_eq!(array[0]["title"], "Attention Is All You Need");
     assert_eq!(
         array[0]["doi"], "10.48550/arXiv.1706.03762",
@@ -280,7 +292,12 @@ async fn a_web_hit_without_a_doi_cites_without_one(pool: PgPool) {
         .expect("a citations event");
     let array = citations.as_array().unwrap();
     assert_eq!(array.len(), 1);
-    assert_eq!(array[0]["url"], "https://arxiv.org/abs/1706.03762");
+    assert!(
+        array[0]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://arxiv.org/abs/1706.03762")
+    );
     assert!(
         array[0]["doi"].is_null(),
         "no DOI was provided, so none may appear: {citations}"
@@ -317,4 +334,188 @@ async fn a_turn_without_the_toggle_does_not_search(pool: PgPool) {
     // claim otherwise.
     let system = &llm.requests()[0].messages[0].content;
     assert!(system.contains("Web search: off"), "{system}");
+}
+
+/// `web_searches_per_day` is enforced, and a cache hit does not consume it.
+///
+/// Two things this pins that are easy to get wrong. The cap has to exist at all:
+/// it is configured in `plans.toml` (3 free, 30 pro, 100 power) and a limit nothing
+/// reads is a limit that does not exist, which is exactly what happened to
+/// `sources_total` in Phase 1. And it must count **uncached** searches only: a
+/// repeat of a question already answered costs no credit, so charging the daily
+/// allowance for it would make the free tier's three searches unusable for a
+/// student who revises, which is the opposite of what the cache is for (A40).
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_daily_search_cap_counts_uncached_searches_only(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "search-cap@example.test").await;
+    let (workspace_id, _) =
+        workspace_with_text(&app, &harness, &token, "Notes", "Notes", NOTES).await;
+
+    let (harness, calls) = with_stub(harness, Some("10.48550/arXiv.1706.03762"));
+    // Enough credits that the cap is what refuses, not the balance.
+    let user_id: uuid::Uuid = sqlx::query_scalar("select id from users limit 1")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into credit_ledger (user_id, delta, bucket, reason) values ($1, 500, 'monthly', 'test')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let llm = Arc::new(ScriptedLlm::new(vec!["An answer [W1].".to_string(); 20]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let cap = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .web_searches_per_day;
+    let uri = format!("/workspaces/{workspace_id}/chat");
+
+    // Distinct queries, so each is a miss and each consumes one of the allowance.
+    for index in 0..cap {
+        let (status, events) = sse_events(
+            &app,
+            &uri,
+            &token,
+            serde_json::json!({ "message": format!("distinct question {index}"), "use_web": true }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "search {index} of {cap}: {events:?}"
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), cap as usize);
+
+    // The next distinct query is refused, and the refusal names the plan.
+    let (status, rejected) = json(
+        &app,
+        "POST",
+        &uri,
+        &token,
+        serde_json::json!({ "message": "one more distinct question", "use_web": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{rejected}");
+    assert_eq!(rejected["code"], "limit_reached");
+    assert_eq!(rejected["min_plan"], "pro");
+    assert_eq!(rejected["limit"], cap as i64);
+
+    // A repeat of an already-cached query still works: it costs nothing and must not
+    // consume the allowance it already spent.
+    let before = calls.load(Ordering::SeqCst);
+    let (status, events) = sse_events(
+        &app,
+        &uri,
+        &token,
+        serde_json::json!({ "message": "distinct question 0", "use_web": true }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a cached repeat must still answer after the cap is reached: {events:?}"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        before,
+        "a cached repeat must not call the provider again"
+    );
+
+    // And the uncached count is exactly the cap, not cap + 1: the repeat did not add
+    // to it.
+    let uncached: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from usage_events
+          where action = 'web_search' and cache_hit = false",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(uncached, cap as i64);
+}
+
+/// A search that is refused by the cap spends no credit for it.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_search_refused_by_the_cap_does_not_charge_for_it(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "cap-charge@example.test").await;
+    let (workspace_id, _) =
+        workspace_with_text(&app, &harness, &token, "Notes", "Notes", NOTES).await;
+
+    let (harness, _) = with_stub(harness, None);
+    let user_id: uuid::Uuid = sqlx::query_scalar("select id from users limit 1")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+
+    // A cap already reached, simulated with usage rows, and a healthy balance.
+    let cap = harness
+        .state
+        .config
+        .plans
+        .get(stvdy_core::config::PlanId::Free)
+        .web_searches_per_day;
+    sqlx::query(
+        "insert into credit_ledger (user_id, delta, bucket, reason) values ($1, 500, 'monthly', 'test')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+    for _ in 0..cap {
+        sqlx::query(
+            "insert into usage_events (user_id, action, credits, cache_hit)
+             values ($1, 'web_search', 2, false)",
+        )
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    }
+
+    let before: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let llm = Arc::new(ScriptedLlm::new(vec!["unused".to_string()]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, rejected) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "a distinct question", "use_web": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{rejected}");
+
+    let after: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        after, before,
+        "a refused turn must not charge, because the whole spend is one transaction"
+    );
 }

@@ -98,6 +98,51 @@ fn is_public_v6(addr: Ipv6Addr) -> bool {
     true
 }
 
+/// Whether a search result's URL may be shown to the user as a citation.
+///
+/// The citation path never goes through the fetcher: a hit's URL is written into
+/// `Citation::Web` and rendered as a link the user clicks, which
+/// `platform.openExternal` then opens in their browser. So a hostile or
+/// compromised search tier could return `http://169.254.169.254/latest/meta-data/`
+/// or `http://127.0.0.1:8099/` and have it offered as a citable source. Filtering
+/// at the tier boundary is what makes the property true for every consumer at once,
+/// instead of each one having to remember.
+///
+/// This is a *syntactic* check and a *literal* address check: a hostname that
+/// resolves to a private address still passes here, because resolving every hit
+/// would be a DNS lookup per result. That residual is recorded rather than
+/// claimed solved, and the fetch path (which does resolve) is the one that has to
+/// be airtight.
+pub fn is_citable_url(raw: &str) -> bool {
+    let Ok(parsed) = parse_target(raw) else {
+        return false;
+    };
+    // `Url::host()` rather than `host_str()`: the string form keeps an IPv6
+    // literal's brackets (`[::1]`), so parsing it as an `IpAddr` fails and the
+    // address check silently does not run. The suite caught exactly that.
+    match parsed.host() {
+        Some(url::Host::Ipv4(addr)) => is_public_ip(IpAddr::V4(addr)),
+        Some(url::Host::Ipv6(addr)) => is_public_ip(IpAddr::V6(addr)),
+        Some(url::Host::Domain(host)) => {
+            // The loopback names, checked without DNS. `localhost` is the case that
+            // matters: it is not a literal, so an address-only check would let a hit
+            // pointing at this very server through, and every platform's hosts file
+            // resolves it to loopback.
+            !is_loopback_name(host)
+        }
+        None => false,
+    }
+}
+
+/// Names that resolve to loopback without a DNS lookup.
+///
+/// `localhost` and its dotted form, plus the `*.localhost` convention that RFC 6761
+/// reserves and every modern resolver maps to the loopback interface.
+fn is_loopback_name(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "localhost" || host.ends_with(".localhost")
+}
+
 /// The scheme and host check, before any DNS work.
 pub fn parse_target(raw: &str) -> Result<url::Url, FetchError> {
     let parsed = url::Url::parse(raw).map_err(|error| FetchError::Invalid(error.to_string()))?;
@@ -230,11 +275,19 @@ impl PageFetcher for ReqwestFetcher {
                         FetchError::Provider("a redirect with no Location header".to_string())
                     })?;
 
-                // Relative redirects are resolved against the current URL, and the
-                // next iteration re-checks the scheme and the addresses.
-                current = current
-                    .join(location)
-                    .map_err(|error| FetchError::Invalid(error.to_string()))?;
+                // Relative redirects are resolved against the current URL, then
+                // re-validated exactly like the original: `parse_target` checks the
+                // scheme and the credentials, and the next iteration re-resolves and
+                // re-checks the addresses. Without the `parse_target` call here a
+                // redirect to a non-http scheme would slip past the guard and fail
+                // later inside `send()` as a provider error, which reads like an
+                // outage rather than a refusal.
+                current = parse_target(
+                    current
+                        .join(location)
+                        .map_err(|error| FetchError::Invalid(error.to_string()))?
+                        .as_str(),
+                )?;
                 continue;
             }
 

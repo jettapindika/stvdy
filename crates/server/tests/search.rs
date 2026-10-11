@@ -696,3 +696,82 @@ async fn a_repeat_query_hits_the_cache_even_when_another_tier_answered(pool: PgP
     );
     assert_eq!(second.hits[0].doi.as_deref(), Some("10.1000/second"));
 }
+
+/// A tier returning an unusable URL has those hits dropped before ranking and
+/// before caching.
+///
+/// Asserted here rather than only on the pure guard, because the placement is the
+/// point: dropping after the cache write would leave an unusable URL stored and
+/// served to every later request for that query.
+#[sqlx::test(migrations = "../../migrations")]
+async fn hits_with_unusable_urls_are_dropped_before_the_cache(pool: PgPool) {
+    use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
+    use stvdy_server::integrations::search::composite::CompositeSearch;
+
+    struct Mixed;
+    #[async_trait::async_trait]
+    impl SearchProvider for Mixed {
+        fn name(&self) -> &'static str {
+            "mixed"
+        }
+        async fn search(&self, _q: &str, _max: u8) -> Result<Vec<SearchHit>, SearchError> {
+            let good = SearchHit::new(
+                "A real paper",
+                "https://arxiv.org/abs/1706.03762",
+                "s",
+                SourceKind::Academic,
+                "mixed",
+            );
+            // The two that matter: the cloud metadata endpoint, and a service on the
+            // user's own machine.
+            let metadata = SearchHit::new(
+                "Metadata",
+                "http://169.254.169.254/latest/meta-data/",
+                "s",
+                SourceKind::Web,
+                "mixed",
+            );
+            let loopback = SearchHit::new(
+                "Local",
+                "http://127.0.0.1:8099/workspaces",
+                "s",
+                SourceKind::Web,
+                "mixed",
+            );
+            Ok(vec![good, metadata, loopback])
+        }
+    }
+
+    let composite = CompositeSearch::with_tiers(
+        vec![Arc::new(Mixed)],
+        pool.clone(),
+        std::time::Duration::from_secs(3600),
+    );
+
+    let outcome = composite.search("anything", 8).await;
+    assert_eq!(
+        outcome.hits.len(),
+        1,
+        "only the citable hit may survive: {:?}",
+        outcome
+            .hits
+            .iter()
+            .map(|hit| hit.url.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(outcome.hits[0].url, "https://arxiv.org/abs/1706.03762");
+
+    // And the cache holds only the citable one, so a later request cannot be served
+    // an unusable URL from it.
+    let cached: serde_json::Value = sqlx::query_scalar("select results from search_cache limit 1")
+        .fetch_one(&pool)
+        .await
+        .expect("the outcome was cached");
+    let urls: Vec<String> = cached
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|hit| hit["url"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(urls, vec!["https://arxiv.org/abs/1706.03762".to_string()]);
+}

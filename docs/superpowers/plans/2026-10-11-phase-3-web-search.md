@@ -360,7 +360,7 @@ passes.
 |---|---|
 | `cargo fmt --all -- --check` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace` | **313 passing**, 0 failing |
+| `cargo test --workspace` | **317 passing**, 0 failing |
 | `npm --prefix app test` | **144 passing** |
 | `npm --prefix app run build` | clean |
 | `src-tauri` tests + `tauri build --no-bundle` | green |
@@ -397,6 +397,39 @@ prompt carries the Indonesian chunk labelled [1] and a web result labelled [W1]
 - **`moli`.** Not installed here, so the chain is Exa (absent) then reqwest; the
   `--block-private-networks` invocation is asserted by construction, not by running
   it.
+
+### Review round: four defects found after the first Phase 3 summary
+
+8. **`web_searches_per_day` was configured but never read.** Three on free, 30 on
+   pro, 100 on power, and nothing enforced any of it. Exactly the shape Phase 1
+   shipped for `sources_total`, and the same fix: the cap now lives inside the
+   spend's transaction, alongside the chat cap, and counts **uncached** searches
+   only, because a cache hit costs no credit and must not consume the daily
+   allowance either. Both caps are checked in one transaction, which is what makes
+   a refused turn charge nothing: two separate spends would charge for the chat and
+   then refuse the search, leaving a billed turn with no web context (A78).
+9. **A search hit's URL could reach a citation without ever being checked.** The
+   citation path does not go through the fetcher: a hit's URL is written into
+   `Citation::Web` and rendered as a link the shell opens in the user's browser,
+   where their own credentials may live. So a hostile or compromised tier could
+   return `http://169.254.169.254/latest/meta-data/` or this server's own loopback
+   address and have it offered as a source. Unusable URLs are now dropped at the
+   tier boundary, before ranking and before the cache write, so an unusable URL can
+   be neither cited nor stored (A79). The suite caught two gaps while pinning it:
+   `localhost` is a name rather than a literal so an address-only check missed it,
+   and `host_str()` keeps an IPv6 literal's brackets so `[::1]` failed to parse as
+   an address and the check silently did not run.
+10. **`used_web` was one value for two different facts.** It was written to the
+    user's row, the assistant's row and the `done` event from the same expression.
+    The user's row should record what the turn asked for, and the assistant's row
+    and the event should record whether web context actually reached the prompt;
+    they differ in exactly the case where the toggle was on and every tier returned
+    nothing, and sharing one value misattributes the answer on that turn (A80).
+11. **A redirect was not re-checked for its scheme.** The comment claimed the next
+    iteration re-checked "the scheme and the addresses" and only the addresses were
+    re-checked, so a redirect to a non-http scheme failed later inside `send()` as a
+    provider error, which reads like an outage rather than a refusal. `parse_target`
+    now runs on every joined redirect target as well as at the top.
 
 ### Roadmap gate 6, with web context present: PASS
 

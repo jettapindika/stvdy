@@ -87,7 +87,8 @@ pub async fn chat(
         )
     })?;
 
-    let cap = credits::daily_chat_cap(&state, &user);
+    let chat_cap = credits::daily_chat_cap(&state, &user);
+    let search_cap = credits::daily_search_cap(&state, &user);
     let cost = credits::chat_message_cost(&state);
 
     let chunks = retrieve::retrieve(
@@ -159,17 +160,34 @@ pub async fn chat(
         user.plan(),
         ACTION,
         total_cost,
-        Some(cap),
+        // Both caps, in this one transaction. The search cap is only armed when a
+        // search actually ran and was not a cache hit, because that is the case it
+        // governs: an uncached search consumes `web_searches_per_day`, and a repeat
+        // of a cached question does not (A40).
+        [
+            Some(chat_cap),
+            if search_cost > 0 {
+                Some(search_cap)
+            } else {
+                None
+            },
+        ],
     )
     .await?;
     let remaining = spent.remaining;
     let usage_event_id = spent.usage_event_id;
 
-    // What the turn actually used, which is not the same as what was requested: a
-    // toggle-on turn where every tier returned nothing used no web context, and
-    // recording `used_web: true` for it would make the stored assistant row a lie
-    // about where the answer came from.
-    let used_web = !web.is_empty();
+    // Two related-but-distinct facts, deliberately stored separately:
+    //
+    //  * the *user's* row records what the turn asked for, because that is what the
+    //    user's message is;
+    //  * the *assistant's* row and the `done` event record what the answer actually
+    //    used, because a toggle-on turn where every tier returned nothing used no
+    //    web context and claiming otherwise would misattribute the answer.
+    //
+    // They differ in exactly one case, which is why it is worth being explicit
+    // rather than sharing one value: a search that returned nothing.
+    let answered_with_web = !web.is_empty();
 
     let user_message_id = insert_message(
         &state,
@@ -178,7 +196,7 @@ pub async fn chat(
         "user",
         &message,
         &[],
-        used_web,
+        body.use_web,
     )
     .await?;
 
@@ -342,14 +360,14 @@ pub async fn chat(
                 "assistant",
                 &cleaned,
                 &resolved,
-                used_web,
+                answered_with_web,
             )
             .await
             {
                 Ok(message_id) => {
                     yield Ok(sse::citations(&resolved));
                     yield Ok(sse::usage(total_cost, remaining));
-                    yield Ok(sse::done(message_id, used_web));
+                    yield Ok(sse::done(message_id, answered_with_web));
                 }
                 Err(error) => {
                     tracing::error!(%error, "persisting the assistant message failed");

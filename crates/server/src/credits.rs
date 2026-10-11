@@ -79,11 +79,19 @@ fn plan_for_more_credits(plan: stvdy_core::config::PlanId) -> Option<&'static st
 /// exact.
 #[derive(Debug, Clone, Copy)]
 pub struct DailyCap {
+    /// The `usage_events.action` this cap counts.
+    pub action: &'static str,
     pub limit: stvdy_core::config::Limit,
     /// Start of the user's local day, from `util::local_day_start`.
     pub since: DateTime<Utc>,
     /// The label the error names, e.g. "chat messages today".
     pub label: &'static str,
+    /// Count only rows the user actually paid for.
+    ///
+    /// The web-search cap needs this: a cache hit costs no credit and must not
+    /// consume the daily allowance either, or re-asking a question would burn the
+    /// allowance that A40 introduced the cache to protect.
+    pub uncached_only: bool,
 }
 
 /// What a successful spend leaves behind.
@@ -113,7 +121,7 @@ pub async fn spend(
     plan: stvdy_core::config::PlanId,
     action: &str,
     credits: i64,
-    daily_cap: Option<DailyCap>,
+    daily_caps: [Option<DailyCap>; 2],
 ) -> AppResult<Spent> {
     let pool = &state.pool;
     if credits < 0 {
@@ -136,14 +144,16 @@ pub async fn spend(
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the spend lock: {error}")))?;
 
-    if let Some(cap) = daily_cap {
+    for cap in daily_caps.iter().flatten() {
         let used: i64 = sqlx::query_scalar(
             "select count(*)::bigint from usage_events
-              where user_id = $1 and action = $2 and created_at >= $3",
+              where user_id = $1 and action = $2 and created_at >= $3
+                and (not $4 or cache_hit = false)",
         )
         .bind(user_id)
-        .bind(action)
+        .bind(cap.action)
         .bind(cap.since)
+        .bind(cap.uncached_only)
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("counting usage: {error}")))?;
@@ -283,9 +293,28 @@ pub async fn record_provider_usage(
 pub fn daily_chat_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -> DailyCap {
     let plan = user.plan();
     DailyCap {
+        action: "chat_message",
         limit: state.config.plans.get(plan).chat_msgs_per_day,
         since: crate::util::local_day_start(&user.timezone, state.clock.as_ref()),
         label: "chat messages today",
+        uncached_only: false,
+    }
+}
+
+/// The daily web-search cap: `web_searches_per_day`, 3 on free and 30 on pro.
+///
+/// Counts **uncached searches only**. A cache hit costs no credit (A40) and must
+/// not consume the allowance either: a repeat of a question already answered is
+/// exactly the case the cache exists for, and charging the allowance for it would
+/// make the free tier's three searches per day unusable for a student who revises.
+pub fn daily_search_cap(state: &AppState, user: &crate::auth::extract::AuthUser) -> DailyCap {
+    let plan = user.plan();
+    DailyCap {
+        action: "web_search",
+        limit: stvdy_core::config::Limit::Max(state.config.plans.get(plan).web_searches_per_day),
+        since: crate::util::local_day_start(&user.timezone, state.clock.as_ref()),
+        label: "web searches today",
+        uncached_only: true,
     }
 }
 

@@ -199,3 +199,53 @@ async fn a_literal_private_host_is_refused_by_the_resolver() {
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].port(), 443);
 }
+
+/// A search hit whose URL cannot be opened must never become a citation.
+///
+/// The citation path does not go through the fetcher: a hit's URL is written into
+/// `Citation::Web` and rendered as a link the user clicks, which the shell then
+/// opens in their browser. So a hostile or compromised search tier could return the
+/// metadata endpoint or this server's own loopback address and have it offered as a
+/// citable source. Filtering at the tier boundary is what makes the property true
+/// for every consumer at once.
+#[test]
+fn only_a_url_that_could_be_opened_is_citable() {
+    use stvdy_server::integrations::fetch::is_citable_url;
+
+    for refused in [
+        // The two with real consequences: the cloud metadata endpoint and a service
+        // on the user's own machine.
+        "http://169.254.169.254/latest/meta-data/",
+        "http://127.0.0.1:8099/workspaces",
+        "http://localhost/",
+        "http://10.0.0.1/admin",
+        "http://192.168.1.1/",
+        "http://[::1]/",
+        "http://[fd00::1]/",
+        // Not a URL a browser should be handed from a citation.
+        "javascript:alert(1)",
+        "data:text/html,<script>x</script>",
+        "file:///etc/passwd",
+        // Not a URL at all.
+        "",
+        "not a url",
+        // Credentials would be sent to whatever answers.
+        "https://user:pass@example.com/",
+    ] {
+        assert!(
+            !is_citable_url(refused),
+            "{refused} must not be offered as a citation"
+        );
+    }
+
+    for allowed in [
+        "https://arxiv.org/abs/1706.03762",
+        "https://doi.org/10.5281/zenodo.19225200",
+        "http://example.com:8080/paper?q=1#frag",
+        // A hostname is left to the fetch path, which resolves it; this check is
+        // syntactic plus a literal-address test, and that residual is documented.
+        "https://a-hostname-that-could-resolve-anywhere.example/paper",
+    ] {
+        assert!(is_citable_url(allowed), "{allowed} is a citable URL");
+    }
+}

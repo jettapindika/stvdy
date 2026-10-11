@@ -53,6 +53,30 @@ pub struct CompositeSearch {
     searxng: Option<Arc<SearxngSearch>>,
 }
 
+/// Drops hits whose URL cannot be offered to the user as a citation.
+///
+/// Applied before ranking and before caching, so an unusable URL can never reach a
+/// citation and is never stored. See `fetch::is_citable_url` for why this is a
+/// boundary concern rather than each consumer's own: the citation path never goes
+/// through the fetcher.
+fn drop_uncitable(hits: Vec<SearchHit>) -> Vec<SearchHit> {
+    let before = hits.len();
+    let kept: Vec<SearchHit> = hits
+        .into_iter()
+        .filter(|hit| crate::integrations::fetch::is_citable_url(&hit.url))
+        .collect();
+
+    if kept.len() != before {
+        // Worth a log line: a tier returning unusable URLs is either broken or
+        // hostile, and either way an operator wants to see it.
+        tracing::warn!(
+            dropped = before - kept.len(),
+            "a search tier returned hits with URLs that cannot be cited"
+        );
+    }
+    kept
+}
+
 impl CompositeSearch {
     /// Builds the tiers `SEARCH_PROVIDER` asks for, in A3's order.
     ///
@@ -164,7 +188,12 @@ impl CompositeSearch {
             let key = dedupe_key(q, tier.name(), max_results);
             match tier.search(q, max_results).await {
                 Ok(hits) if !hits.is_empty() => {
-                    let hits = rank(hits);
+                    // Unusable URLs are dropped before ranking and before caching, so
+                    // they can never become a citation and are never stored. A hit
+                    // whose URL is a `javascript:` scheme or a literal private address
+                    // is not a source the user can open, and offering it as one is how
+                    // a search tier gets the user to click something they should not.
+                    let hits = rank(drop_uncitable(hits));
                     self.write_cache(&key, tier.name(), &hits).await;
                     outcome.answered_by = Some(tier.name().to_string());
                     outcome.hits = hits;
