@@ -996,3 +996,140 @@ Native clients keep a SQLite cache plus an outbox, owned by the Rust shell
 (`rusqlite`, `bundled`). Never by JS, so the sync engine and the database live
 on the same side of the boundary. The web build has no local database and is
 online-first. SQLCipher encryption is a config flag, off by default.
+
+### The cache's tables
+
+The DDL is **generated from `Entity`**, not hand-written: one table per synced entity
+(17 of them), whose columns are `Entity::payload_columns` (A168) plus three local ones, and
+whose foreign keys mirror `migrations/` exactly — the same `on delete cascade` /
+`on delete set null` a parent's deletion has on the server. Mirroring them is not tidiness:
+with a bare reference, deleting a cached deck whose flashcards are still cached would fail
+the deferred check at commit, and a page that cannot commit is a pass that can never make
+progress. The three local columns never travel:
+
+- `id` is the row's key. For every entity but `user_settings` it is also a payload column;
+  for `user_settings` the row *is* the account (A179), so the key holds the account id the
+  change was addressed to.
+- `account` is the account this cache belongs to, written from the store's binding — never
+  from a payload. `user_id` is deliberately absent from the wire (A168), and a payload that
+  carries one is refused rather than trusted.
+- `seq` is the last change applied to the row, which is what makes "a retry never overwrites
+  a newer version" decidable locally. A row written by the local-first path has no server
+  seq yet and holds 0.
+
+Four bookkeeping tables sit beside them: `outbox` (with an index on `position`),
+`deferred_changes`, `rejections`, and the single `sync_state` row. `local_state` is
+deliberately **not** in that list and not in the wipe's: `Platform.localState` holds a UI
+preference or a running focus timer's marker, neither of which is a row the account owns, and
+clearing a running timer's marker with the cache would silently stop a timer the student is
+watching. The two have different lifetimes, so they have different lists — and
+`schema::tables()`, which both the wipe and the version rebuild use, is the one place that
+decides.
+
+A file whose SQLite `user_version` is not this build's `SCHEMA_VERSION` is **dropped and
+rebuilt**, not migrated: everything in it can be pulled again, and a half-applied migration
+on a device is a launch crash with no recovery. The DDL is all `create table if not exists`,
+so a second open is a no-op.
+
+One column-storage rule is load-bearing rather than tidy: `id`, `account` and every foreign
+key are stored as **bare text**, everything else as JSON. SQLite compares a foreign key's
+stored value against the parent's `id` as text, so a JSON-encoded uuid — `"1f0c…"` with its
+quotes — never matches, and the first page containing a deck and its cards raised
+`FOREIGN KEY constraint failed` with the deferral working perfectly and the comparison
+failing. Nothing else is ever compared in SQL, so every other column stays JSON and
+round-trips its numbers, arrays, objects and nulls.
+
+### The apply path, and out-of-order arrival
+
+`apply_page` is one SQLite transaction per pull page. Inside it, `PRAGMA defer_foreign_keys`
+is turned **on** — read back by the test to prove it, because SQLite resets that pragma at
+every COMMIT and so it is the transaction's setting and cannot be moved to `prepare()`. The
+deferral is what lets a child land before its parent in the same page.
+
+Two mechanisms make out-of-order arrival land, and they cover different distances:
+
+- **In-page deferral.** A child whose parent is also in the page commits, because the
+  deferred check runs at COMMIT rather than per statement.
+- **Cross-pull retry.** A row a page cannot link at all is kept in `deferred_changes` — not
+  dropped — read back at the start of the next page, and landed by the page that brings its
+  parent. That is what makes a device killed mid-pass recover instead of losing a subtree.
+
+The engine also orders each page by `(dependency_rank, seq)` before writing it, which is the
+same order the initial pass uses, so the common case does not need the deferral at all.
+
+### The outbox
+
+`outbox` is the queue of local writes, in enqueue order, with an index on `position` so the
+order is the table's rather than a convention. A pass pushes before it pulls, one push per
+batch of **100** mutations — a device that has been offline for a week has a long outbox and
+one request must not carry all of it — and resolves each mutation by its result. A batch
+whose response is short leaves the outbox's state unknown, so nothing is resolved and the
+batch is retried; the replay is idempotent, so that costs nothing but a round trip.
+
+Retry is bounded exponential backoff: **500 ms, doubling, capped at 60 s**, reset by any
+pass that reached the server. The bound keeps a flapping network from becoming a hot loop
+against the server; the reset keeps a device that comes back from waiting. A refusal the
+server made on purpose resets the backoff too, because waiting is not the remedy for it.
+
+### The wipe
+
+`wipe()` empties every table in `schema::tables()` — the entity rows, the outbox, the
+deferred rows, the rejections, the cursor, the timestamp and the last state — and leaves
+`local_state` alone. It has two callers and they want the same thing: a manual "Reset local
+data and resync", and a revoked device (A186), which goes `TransportError::Revoked` →
+`wipe()` → `stvdy://sync-revoked` → the refresh token deleted → the session dropped.
+
+The outbox is part of what a wipe empties, and that is the point rather than a side effect:
+a pending offline write from a revoked device must not be replayed by the next account that
+signs in on that machine. It is also why a 410 resync — which uses the same call — can lose
+a write the device never pushed. The two callers would want different things here; the plan
+specified one `wipe()`, so the consequence is written down rather than papered over.
+
+### Why `rusqlite` and `reqwest` are in the shell
+
+`crates/sync`'s client engine is generic over a `LocalStore` trait (the cache, the outbox,
+the cursor, the last state) and a `Transport` trait (pull, push), both `async_trait`
+(A182). `rusqlite` and `reqwest` live in `src-tauri`; `crates/sync` links neither, and the
+server's own test binaries link it. A C SQLite in that graph is a build problem on every
+platform for no benefit, and the trait is the thing to add if a task ever wants a driver
+there.
+
+The split also buys the phase's exit gate: the convergence suite implements the same two
+traits over an in-memory store and the **real router** called in process, so the engine is
+exercised against the routes rather than against a mock of them — and the engine cannot
+behave differently under test than it does in the app, because both classify a response
+through `TransportError::from_status`.
+
+## The seq clock
+
+`change_log.seq` is a `bigserial`, so it is assigned by `nextval()` at INSERT time while the
+row becomes visible only at COMMIT time. Two concurrent transactions for one account can
+therefore be assigned seq 10 and 11 and commit in the opposite order, and a client that
+reads `seq > cursor`, sees 11 and advances to 11 would never receive 10 — a permanently
+skipped change on that device.
+
+Both trigger bodies (`log_change` and `log_change_by_user`, `migrations/0006_sync_functions.sql`)
+therefore take `pg_advisory_xact_lock(hashtext(user_id::text))` **before** inserting the
+change_log row, and hold it to commit. So for any committed row of an account every lower
+seq is already committed, and a reader can only ever observe a contiguous prefix. The lock
+must precede the insert; taking it afterwards is useless, because seq has already been
+assigned by then. This property is the whole reason the cursor is a single integer, and it is
+why nothing may compare `seq` across accounts (the sequence is global) or order by
+`changed_at` where the cursor is the point.
+
+Because the lock lives in an AFTER trigger, a multi-row transaction would acquire it *after*
+its row locks, so two devices editing overlapping rows could deadlock (`40P01`). **The push
+route takes the same lock as its first statement**, before it touches a row, which makes the
+acquisition order uniformly advisory-then-rows everywhere; the trigger keeps its own lock as
+the backstop for the dedicated REST endpoints, which write a single row and cannot invert the
+order. `sync_push.rs::the_push_takes_the_advisory_lock_before_it_touches_a_row` asserts that
+by observation rather than by reading the file: it holds the lock in another transaction,
+waits until a push is blocked on it, and then asserts the blocked push holds no
+`RowExclusiveLock` on `tasks` — a lock it would hold if it had written a row first.
+
+The client's side of the same fact: an incremental page is complete in itself, so its cursor
+commits per page and a pass that hits its page budget resumes rather than restarts, while an
+initial pass commits its cursor only when it is finished, because until then the cursor is
+the anchor rather than a position (A164). `docs/SYNC.md` is the normative statement of all
+of this.
+
