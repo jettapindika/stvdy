@@ -133,6 +133,14 @@ jobs:
       # Every runtime asset must be bundled: the desktop shell's CSP allows no
       # remote origin, and the phone build is used on Wi-Fi that is often down.
       - run: node scripts/check-no-cdn.mjs
+      # The absence proof, in the artifact rather than in a component: the
+      # shipped bytes must contain no purchase affordance, and the policy must
+      # still deny purchase UI on both store platforms. It runs *after* the
+      # build because that is when the files exist, and it runs in CI rather
+      # than by hand because a check that is only run by hand is the one that is
+      # skipped (A321).
+      - run: node scripts/check-no-purchase-ui.mjs
+      - run: node --test scripts/check-no-purchase-ui.test.mjs
 
   desktop:
     name: desktop build (${{ matrix.os }})

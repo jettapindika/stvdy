@@ -916,7 +916,7 @@ purchase link — proved by reading the bytes, not the component.
 - Consumes: `app/dist/**` (the build), `config/billing_policy.toml`.
 - Produces: exit 0 with `no purchase UI in N shipped file(s)`, or exit 1 with a list.
 
-- [ ] **Step 1: Write the failing test — a planted marker must be caught**
+- [x] **Step 1: Write the failing test — a planted marker must be caught**
 
 ```js
 // scripts/check-no-purchase-ui.test.mjs
@@ -935,11 +935,11 @@ test('a clean bundle passes', () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `node --test scripts/check-no-purchase-ui.test.mjs` → `Cannot find module`.
 
-- [ ] **Step 3: Implement, in the `check-no-cdn.mjs` shape**
+- [x] **Step 3: Implement, in the `check-no-cdn.mjs` shape**
 
 Export `findOffenders(files: Record<string,string>)` and, when run as a script, read
 `app/dist/**`, build the map, and fail on: `Rp` followed by digits, `QRIS`, `Checkout`,
@@ -947,7 +947,7 @@ Export `findOffenders(files: Record<string,string>)` and, when run as a script, 
 `config/billing_policy.toml` and fails if `allow_purchase_ui`, `show_prices` or
 `allow_purchase_cta_in_locked_messages` is `true` for `ios` or `android`.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 ```
 npm --prefix app run build
@@ -955,9 +955,9 @@ node scripts/check-no-purchase-ui.mjs     # exit 0, prints the count
 node --test scripts/check-no-purchase-ui.test.mjs
 ```
 
-- [ ] **Step 5: Wire it into CI** after the web build job (A321).
+- [x] **Step 5: Wire it into CI** after the web build job (A321).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 8: bundle inspection proves no purchase UI in the mobile build"
