@@ -103,8 +103,30 @@ function findChrome() {
   return CHROME_CANDIDATES.find((path) => existsSync(path)) ?? null
 }
 
-/** The smallest interactive-target side WCAG 2.2 SC 2.5.8 allows, and R-03's. */
-const MIN_TARGET = 44
+/**
+ * The smallest interactive-target side the platform's rule allows.
+ *
+ * **This is viewport-keyed, and it has to be.** 44px is the *touch* target — R-03 and
+ * WCAG 2.2 SC 2.5.8, which is about a pointer that lands somewhere on a 9mm finger —
+ * and the spec's desktop floor is 32px. The repo states the relationship itself in
+ * `.btn`'s comment: "44px minimum touch target, which also clears the spec's 32px
+ * desktop floor".
+ *
+ * Applying 44 at 1365px flagged 200 desktop sidebar links at 215x40, which are
+ * `min-height: 2.5rem` **by design** — so an undersized count at desktop width read as
+ * a defect when it was the phone rule measured at the wrong width. The desktop leg's
+ * genuinely undersized set is 12, not 224.
+ *
+ * The boundary is the `md` breakpoint (768px), the same one `useFormFactor` and the
+ * CSS use for the sidebar/tab-bar swap: below it the layout is the touch one, above it
+ * the pointer one. A third convention for "is this a phone" would be the defect this
+ * avoids.
+ */
+const TOUCH_TARGET = 44
+const DESKTOP_TARGET = 32
+const TOUCH_MAX_WIDTH = 767
+
+const MIN_TARGET = VIEWPORT.width <= TOUCH_MAX_WIDTH ? TOUCH_TARGET : DESKTOP_TARGET
 
 /** WCAG 2.2 AA: 4.5:1 for body text, 3:1 for large text and UI graphics. */
 const MIN_TEXT = 4.5
