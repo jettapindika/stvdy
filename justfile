@@ -228,6 +228,18 @@ smoke-phase8:
 smoke-phase10:
     BASE=http://localhost:8099 bash scripts/smoke-phase10.sh
 
+# Phase 10's server. The only reason this exists rather than reusing `smoke-server-phase7` is
+# scenario 6's connect assertion: `GET /calendar/google/connect` answers **404** when the
+# calendar OAuth client is unset, and 404 is also what an unregistered route answers, so the
+# run cannot tell "not configured" from "not landed". These three values are dummy strings —
+# nothing in the run reaches Google, and the refusal it asserts is the entitlement engine's,
+# which fires before any request would be made.
+smoke-server-phase10:
+    GOOGLE_CALENDAR_CLIENT_ID=smoke-calendar-client.apps.googleusercontent.com \
+      GOOGLE_CALENDAR_CLIENT_SECRET=smoke-only-not-a-secret \
+      GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:8099/calendar/google/callback \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
 # The academic tier is keyless and reachable from this machine, so the run gets
@@ -347,4 +359,6 @@ smoke-server-phase13:
       BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
 
 smoke-phase13:
-    BASE=http://localhost:8099 bash scripts/smoke-phase13.sh
+    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_API_KEY=smoke-qris-key \
+      QRIS_CALLBACK_TOKEN=smoke-callback-token QRIS_SIGNATURE_SCHEME=hmac_sha256_hex \
+      BASE=http://localhost:8099 bash scripts/smoke-phase13.sh
