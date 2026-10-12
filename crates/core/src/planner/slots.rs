@@ -70,7 +70,14 @@ fn window_start(day: NaiveDate, hour: u32, tz: chrono_tz::Tz) -> Option<DateTime
 
 /// The exclusive end of the window at `hour:00`, or the instant the gap starts when that
 /// local time does not exist.
+///
+/// `study_end_hour` is `between 1 and 24` in the schema, so `24` means midnight of the
+/// following local day and is handled before the gap search — the gap search would otherwise
+/// stop at the last minute of the current day and silently drop an hour.
 fn window_end(day: NaiveDate, hour: u32, tz: chrono_tz::Tz) -> Option<DateTime<Utc>> {
+    if hour >= 24 {
+        return local_at(day + Duration::days(1), hour - 24, 0, tz);
+    }
     let total = hour * 60;
     for step in 0..=(3 * 60) {
         if step > total {

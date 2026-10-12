@@ -178,6 +178,39 @@ fn study_hours_are_respected() {
     }
 }
 
+/// `study_end_hour` is legal up to `24` (the schema's own bound), and `24` means midnight of
+/// the following local day — not the last minute of the current one.
+///
+/// A window of 08:00–24:00 in `Europe/London` on a BST day is 16 hours, so the day's capacity
+/// is 960 minutes. An implementation that stopped the window at 23:59 would report 959 and
+/// silently drop a minute; one that treated `24:00` as `23:01` would drop an hour.
+#[test]
+fn an_end_hour_of_twenty_four_reaches_midnight() {
+    let tz = london();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 24, 1440),
+        vec![goal(
+            1,
+            utc(2026, 4, 10, 12, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 900, None)],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 0, 0, 0.0),
+    );
+    let proposal = propose(&input);
+    let first = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    assert_eq!(
+        day_load(&proposal, first),
+        960,
+        "08:00 to midnight is sixteen hours"
+    );
+}
+
 /// The spring-forward day. `Europe/London`, 2026-03-29: 01:00–02:00 local does not exist, so
 /// the 00:00–06:00 window holds 300 minutes, not 360 — and no block starts in the missing
 /// hour, because there is no such instant to start in.
@@ -497,35 +530,57 @@ fn the_spread_cap_prevents_front_loading() {
 ///
 /// Asserted on the block kind, not on a gap, so a review block placed there does not make the
 /// test vacuous.
+///
+/// The demand is set to the whole horizon's capacity and the daily maximum to the whole study
+/// window, so the deadline day fills. Non-vacuity is then proved rather than assumed: the same
+/// input with `deadline_buffer_min = 0` **does** place a block starting inside the buffer, so
+/// the assertion above is the rule doing work and not a fixture that never reaches it.
 #[test]
 fn the_deadline_buffer_is_left_free_of_new_material() {
     let tz = london();
     let target = utc(2026, 4, 5, 18, 0);
-    let input = input(
-        utc(2026, 4, 1, 0, 0),
-        tz,
-        settings(8, 22, 240),
-        vec![goal(
-            1,
-            target,
+    let build = |buffer_min: i64| {
+        input(
             utc(2026, 4, 1, 0, 0),
-            vec![topic("Jaringan", 2000, None)],
-        )],
-        0,
-        vec![],
-        vec![],
-        config(50, 10, 120, 3, 0.0),
-    );
-    let proposal = propose(&input);
+            tz,
+            settings(8, 22, 840),
+            vec![goal(
+                1,
+                target,
+                utc(2026, 4, 1, 0, 0),
+                vec![topic("Jaringan", 4200, None)],
+            )],
+            0,
+            vec![],
+            vec![],
+            config(50, 10, buffer_min, 0, 0.0),
+        )
+    };
     let buffer_start = target - chrono::Duration::minutes(120);
-    for block in &proposal.blocks {
-        if block.kind == stvdy_core::planner::BlockKind::NewMaterial {
-            assert!(
-                block.starts_at < buffer_start || block.starts_at >= target,
-                "new material starts inside the deadline buffer: {block:?}"
-            );
-        }
-    }
+    let starts_in_buffer = |proposal: &PlanProposal| {
+        proposal
+            .blocks
+            .iter()
+            .filter(|block| {
+                block.kind == stvdy_core::planner::BlockKind::NewMaterial
+                    && block.starts_at >= buffer_start
+                    && block.starts_at < target
+            })
+            .count()
+    };
+
+    let buffered = propose(&build(120));
+    assert_eq!(
+        starts_in_buffer(&buffered),
+        0,
+        "no new material starts inside the deadline buffer"
+    );
+
+    let unbuffered = propose(&build(0));
+    assert!(
+        starts_in_buffer(&unbuffered) > 0,
+        "without the buffer the fixture places a block there, so the rule was exercised"
+    );
 }
 
 /// The review pass reserves one block on each of the last `revisit_days` local dates before
@@ -659,16 +714,22 @@ fn a_deadline_before_now_is_a_warning_not_a_panic() {
 /// order; the other from an ordered map. A container whose iteration order reaches the output
 /// cannot pass this, because the two paths hand the planner the same topics in different
 /// sequences.
+///
+/// Every topic has the **same remaining work and the same accuracy**, so weight and remaining
+/// tie and the allocation's tie-break falls all the way through to the topic's position in
+/// the input. A fixture with distinct weights would let the weight tie-break resolve
+/// everything and pass with the canonical ordering deleted, which is the leak this test is
+/// for.
 #[test]
 fn the_same_input_produces_byte_identical_output() {
     use std::collections::{BTreeMap, HashMap};
 
     let mut unordered: HashMap<&str, Option<f64>> = HashMap::new();
-    unordered.insert("Algoritma", Some(0.4));
-    unordered.insert("Basis data", Some(0.95));
-    unordered.insert("Jaringan", None);
-    unordered.insert("Kriptografi", Some(0.7));
-    unordered.insert("Sistem operasi", Some(0.55));
+    unordered.insert("Algoritma", Some(0.5));
+    unordered.insert("Basis data", Some(0.5));
+    unordered.insert("Jaringan", Some(0.5));
+    unordered.insert("Kriptografi", Some(0.5));
+    unordered.insert("Sistem operasi", Some(0.5));
 
     let ordered: BTreeMap<&str, Option<f64>> = unordered.iter().map(|(k, v)| (*k, *v)).collect();
 
@@ -831,4 +892,62 @@ fn the_balancer_never_moves_a_pinned_block() {
         serde_json::to_vec(&pre).unwrap(),
         "a pinned-only plan is identical with the balancer on and off"
     );
+}
+
+/// Replan keeps every pinned block exactly, and no new block overlaps one.
+///
+/// This is the property that makes replanning trustworthy at all: a student who committed to
+/// Tuesday 08:00 must find Tuesday 08:00 still there after they ask for a new week. The
+/// pinned intervals are subtracted from the free slots (step 2) and emitted as blocks, so the
+/// two halves of the guarantee are checked separately — the block survives, and nothing is
+/// placed on top of it.
+///
+/// The pinned slots are the **first block of three days**, which is exactly where the
+/// allocator would otherwise put new material: a pin somewhere the plan never reaches would
+/// make the overlap half of this test vacuous.
+#[test]
+fn replan_keeps_pinned_blocks_exactly() {
+    let tz = london();
+    let pinned = vec![
+        interval(utc(2026, 4, 2, 7, 0), utc(2026, 4, 2, 7, 50)),
+        interval(utc(2026, 4, 3, 7, 0), utc(2026, 4, 3, 7, 50)),
+        interval(utc(2026, 4, 6, 7, 0), utc(2026, 4, 6, 7, 50)),
+    ];
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 22, 240),
+        vec![goal(
+            1,
+            utc(2026, 4, 10, 12, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 3000, None)],
+        )],
+        0,
+        vec![],
+        pinned.clone(),
+        config(50, 10, 0, 0, 0.0),
+    );
+    let proposal = stvdy_core::planner::replan(&input);
+
+    for interval in &pinned {
+        let found = proposal.blocks.iter().find(|block| {
+            block.pinned
+                && block.starts_at == interval.starts_at
+                && block.ends_at == interval.ends_at
+        });
+        assert!(
+            found.is_some(),
+            "the pinned interval {interval:?} is missing or moved"
+        );
+    }
+    for block in &proposal.blocks {
+        if block.pinned {
+            continue;
+        }
+        for interval in &pinned {
+            let overlaps = block.starts_at < interval.ends_at && block.ends_at > interval.starts_at;
+            assert!(!overlaps, "a new block overlaps a pinned one: {block:?}");
+        }
+    }
 }

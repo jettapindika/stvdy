@@ -21,6 +21,8 @@ fn the_planner_module_has_no_clock_and_no_hash_ordered_container() {
         ("slots.rs", include_str!("../src/planner/slots.rs")),
         ("allocate.rs", include_str!("../src/planner/allocate.rs")),
         ("balance.rs", include_str!("../src/planner/balance.rs")),
+        ("replan.rs", include_str!("../src/planner/replan.rs")),
+        ("progress.rs", include_str!("../src/planner/progress.rs")),
     ] {
         for forbidden in [
             "Utc::now",

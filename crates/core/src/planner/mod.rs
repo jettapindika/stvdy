@@ -5,17 +5,22 @@
 //! input ⇒ byte-identical output (A266), which `tests/planner.rs` asserts rather than assumes
 //! and `tests/planner_purity.rs` enforces at the source level.
 //!
-//! Steps 1 and 2 live in [`slots`]; demand, the review pass and allocation (3–6) in
-//! [`allocate`]; the Power balancer (7) in [`balance`]. Replanning and prep progress arrive in
-//! the next task.
+//! The steps run in the contract's fixed order and no other: horizon and windows (1–2) in
+//! [`slots`], demand, the review pass and allocation (3–6) in [`allocate`], the Power
+//! balancer (7) in [`balance`]. Replanning is [`propose`] under the name the server's replan
+//! route calls, and [`progress`] is the goal's honest components.
 
 mod allocate;
 mod balance;
 mod model;
+mod replan;
 mod slots;
+
+pub mod progress;
 
 pub use balance::{MAX_ITERATIONS, OVERLOAD_PCT, rebalance};
 pub use model::*;
+pub use replan::replan;
 
 use std::collections::BTreeMap;
 

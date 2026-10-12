@@ -97,7 +97,6 @@ pub(crate) fn reserve_reviews(input: &PlannerInput, slots: &mut [Slot]) -> Vec<P
 /// One topic's allocation state.
 struct Item {
     goal: usize,
-    topic: usize,
     name: String,
     weight: f64,
     /// The minutes this topic is allowed to receive over the horizon.
@@ -106,6 +105,10 @@ struct Item {
     remaining: i64,
     /// The goal's target date in the planner's zone, for the per-day cap.
     target_local: NaiveDate,
+    /// The position in the canonical order. The tie-break uses this rather than the caller's
+    /// `topic` index: the index is the order the caller built the goal in, and a plan that
+    /// depends on it is a plan that changes when the same topics arrive in a different order.
+    rank: usize,
 }
 
 /// Steps 5 and 6.
@@ -127,18 +130,18 @@ pub(crate) fn allocate(
             continue;
         }
         let target_local = goal_input.target_date.with_timezone(&input.tz).date_naive();
-        for (topic, topic_input) in goal_input.topics.iter().enumerate() {
+        for topic_input in &goal_input.topics {
             if topic_input.remaining_min <= 0 {
                 continue;
             }
             items.push(Item {
                 goal,
-                topic,
                 name: topic_input.name.clone(),
                 weight: weight(topic_input, input.config.spread_k),
                 target: topic_input.remaining_min as f64,
                 remaining: topic_input.remaining_min,
                 target_local,
+                rank: 0,
             });
         }
     }
@@ -154,6 +157,9 @@ pub(crate) fn allocate(
             &b.name,
         ))
     });
+    for (rank, item) in items.iter_mut().enumerate() {
+        item.rank = rank;
+    }
 
     let topic_capacity: i64 = slots.iter().map(|slot| slot.remaining_min).sum();
     let weighted_demand: f64 = items.iter().map(|item| item.target * item.weight).sum();
@@ -278,7 +284,7 @@ fn compare(items: &[Item], a: usize, b: usize) -> bool {
     match left.weight.total_cmp(&right.weight) {
         std::cmp::Ordering::Greater => true,
         std::cmp::Ordering::Less => false,
-        std::cmp::Ordering::Equal => (left.goal, left.topic) < (right.goal, right.topic),
+        std::cmp::Ordering::Equal => left.rank < right.rank,
     }
 }
 
