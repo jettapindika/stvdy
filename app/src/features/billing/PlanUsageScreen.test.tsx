@@ -3,22 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PlanUsageScreen } from './PlanUsageScreen'
 import { formatCount } from './CreditMeter'
-import type { Usage } from '@/api/queries/usage'
 import i18n from '@/i18n'
 import { setAccessToken } from '@/lib/tokens'
 import { formatInZone } from '@/lib/time'
-import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
+import { fixtureNumbers, installFakePlatform } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
+import { PERIOD_END, RESETS_AT, USAGE, USER, serveUsage } from '@/test/usage'
 
 /**
  * The plan and usage screen against a scripted `GET /usage`.
  *
- * The fixture is a *free* account at the ceilings, because that is the state the
- * screen exists for: an account that has been refused something. It is shaped
- * exactly as `crates/server/src/usage.rs` builds the body, including the two
- * kinds of `null` the payload distinguishes — an axis the plan does not cap, and
- * an axis with no counter to report — because collapsing either into `0` is the
- * defect the honesty test below is written to catch.
+ * The fixture is shared with `MobilePlanScreen.test.tsx` (see `@/test/usage`):
+ * both screens render the same body, so a second hand-written payload would be a
+ * second answer to what the wire shape is.
  *
  * The honesty test is the load-bearing one. Asserting "the numbers are shown" is
  * satisfied by a screen that hardcodes them; asserting that **no number appears
@@ -26,71 +23,6 @@ import { renderWithProviders } from '@/test/render'
  * a locally computed total fail. Every other test here is about a state the
  * screen can be in.
  */
-
-/** The session the screen reads its timezone from. */
-const USER = {
-  id: 'u1',
-  email: 'student@example.com',
-  email_verified: true,
-  email_verified_at: '2026-10-01T08:00:00Z',
-  plan_id: 'free',
-  timezone: 'Asia/Jakarta',
-  student_verified: false,
-  created_at: '2026-10-01T08:00:00Z',
-}
-
-const PERIOD_END = '2026-11-01T07:00:00Z'
-const RESETS_AT = '2026-11-01T07:00:00Z'
-
-const USAGE: Usage = {
-  plan: 'free',
-  name: 'Free',
-  subscription: { status: 'active', period_end: PERIOD_END },
-  credits: { monthly: 60, purchased: 12, total: 72 },
-  storage_bytes: 1048576,
-  limits: {
-    workspaces: { limit: 2, used: 2 },
-    sources_total: { limit: 20, used: 3 },
-    max_file_mb: { limit: 20, used: null },
-    storage_mb: { limit: 200, used: null },
-    devices_max: { limit: 2, used: 1 },
-    credits_per_month: { limit: 60, used: null },
-    chat_msgs_per_day: { limit: 20, used: 4 },
-    web_searches_per_day: { limit: 3, used: 3 },
-    flashcards_per_month: { limit: 30, used: 12 },
-    quizzes_per_month: { limit: 2, used: 0 },
-    reports_per_month: { limit: 1, used: 1 },
-    syllabus_imports_total: { limit: 1, used: 0 },
-    google_accounts_max: { limit: 0, used: null },
-  },
-  features: {
-    export_formats: ['md'],
-    task_ai_breakdown: false,
-    quick_capture: false,
-    google_calendar: false,
-    planner: 'manual',
-    agent_actions: false,
-    reminder_channels: ['web', 'push'],
-    model_tier: 'cheapest',
-    byok: false,
-    advanced_analytics: false,
-  },
-  costs: {
-    chat_message: 1,
-    web_search: 2,
-    flashcard_batch_10: 4,
-    quiz_10: 6,
-    report_outline: 3,
-    report_section: 6,
-    task_breakdown: 2,
-    syllabus_import: 8,
-    plan_generation: 2,
-    agent_turn: 2,
-    long_doc_threshold_tokens: 20000,
-    long_doc_credits_per_1k_tokens: 1,
-  },
-  provider_cost: { paused: false, resets_at: RESETS_AT },
-}
 
 beforeEach(() => {
   installFakePlatform('macos')
@@ -101,32 +33,6 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   await i18n.changeLanguage('en')
 })
-
-/** Serves the two routes the screen reads, and nothing else. */
-function serve(usage: Usage = USAGE) {
-  return mockFetch((url) => {
-    const path = new URL(url).pathname
-    if (path === '/auth/me') return jsonResponse(200, USER)
-    if (path === '/usage') return jsonResponse(200, usage)
-    return jsonResponse(404, {
-      code: 'not_found',
-      message: 'no such route',
-      min_plan: null,
-      limit: null,
-      used: null,
-    })
-  })
-}
-
-/** Every number anywhere in the payload, so the test's allowed set is the fixture. */
-function fixtureNumbers(value: unknown): number[] {
-  if (typeof value === 'number') return [value]
-  // Strings are excluded deliberately: the payload's dates are ISO instants that
-  // the screen formats rather than prints, and a raw `2026-11-01T07:00:00Z` on
-  // screen would be a different defect, asserted separately below.
-  if (typeof value === 'string' || value === null || typeof value !== 'object') return []
-  return Object.values(value).flatMap(fixtureNumbers)
-}
 
 /** The digit runs a string contains, with the grouping separators removed. */
 function digitRuns(text: string): string[] {
@@ -148,7 +54,7 @@ function row(label: string): HTMLElement {
 
 describe('the plan and usage screen', () => {
   it('renders only the numbers the usage endpoint returned', async () => {
-    serve()
+    serveUsage()
     const { container } = renderWithProviders(<PlanUsageScreen />)
 
     // The plan, and the buckets with their total, as the ledger holds them.
@@ -197,7 +103,7 @@ describe('the plan and usage screen', () => {
   })
 
   it('shows the credit cost of every generative action', async () => {
-    serve()
+    serveUsage()
     renderWithProviders(<PlanUsageScreen />)
 
     // The four actions a student spends on without thinking about it, each with
@@ -232,7 +138,7 @@ describe('the plan and usage screen', () => {
   })
 
   it('states the locked format with no upgrade CTA on a mobile platform', async () => {
-    serve()
+    serveUsage()
     installFakePlatform('ios')
     renderWithProviders(<PlanUsageScreen />)
 
@@ -246,7 +152,7 @@ describe('the plan and usage screen', () => {
   })
 
   it('names the plan that has the locked format on desktop, with no price', async () => {
-    serve()
+    serveUsage()
     installFakePlatform('macos')
     renderWithProviders(<PlanUsageScreen />)
 
@@ -263,7 +169,7 @@ describe('the plan and usage screen', () => {
   })
 
   it('renders the paused ceiling as a sentence naming the reset date', async () => {
-    serve({
+    serveUsage({
       ...USAGE,
       provider_cost: { paused: true, resets_at: RESETS_AT },
     })
@@ -278,7 +184,7 @@ describe('the plan and usage screen', () => {
   })
 
   it('reads every row in Indonesian', async () => {
-    serve()
+    serveUsage()
     await i18n.changeLanguage('id')
     renderWithProviders(<PlanUsageScreen />)
 

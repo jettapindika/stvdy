@@ -139,6 +139,9 @@
       "longDoc_other": "Documents longer than {{tokens}} tokens cost {{count}} more credits for each thousand tokens after that."
     },
     "paused": "New generation is paused until {{date}}. This account has reached the ceiling its plan sets for provider costs this month.",
+    "mobile": {
+      "noPurchase": "This app does not sell subscriptions. Your plan and credits sync from your account."
+    },
     "formats": {
       "title": "Export formats",
       "included": "Included in your plan: {{formats}}",

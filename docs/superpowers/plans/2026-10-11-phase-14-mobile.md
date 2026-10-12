@@ -981,7 +981,7 @@ with no purchase path anywhere in the mobile router.
 - Consumes: `platform.kind()`, `policyFor`, the Phase 13 plan/usage query.
 - Produces: `<MobilePlanScreen/>` and a router element chosen by platform.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 it('renders the plan and the computed usage, and no purchase control', async () => {
@@ -998,11 +998,11 @@ it('routes /billing to the read-only screen on android', () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `npm --prefix app test -- MobilePlanScreen` → `Cannot find module`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `MobilePlanScreen` shows the plan name, credits remaining and the usage numbers the app
 computes (from Phase 13's query), and the neutral `lock.notOnPlan` copy. `router.tsx`
@@ -1010,12 +1010,12 @@ picks the element: `platform.kind()` in `('ios','android')` → `MobilePlanScree
 Phase 13's checkout screen. The checkout component is therefore not imported on the
 mobile path, so it is tree-shaken out (A322).
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 `npm --prefix app test -- billing` → pass; then `node scripts/check-no-purchase-ui.mjs`
 still exits 0 (the new screen adds no marker).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git commit -am "Phase 14 Task 9: read-only mobile plan screen + the /billing platform gate"

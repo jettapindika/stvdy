@@ -137,6 +137,9 @@
       "longDoc_other": "Dokumen lebih dari {{tokens}} token dikenai {{count}} kredit tambahan untuk setiap seribu token berikutnya."
     },
     "paused": "Pembuatan baru dijeda sampai {{date}}. Akun ini sudah mencapai batas biaya penyedia yang ditetapkan paketnya bulan ini.",
+    "mobile": {
+      "noPurchase": "Aplikasi ini tidak menjual langganan. Paket dan kredit Anda disinkronkan dari akun Anda."
+    },
     "formats": {
       "title": "Format ekspor",
       "included": "Termasuk di paketmu: {{formats}}",

@@ -409,3 +409,20 @@ export function stubViewport(width: number): void {
     } as unknown as MediaQueryList
   })
 }
+
+/**
+ * Every number anywhere in a response body, so a test's allowed set is the
+ * payload itself.
+ *
+ * This is how the plan screens assert the honesty rule rather than asserting
+ * that the numbers appear: a screen that hardcodes a number passes "the numbers
+ * are shown" and fails this, because the number is not in the fixture. Strings
+ * are skipped deliberately — a payload's dates are ISO instants the screen
+ * formats rather than prints, and printing one raw is a different defect with
+ * its own assertion.
+ */
+export function fixtureNumbers(value: unknown): number[] {
+  if (typeof value === 'number') return [value]
+  if (typeof value === 'string' || value === null || typeof value !== 'object') return []
+  return Object.values(value).flatMap(fixtureNumbers)
+}

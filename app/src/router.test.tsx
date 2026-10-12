@@ -8,8 +8,13 @@ import { NotBuiltYet } from './components/ui/States'
 import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
+import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
+import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
+import { billingElementFor, router as appRouter } from './router'
 import { installFakePlatform, jsonResponse, mockFetch, stubViewport } from './test/harness'
+import { renderWithProviders } from './test/render'
+import { serveUsage } from './test/usage'
 import { saveSession, setAccessToken } from './lib/tokens'
 
 /**
@@ -151,5 +156,66 @@ describe('the signed-in routes are behind the gate', () => {
 
     expect(await screen.findByRole('heading', { name: 'Workspaces' })).toBeInTheDocument()
     expect(await screen.findByText('No workspaces yet')).toBeInTheDocument()
+  })
+})
+
+/** The route the real table registers at a path, found by walking it. */
+function registeredRoute(path: string) {
+  const queue = [...appRouter.routes]
+  while (queue.length > 0) {
+    const route = queue.shift()
+    if (route === undefined) break
+    if (route.path === path) return route
+    queue.push(...(route.children ?? []))
+  }
+  return undefined
+}
+
+/**
+ * `/billing` is chosen by platform, and the choice is the mechanism (A322).
+ *
+ * The rule is a store rule: a phone build must contain no purchase path, and the
+ * one the web/desktop build has is a route element the phone never renders. So
+ * what is asserted here is a property of the table, read from the real table —
+ * `appRouter`, not a copy of the shape as the tests above build one. Rendering
+ * `MobilePlanScreen` on its own cannot see it.
+ */
+describe('/billing is chosen by platform', () => {
+  it('registers the gate rather than a fixed screen', () => {
+    const registered = registeredRoute('billing')
+    expect(registered?.element, 'router.tsx must register /billing').toBeTruthy()
+  })
+
+  it('picks the read-only plan screen on both store platforms', () => {
+    for (const kind of ['ios', 'android'] as const) {
+      expect(billingElementFor(kind).type, kind).toBe(MobilePlanScreen)
+    }
+    for (const kind of ['web', 'macos', 'windows'] as const) {
+      expect(billingElementFor(kind).type, kind).toBe(PlanUsageScreen)
+    }
+  })
+
+  it('reads the platform when the route renders, not when the table is built', async () => {
+    // At module scope `platform.kind()` answers `web`: `main.tsx` installs the
+    // native adapter after its imports have been evaluated. A table-level
+    // `billingElementFor(platform.kind())` would therefore hand an iPhone the
+    // desktop screen — and would pass every test that renders the components
+    // directly, which is why this one goes through the registered element.
+    installFakePlatform('ios')
+    serveUsage()
+
+    renderWithProviders(registeredRoute('billing')?.element)
+
+    expect(await screen.findByText(/does not sell subscriptions/)).toBeInTheDocument()
+  })
+
+  it('renders the desktop plan screen off the stores', async () => {
+    installFakePlatform('macos')
+    serveUsage()
+
+    renderWithProviders(registeredRoute('billing')?.element)
+
+    expect(await screen.findByText('Free')).toBeInTheDocument()
+    expect(screen.queryByText(/does not sell subscriptions/)).toBeNull()
   })
 })

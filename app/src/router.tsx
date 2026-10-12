@@ -8,6 +8,7 @@ import { GoogleCallbackRoute } from './features/auth/GoogleCallbackScreen'
 import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
+import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
@@ -20,6 +21,36 @@ import { StudyScreen } from './features/study/StudyScreen'
 import { TodayScreen } from './features/today/TodayScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
 import { WorkspaceScreen } from './features/workspaces/WorkspaceScreen'
+import { platform, type PlatformKind } from './platform'
+
+/**
+ * The element `/billing` renders, chosen by platform (A322).
+ *
+ * A phone gets the read-only plan screen and the web/desktop builds get theirs.
+ * The choice is made here, at the route, rather than inside the screen, so that a
+ * purchase surface added to the web/desktop screen is not reachable from a phone
+ * build at all — `config/billing_policy.toml` is a second lock, not the only one.
+ *
+ * A pure function of the kind so the decision is testable without a browser, the
+ * way `formFactorForWidth` is.
+ */
+export function billingElementFor(kind: PlatformKind) {
+  return kind === 'ios' || kind === 'android' ? <MobilePlanScreen /> : <PlanUsageScreen />
+}
+
+/**
+ * `/billing`, with the platform read when the route renders.
+ *
+ * **Not** `billingElementFor(platform.kind())` at module scope, which is the
+ * version that looks right and is wrong: this file is evaluated while `main.tsx`
+ * is still importing, before `installRuntimePlatform()` installs the native
+ * adapter, so at module scope `platform.kind()` answers `web` on an iPhone and the
+ * phone would be handed the desktop screen. The same trap the language table
+ * documents below — a value read before the thing that decides it exists.
+ */
+function BillingRoute() {
+  return billingElementFor(platform.kind())
+}
 
 /**
  * A route whose screen is planned but not built yet.
@@ -98,7 +129,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'billing',
-            element: <PlanUsageScreen />,
+            element: <BillingRoute />,
           },
           // Reached from the sync status control rather than from the nav (A189):
           // the sidebar and the phone tab bar are both built from the same five
