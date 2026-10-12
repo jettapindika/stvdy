@@ -114,3 +114,21 @@ reminder_channels = ["web", "push", "email", "telegram", "discord"]
 model_tier = "best"
 byok = true
 advanced_analytics = true
+
+# One-time credit packs. A pack is a `payments` row with `kind = 'credit_pack'` whose
+# grant lands in the `purchased` bucket, which never expires (A297). The price lives
+# here rather than in the checkout code, because a price invented in code is what A21
+# forbids; the credit amount is the pack's identity (the checkout body names a pack by
+# the credits it grants), so two packs with the same amount are two products the screen
+# cannot tell apart — `validate()` rejects them.
+#
+# A pack is deliberately a worse rate per credit than a subscription (pro is 10000 IDR
+# for 500 credits, i.e. 20 IDR/credit, and power is 12.5), or nobody would ever
+# subscribe. The rate improves as the pack grows, which is the only reason to buy the
+# larger one.
+[credit_packs]
+packs = [
+  { credits = 100, price_idr = 3000 },
+  { credits = 500, price_idr = 12500 },
+  { credits = 1000, price_idr = 22000 },
+]

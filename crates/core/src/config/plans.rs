@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -298,12 +298,46 @@ pub struct PlanConfig {
     pub advanced_analytics: bool,
 }
 
+/// One one-time credit pack: how many credits it grants, and what it costs.
+///
+/// There is no id, because the credit amount *is* the pack's identity: the checkout
+/// body names a pack by the credits it grants (`{credit_pack}` in spec § Payments).
+/// That is why `validate()` requires the amounts to be unique — two packs granting the
+/// same credits at different prices would make the lookup ambiguous and put two
+/// indistinguishable products on the pricing page.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreditPack {
+    pub credits: i64,
+    pub price_idr: i64,
+}
+
+/// The `[credit_packs]` table. A price is config here rather than a literal in the
+/// checkout path, which is what A21 forbids.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreditPacks {
+    pub packs: Vec<CreditPack>,
+}
+
+impl CreditPacks {
+    /// The pack that grants exactly `credits`, which is how a pack is named.
+    pub fn pack(&self, credits: i64) -> Option<&CreditPack> {
+        self.packs.iter().find(|pack| pack.credits == credits)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlansFile {
     pub meta: Meta,
     pub credits: Credits,
     pub provider_cost_ceiling_usd: BTreeMap<PlanId, f64>,
+    /// Defaulted so that a file with no `[credit_packs]` table produces the actionable
+    /// "must define at least one pack" error from `validate()` rather than serde's
+    /// "missing field `credit_packs`".
+    #[serde(default)]
+    pub credit_packs: CreditPacks,
     /// Defaulted so that a config with no plan tables produces the actionable
     /// "must define a [free] plan" error from `validate()` rather than serde's
     /// "missing field `plans`".
@@ -377,6 +411,36 @@ impl PlansFile {
             return Err(CoreError::ConfigInvalid(
                 "the free plan must cost 0 IDR".into(),
             ));
+        }
+
+        // Credit packs. Checked here rather than only in a test, for the same reason
+        // the plan matrix is: a mis-edited config must fail at boot, naming the pack,
+        // rather than surface as a checkout that charges 0 IDR.
+        if self.credit_packs.packs.is_empty() {
+            return Err(CoreError::ConfigInvalid(
+                "credit_packs must define at least one pack".into(),
+            ));
+        }
+        let mut amounts = BTreeSet::new();
+        for pack in &self.credit_packs.packs {
+            if pack.credits <= 0 {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "credit pack credits must be greater than 0 (a pack grants {} credits)",
+                    pack.credits
+                )));
+            }
+            if pack.price_idr <= 0 {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "credit pack price must be greater than 0 (the {}-credit pack costs {} IDR)",
+                    pack.credits, pack.price_idr
+                )));
+            }
+            if !amounts.insert(pack.credits) {
+                return Err(CoreError::ConfigInvalid(format!(
+                    "credit pack amounts must be unique; {} credits is listed twice",
+                    pack.credits
+                )));
+            }
         }
 
         for plan in PlanId::ALL {

@@ -7,8 +7,8 @@ use crate::error::{CoreError, CoreResult};
 
 pub use billing_policy::{BillingPolicy, Platform, PlatformPolicy};
 pub use plans::{
-    CreditAction, Credits, ExportFormat, Limit, Meta, ModelTier, PlanConfig, PlanId, PlannerMode,
-    PlansFile, ReminderChannel,
+    CreditAction, CreditPack, CreditPacks, Credits, ExportFormat, Limit, Meta, ModelTier,
+    PlanConfig, PlanId, PlannerMode, PlansFile, ReminderChannel,
 };
 
 fn read_to_string(path: &Path) -> CoreResult<String> {
