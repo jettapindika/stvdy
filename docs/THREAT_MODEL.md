@@ -116,7 +116,6 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 | Enable checkout on iOS/Android | **Fails.** Server refuses `platform in (ios, android)` | A24 |
 | Read another user's rows | **Fails.** Every query scoped by `user_id`; pull is filtered; signed URLs are short-lived and scoped | `docs/SPEC.md` § AUTH AND SECURITY; Phase 8 test |
 | Exceed the provider-cost ceiling | **Fails.** The next spend → `422 limit_reached`, naming the plan whose ceiling is higher; the ledger and `usage_events` are untouched | `credits::spend_in` sums the month's `provider_cost_usd` inside the spend's own transaction, `byok = false` only (A148, A155, A156) |
-| Reach a private address through an ICS URL | **Fails.** The next fetch → `Refused`, at save time as a 400 `validation` and at fetch time by the guard | `fetch_guarded_text` shares `parse_target`/`resolve_public` with ingestion and re-checks every redirect hop (A233); the refusal is asserted against `fetch_guarded_text` itself in `crates/server/tests/ssrf.rs`, because a route test cannot point the real guard at a local stub |
 | Farm signups past the per-IP limit | **Fails.** The next attempt → `429 rate_limited`, logged with the IP, the domain, the count and the rule that tripped | `signup_attempts` is database-backed, so a restart is not a reset (A154, A43) |
 | Farm free accounts | **Slowed, not eliminated.** Verification + signup limits + per-account cap bound the cost | A43 |
 | Fabricate `study_sessions` / `quiz_attempts` / `flashcard_reviews` | **Succeeds.** Accepted — see R1 | — |
@@ -127,6 +126,25 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 **Reading this table:** the "fails" rows are the product's actual security boundary. The "succeeds"
 rows are not bugs; they are the price of shipping a local-first client, and each is bounded to
 consequences the attacker inflicts on themselves.
+
+### The ICS fetch is not a row in the table above
+
+**Reach a private address through an ICS URL → Fails.** Enforced by the shared SSRF guard:
+`fetch_guarded_text` reuses `parse_target` + `resolve_public` + the pinned-address client with
+a re-check on every redirect hop (A233), and the URL is refused once more at save time with a
+400 `validation`. The refusal is asserted against `fetch_guarded_text` **itself** in
+`crates/server/tests/ssrf.rs`, alongside ingestion's, because the guard is precisely what
+refuses a local stub — a route test that pointed the real fetcher at `127.0.0.1` and passed
+would be proving the guard *absent*.
+
+It is deliberately **not** a row of the table, for the same structural reason as the update
+channel below: the table answers "what can a *modified client* do", and this attacker has not
+modified anything. They control a **document** — an ICS URL the user subscribed to, or a
+hostname that resolves differently at fetch time than it did at save time — and the client
+they reach is the genuine one. Filing it under client modification would also be actively
+harmful, because `every_section_5_fails_row_has_a_case` requires each "**Fails.**" row to have
+a case in `crates/server/tests/tamper.rs`, whose subject is the server's HTTP boundary, where
+an ICS URL is not a request. The enforcement is real and tested; it lives in `ssrf.rs`.
 
 ### The update channel is not a row in the table above
 
@@ -160,6 +178,36 @@ the announced version to the bytes. `tauri-plugin-updater` compares the version 
 signature's *trusted comment* against the version the endpoint announced, and `verify` checks
 the global signature that covers that comment before it is read. A manifest whose `url` points
 at an older, genuinely signed release therefore fails rather than downgrading the user.
+
+### A hidden instruction in a source cannot make the assistant write (Phase 12)
+
+**Fails.** A retrieved document may make the model *say* anything and still cannot make the app
+write a row, because no WRITE tool ever executes without a human confirm (A271): the gate has no
+arm that runs one, so a `create_task` becomes a `pending_actions` row plus a confirmation card
+and waits. The defence is **structural**, not a promise about the model.
+
+It is not a row of the table above for the same reason the update channel is not, and the reason
+is worth stating because it is easy to get wrong: § 5 answers "what can a modified *client* do",
+and this attacker modifies nothing — they plant text in a PDF, and the client and the server are
+both genuine. Filing it there would also break `every_section_5_fails_row_has_a_case`, which
+requires every "**Fails.**" row to have a case in `tamper.rs`, whose subject is the server's HTTP
+boundary where a document is not a request.
+
+The test is `crates/server/tests/agent_injection.rs::a_poisoned_source_does_not_create_a_task`,
+and it is **two-sided against vacuity** on purpose, because the obvious version of it is
+worthless in two independent ways. It asserts (1) against `ScriptedLlm::requests()` that the
+poison text **was** in the prompt inside `<sources>`, so the fixture is demonstrably poisoned and
+demonstrably delivered; (2) that the scripted model **did** emit the `create_task` call — the call
+the gate has to stop, so deleting the gate makes the test fail; and only then (3) that the
+database is untouched. A companion assertion covers the other direction: the proposal that *is*
+created has `status = 'pending'` and no `tasks` row exists, which distinguishes "the write never
+executed" from "the write was refused by a validator" — different defences, both wanted. Without
+(1) and (2) the test would still pass with the entire gate deleted, and the threat model would
+then cite it.
+
+`crates/core/src/prompts/registry.rs`'s `<security_untrusted_content>` block already carries the
+sentence this makes true, and a shipped prompt version is never edited (A38) — so the phase's
+work was the test, not the prompt.
 
 ---
 
@@ -227,6 +275,21 @@ carry only the future bound a review and an attempt already had. The trigger is 
 `crates/server/tests/offline_tasks.rs::a_session_that_starts_beyond_the_devices_own_clock_is_refused`
 (both directions — a session from a clock running 30 h fast is *stored*, so the case tests the bound
 and not a check that refuses every session), and `scripts/smoke-phase9.sh` scenario 7.
+
+**R1 addendum (Phase 12): the dashboard reads the same rows, so fabricating them inflates one more
+surface the attacker already owns — and no more than that.** `GET /dashboard` counts
+`study_sessions`, `flashcard_reviews` and `quiz_attempts` and sums their minutes; `GET /dashboard/topics`
+derives accuracy per source from `quiz_attempts`. A fabricated row therefore moves a number on a screen
+the student actually looks at, which is the same consequence Phase 9's addendum above records for the
+Today view and the streak, one screen further on.
+
+What is *not* widened is the part that matters. The dashboard reports only what traces to a row
+(A289): every figure is a count or a sum over the account's own rows, there is no composite score, no
+predicted grade and no "retention", so a fabricated row cannot be laundered into a claim the app
+computed from something other than the row itself. The rows remain the account's own claim about
+itself, and — unchanged from above — no credit, quota, plan or money reads them. The bound is
+unaffected too: the dashboard's window is the student's local days, and a session outside the elapsed
+bound is refused before it can be counted.
 
 **R2 — Local cache is readable and editable.** SQLCipher is off by default (A13). The cache holds only
 the user's own synced entities — never `chunks`, embeddings, or other users' rows
@@ -356,7 +419,7 @@ The design never depends on this column. It is recorded so that no phase mistake
 | Free-tier abuse controls are live | 7 | `crates/server/tests/abuse.rs` — `an_unverified_account_cannot_chat_generate_search_or_ingest`, `the_per_ip_signup_limit_trips_and_logs`, `a_public_email_domain_is_not_rate_limited`, `the_spend_cap_trips_at_ten_a_minute_and_never_caps_a_read`, `the_spend_cap_is_per_account` |
 | Provider cost ceiling stops spend | 7 | `crates/server/tests/credits.rs::an_account_over_its_provider_cost_ceiling_is_refused` — an account at its ceiling gets `422 limit_reached` naming the plan whose ceiling is higher, with the ledger and `usage_events` untouched; `a_higher_plan_has_a_higher_ceiling` is the other half |
 | Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md` § QUALITY BAR, "Payment tests") |
-| Retrieved text cannot act as instructions | 12 | injection fixture in an uploaded document does not alter tool behaviour |
+| Retrieved text cannot act as instructions | 12 | `crates/server/tests/agent_injection.rs::a_poisoned_source_does_not_create_a_task` — the phase's real risk, and it is **two-sided against vacuity**: the poison text is asserted to have been in the prompt inside `<sources>` (so the fixture was poisoned *and* delivered), the scripted model is asserted to have emitted the `create_task` call (so deleting the gate fails the test), and only then is the database asserted untouched — with a companion assertion that the proposal which *is* created is `status = 'pending'` and that no `tasks` row exists. § 5's subsection above carries the reasoning for why it is not a § 5 row |
 | Rendered documents are inert | 6 | a source containing `</div><script>` and `<svg onload=…>` produces a PDF with neither |
 | A replayed mutation applies **nothing**, not merely answers the same | 8 | `crates/server/tests/sync_push.rs::a_replayed_mutation_applies_nothing` asserts the row's `updated_at` **and** the account's `change_log` count are both unchanged; `crates/server/tests/sync_convergence.rs::a_replayed_mutation_through_the_outbox_applies_nothing` is the same property through the engine, with the first response lost so the replay is the client's own retry |
 | A mutation id belonging to another account never returns that account's result | 8 | `sync_push.rs::a_mutation_id_belonging_to_another_account_is_a_conflict` — `mutation_log.mutation_id` is a **global** primary key, so the collision is representable; the answer is `Rejected{code: "conflict"}` and never the stored result (A172) |
