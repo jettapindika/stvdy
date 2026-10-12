@@ -57,6 +57,10 @@ const NON_SYNC_TABLES: &[&str] = &[
     // A40: a provider result set is a server-side cost control with no client
     // entity, so it must never reach a device through the change log.
     "search_cache",
+    // Phase 8. Compaction's per-user watermark is a server-side cursor fact with no
+    // client entity: a device that learned it would learn nothing it could act on
+    // (A165/A184).
+    "change_log_watermark",
 ];
 
 async fn insert_user(pool: &PgPool) -> Uuid {
@@ -197,6 +201,35 @@ async fn non_sync_tables_have_no_triggers(pool: PgPool) {
     }
 }
 
+/// A table with no client entity must never be able to reach one (A165/A184): no
+/// triggers, and a primary key that is the user id rather than a row id.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_watermark_is_server_side_only(pool: PgPool) {
+    let triggers: i64 = sqlx::query_scalar(
+        "select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+         where not t.tgisinternal and c.relname = 'change_log_watermark'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(triggers, 0);
+
+    let cols: Vec<String> = sqlx::query_scalar(
+        "select column_name from information_schema.columns
+         where table_name = 'change_log_watermark'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("columns");
+    assert_eq!(
+        cols.iter().cloned().collect::<BTreeSet<_>>(),
+        ["user_id", "min_retained_seq", "compacted_at"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    );
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_trigger_set_is_exactly_the_sync_tables(pool: PgPool) {
     // Catches both directions of drift: a synced table missing its triggers, and
@@ -292,6 +325,11 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // bucket resets on restart, which is exactly what a signup farm waits for. It
         // holds IPs and email domains, so it is not a `+sync` table (A154).
         "signup_attempts",
+        // Phase 8. Compaction's per-user watermark: the seq below which this account's
+        // history is gone, which is what a cursor is compared against for 410 (A165).
+        // Not a `+sync` table: it is a server-side cursor fact with no client entity, and
+        // a device that learned it would learn nothing it could act on.
+        "change_log_watermark",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
