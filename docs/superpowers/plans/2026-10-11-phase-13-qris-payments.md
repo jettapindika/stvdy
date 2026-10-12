@@ -1675,7 +1675,7 @@ exist, which is why it is written here.
 | 20 | Route sweep (every new route classified) | `cargo test -p stvdy-server --test route_sweep` | **4 passed / 0 failed** (slice B's run). |
 | 21 | Schema deviations | `cargo test -p stvdy-server --test schema` | see the Execution notes. |
 | 22 | Threat model §5 rows (Phase 7's suite, extended) | `cargo test -p stvdy-server --test tamper` | **17 passed / 0 failed**, including `every_section_5_fails_row_has_a_case`. **Unchanged, deliberately:** the three webhook attempts went into a §5 *subsection* that points at §9 with named tests, rather than three rows — the row scanner reads every `| … | **Fails.** … |` line until the next `## ` heading, so a table anywhere inside §5 would have been counted as rows and the suite would have gone red for everyone. It stays at 13 rows. A309 records the reasoning. |
-| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at the phone viewport in both themes at 100% and 200%; the desktop leg is NOT measured** — see the Execution notes for the harness defect that blocks it and for the three defects the phone leg found. |
+| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at both viewports, in both themes, at 100% and 200%.** Phone (390×844, DPR 3): 76 combinations, 1028 targets, 2988 pairs, lowest contrast 4.97:1, 0 under 44px, the six checkout states all verified in words. Desktop (1365×900, DPR 2): 80 combinations, 1580 targets, 4292 pairs, **0 below requirement**, **0 overlaps**, **0 painted past the edge**, **0 page-width overflows**. Seven defects found — three on the phone leg, four on the desktop — all reported with elements and numbers. See the Execution notes, including the harness defect the desktop leg exposed (`MIN_TARGET` is not viewport-keyed). |
 | 24 | Gate 6 — Indonesian, invoice and reminder copy | `cargo test -p stvdy-server --test billing_jakarta` | **4 passed / 0 failed / 0 ignored**, including the two planted-failure controls. See the Execution notes for the quoted output. |
 | 25 | Gate 7 — honesty | the statements in Task 13 Step 8 | **Satisfied by assertion**, each named in the Execution notes with the test that carries it. No new honesty surface was added by Task 13. |
 
@@ -1730,7 +1730,7 @@ in-app sentence a student reads for a period ending. **The fix is two locale ent
 renderer (or the server stops sending a key nothing reads), and it is a defect this gate found
 in the phase's own copy rather than a gap in the gate.**
 
-### Gate 5 — accessibility, measured on the phone viewport
+### Gate 5 — accessibility, measured at both viewports
 
 `node scripts/measure-mobile.mjs` (390×844, `deviceScaleFactor: 3`) → **76 screen/theme/scale
 combinations, 1028 interactive targets, 2988 text pairs, lowest contrast 4.97:1.**
@@ -1798,17 +1798,38 @@ had made earlier measurements say less than they appeared to:
    which calls `GET /plans`, and with no fixture the walk had been measuring that panel's 404
    notice rather than its content.
 
-**The desktop leg is not measured, and the reason is a harness defect rather than a decision.**
-`scripts/measure-mobile.mjs` is the same instrument at both viewports by design
-(`VIEWPORT_WIDTH=1365 …`), but its `openSurface` steps name the **phone tab bar's** labels
-(`nav a` matched on `textContent.trim()`), while the desktop sidebar reads different ones —
-`nav.work` is "Work" in the tab bar and "Workspaces" in the sidebar, `nav.more` is "More" and
-"Settings". So the walk dies on `FAIL: no nav a labelled "Work"` at any desktop width. This slice
-added a fallback alias for those two labels, which is enough for the surfaces that begin with a
-`nav` step; **the desktop run was still not performed**, so the desktop half of (a)–(e) is
-untested and gate 5 is closed for the phone viewport only. A browser measurement at a viewport is
-not a device either, and this one is a headless Chromium at 390×844: it does not prove a scan of
-the QR, a tap on a real touchscreen, or a screen reader's traversal.
+**The desktop leg, measured.** `VIEWPORT_WIDTH=1365 VIEWPORT_HEIGHT=900 VIEWPORT_DPR=2
+OUTPUT=gate5-desktop.json node scripts/measure-mobile.mjs` → **80 combinations (20 surfaces × 2
+themes × 100%/200%), 1580 targets, 4292 text pairs with 0 below requirement, lowest contrast
+4.97:1, 0 overlaps, 0 elements painted past the edge, 0 page-width overflows.**
+
+**The desktop leg exposed a harness defect that this slice fixed, and a second one it did not.**
+The walk used to die on `FAIL: no nav a labelled "Work"` at any desktop width, because the
+`SURFACES` steps name the **phone tab bar's** labels while the desktop sidebar reads different
+ones (`nav.work` is "Work" in the tab bar and "Workspaces" in the sidebar, `nav.more` is "More"
+and "Settings"); a fallback alias for those two labels is what made the run possible. The one
+still open is `MIN_TARGET`: **224 targets read as undersized at desktop width, 212 of them at 100%
+text, and 200 of those are `a.nav-item` at 215×40** — the desktop sidebar's own links, which
+`styles.css` sets to `min-height: 2.5rem` by design. The repo's own `.btn` comment states the
+resolving rule ("44px minimum touch target, which also clears the spec's 32px desktop floor"), and
+R-03 and WCAG 2.5.8 are about pointer targets — so the honest instrument is 44px below the `md`
+breakpoint and the spec's 32px floor above it. **The measurement is not weakened to make this
+pass**: the 44px number stands, the finding is recorded as a harness defect, and the count of
+genuinely undersized targets is 12 (`button.cite` at 36×15 in the chat surfaces, another slice's).
+
+**Four more defects, all on the desktop leg, all at 200% text and all in this phase's own
+pricing screen** — `pricing/dark/x200` and `pricing/light/x200` each report two:
+`p.text-h2` rendering **"IDR 50,000 per year"** at **scroll 211 vs client 181**, and
+**"IDR 125,000 per year"** at **scroll 226 vs client 181**. Those are the two student prices, and
+a student at 200% text on a 1365px window cannot read the full figure. `PricingScreen.tsx` is
+another slice's file, so they are reported rather than fixed. Together with the three the phone leg
+found, gate 5 has now found **seven** defects in this phase's screens, which is the same class as
+the nine the earlier phases found and the same mechanism the brief warned about.
+
+**A browser measurement at a viewport is not a device.** Both legs are headless Chromium: they do
+not prove a camera scans the QR, a real touchscreen tap, or a screen-reader traversal. The 46
+clipped elements the desktop walk reports are dominated by the workspace screen's side panels (28,
+another slice's) rather than by this phase's screens.
 
 ### Gate 7 — honesty
 
