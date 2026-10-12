@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { ActionCard, actionCost } from './ActionCard'
@@ -137,6 +137,39 @@ describe('a pending proposal', () => {
     )
     expect(container.textContent).not.toContain('2026-10-16T16:59:00Z')
     expect(container.textContent).toContain('16 Oct 2026')
+  })
+
+  it('labels every field it shows, in copy rather than in the argument’s own name', () => {
+    // The defect this exists for: the label was resolved as
+    // `` t(`agent.field.${field}`) `` against the *argument* names, and the locale
+    // keys are not the argument names — `due_at` is `agent.field.due`. So the card
+    // rendered the string `agent.field.due_at` where a reader expects "Due", for
+    // five of the twelve fields and four of the six tools.
+    //
+    // Neither existing check could see it. `i18n.test.ts`'s dynamic-prefix rule
+    // marks every key beneath `agent.field.` as used, so it cannot tell a reachable
+    // key from an unreachable one. And the case above asserts the *value* renders
+    // without ever asserting the label does. It took a browser reading the screen
+    // in Indonesian (Phase 12's gate 6) to catch it, which is why the assertion is
+    // now here: the labels are asserted by their English copy, for every field the
+    // six tools can show, and a key that resolves to itself fails.
+    const cases: [string, Record<string, unknown>, string[]][] = [
+      ['create_task', { title: 't', notes: 'n', due_at: '2026-10-16T16:59:00Z', estimate_min: 90, priority: 1 }, ['Title', 'Notes', 'Due', 'Estimate (minutes)', 'Priority']],
+      ['update_task', { task_id: 'x', due_at: '2026-10-16T16:59:00Z', status: 'done' }, ['Due', 'Status']],
+      ['create_event', { title: 't', starts_at: '2026-10-16T09:00:00Z', ends_at: '2026-10-16T10:00:00Z' }, ['Title', 'Starts', 'Ends']],
+      ['schedule_study_block', { title: 't', starts_at: '2026-10-16T09:00:00Z', duration_min: 45 }, ['Starts', 'Duration (minutes)']],
+    ]
+
+    for (const [tool, args, labels] of cases) {
+      const { container } = renderWithProviders(
+        <ActionCard action={proposal({ tool, args })} timeZone={TZ} />,
+      )
+      const rendered = [...container.querySelectorAll('dt')].map((node) => node.textContent)
+      for (const label of labels) expect(rendered, `${tool} is missing "${label}"`).toContain(label)
+      // The general form of the same defect: no label may be the key it resolved from.
+      for (const node of rendered) expect(node).not.toContain('agent.field.')
+      cleanup()
+    }
   })
 
   it('confirms the proposal as it stands when no edit is open', async () => {

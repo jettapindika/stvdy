@@ -51,10 +51,7 @@ import { formatInZone } from '@/lib/time'
  * The keys are the tools' own argument names (`crates/core/src/agent/tools.rs`), so
  * a field the model set and this table does not name is still visible in the JSON
  * the edit field shows — nothing is hidden, and nothing is invented for a tool the
- * card does not know. The label each one carries is resolved as
- * `` t(`agent.field.${field}`) ``, which is the dynamic-prefix form the i18n
- * contract test understands: a static table of label keys would be copy nothing
- * could see was rendered.
+ * card does not know.
  */
 const WRITE_TOOL_FIELDS: Record<string, string[]> = {
   create_task: ['title', 'notes', 'due_at', 'estimate_min', 'priority'],
@@ -63,6 +60,40 @@ const WRITE_TOOL_FIELDS: Record<string, string[]> = {
   schedule_study_block: ['title', 'starts_at', 'duration_min'],
   create_flashcards: ['title', 'count', 'source_ids'],
   create_quiz: ['title', 'count', 'difficulty'],
+}
+
+/**
+ * The copy key for an argument whose name is not its label.
+ *
+ * The argument name is the *wire* name and the label is *copy*, and for the five
+ * time-shaped arguments the two are not the same string: `agent.field.due_at` does
+ * not exist, `agent.field.due` does. Resolving the label as `` t(`agent.field.${arg}`) ``
+ * rendered **the key itself** on the card — `agent.field.due_at` — for `due_at`,
+ * `starts_at`, `ends_at`, `estimate_min` and `duration_min`, which is five of the
+ * twelve fields and four of the six tools.
+ *
+ * Nothing in the app caught it, and the two checks that look like they should are
+ * both structurally blind to it. `i18n.test.ts`'s dynamic-prefix rule
+ * (`` t(`agent.field.${field}`) ``) marks **every** key beneath `agent.field.` as
+ * used, so a key that exists but is never reachable and a key that is referenced
+ * but does not exist are the same thing to it. And this card's own test asserted
+ * the *value* rendered (`16 Oct 2026`) without ever asserting the label did. It was
+ * the Indonesian browser run in Phase 12's gate 6 that read the raw key off the
+ * screen.
+ *
+ * A map rather than renaming the locale keys: the argument names are the tools'
+ * schema (`additionalProperties: false`, so a renamed key would be a wire change),
+ * and the locale keys are copy a translator reads. The two are allowed to differ,
+ * and this is where they are reconciled — with the argument name itself as the
+ * fallback, so a tool the registry gains still renders something rather than
+ * nothing.
+ */
+const FIELD_LABEL_KEY: Record<string, string> = {
+  due_at: 'due',
+  starts_at: 'starts',
+  ends_at: 'ends',
+  estimate_min: 'estimate',
+  duration_min: 'duration',
 }
 
 /**
@@ -198,7 +229,9 @@ export function ActionCard({ action, timeZone }: { action: ActionRow; timeZone: 
             if (value === null || value === undefined) return null
             return (
               <div key={field} className="flex flex-wrap gap-x-2">
-                <dt className="text-small text-muted">{t(`agent.field.${field}`)}</dt>
+                <dt className="text-small text-muted">
+                  {t(`agent.field.${FIELD_LABEL_KEY[field] ?? field}`)}
+                </dt>
                 <dd className="min-w-0 text-small break-words">
                   <FieldValue field={field} value={value} timeZone={timeZone} />
                 </dd>
