@@ -12,6 +12,7 @@ pub mod db;
 pub mod devices;
 pub mod entitlements;
 pub mod error;
+pub mod events;
 pub mod flashcards;
 pub mod integrations;
 pub mod jobs;

@@ -24,6 +24,7 @@ use crate::cheatsheets;
 use crate::chunks;
 use crate::config::AppConfig;
 use crate::devices;
+use crate::events;
 use crate::flashcards;
 use crate::quizzes;
 use crate::reports;
@@ -127,6 +128,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(reports::routes())
         .merge(cheatsheets::routes())
         .merge(tasks::routes())
+        .merge(events::routes())
         .merge(usage::routes())
         .merge(admin::routes())
         .merge(sources::routes(sources::max_upload_bytes(

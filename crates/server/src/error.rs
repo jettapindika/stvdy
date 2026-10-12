@@ -20,6 +20,16 @@ pub enum AppError {
     #[error("not permitted")]
     Forbidden,
 
+    /// `forbidden`, and it says why.
+    ///
+    /// The unit variant's "not permitted" is the right answer when there is nothing more to
+    /// say. A row the calendar owns is not that case: Phase 10 fills `events.source`,
+    /// `external_id`, `etag` and `connection_id`, and a client told only "not permitted"
+    /// reads it as a permissions bug rather than as "this event belongs to your Google
+    /// calendar" (A198).
+    #[error("{0}")]
+    ForbiddenWith(String),
+
     #[error("not found")]
     NotFound,
 
@@ -68,7 +78,7 @@ impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
             AppError::Unauthorized | AppError::TokenExpired => StatusCode::UNAUTHORIZED,
-            AppError::Forbidden => StatusCode::FORBIDDEN,
+            AppError::Forbidden | AppError::ForbiddenWith(_) => StatusCode::FORBIDDEN,
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
@@ -93,7 +103,7 @@ impl AppError {
         match self {
             AppError::Unauthorized => "unauthorized",
             AppError::TokenExpired => "token_expired",
-            AppError::Forbidden => "forbidden",
+            AppError::Forbidden | AppError::ForbiddenWith(_) => "forbidden",
             AppError::NotFound => "not_found",
             AppError::Validation(_) => "validation",
             AppError::Conflict(_) => "conflict",
