@@ -1297,3 +1297,71 @@ template that gained a *fifth* remote reference is not silently pointed at the w
 path: it survives the rewrite, and `crates/server/tests/assets.rs` fails on it. `ASSETS_DIR`
 points at the image's second, redundant copy of the same bytes — an operator checking what
 shipped should not have to unpack the binary.
+
+## Calendar (Phase 10)
+
+Three pieces, and the split is where it is because each fails differently.
+
+**The feed is a pure function of rows.** `crates/core/src/calendar/feed.rs` takes
+`FeedEvent`s and returns an ICS document; nothing in it reads a clock, a database or a
+network. So the two properties a client depends on are testable without one: two renders of an
+unchanged set are **byte-identical**, and an edit strictly raises `SEQUENCE` (A230). The `UID`
+is `<events.id>@stvdy.app` and the sequence is derived from `(created_at, updated_at)` rather
+than from a clock reading, because a feed is a cache the client owns: a client that caches on
+`UID` and finds no `SEQUENCE` has no signal an event changed, so an edited title is invisible
+forever, per client. The one thing the module does that looks like a detail and is not: it
+**strips CR before escaping**, because CR is not an escapable character in ICS TEXT and is a
+line break to a lenient parser — an event title that arrived with a CR would split the
+`SUMMARY` line and shift every field after it.
+
+**The import is parse + a bounded expand + one upsert keyed on the occurrence.** The bound is
+the phase's real risk and it is a **hang**, not a wrong answer: `all()` without a limit on a
+rule with no `UNTIL` never returns, and one faculty feed with `RRULE:FREQ=SECONDLY` takes the
+job worker down for every user. So the set asks for `MAX_OCCURRENCES + 1` (500 + 1) inside a
+180-day horizon and keeps 500, and truncation is read from the expansion's own `truncated`
+flag — **never** from `occurrences.len()`, or the same inference bug reappears one layer up.
+The `+1` is not a fudge: `rrule`'s `collect_with_error` ends with `was_limited || limit ==
+list.len()`, so asking for exactly the cap reports a rule with exactly that many occurrences
+as truncated, which is a connection that looks broken while it is fine. A truncated expansion
+keeps everything it read and writes `calendar_connections.error = 'recurrence_truncated'`.
+
+An **occurrence, not a series, is a row** (A231): `events.external_id` holds the occurrence
+key and the existing partial unique index on `(connection_id, external_id)` is the upsert key,
+so a re-poll is idempotent. The alternative — storing the series and expanding on read — would
+need a second recurrence engine in the planner, in the SPA's week grid and in the feed, all
+three of which would drift.
+
+**The guard is shared and the body handling is not** (A233). `ChainFetcher::fetch` runs
+`extract_readable`, which is right for a web page and destroys an ICS body, and its Exa/moli
+tiers are wrong for a feed. So `integrations::fetch::fetch_guarded_text` is a second
+**function** on the same guard — `parse_target` + `resolve_public` + the same pinned-address
+client and the same per-hop redirect re-check — that skips readability. A second guard would
+be the defect; a second function is the point. The consequence is stated in the code and worth
+repeating: a route test cannot point the real fetcher at a local stub, because the guard is
+precisely what refuses `127.0.0.1`. So the importer takes a fetcher seam, the route tests
+inject a fake, and the refusal is proven in `crates/server/tests/ssrf.rs` against
+`fetch_guarded_text` itself. A test that pointed at a local server and passed would be proving
+the guard **absent**.
+
+**The conditional GET is what keeps the poll cheap in the part that costs** (A239). An
+academic calendar is polled every 15 minutes and changes a few times a term. The expensive
+half is not the download: an unconditional re-upsert **touches every row**, and `events` is
+`+sync`, so every touched row writes a `change_log` entry and every device pulls the whole
+calendar every 15 minutes. `ics_etag`/`ics_last_modified` hold the validators, the fetch sends
+`If-None-Match`/`If-Modified-Since`, and a `304` advances `last_synced_at` and nothing else.
+
+**The scope pair makes the conflict policy structural** (A234). The consent asks for
+`calendar.app.created` **plus** `calendar.events.readonly`: the first can create and manage
+only calendars this app made — which is "our study blocks go to a dedicated 'Study Plan'
+calendar" (A237) — and the second can read everything else and change nothing. So "Google wins
+for events we didn't create" is enforced by the token rather than by remembering a rule, and a
+bug in our merge logic cannot rewrite a user's own event. The encrypted `state` carries a
+`purpose` (`Login` | `Calendar`), which is what keeps a login state from being replayed as a
+calendar state: the two flows share a codec, not a trust domain (A235).
+
+**The SPA reads Phase 9's window and adds no route** (A244). `GET /events?from=&to=` is the
+overlap query the grid needs, and the two views are pure functions of the rows in the window,
+unit-tested against a fixed instant and an explicit `Asia/Jakarta` zone. The grid is a
+**table** rather than absolutely-positioned divs, because a grid a keyboard cannot enter and a
+screen reader cannot read is not a grid; and the course colour is a 4px marker **plus** a
+tinted chip **plus** the workspace's name, never the colour alone.
