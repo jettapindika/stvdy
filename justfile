@@ -162,6 +162,25 @@ smoke-server-phase7:
 smoke-phase7:
     BASE=http://localhost:8099 bash scripts/smoke-phase7.sh
 
+# Phase 9's run. The stub must answer with a capture JSON and a breakdown JSON: both
+# generators ask for a strict-JSON reply, so the Phase 2 default (a prose answer) would fail
+# them for good. That is what `--answers-file` is for, and it matches on the prompt rather
+# than on the request's position so a re-run answers correctly.
+#
+# It reads the database back (the credit ledger, the task count, `deleted_with_parent`,
+# `change_log`), so it needs `DATABASE_URL`, which it reads out of `.env` itself, and it
+# prunes `signup_attempts` for 127.0.0.1 at the start because A154's window is 24h.
+smoke-llm-phase9:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-phase9-requests.jsonl \
+      --answers-file scripts/fixtures/phase9-answers.json
+
+smoke-server-phase9:
+    LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase9:
+    BASE=http://localhost:8099 bash scripts/smoke-phase9.sh
+
 # Phase 8's run. **No model stub and no browser**: nothing on the sync path calls an LLM
 # and nothing here renders a document, so `just smoke-server-phase7` is a fine server for
 # it (the stub it points at is never reached) and CHROME_PATH is not part of the pairing.
