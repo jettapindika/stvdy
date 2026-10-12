@@ -66,6 +66,12 @@ pub struct AppConfig {
     pub grace_period_days: i64,
     /// How long an `upsert` change is kept before `compact_change_log` removes it (A184).
     pub change_log_retention_days: i64,
+    /// How often a live calendar connection is polled (A238).
+    ///
+    /// Fifteen minutes: an academic calendar changes a few times a term, and the cost of a
+    /// poll is one conditional GET that usually answers `304` — so the interval bounds how
+    /// stale a new class can be, not how much the poll costs.
+    pub calendar_poll_interval: std::time::Duration,
     /// How long a `delete` change is kept. At least the retention window, because a device
     /// that has been offline for three months must still be told that a row was removed
     /// rather than silently keep it (A184).
@@ -78,6 +84,99 @@ pub struct AppConfig {
     /// converter must be honest rather than silent, because a source with no
     /// preview and no explanation looks like a scanned document.
     pub soffice_bin: Option<PathBuf>,
+    /// The QRIS gateway (Phase 13).
+    ///
+    /// `None` is a supported deployment, exactly like `renderer`: with no gateway
+    /// configured there is nothing to sell, so checkout answers 502 `provider_error`
+    /// rather than minting an invoice against a mock. Every field here is
+    /// env-driven because **B1 is unresolved** — the gateway has no identity and no
+    /// docs, so the entire surface of the unknown is this struct plus
+    /// `integrations::payment::mapping` (A291).
+    pub qris: Option<QrisConfig>,
+    /// The origin the print template's assets (KaTeX, the typefaces) are fetched from,
+    /// rewritten into the document before it is printed (A339).
+    ///
+    /// Defaults to `http://127.0.0.1:<BIND_ADDR's port>`, which is what makes a
+    /// single-container deployment work with no configuration: the renderer is in the same
+    /// container as the route that serves `/assets`. A deployment where Chromium resolves the
+    /// advertised address differently — or where the renderer runs beside the server rather
+    /// than inside it — sets `ASSETS_BASE_URL` explicitly.
+    pub assets_base_url: String,
+}
+
+/// The callback signature scheme, as a closed set (A292).
+///
+/// A closed set rather than a string, and an unknown value is a **startup** error:
+/// a default would be a scheme that verifies everything, which is the one failure
+/// mode this whole verification exists to prevent. Three shapes cover the plausible
+/// gateways — an HMAC in hex, the same in base64, and a plain shared token for one
+/// that signs nothing — so the code is finished before the docs arrive without
+/// pretending to know which one is right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureScheme {
+    /// `HMAC-SHA256(QRIS_CALLBACK_TOKEN, raw_body)`, hex, in `QRIS_SIGNATURE_HEADER`.
+    HmacSha256Hex,
+    /// The same tag, base64.
+    HmacSha256Base64,
+    /// The header *is* `QRIS_CALLBACK_TOKEN`, compared in constant time.
+    SharedToken,
+}
+
+impl SignatureScheme {
+    pub const ALL: [SignatureScheme; 3] = [
+        SignatureScheme::HmacSha256Hex,
+        SignatureScheme::HmacSha256Base64,
+        SignatureScheme::SharedToken,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SignatureScheme::HmacSha256Hex => "hmac_sha256_hex",
+            SignatureScheme::HmacSha256Base64 => "hmac_sha256_base64",
+            SignatureScheme::SharedToken => "shared_token",
+        }
+    }
+
+    /// `None` for anything not in the closed set: the caller turns that into a boot
+    /// failure rather than a default.
+    pub fn parse(raw: &str) -> Option<SignatureScheme> {
+        Self::ALL.into_iter().find(|scheme| scheme.as_str() == raw)
+    }
+
+    /// Whether the scheme needs `QRIS_CALLBACK_TOKEN` as an HMAC key rather than as
+    /// the literal header value. Both need the secret; only the message differs.
+    pub fn signs_with_hmac(self) -> bool {
+        !matches!(self, SignatureScheme::SharedToken)
+    }
+}
+
+/// Everything about the gateway that is a value rather than a shape.
+///
+/// The field names are **not** here — they are in
+/// `integrations::payment::mapping`, which is the one file B1 changes. This struct
+/// is the env half: the URL, the credentials, the scheme, the fee rate, the invoice
+/// lifetime and the two switches that decide how a late or lost payment is treated.
+#[derive(Debug, Clone)]
+pub struct QrisConfig {
+    pub base_url: String,
+    pub api_key: SecretString,
+    pub callback_token: SecretString,
+    pub signature_scheme: SignatureScheme,
+    /// Defaults to `X-Callback-Signature`. The header name is a gateway fact, so it
+    /// is config too.
+    pub signature_header: String,
+    /// An allowlist checked **before** the signature when non-empty (A292).
+    pub webhook_ips: Vec<std::net::IpAddr>,
+    /// The gateway's percentage fee. Defaults to `0.0` — "unknown, record nothing" —
+    /// rather than a plausible-looking rate, because B1 has not told us the rate and
+    /// a made-up fee would silently corrupt the margin report (A304).
+    pub fee_percent: f64,
+    pub fee_fixed_idr: i64,
+    pub invoice_ttl_minutes: i64,
+    /// A payment confirmed after its invoice expired is honoured when the gateway
+    /// says it was paid *before* the expiry (A295).
+    pub honor_late_payment: bool,
+    pub reconcile_hours: i64,
 }
 
 /// Token lifetimes and the verification-link window.
@@ -319,6 +418,17 @@ impl AppConfig {
             search: search_config(&get, &get_or)?,
             grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
             change_log_retention_days: get_i64(&get, "CHANGE_LOG_RETENTION_DAYS", 90)?,
+            calendar_poll_interval: {
+                // A zero interval is not "poll constantly": it makes the dedupe window one
+                // second wide, so a poll pass enqueues a job per connection per second. Refused
+                // at boot rather than at the first scheduler tick.
+                let secs = get_i64(&get, "CALENDAR_POLL_INTERVAL_SECS", 900)?;
+                anyhow::ensure!(
+                    secs > 0,
+                    "CALENDAR_POLL_INTERVAL_SECS must be positive, got {secs}"
+                );
+                std::time::Duration::from_secs(secs as u64)
+            },
             change_log_tombstone_retention_days: get_i64(
                 &get,
                 "CHANGE_LOG_TOMBSTONE_RETENTION_DAYS",
@@ -327,8 +437,111 @@ impl AppConfig {
             soffice_bin: get("SOFFICE_BIN")
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),
+            qris: qris_config(&get, &get_or)?,
+            // The loopback default is what makes a single-container deployment need no
+            // configuration: the renderer and the `/assets` route are the same process. It is
+            // built from `BIND_ADDR`'s *port* rather than its address, because `0.0.0.0` is a
+            // bind address and not something a browser can fetch from.
+            assets_base_url: get_or(
+                "ASSETS_BASE_URL",
+                &format!("http://127.0.0.1:{}", bind_addr.port()),
+            ),
         })
     }
+}
+
+/// The QRIS gateway configuration, or `None` when no base URL is set.
+///
+/// **The signature scheme is parsed even when no gateway is configured**, and an
+/// unknown value is a boot failure either way: a typo in `QRIS_SIGNATURE_SCHEME` is
+/// an operator who believes a scheme is in force, and failing at startup is the only
+/// place that can be said loudly (A292).
+///
+/// A configured gateway with no `QRIS_API_KEY` or no `QRIS_CALLBACK_TOKEN` is also a
+/// boot failure rather than a first-webhook surprise. The callback token is the HMAC
+/// key (or the compared value), so booting without it would mean verifying signatures
+/// against an empty secret — which an attacker can reproduce.
+fn qris_config(
+    get: &impl Fn(&str) -> Option<String>,
+    get_or: &impl Fn(&str, &str) -> String,
+) -> anyhow::Result<Option<QrisConfig>> {
+    let scheme_raw = get_or("QRIS_SIGNATURE_SCHEME", "hmac_sha256_hex");
+    let Some(signature_scheme) = SignatureScheme::parse(&scheme_raw) else {
+        anyhow::bail!(
+            "QRIS_SIGNATURE_SCHEME must be one of {}, got {scheme_raw}",
+            SignatureScheme::ALL
+                .map(|scheme| scheme.as_str())
+                .join(", ")
+        );
+    };
+
+    let Some(base_url) = get("QRIS_BASE_URL").filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let api_key = get("QRIS_API_KEY")
+        .filter(|value| !value.is_empty())
+        .context("QRIS_BASE_URL is set but QRIS_API_KEY is not")?;
+    let callback_token = get("QRIS_CALLBACK_TOKEN")
+        .filter(|value| !value.is_empty())
+        .context(
+            "QRIS_BASE_URL is set but QRIS_CALLBACK_TOKEN is not: it is the HMAC key \
+             (or the compared value) for every callback, and an empty one verifies \
+             anything",
+        )?;
+
+    let webhook_ips = match get("QRIS_WEBHOOK_IPS").filter(|value| !value.is_empty()) {
+        None => Vec::new(),
+        Some(raw) => {
+            let mut parsed = Vec::new();
+            for candidate in raw.split(',').map(str::trim).filter(|c| !c.is_empty()) {
+                parsed.push(candidate.parse::<std::net::IpAddr>().with_context(|| {
+                    format!("QRIS_WEBHOOK_IPS entry {candidate:?} is not an IP address")
+                })?);
+            }
+            parsed
+        }
+    };
+
+    let fee_percent = get_or("QRIS_FEE_PERCENT", "0")
+        .parse::<f64>()
+        .context("QRIS_FEE_PERCENT must be a number")?;
+    anyhow::ensure!(
+        (0.0..=100.0).contains(&fee_percent),
+        "QRIS_FEE_PERCENT must be between 0 and 100, got {fee_percent}"
+    );
+
+    let fee_fixed_idr = get_i64(get, "QRIS_FEE_FIXED_IDR", 0)?;
+    anyhow::ensure!(
+        fee_fixed_idr >= 0,
+        "QRIS_FEE_FIXED_IDR must not be negative, got {fee_fixed_idr}"
+    );
+
+    let invoice_ttl_minutes = get_i64(get, "QRIS_INVOICE_TTL_MINUTES", 15)?;
+    anyhow::ensure!(
+        invoice_ttl_minutes > 0,
+        "QRIS_INVOICE_TTL_MINUTES must be positive, got {invoice_ttl_minutes}"
+    );
+
+    let reconcile_hours = get_i64(get, "QRIS_RECONCILE_HOURS", 48)?;
+    anyhow::ensure!(
+        reconcile_hours > 0,
+        "QRIS_RECONCILE_HOURS must be positive, got {reconcile_hours}"
+    );
+
+    Ok(Some(QrisConfig {
+        base_url: base_url.trim_end_matches('/').to_string(),
+        api_key: SecretString::from(api_key),
+        callback_token: SecretString::from(callback_token),
+        signature_scheme,
+        signature_header: get_or("QRIS_SIGNATURE_HEADER", "X-Callback-Signature"),
+        webhook_ips,
+        fee_percent,
+        fee_fixed_idr,
+        invoice_ttl_minutes,
+        honor_late_payment: get_or("QRIS_HONOR_LATE_PAYMENT", "true") != "false",
+        reconcile_hours,
+    }))
 }
 
 /// The model provider. Optional as a whole: with no base URL there is no chat,

@@ -1,6 +1,7 @@
 //! Job handlers. One module per kind; `jobs::worker::dispatch` is the only
 //! caller.
 
+pub mod calendar;
 pub mod cheatsheet;
 pub mod compact;
 pub mod counters;

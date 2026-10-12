@@ -97,6 +97,57 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
     // boundary job, so it is enqueued once per pass and deduped by the UTC date (A184).
     enqueue_compaction(state).await?;
 
+    // And the calendar poll, which is per *connection* rather than per account (A238).
+    calendar_pass(state).await?;
+
+    Ok(scheduled)
+}
+
+/// One pass over the live calendar connections whose watermark is older than the interval.
+///
+/// The same shape as [`pass`]: a producer of rows, bounded, idempotent. Two bounds and two
+/// independent idempotences, and they do different jobs:
+///
+///  * the `not exists` guard plus the windowed `dedupe_key` mean a restart, a second instance
+///    or a double tick enqueues **one** job rather than two;
+///  * `last_synced_at < now() - INTERVAL` means a connection synced inside the window is not
+///    even examined, so a pass costs one query rather than one row per connection.
+///
+/// A connection in `status = 'revoked'` is skipped: its grant is gone, and a pass would only
+/// mark it revoked again. `error` is deliberately **not** skipped — a faculty calendar that
+/// 500s for an hour must be picked back up on its own, and the whole point of A247's "the
+/// error is cleared by the next clean pass" is that the pass keeps happening.
+pub async fn calendar_pass(state: &AppState) -> AppResult<u64> {
+    let interval_secs = state.config.calendar_poll_interval.as_secs().max(1) as i64;
+    let window = calendar_window(state);
+    let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "select c.id, c.user_id
+           from calendar_connections c
+          where c.status <> 'revoked'
+            and (c.last_synced_at is null
+                 or c.last_synced_at < now() - make_interval(secs => $1))
+            and not exists (
+                  select 1 from jobs j
+                   where j.status in ('queued', 'running')
+                     and j.dedupe_key = 'sync_calendar:' || c.id::text || ':' || $2::text)
+          order by c.last_synced_at asc nulls first, c.id
+          limit $3",
+    )
+    .bind(interval_secs as f64)
+    .bind(window.to_string())
+    .bind(SCHEDULE_BATCH)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing connections to poll: {error}")))?;
+
+    let mut scheduled = 0u64;
+    for (connection_id, user_id) in rows {
+        enqueue_connection_sync(state, user_id, connection_id).await?;
+        scheduled += 1;
+    }
+    if scheduled > 0 {
+        tracing::info!(scheduled, "scheduled calendar syncs");
+    }
     Ok(scheduled)
 }
 
@@ -130,6 +181,55 @@ pub async fn enqueue_boundary_jobs(
         enqueue_kind(state, kind, user_id, timezone).await?;
     }
     Ok(())
+}
+
+/// Enqueues one connection's `sync_calendar`, idempotent inside the poll window (A238).
+///
+/// The key is `"sync_calendar:<connection_id>:<floor(now/INTERVAL)>"`, which is the whole of
+/// the idempotence: a scheduler restart, a second instance, a double tick and the *first*
+/// import enqueued by `POST /calendar/ics` all produce the same key inside one window, so the
+/// unique index on `jobs.dedupe_key` turns every duplicate into a no-op. The watermark column
+/// (`last_synced_at`) is the other half — it keeps a pass from *examining* a connection that
+/// was synced inside the interval, while the key keeps a second pass from *enqueuing* one.
+///
+/// `POST /calendar/sync` uses its own per-minute key rather than this one: a manual sync must
+/// work when the poll window has already been used, and the two keys are deliberately
+/// different so a user pressing the button does not silently do nothing for fourteen minutes.
+pub async fn enqueue_connection_sync(
+    state: &AppState,
+    user_id: Uuid,
+    connection_id: Uuid,
+) -> AppResult<()> {
+    let window = calendar_window(state);
+    let dedupe_key = format!("sync_calendar:{connection_id}:{window}");
+
+    jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        "sync_calendar",
+        serde_json::json!({ "user_id": user_id, "connection_id": connection_id }),
+        Some(&dedupe_key),
+    )
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing a calendar sync: {error}")))?;
+
+    tracing::debug!(%connection_id, %dedupe_key, "calendar sync scheduled");
+    Ok(())
+}
+
+/// The manual sync's key window: one per minute per connection (A238).
+///
+/// A per-minute key bounds a user's own retry loop without a second rate limiter, and it is
+/// deliberately not the poll's window: a student who has just added a class and wants it now
+/// must not be told "wait fifteen minutes" because the poll already ran.
+pub fn manual_window(state: &AppState) -> i64 {
+    state.clock.now().timestamp() / 60
+}
+
+/// `floor(now / CALENDAR_POLL_INTERVAL)`, the poll's dedupe window.
+fn calendar_window(state: &AppState) -> i64 {
+    let interval = state.config.calendar_poll_interval.as_secs().max(1) as i64;
+    state.clock.now().timestamp() / interval
 }
 
 /// Enqueues just the next period's grant, for a producer that is not the scheduler.

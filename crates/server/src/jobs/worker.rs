@@ -102,6 +102,9 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // successfully generated document: the blocks are the document, and a print is
         // retryable and free.
         "render_cheatsheet_pdf" => crate::jobs::handlers::render_pdf::run(state, job).await,
+        // One connection, one pass (A238). The payload names the connection rather than the
+        // account, because two Google accounts for one student are two rows.
+        "sync_calendar" => crate::jobs::handlers::calendar::run(state, job).await,
         // Permanent: no retry will invent a handler for a kind this binary does
         // not know, which is what an old row from a newer version looks like.
         other => Err(jobs::Failure::permanent(format!(

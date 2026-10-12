@@ -22,6 +22,238 @@ use stvdy_core::traits::search::{FetchError, FetchedPage, PageFetcher};
 /// redirect chain is a denial-of-service on our own worker.
 const MAX_REDIRECTS: usize = 5;
 
+/// The largest response body either guarded path will read.
+///
+/// The same 8 MiB the ICS expansion refuses above (`calendar::expand::MAX_BODY_BYTES`), and
+/// deliberately enforced *here* rather than only there: the expansion's check runs after the
+/// body is a `String` in memory, so without a bound at the socket a hostile URL can make the
+/// worker hold hundreds of megabytes before anything looks at the size. A page fetch gets the
+/// same bound, because "save this page" is not a reason to buffer an unbounded body either.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+/// The validators a conditional GET sends (A239).
+///
+/// A struct rather than the `Option<(&str, &str)>` pair a signature would suggest, because the
+/// two are independent: an ICS server may send an `ETag` and no `Last-Modified`, and a pair
+/// would force an empty-string sentinel for the missing one — which is a header whose value is
+/// `""`, not an absent header. Both `None` is an unconditional request.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Validators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+/// A body fetched as text through the guard, with no readability pass (A233).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardedText {
+    /// The URL actually served, after any redirects. A redirect target is re-validated, so
+    /// this is also the URL the guard last approved.
+    pub final_url: String,
+    /// The body. Empty when `not_modified`.
+    pub body: String,
+    /// The response's `ETag`, for the next conditional GET.
+    pub etag: Option<String>,
+    /// The response's `Last-Modified`, for the next conditional GET.
+    pub last_modified: Option<String>,
+    /// The server answered `304 Not Modified`: the caller's validators still match, so there
+    /// is nothing to parse and nothing to write. A field rather than an empty-body check,
+    /// because an ICS document that is genuinely empty and a 304 are different facts and a
+    /// sync that confused them would either re-import nothing forever or skip a real change.
+    pub not_modified: bool,
+}
+
+/// A user-supplied URL fetched as text, through the **same** guard as [`ReqwestFetcher`] and
+/// without readability (A233): an ICS body is not HTML, and `extract_readable` would hand back
+/// a tag-stripped document — a silently empty import, with no error anywhere.
+///
+/// `If-None-Match`/`If-Modified-Since` are sent when the caller has validators, and a `304` is
+/// `Ok` with `not_modified` set and an empty body.
+pub async fn fetch_guarded_text(
+    url: &str,
+    accept: &str,
+    validators: Option<&Validators>,
+) -> Result<GuardedText, FetchError> {
+    let response = guarded_get(url, accept, validators).await?;
+
+    if response.status == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(GuardedText {
+            final_url: response.final_url,
+            body: String::new(),
+            etag: response.etag,
+            last_modified: response.last_modified,
+            not_modified: true,
+        });
+    }
+    if !response.status.is_success() {
+        return Err(FetchError::Provider(format!(
+            "the server answered {}",
+            response.status
+        )));
+    }
+
+    Ok(GuardedText {
+        final_url: response.final_url,
+        body: response.body,
+        etag: response.etag,
+        last_modified: response.last_modified,
+        not_modified: false,
+    })
+}
+
+/// One guarded GET: the scheme and host check, the address check, a client pinned to a
+/// checked address, and a bounded redirect loop with every hop re-validated.
+///
+/// Extracted from `ReqwestFetcher::fetch` so there is **one** redirect loop and not two
+/// (A233). The guard is the thing that must not be duplicated — a second copy is a second
+/// place for the pinned-address step or the per-hop re-check to be forgotten, and the failure
+/// is a request to `169.254.169.254` that looks like an ordinary fetch.
+///
+/// Returns the response without interpreting it: a `304` is not a success and not an error, and
+/// only the caller knows whether a body is HTML to extract or text to parse.
+async fn guarded_get(
+    url: &str,
+    accept: &str,
+    validators: Option<&Validators>,
+) -> Result<GuardedResponse, FetchError> {
+    let mut current = parse_target(url)?;
+
+    for _ in 0..=MAX_REDIRECTS {
+        let host = current
+            .host_str()
+            .ok_or_else(|| FetchError::Invalid("the URL has no host".to_string()))?
+            .to_string();
+        let port = current.port_or_known_default().unwrap_or(443);
+        let allowed = resolve_public(&host, port).await?;
+
+        // Pin the connection to an address that was just checked, so a second
+        // DNS answer arriving between the check and the connect cannot point
+        // somewhere else. `resolve` is on the client builder, so this is a
+        // per-request client; both callers are rare operations, so losing
+        // connection pooling across requests costs nothing that matters.
+        let pinned = allowed[0];
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent("Stvdy/0.1 (+https://stvdy.app)")
+            .resolve(&host, pinned)
+            .build()
+            .map_err(|error| FetchError::Provider(error.to_string()))?;
+
+        let mut request = client.get(current.clone()).header("accept", accept);
+        if let Some(validators) = validators {
+            // An empty validator is an absent one, never a header with an empty value: a
+            // server reads `If-None-Match: ` as a malformed request, not as "no opinion".
+            if let Some(etag) = validators.etag.as_deref().filter(|value| !value.is_empty()) {
+                request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+            }
+            if let Some(modified) = validators
+                .last_modified
+                .as_deref()
+                .filter(|value| !value.is_empty())
+            {
+                request = request.header(reqwest::header::IF_MODIFIED_SINCE, modified);
+            }
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|error| FetchError::Provider(error.to_string()))?;
+
+        if response.status().is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    FetchError::Provider("a redirect with no Location header".to_string())
+                })?;
+
+            // Relative redirects are resolved against the current URL, then
+            // re-validated exactly like the original: `parse_target` checks the
+            // scheme and the credentials, and the next iteration re-resolves and
+            // re-checks the addresses. Without the `parse_target` call here a
+            // redirect to a non-http scheme would slip past the guard and fail
+            // later inside `send()` as a provider error, which reads like an
+            // outage rather than a refusal.
+            current = parse_target(
+                current
+                    .join(location)
+                    .map_err(|error| FetchError::Invalid(error.to_string()))?
+                    .as_str(),
+            )?;
+            continue;
+        }
+
+        let final_url = response.url().to_string();
+        let etag = header_value(&response, reqwest::header::ETAG);
+        let last_modified = header_value(&response, reqwest::header::LAST_MODIFIED);
+        let status = response.status();
+        // A `304` carries no body, and `bytes_stream` on it yields nothing, so this is the
+        // same path either way.
+        let body = read_bounded(response).await?;
+
+        return Ok(GuardedResponse {
+            final_url,
+            status,
+            etag,
+            last_modified,
+            body,
+        });
+    }
+
+    Err(FetchError::Provider(format!(
+        "more than {MAX_REDIRECTS} redirects"
+    )))
+}
+
+/// The response, without its body having been interpreted.
+struct GuardedResponse {
+    final_url: String,
+    status: reqwest::StatusCode,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    body: String,
+}
+
+/// One header, as a `String`, or `None` when it is absent or not valid UTF-8.
+///
+/// A non-UTF-8 `ETag` is not a reason to fail a fetch — it is a validator we cannot echo, and
+/// the next poll is then unconditional, which is the safe direction.
+fn header_value(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+/// Reads a response body, refusing one larger than [`MAX_RESPONSE_BYTES`].
+///
+/// Streamed rather than `response.text()`, because `text()` buffers whatever the peer sends and
+/// only then can the size be looked at. A chunked response has no `Content-Length` to check
+/// first, so the only place the bound can be enforced is while reading.
+///
+/// The decode is `String::from_utf8_lossy`, which is exactly what `reqwest`'s own `text()`
+/// does in this build: the workspace enables `reqwest` without its `charset` feature, so
+/// `text()` is the `from_utf8_lossy` branch and no behaviour is lost by reading the bytes here.
+async fn read_bounded(response: reqwest::Response) -> Result<String, FetchError> {
+    use futures::StreamExt;
+
+    let mut collected: Vec<u8> = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| FetchError::Provider(error.to_string()))?;
+        if collected.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+            return Err(FetchError::Refused(format!(
+                "refusing a response larger than {MAX_RESPONSE_BYTES} bytes"
+            )));
+        }
+        collected.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&collected).into_owned())
+}
+
 /// Whether an address is one this server refuses to connect to.
 ///
 /// Explicit rather than `!is_global()`, which is unstable, and deliberately
@@ -98,6 +330,39 @@ fn is_public_v6(addr: Ipv6Addr) -> bool {
     true
 }
 
+/// The syntactic and literal-address check, with the reason.
+///
+/// [`parse_target`] covers the scheme, the host and the credentials; this adds the two things
+/// that can be decided **without DNS**: a literal address in a private or reserved range, and
+/// the loopback names every resolver maps to the loopback interface. It is what `is_citable_url`
+/// decides with, and what `POST /calendar/ics` refuses a URL with (A246) — the user gets
+/// "that is not a URL we can fetch" at save time instead of a connection that silently never
+/// syncs.
+///
+/// A hostname that resolves to a private address still passes here, and that residual is
+/// deliberate rather than an oversight: resolving it would be a DNS lookup in a request
+/// handler, and DNS can change between the save and the fetch anyway. The fetch-time guard
+/// (which does resolve, and pins the checked address) is the protection; this is the courtesy.
+///
+/// `Url::host()` rather than `host_str()`: the string form keeps an IPv6 literal's brackets
+/// (`[::1]`), so parsing it as an `IpAddr` fails and the address check silently does not run.
+/// The suite caught exactly that.
+pub fn check_fetchable_literal(raw: &str) -> Result<url::Url, FetchError> {
+    let parsed = parse_target(raw)?;
+    match parsed.host() {
+        Some(url::Host::Ipv4(addr)) if !is_public_ip(IpAddr::V4(addr)) => Err(FetchError::Refused(
+            format!("refusing to fetch {addr}: it is not a public address"),
+        )),
+        Some(url::Host::Ipv6(addr)) if !is_public_ip(IpAddr::V6(addr)) => Err(FetchError::Refused(
+            format!("refusing to fetch {addr}: it is not a public address"),
+        )),
+        Some(url::Host::Domain(host)) if is_loopback_name(host) => Err(FetchError::Refused(
+            format!("refusing to fetch {host}: it resolves to the loopback interface"),
+        )),
+        _ => Ok(parsed),
+    }
+}
+
 /// Whether a search result's URL may be shown to the user as a citation.
 ///
 /// The citation path never goes through the fetcher: a hit's URL is written into
@@ -114,24 +379,7 @@ fn is_public_v6(addr: Ipv6Addr) -> bool {
 /// claimed solved, and the fetch path (which does resolve) is the one that has to
 /// be airtight.
 pub fn is_citable_url(raw: &str) -> bool {
-    let Ok(parsed) = parse_target(raw) else {
-        return false;
-    };
-    // `Url::host()` rather than `host_str()`: the string form keeps an IPv6
-    // literal's brackets (`[::1]`), so parsing it as an `IpAddr` fails and the
-    // address check silently does not run. The suite caught exactly that.
-    match parsed.host() {
-        Some(url::Host::Ipv4(addr)) => is_public_ip(IpAddr::V4(addr)),
-        Some(url::Host::Ipv6(addr)) => is_public_ip(IpAddr::V6(addr)),
-        Some(url::Host::Domain(host)) => {
-            // The loopback names, checked without DNS. `localhost` is the case that
-            // matters: it is not a literal, so an address-only check would let a hit
-            // pointing at this very server through, and every platform's hosts file
-            // resolves it to loopback.
-            !is_loopback_name(host)
-        }
-        None => false,
-    }
+    check_fetchable_literal(raw).is_ok()
 }
 
 /// Names that resolve to loopback without a DNS lookup.
@@ -236,86 +484,26 @@ impl PageFetcher for ReqwestFetcher {
     }
 
     async fn fetch(&self, url: &str) -> Result<FetchedPage, FetchError> {
-        let mut current = parse_target(url)?;
+        // The guard, the redirect loop and the body bound live in `guarded_get`, shared with
+        // `fetch_guarded_text` (A233). What is *not* shared is this line: a web page is HTML
+        // and readability is what turns it into the text a source is made of, while an ICS
+        // body must be handed over byte for byte.
+        let response = guarded_get(url, "*/*", None).await?;
 
-        for _ in 0..=MAX_REDIRECTS {
-            let host = current
-                .host_str()
-                .ok_or_else(|| FetchError::Invalid("the URL has no host".to_string()))?
-                .to_string();
-            let port = current.port_or_known_default().unwrap_or(443);
-            let allowed = resolve_public(&host, port).await?;
-
-            // Pin the connection to an address that was just checked, so a second
-            // DNS answer arriving between the check and the connect cannot point
-            // somewhere else. `resolve` is on the client builder, so this is a
-            // per-request client; the path is a rare "save this page" operation, so
-            // losing connection pooling across requests costs nothing that matters.
-            let pinned = allowed[0];
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(20))
-                .redirect(reqwest::redirect::Policy::none())
-                .user_agent("Stvdy/0.1 (+https://stvdy.app)")
-                .resolve(&host, pinned)
-                .build()
-                .map_err(|error| FetchError::Provider(error.to_string()))?;
-
-            let response = client
-                .get(current.clone())
-                .send()
-                .await
-                .map_err(|error| FetchError::Provider(error.to_string()))?;
-
-            if response.status().is_redirection() {
-                let location = response
-                    .headers()
-                    .get(reqwest::header::LOCATION)
-                    .and_then(|value| value.to_str().ok())
-                    .ok_or_else(|| {
-                        FetchError::Provider("a redirect with no Location header".to_string())
-                    })?;
-
-                // Relative redirects are resolved against the current URL, then
-                // re-validated exactly like the original: `parse_target` checks the
-                // scheme and the credentials, and the next iteration re-resolves and
-                // re-checks the addresses. Without the `parse_target` call here a
-                // redirect to a non-http scheme would slip past the guard and fail
-                // later inside `send()` as a provider error, which reads like an
-                // outage rather than a refusal.
-                current = parse_target(
-                    current
-                        .join(location)
-                        .map_err(|error| FetchError::Invalid(error.to_string()))?
-                        .as_str(),
-                )?;
-                continue;
-            }
-
-            if !response.status().is_success() {
-                return Err(FetchError::Provider(format!(
-                    "the server answered {}",
-                    response.status()
-                )));
-            }
-
-            let final_url = response.url().to_string();
-            let body = response
-                .text()
-                .await
-                .map_err(|error| FetchError::Provider(error.to_string()))?;
-
-            let (title, text) = extract_readable(&body, &final_url);
-            return Ok(FetchedPage {
-                final_url,
-                title,
-                text,
-                fetched_at: Utc::now(),
-            });
+        if !response.status.is_success() {
+            return Err(FetchError::Provider(format!(
+                "the server answered {}",
+                response.status
+            )));
         }
 
-        Err(FetchError::Provider(format!(
-            "more than {MAX_REDIRECTS} redirects"
-        )))
+        let (title, text) = extract_readable(&response.body, &response.final_url);
+        Ok(FetchedPage {
+            final_url: response.final_url,
+            title,
+            text,
+            fetched_at: Utc::now(),
+        })
     }
 }
 

@@ -7,13 +7,16 @@
 //! rate-limit bucket, because it is an unauthenticated database lookup keyed by a secret
 //! (A243).
 
+pub mod ics_in;
 pub mod ics_out;
+pub mod sync;
 
 use axum::Router;
 
 use crate::state::AppState;
 
-/// The authenticated calendar routes: the feed token's read and rotate.
+/// The authenticated calendar routes: the feed token's read and rotate, the ICS import, the
+/// connection list and the delete.
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/calendar/ics-token", axum::routing::get(ics_out::token))
@@ -21,6 +24,13 @@ pub fn routes() -> Router<AppState> {
             "/calendar/ics-token/regenerate",
             axum::routing::post(ics_out::regenerate_token),
         )
+        .route("/calendar/ics", axum::routing::post(ics_in::add))
+        .route("/calendar/connections", axum::routing::get(ics_in::list))
+        .route(
+            "/calendar/connections/{id}",
+            axum::routing::delete(ics_in::remove),
+        )
+        .route("/calendar/sync", axum::routing::post(sync::manual_sync))
 }
 
 /// The routes with no authenticated user: `GET /cal/{token}`.

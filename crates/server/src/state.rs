@@ -49,11 +49,57 @@ pub struct AppState {
     /// second fetch path would be a second place to forget it. Present on every
     /// deployment, because the chain's last step needs no key and no binary.
     pub fetcher: Arc<ChainFetcher>,
+    /// The raw-text fetch for a user-supplied ICS URL (A233).
+    ///
+    /// Separate from [`fetcher`](Self::fetcher) on purpose, and not a second guard: the guard
+    /// is shared (`fetch_guarded_text` calls the same `parse_target`/`resolve_public`/pinned
+    /// client), while the *body handling* differs — `ChainFetcher` runs readability, which
+    /// turns an ICS document into prose and imports nothing, silently. It is a trait object so
+    /// the route tests can inject a fake; the real guard is exactly what refuses a local stub,
+    /// so a test that pointed the real fetcher at one and passed would be proving the guard
+    /// absent.
+    pub ics_fetch: Arc<dyn crate::calendar::ics_in::IcsFetch>,
+    /// The payment gateway, or `None` when the deployment has none (Phase 13).
+    ///
+    /// `None` is a supported state and not a degraded one: with no gateway there is
+    /// nothing to sell, so [`AppState::payment`] answers 502 `provider_error` and every
+    /// other route is unaffected. It is deliberately **not** a mock in production — a
+    /// double's QR string is not money, and a signature we chose ourselves proves
+    /// nothing about who sent a callback.
+    pub payment: Option<Arc<dyn crate::integrations::payment::PaymentGateway>>,
     pub jobs: Queue,
 }
 
 impl AppState {
     pub fn plans(&self) -> &stvdy_core::config::PlansFile {
         &self.config.plans
+    }
+
+    /// The payment gateway, or the honest 502.
+    ///
+    /// One accessor for both callers (checkout and the webhook), so a deployment with no
+    /// gateway cannot answer one way at checkout and another way at the callback. The
+    /// error is `provider_error`, not `not_found`: nothing is missing from the request —
+    /// the *deployment* cannot take money, and an operator reading the log must be able
+    /// to tell the two apart.
+    pub fn payment(
+        &self,
+    ) -> crate::error::AppResult<&Arc<dyn crate::integrations::payment::PaymentGateway>> {
+        self.payment.as_ref().ok_or_else(|| {
+            crate::error::AppError::Provider(
+                "no payment gateway is configured on this deployment".to_string(),
+            )
+        })
+    }
+
+    /// The gateway's configuration, which is present exactly when [`AppState::payment`]
+    /// is. It carries the invoice lifetime, the late-payment switch and the reconcile
+    /// window — the three values that are the gateway's without being a field name.
+    pub fn qris(&self) -> crate::error::AppResult<&crate::config::QrisConfig> {
+        self.config.qris.as_ref().ok_or_else(|| {
+            crate::error::AppError::Provider(
+                "no payment gateway is configured on this deployment".to_string(),
+            )
+        })
     }
 }

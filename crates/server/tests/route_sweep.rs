@@ -239,6 +239,34 @@ fn read_only_rows() -> Vec<Row> {
             "/calendar/ics-token/regenerate",
             "rotating the feed token grants nothing and spends nothing",
         ),
+        ro(
+            "GET",
+            "/syllabus/{id}/draft",
+            "reads the caller's own draft; another account's is a 404",
+        ),
+        ro(
+            "POST",
+            "/syllabus/{id}/confirm",
+            "the import was already counted and charged at upload, so confirming writes rows \
+             and spends nothing",
+        ),
+        ro(
+            "POST",
+            "/calendar/ics",
+            "an ICS connection is available on free (the matrix's `ICS feed + import` row), \
+             so refusing this would refuse the feature the plan says every plan has",
+        ),
+        ro(
+            "GET",
+            "/calendar/connections",
+            "reads the caller's own connections (A249); a read, so an over-limit account keeps it (A149)",
+        ),
+        ro(
+            "DELETE",
+            "/calendar/connections/{id}",
+            "deleting a connection is the remedy a connection refusal names, and it must work \
+             for an account whose plan lapsed",
+        ),
         ro("GET", "/sessions", "reads the caller's own sessions"),
         ro("POST", "/sessions", "a session is free (R1), like a review"),
         ro("GET", "/activity", "reads the caller's own activity"),
@@ -356,6 +384,27 @@ fn swept_rows() -> Vec<Row> {
             403,
             "plan_required",
         ),
+        // Google is the only calendar provider a plan gates: free has `google_calendar =
+        // false` and the ICS feed and import are available on every plan (the matrix's own
+        // row), which is why `POST /calendar/ics` and the connection delete are `ReadOnly`
+        // below and this one is not.
+        swept(
+            "POST",
+            "/calendar/sync",
+            "GoogleCalendar",
+            403,
+            "plan_required",
+        ),
+        // The import is counted and priced: free allows one a month
+        // (`syllabus_imports_total`), so an exhausted account meets the count's refusal
+        // before the eight credits are considered.
+        swept(
+            "POST",
+            "/workspaces/{id}/syllabus",
+            "SyllabusImport",
+            422,
+            "limit_reached",
+        ),
     ]
 }
 
@@ -372,6 +421,13 @@ fn exempt_rows() -> Vec<Row> {
 
     vec![
         exempt("GET", "/health", "no user"),
+        exempt(
+            "GET",
+            "/assets/{*path}",
+            "no user: the fetch is headless Chromium printing a document, and every file is a \
+             vendored upstream release (KaTeX, two typefaces) with no user data in it (A339). \
+             There is no entitlement decision to sweep and no account to exhaust",
+        ),
         exempt(
             "GET",
             "/cal/{token}",
@@ -1245,6 +1301,26 @@ impl Fixture {
                     serde_json::json!({}),
                 )
                 .await
+            }
+            ("POST", "/workspaces/{id}/syllabus") => {
+                // The refusal has to come from the count, not from the multipart read, so the
+                // body is a valid one: an exhausted account must meet `limit_reached` rather
+                // than a 400 about a missing field.
+                let (content_type, body) = multipart(&[("text", "Kuliah Senin 08:00", None)]);
+                post_json(
+                    app,
+                    "POST",
+                    &format!("/workspaces/{workspace}/syllabus"),
+                    token,
+                    Some(&content_type),
+                    body,
+                )
+                .await
+            }
+            ("POST", "/calendar/sync") => {
+                // The refusal is on the plan, before any connection is read, so the body is
+                // irrelevant to the answer — which is the order a counted refusal must take.
+                json(&app, "POST", "/calendar/sync", token, serde_json::json!({})).await
             }
             ("POST", "/sync/push") => {
                 let device_id: Uuid = sqlx::query_scalar(

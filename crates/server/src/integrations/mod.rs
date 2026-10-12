@@ -8,6 +8,7 @@ pub mod embedder;
 pub mod fetch;
 pub mod llm;
 pub mod mailer;
+pub mod payment;
 pub mod search;
 pub mod storage;
 
@@ -42,6 +43,21 @@ pub struct Providers {
     /// to go. A test can replace it (see `testing::TestState::with_fetcher`), which
     /// is how the URL path is exercised without a network.
     pub fetcher: Arc<fetch::ChainFetcher>,
+    /// The raw-text fetch for a user-supplied ICS URL (A233).
+    ///
+    /// Always present and needs no configuration: it is the same guard as
+    /// [`fetcher`](Self::fetcher) with no readability pass. A test replaces it with a fake
+    /// (see `testing::TestState::with_ics_fetch`), because the real guard is exactly what
+    /// refuses the local stub a route test would want to point at.
+    pub ics_fetch: Arc<dyn crate::calendar::ics_in::IcsFetch>,
+    /// The payment gateway (Phase 13).
+    ///
+    /// `None` when `QRIS_BASE_URL` is unset — a supported deployment with nothing to
+    /// sell, like [`renderer`](Self::renderer) and [`llm`](Self::llm). It is
+    /// **not** a mock: a deployment with no gateway must answer `provider_error`
+    /// rather than mint an invoice against a double, because a double's QR string is
+    /// not money and its callback signature is one we chose ourselves.
+    pub payment: Option<Arc<dyn payment::PaymentGateway>>,
 }
 
 impl Providers {
@@ -130,10 +146,19 @@ impl Providers {
         // user-namespace support Chromium's sandbox needs is a deployment fact rather than
         // a preference. Outside dev an unsandboxed render is refused outright: the browser
         // is rendering model-influenced HTML.
+        //
+        // The renderer is given the origin its print assets are served from, because the
+        // template's own references point at a CDN and a PDF must not depend on one being
+        // reachable (A339). It is the loopback origin by default, so a single container
+        // needs no configuration.
         let renderer = match crate::render::chrome::find_executable() {
             Some(executable) => {
                 let allow_no_sandbox = cfg.env.is_dev();
-                match crate::render::chrome::Renderer::launch(Some(&executable), allow_no_sandbox) {
+                match crate::render::chrome::Renderer::launch(
+                    Some(&executable),
+                    allow_no_sandbox,
+                    Some(&cfg.assets_base_url),
+                ) {
                     Ok(renderer) => {
                         tracing::info!(%executable, "chromium renderer ready");
                         Some(Arc::new(renderer))
@@ -165,6 +190,30 @@ impl Providers {
                     .as_ref()
                     .map(|key| key.expose_secret().to_string()),
             )?),
+            ics_fetch: Arc::new(crate::calendar::ics_in::GuardedFetch),
+            payment: payment(cfg)?,
         })
     }
+}
+
+/// The payment gateway, or `None` when no base URL is configured.
+///
+/// Built at boot rather than lazily so a gateway whose client cannot be constructed is
+/// a startup failure, not a checkout-time surprise. `None` is a supported deployment:
+/// checkout answers 502 `provider_error` and every other route is unaffected, which is
+/// the same shape the renderer and the model provider take (A130).
+fn payment(cfg: &AppConfig) -> anyhow::Result<Option<Arc<dyn payment::PaymentGateway>>> {
+    let Some(qris) = &cfg.qris else {
+        tracing::warn!("QRIS_BASE_URL is unset; checkout is unavailable");
+        return Ok(None);
+    };
+
+    let gateway = payment::QrisGateway::from_config(qris)?;
+    tracing::info!(
+        base_url = %qris.base_url,
+        scheme = qris.signature_scheme.as_str(),
+        fee_percent = qris.fee_percent,
+        "payment gateway ready"
+    );
+    Ok(Some(Arc::new(gateway)))
 }

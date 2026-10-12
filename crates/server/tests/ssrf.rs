@@ -249,3 +249,34 @@ fn only_a_url_that_could_be_opened_is_citable() {
         assert!(is_citable_url(allowed), "{allowed} is a citable URL");
     }
 }
+
+/// The raw text fetch shares the guard with the page fetcher (A233). A second implementation
+/// of the guard is the failure this asserts against, and it is the failure that matters here:
+/// the ICS path exists because `ChainFetcher` runs readability, so the temptation is to write
+/// a small `reqwest` call beside it — which would be an unguarded fetch of a URL a user typed.
+///
+/// Every case is asserted **before any network work happens**, so this suite needs no network
+/// and no stub: `parse_target` and `resolve_public` refuse these without a socket.
+#[tokio::test]
+async fn the_guarded_text_fetch_refuses_a_private_host_and_a_non_http_scheme() {
+    use stvdy_server::integrations::fetch::{FetchError, fetch_guarded_text};
+
+    for url in [
+        "http://127.0.0.1/feed.ics",
+        "http://169.254.169.254/feed.ics",
+        "http://[::ffff:169.254.169.254]/feed.ics",
+        "http://10.0.0.1/feed.ics",
+        "http://100.64.0.1/feed.ics",
+        "file:///etc/passwd",
+        "https://user:pw@example.com/feed.ics",
+    ] {
+        let refused = fetch_guarded_text(url, "text/calendar", None).await;
+        assert!(
+            matches!(
+                refused,
+                Err(FetchError::Refused(_) | FetchError::Invalid(_))
+            ),
+            "{url} must be refused, got {refused:?}"
+        );
+    }
+}

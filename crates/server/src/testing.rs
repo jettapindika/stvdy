@@ -18,10 +18,16 @@ use stvdy_core::config::{PlanId, PlansFile, load_plans};
 use stvdy_core::traits::clock::Clock;
 use stvdy_core::traits::embedder::Embedder;
 use stvdy_core::traits::mailer::Mailer;
+use stvdy_core::traits::payment::{
+    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
+};
 use stvdy_core::traits::storage::Storage;
-use stvdy_core::traits::testing::{FixedClock, HashEmbedder, InMemoryStorage, RecordingMailer};
+use stvdy_core::traits::testing::{
+    FixedClock, HashEmbedder, InMemoryStorage, MockPayment, RecordingMailer,
+};
 
 use crate::config::AppConfig;
+use crate::integrations::payment::{GatewayTransaction, PaymentGateway};
 use crate::jobs::Queue;
 use crate::state::AppState;
 
@@ -73,6 +79,21 @@ pub fn config() -> AppConfig {
             // window would otherwise change what the sync suites compact.
             ("CHANGE_LOG_RETENTION_DAYS", "90"),
             ("CHANGE_LOG_TOMBSTONE_RETENTION_DAYS", "180"),
+            // Pinned empty for the same reason, and with one more: a developer with a
+            // real gateway in `.env` would otherwise make every suite in this crate
+            // build a `QrisConfig` the test state does not use. A test that wants a
+            // gateway builds its own config through `from_env_at`.
+            ("QRIS_BASE_URL", ""),
+            ("QRIS_API_KEY", ""),
+            ("QRIS_CALLBACK_TOKEN", ""),
+            ("QRIS_SIGNATURE_SCHEME", "hmac_sha256_hex"),
+            ("QRIS_SIGNATURE_HEADER", "X-Callback-Signature"),
+            ("QRIS_WEBHOOK_IPS", ""),
+            ("QRIS_FEE_PERCENT", "0"),
+            ("QRIS_FEE_FIXED_IDR", "0"),
+            ("QRIS_INVOICE_TTL_MINUTES", "15"),
+            ("QRIS_HONOR_LATE_PAYMENT", "true"),
+            ("QRIS_RECONCILE_HOURS", "48"),
         ],
     )
     .expect("the test config must load")
@@ -80,6 +101,106 @@ pub fn config() -> AppConfig {
 
 pub fn plans() -> PlansFile {
     load_plans(&root().join("config/plans.toml")).expect("plans.toml must load")
+}
+
+/// A gateway that signs bodies like a real one **and** serves a scripted transaction
+/// list, so the reconciliation sweep is testable.
+///
+/// It wraps [`MockPayment`] rather than reimplementing it: the signature is a real
+/// HMAC over the bytes the test posts, which is the property every webhook test depends
+/// on. The one thing `MockPayment` cannot do is answer `recent_transactions` — it is a
+/// contract trait double in `crates/core`, and the listing is this server's own
+/// extension — so the script for that lives here.
+pub struct TestGateway {
+    mock: MockPayment,
+    transactions: std::sync::Mutex<std::collections::VecDeque<Vec<GatewayTransaction>>>,
+}
+
+impl TestGateway {
+    /// A gateway signing with the mock's own secret.
+    pub fn new() -> Self {
+        Self {
+            mock: MockPayment::new(),
+            transactions: std::sync::Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+
+    /// The headers a real gateway would send for this body.
+    pub fn sign(&self, body: &[u8]) -> axum::http::HeaderMap {
+        self.mock.sign(body)
+    }
+
+    /// The next status `get_status` will report.
+    pub fn push_status(&self, status: GatewayStatus) {
+        self.mock.push_status(status);
+    }
+
+    /// Every invoice request this double was handed, in order.
+    pub fn invoices(&self) -> Vec<InvoiceRequest> {
+        self.mock.invoices()
+    }
+
+    /// Queues one answer for `recent_transactions`. The last answer repeats, so a test
+    /// that sweeps twice does not have to script the list twice.
+    pub fn push_transactions(&self, list: Vec<GatewayTransaction>) {
+        if let Ok(mut script) = self.transactions.lock() {
+            script.push_back(list);
+        }
+    }
+}
+
+impl Default for TestGateway {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl PaymentProvider for TestGateway {
+    fn name(&self) -> &'static str {
+        self.mock.name()
+    }
+
+    async fn create_invoice(&self, request: InvoiceRequest) -> Result<Invoice, PaymentError> {
+        self.mock.create_invoice(request).await
+    }
+
+    async fn get_status(&self, order_id: &str) -> Result<GatewayStatus, PaymentError> {
+        self.mock.get_status(order_id).await
+    }
+
+    fn parse_and_verify_webhook(
+        &self,
+        headers: &axum::http::HeaderMap,
+        raw_body: &[u8],
+    ) -> Result<WebhookEvent, PaymentError> {
+        self.mock.parse_and_verify_webhook(headers, raw_body)
+    }
+
+    async fn refund_note(&self, order_id: &str, amount_idr: i64) -> Result<(), PaymentError> {
+        self.mock.refund_note(order_id, amount_idr).await
+    }
+}
+
+#[async_trait::async_trait]
+impl PaymentGateway for TestGateway {
+    async fn recent_transactions(
+        &self,
+        _since_hours: i64,
+    ) -> Result<Vec<GatewayTransaction>, PaymentError> {
+        let mut script = self
+            .transactions
+            .lock()
+            .map_err(|_| PaymentError::Provider("mock gateway lock poisoned".into()))?;
+        // An empty script is an empty list, not an error: "the gateway knows nothing"
+        // is a legitimate answer the sweep must handle, and a test that forgot to
+        // script one should see the honest empty result rather than a panic.
+        if script.len() > 1 {
+            Ok(script.pop_front().unwrap_or_default())
+        } else {
+            Ok(script.front().cloned().unwrap_or_default())
+        }
+    }
 }
 
 /// An `AppState` backed by deterministic doubles.
@@ -99,6 +220,10 @@ pub fn state(pool: PgPool) -> AppState {
         search: None,
         renderer: None,
         fetcher: offline_fetcher(),
+        ics_fetch: offline_ics_fetch(),
+        // A real HMAC over the bytes a test posts, so a webhook test that passes
+        // actually verified something. `TestState` keeps a handle to the same object.
+        payment: Some(Arc::new(TestGateway::new())),
         jobs: Queue::new(),
     }
 }
@@ -113,12 +238,135 @@ pub fn offline_fetcher() -> Arc<crate::integrations::fetch::ChainFetcher> {
     Arc::new(crate::integrations::fetch::ChainFetcher::new(Vec::new()))
 }
 
+/// An ICS fetcher that refuses everything.
+///
+/// The same reasoning as [`offline_fetcher`]: a test that imports a URL without installing a
+/// script must be refused rather than reach the network. `GuardedFetch` would resolve
+/// `faculty.example` over real DNS before failing, which is exactly the quiet dependency a
+/// suite must not have.
+pub fn offline_ics_fetch() -> Arc<dyn crate::calendar::ics_in::IcsFetch> {
+    Arc::new(ScriptedIcsFetch::new(vec![Scripted::Refused(
+        "no ICS fetcher is installed in this test".to_string(),
+    )]))
+}
+
+/// What a scripted ICS fetch should answer, in the order it is asked.
+#[derive(Debug, Clone)]
+pub enum Scripted {
+    /// A `200` with a body and the validators to store.
+    Body {
+        body: String,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+    /// A `304`: the caller's validators still match.
+    NotModified,
+    /// A refusal, as the guard would produce one.
+    Refused(String),
+}
+
+/// One call the scripted fetcher received.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IcsCall {
+    pub url: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+/// A scripted ICS fetcher, so the route tests drive the import without a network.
+///
+/// A queue rather than a closure: the interesting assertion is *which request was sent
+/// second* — A239's whole point is that the second poll carries `If-None-Match` — and a
+/// closure that only returned a body would make the request invisible. The last scripted
+/// answer repeats once the queue is exhausted, so a test that polls three times does not have
+/// to script three bodies to assert on the second.
+pub struct ScriptedIcsFetch {
+    script: std::sync::Mutex<std::collections::VecDeque<Scripted>>,
+    calls: std::sync::Mutex<Vec<IcsCall>>,
+}
+
+impl ScriptedIcsFetch {
+    pub fn new(script: Vec<Scripted>) -> Self {
+        Self {
+            script: std::sync::Mutex::new(script.into()),
+            calls: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A fetcher that answers `body` with `etag` forever, and never a `304`.
+    pub fn always(body: &str, etag: Option<&str>) -> Self {
+        Self::new(vec![Scripted::Body {
+            body: body.to_string(),
+            etag: etag.map(str::to_string),
+            last_modified: None,
+        }])
+    }
+
+    /// Every call received, in order.
+    pub fn calls(&self) -> Vec<IcsCall> {
+        self.calls.lock().expect("the call log").clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::calendar::ics_in::IcsFetch for ScriptedIcsFetch {
+    async fn get(
+        &self,
+        url: &str,
+        validators: Option<&crate::integrations::fetch::Validators>,
+    ) -> Result<crate::integrations::fetch::GuardedText, stvdy_core::traits::search::FetchError>
+    {
+        use stvdy_core::traits::search::FetchError;
+
+        self.calls.lock().expect("the call log").push(IcsCall {
+            url: url.to_string(),
+            etag: validators.and_then(|v| v.etag.clone()),
+            last_modified: validators.and_then(|v| v.last_modified.clone()),
+        });
+
+        let mut script = self.script.lock().expect("the script");
+        // The last answer repeats: a test that polls past its script is asking the same
+        // question again, and an empty answer would make it look like an empty feed.
+        let answer = if script.len() > 1 {
+            script.pop_front()
+        } else {
+            script.front().cloned()
+        }
+        .expect("the scripted fetcher was given at least one answer");
+
+        Ok(match answer {
+            Scripted::Body {
+                body,
+                etag,
+                last_modified,
+            } => crate::integrations::fetch::GuardedText {
+                final_url: url.to_string(),
+                body,
+                etag,
+                last_modified,
+                not_modified: false,
+            },
+            Scripted::NotModified => crate::integrations::fetch::GuardedText {
+                final_url: url.to_string(),
+                body: String::new(),
+                etag: validators.and_then(|v| v.etag.clone()),
+                last_modified: validators.and_then(|v| v.last_modified.clone()),
+                not_modified: true,
+            },
+            Scripted::Refused(reason) => return Err(FetchError::Refused(reason)),
+        })
+    }
+}
+
 /// The same state with each provider handed out for assertions.
 pub struct TestState {
     pub state: AppState,
     pub storage: Arc<InMemoryStorage>,
     pub mailer: Arc<RecordingMailer>,
     pub clock: Arc<FixedClock>,
+    /// The gateway double, so a webhook test can sign the body it posts and a poll test
+    /// can script the status the gateway will report.
+    pub gateway: Arc<TestGateway>,
 }
 
 impl TestState {
@@ -138,6 +386,7 @@ impl TestState {
         let storage = Arc::new(InMemoryStorage::new());
         let mailer = Arc::new(RecordingMailer::default());
         let clock = Arc::new(FixedClock::at(chrono::Utc::now()));
+        let gateway = Arc::new(TestGateway::new());
         Self {
             state: AppState {
                 pool,
@@ -155,11 +404,14 @@ impl TestState {
                 // does too.
                 renderer: None,
                 fetcher: offline_fetcher(),
+                ics_fetch: offline_ics_fetch(),
+                payment: Some(gateway.clone()),
                 jobs: Queue::new(),
             },
             storage,
             mailer,
             clock,
+            gateway,
         }
     }
 
@@ -199,6 +451,17 @@ impl TestState {
         self
     }
 
+    /// The same state with an ICS fetcher of the test's own.
+    ///
+    /// A route test **must** use this rather than pointing the real one at a local server: the
+    /// real path's whole job is to refuse `127.0.0.1`, so a test that reached its stub through
+    /// it would be proving the guard absent (A233). The refusal itself is asserted against
+    /// `fetch_guarded_text` directly in `tests/ssrf.rs`.
+    pub fn with_ics_fetch(mut self, fetch: Arc<dyn crate::calendar::ics_in::IcsFetch>) -> Self {
+        self.state.ics_fetch = fetch;
+        self
+    }
+
     /// The same state with a different embedder.
     ///
     /// Needed by the Indonesian gate: the harness's `HashEmbedder` treats a query
@@ -218,6 +481,19 @@ impl TestState {
         search: Arc<crate::integrations::search::composite::CompositeSearch>,
     ) -> Self {
         self.state.search = Some(search);
+        self
+    }
+
+    /// The same state with no gateway at all.
+    ///
+    /// Both halves move together — the handle and the config — because "is there a
+    /// gateway" is one question: a state whose config carries a gateway but whose
+    /// handle is `None` would be a state that cannot exist in production.
+    pub fn without_gateway(mut self) -> Self {
+        self.state.payment = None;
+        let mut config = (*self.state.config).clone();
+        config.qris = None;
+        self.state.config = Arc::new(config);
         self
     }
 
