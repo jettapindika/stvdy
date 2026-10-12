@@ -161,7 +161,7 @@ describe('a pending proposal', () => {
 
   it('sends an edited object through the same confirm, and refuses an edit that is not one', async () => {
     const calls: string[] = []
-    mockFetch((url, init) => {
+    mockFetch((_url, init) => {
       calls.push(String(init?.body ?? ''))
       return jsonResponse(200, { action: { ...proposal(), status: 'confirmed' } })
     })
@@ -179,6 +179,17 @@ describe('a pending proposal', () => {
     // original would be the app doing something the student did not ask for.
     expect(screen.getByRole('alert').textContent).toContain('not valid JSON')
     expect(calls).toEqual([])
+
+    // And a valid edit *is* sent, through the same confirm endpoint, carrying the
+    // edited object rather than the proposal: the route re-parses it through the
+    // same validator the proposal went through, so an edit can only narrow it.
+    await user.clear(field)
+    await user.type(field, '{{"title":"Judul lain"}')
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => {
+      expect(calls).toHaveLength(1)
+    })
+    expect(JSON.parse(calls[0] ?? '{}')).toEqual({ args: { title: 'Judul lain' } })
   })
 
   it('does not let a proposal read as done while it is only suggested', () => {
