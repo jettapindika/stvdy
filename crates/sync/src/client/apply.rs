@@ -19,14 +19,6 @@ impl ChangeSet {
     pub fn writes(&self) -> &[Change] {
         &self.writes
     }
-
-    pub fn len(&self) -> usize {
-        self.writes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.writes.is_empty()
-    }
 }
 
 /// Normalises one page (A188) and orders it so a parent is written before its child.

@@ -360,8 +360,15 @@ impl LocalStore for InMemoryStore {
             if let MutationResult::Conflict { winner } = result {
                 // The server's row wins (A178), including its `deleted_at`: that is how the
                 // device that edited a tombstoned row learns what the account holds.
-                if let Some(object) = winner.as_object() {
-                    let key = (mutation.entity, mutation.id);
+                let key = (mutation.entity, mutation.id);
+                let tombstoned = winner
+                    .get("deleted_at")
+                    .is_some_and(|deleted| !deleted.is_null());
+                if tombstoned {
+                    // The row the server won with is gone, and this store holds the rows the
+                    // account still has — so the same write a `delete` change makes.
+                    self.rows.remove(&key);
+                } else if let Some(object) = winner.as_object() {
                     let seq = self.rows.get(&key).map_or(0, |(seq, _)| *seq);
                     self.rows.insert(key, (seq, Value::Object(object.clone())));
                 }

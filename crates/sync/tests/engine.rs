@@ -549,7 +549,7 @@ async fn a_null_payload_is_applied_as_a_delete() {
 
     // And the normalisation is the planner's, not an accident of the store.
     let set = plan(&[upsert_without_row(Entity::Task, task, 2)]);
-    assert_eq!(set.len(), 1);
+    assert_eq!(set.writes().len(), 1);
     assert_eq!(set.writes()[0].op, Op::Delete);
 }
 
@@ -581,7 +581,7 @@ fn the_planner_keeps_the_newest_change_per_row_and_orders_parents_first() {
         ),
     ]);
 
-    assert_eq!(set.len(), 2, "one write per row");
+    assert_eq!(set.writes().len(), 2, "one write per row");
     let writes = set.writes();
     assert_eq!(
         (writes[0].entity, writes[1].entity),

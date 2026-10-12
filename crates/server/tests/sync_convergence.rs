@@ -582,6 +582,11 @@ async fn a_tombstone_beats_a_concurrent_edit_in_both_arrival_orders(pool: PgPool
         "and the status must name it"
     );
     assert!(
+        b.row(Entity::Task, tombstone_first).is_none(),
+        "and the losing device must not keep the row the server tombstoned: {:?}",
+        b.dump()
+    );
+    assert!(
         deleted_at(&harness.state.pool, tombstone_first)
             .await
             .is_some(),
@@ -917,17 +922,36 @@ async fn two_devices_pushing_overlapping_batches_both_succeed(pool: PgPool) {
     assert_eq!(b.pass().await, SyncState::Synced);
     assert_eq!(a.dump(), b.dump(), "the two devices must converge");
 
-    // And the convergence is on the *content*: each device holds both rows with the title
-    // the last writer pushed. This is the assertion that catches a pull which ships the row
-    // on only one of a row's several changes — the device then applies the rest as A188's
-    // "not visible to you" delete and its cache ends up empty while its cursor advances.
-    for device in [&a, &b] {
-        for (id, title) in [(task, "B"), (subtask, "B sub")] {
-            let row = device.row(Entity::Task, id).unwrap_or_else(|| {
-                panic!("a device is missing a converged row: {:?}", device.dump())
-            });
-            assert_eq!(row["title"], json!(title), "{:?}", device.dump());
-        }
+    // And the convergence is on the *content*: each device holds both rows, carrying a title
+    // one of the two writers pushed. This is the assertion that catches a pull which ships the
+    // row on only one of a row's several changes — the device then applies the rest as A188's
+    // "not visible to you" delete, and its cache ends up empty while its cursor advances.
+    //
+    // Which writer wins is the race's business (the batches are serialised by the lock, so
+    // one of them commits last and takes both rows), which is why the title is asserted to be
+    // one of the two pushed values, and the two devices to agree, rather than to be a fixed
+    // one.
+    for (id, accepted) in [(task, ["A", "B"]), (subtask, ["A sub", "B sub"])] {
+        let title = |device: &Device| {
+            device
+                .row(Entity::Task, id)
+                .unwrap_or_else(|| {
+                    panic!("a device is missing a converged row: {:?}", device.dump())
+                })
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let (from_a, from_b) = (title(&a), title(&b));
+        assert!(
+            accepted.contains(&from_a.as_str()),
+            "a device holds a title neither writer pushed: {from_a:?}"
+        );
+        assert_eq!(
+            from_a, from_b,
+            "the two devices must agree on which writer won the row"
+        );
     }
 }
 
