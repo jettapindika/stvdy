@@ -74,9 +74,6 @@
     "skipToContent": "Skip to content"
   },
   "routes": {
-    "calendar": {
-      "what": "a week and month view of classes, deadlines, and the study blocks the planner proposes, plus Google Calendar and ICS connections"
-    },
     "notFound": {
       "title": "Not found",
       "what": "nothing: this address does not match a screen"
@@ -985,6 +982,108 @@
       "lockedReason": "The assistant proposes subtasks with estimates, and you decide what to keep."
     }
   },
+  "calendar": {
+    "title": "Calendar",
+    "subtitle": "Your classes, exams, study blocks and deadlines, read in {{zone}}.",
+    "loading": "Loading your calendar",
+    "view": {
+      "title": "View",
+      "week": "Week",
+      "month": "Month"
+    },
+    "week": {
+      "title": "This week"
+    },
+    "month": {
+      "title": "This month",
+      "caption": "Month view: one row per week, one cell per day"
+    },
+    "weekOf": "{{from}} to {{to}}",
+    "column": {
+      "day": "Day",
+      "events": "Events"
+    },
+    "today": "Today",
+    "eventCount_one": "{{count}} event in this view",
+    "eventCount_other": "{{count}} events in this view",
+    "day": {
+      "empty": "Nothing scheduled",
+      "cellEmpty": "{{day}}. Nothing scheduled",
+      "cellTodayEmpty": "{{day}}, today. Nothing scheduled",
+      "cell_one": "{{day}}, {{count}} event: {{events}}",
+      "cell_other": "{{day}}, {{count}} events: {{events}}",
+      "cellToday_one": "{{day}}, today, {{count}} event: {{events}}",
+      "cellToday_other": "{{day}}, today, {{count}} events: {{events}}"
+    },
+    "empty": {
+      "title": "Nothing scheduled",
+      "reason": "No classes, exams, study blocks or deadlines fall in this view yet. Add one from Tasks, or connect a calendar below."
+    },
+    "event": {
+      "when": "{{start}} to {{end}}",
+      "kind": "Kind: {{kind}}",
+      "readOnly": "Read-only",
+      "readOnlyLabel": "{{title}} at {{time}}, read-only",
+      "readOnlyGoogle": "This event came from Google Calendar. Edit it there, and the change arrives here on the next sync.",
+      "readOnlyIcs": "This event came from a subscribed calendar. Edit it at the source, and the change arrives here on the next poll."
+    },
+    "kind": {
+      "class": "Class",
+      "exam": "Exam",
+      "study_block": "Study block",
+      "deadline": "Deadline",
+      "external": "From a connected calendar"
+    },
+    "connections": {
+      "loading": "Loading your connections",
+      "empty": {
+        "title": "No connections",
+        "reason": "Nothing is feeding this calendar yet. Add an ICS URL, or connect Google Calendar."
+      },
+      "provider": {
+        "google": "Google Calendar",
+        "ics": "Subscribed calendar"
+      },
+      "status": {
+        "title": "Connections",
+        "connected": "Connected",
+        "error": "Needs attention",
+        "revoked": "Access revoked"
+      },
+      "neverSynced": "Never synced",
+      "lastSynced": "Last synced {{when}}",
+      "disconnect": "Disconnect",
+      "syncNow": "Sync now",
+      "syncQueued_one": "{{count}} sync queued. It runs in a moment.",
+      "syncQueued_other": "{{count}} syncs queued. They run in a moment.",
+      "feed": {
+        "title": "Your calendar feed",
+        "hint": "Subscribe to this link in Google Calendar, Apple Calendar or Outlook to see your Stvdy classes, exams, study blocks and deadlines there. It carries nothing else.",
+        "none": "You have no feed link yet.",
+        "create": "Create my feed link",
+        "copy": "Copy link",
+        "copied": "Link copied",
+        "regenerate": "Regenerate",
+        "regenerateHint": "Regenerating replaces the link. Anything already subscribed to the old one stops updating until you give it the new link."
+      },
+      "google": {
+        "title": "Google Calendar",
+        "hint": "Connect a Google account to see its events here, and to push your study blocks to a Study Plan calendar of its own.",
+        "connect": "Connect Google Calendar",
+        "lockedReason": "Two-way sync with Google Calendar, so your classes and study blocks stay in step on every device.",
+        "denied": "Google Calendar was not connected",
+        "failed": "Google Calendar could not be connected"
+      },
+      "ics": {
+        "title": "Add an ICS URL",
+        "hint": "Paste your faculty's calendar address, the .ics link. Its classes and exams appear here as read-only events.",
+        "label": "ICS URL",
+        "add": "Add",
+        "queued": "Added. The first import is queued and runs in a moment.",
+        "connected": "Subscribed: {{id}}"
+      }
+    }
+  },
   "settings": {
     "subtitle": "Study hours, notifications, language and your devices.",
     "noun": "settings",
@@ -1041,6 +1140,19 @@
       "resetHint": "Resetting deletes everything cached on this device, including changes you have not synced yet, and downloads it again.",
       "reset": "Reset local data and resync"
     },
+    "updates": {
+      "title": "Updates",
+      "hint": "Check whether a newer version of Stvdy has been published.",
+      "check": "Check for updates",
+      "checking": "Checking…",
+      "upToDate": "You are up to date. This is version {{version}}.",
+      "available": "Version {{version}} is available. You are running {{current}}.",
+      "failed": "The check did not finish: {{message}}",
+      "install": "Download and install",
+      "downloading": "Downloading the update…",
+      "installing": "Installing the update…",
+      "restartRequired": "Installed. Reopen Stvdy to use the new version."
+    },
     "later": {
       "title": "Not built yet",
       "calendar": "Calendar connections",
@@ -1049,6 +1161,87 @@
       "dataPhase": "Exporting and deleting your account arrive in Phase 15.",
       "byok": "Bring your own model key",
       "byokPhase": "BYOK arrives in Phase 13."
+    }
+  },
+  "agent": {
+    "list": {
+      "label": "Suggested actions"
+    },
+    "card": {
+      "label": "Suggested action",
+      "confirmed": "Confirmed",
+      "created": "Added: {{title}}",
+      "failed": "It was confirmed, but the work did not start: {{error}}",
+      "cost": "Costs {{credits}} credits when you confirm.",
+      "noCost": "No credits are charged for this action.",
+      "expires": "Waiting until {{when}}.",
+      "editLabel": "Edit what will be added",
+      "editHint": "The fields this action accepts, as JSON. Confirm without changing them to add exactly what was proposed.",
+      "editInvalidJson": "That is not valid JSON. Fix it, or cancel the edit to confirm what was proposed.",
+      "editNotObject": "The action's fields must be a JSON object.",
+      "noun": "action"
+    },
+    "tool": {
+      "create_task": "Add a task",
+      "update_task": "Update a task",
+      "create_event": "Add an event",
+      "schedule_study_block": "Schedule a study block",
+      "create_flashcards": "Create flashcards",
+      "create_quiz": "Create a quiz"
+    },
+    "field": {
+      "title": "Title",
+      "notes": "Notes",
+      "due": "Due",
+      "starts": "Starts",
+      "ends": "Ends",
+      "estimate": "Estimate (minutes)",
+      "duration": "Duration (minutes)",
+      "priority": "Priority",
+      "status": "Status",
+      "count": "Count",
+      "sources": "Sources",
+      "difficulty": "Difficulty"
+    }
+  },
+  "dashboard": {
+    "title": "Progress",
+    "subtitle": "Time per course, review activity and quiz mastery, counted from your own rows.",
+    "loading": "Loading your progress",
+    "noun": "progress",
+    "empty": "Nothing logged in this window yet. Study minutes, card reviews and quiz attempts appear here once there are some.",
+    "window": "{{from}} to {{to}}",
+    "totals": "Totals",
+    "total": {
+      "minutes": "Minutes studied",
+      "reviews": "Card reviews",
+      "cardsDue": "Cards due now",
+      "quizzes": "Quiz attempts"
+    },
+    "summary": "{{minutes}} minutes studied and {{reviews}} card reviews in this window.",
+    "timePerCourse": "Time per course",
+    "timePerCourseSummary": "{{courses}} courses studied, {{minutes}} minutes in total.",
+    "noCourses": "No study time logged in this window.",
+    "minutes": "{{count}} minutes",
+    "reviewActivity": "Review activity",
+    "reviewActivitySummary": "{{days}} days with reviews, {{reviews}} reviews in total.",
+    "noReviews": "No card reviews in this window.",
+    "reviews": "{{count}} reviews",
+    "mastery": "Quiz mastery per topic",
+    "masterySummary": "{{topics}} topics with attempts.",
+    "masteryLabel": "{{title}}: {{correct}} of {{attempts}} correct, {{accuracy}} percent",
+    "noMastery": "No quiz attempts yet, so there is no mastery to show.",
+    "weakTopics": "Weak topics",
+    "weakTopicsHint": "The topics with the lowest accuracy so far. Pick a goal and the planner will propose review blocks for it.",
+    "shareLabel": "{{title}}: {{percent}} percent of your study time"
+  },
+  "reminders": {
+    "local": {
+      "taskTitle": "Task due soon",
+      "taskBody": "{{title}} is due in {{minutes}} minutes.",
+      "eventTitle": "Starting soon",
+      "eventBody": "{{title}} starts in {{minutes}} minutes.",
+      "unknownSubject": "Something on your list"
     }
   }
 }

@@ -7,6 +7,7 @@ import { CheatsheetScreen } from '@/features/reports/CheatsheetScreen'
 import { ReportScreen } from '@/features/reports/ReportScreen'
 import { PlanUsageScreen } from '@/features/billing/PlanUsageScreen'
 import { DevicesScreen } from '@/features/devices/DevicesScreen'
+import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { StudyScreen } from '@/features/study/StudyScreen'
 import { TodayScreen } from '@/features/today/TodayScreen'
 import { WorkspaceListScreen } from '@/features/workspaces/WorkspaceListScreen'
@@ -112,6 +113,64 @@ const USER = {
   timezone: 'Asia/Jakarta',
   student_verified: false,
   created_at: '2026-10-11T08:00:00Z',
+}
+
+/**
+ * The plan and usage body the calendar panel reads its plan switch from.
+ *
+ * A **free** account, which is the state the panel's split matters in: free has
+ * the ICS feed and the import, and not the Google connection. The calendar test
+ * above asserts that split on the rendered panel; this fixture is what makes the
+ * axe run see the panel as a free user does.
+ */
+const USAGE_BODY = {
+  plan: 'free',
+  name: 'Free',
+  subscription: { status: 'active', period_end: null },
+  credits: { monthly: 60, purchased: 0, total: 60 },
+  storage_bytes: 0,
+  limits: {
+    workspaces: { limit: 2, used: 1 },
+    sources_total: { limit: 20, used: 2 },
+    max_file_mb: { limit: 20, used: null },
+    storage_mb: { limit: 200, used: null },
+    devices_max: { limit: 2, used: 1 },
+    credits_per_month: { limit: 60, used: null },
+    chat_msgs_per_day: { limit: 20, used: 0 },
+    web_searches_per_day: { limit: 3, used: 0 },
+    flashcards_per_month: { limit: 30, used: 0 },
+    quizzes_per_month: { limit: 2, used: 0 },
+    reports_per_month: { limit: 1, used: 0 },
+    syllabus_imports_total: { limit: 1, used: 0 },
+    google_accounts_max: { limit: 0, used: null },
+  },
+  features: {
+    export_formats: ['md'],
+    task_ai_breakdown: false,
+    quick_capture: false,
+    google_calendar: false,
+    planner: 'manual',
+    agent_actions: false,
+    reminder_channels: ['web', 'push'],
+    model_tier: 'cheapest',
+    byok: false,
+    advanced_analytics: false,
+  },
+  costs: {
+    chat_message: 1,
+    web_search: 2,
+    flashcard_batch_10: 4,
+    quiz_10: 6,
+    report_outline: 3,
+    report_section: 6,
+    task_breakdown: 2,
+    syllabus_import: 8,
+    plan_generation: 2,
+    agent_turn: 2,
+    long_doc_threshold_tokens: 20000,
+    long_doc_credits_per_1k_tokens: 1,
+  },
+  provider_cost: { paused: false, resets_at: '2026-11-01T07:00:00Z' },
 }
 
 beforeEach(() => {
@@ -412,5 +471,51 @@ describe('screen accessibility', () => {
     const { container } = renderWithProviders(<DevicesScreen />, { route: '/devices' })
     await screen.findByRole('heading', { name: 'Devices and sync' })
     await expectAccessible(container, () => heading(container, 'the devices screen'))
+  })
+
+  it('the calendar screen has no axe violations', async () => {
+    // The composition most likely to break a rule here is the grid: a table whose
+    // cells are controls, and a panel of labelled fields beside it. The grid is a
+    // table rather than positioned divs precisely so that a keyboard can enter it
+    // and a screen reader can read it (A244), and axe is what checks the roles and
+    // the names that decision produces.
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/events') {
+        return jsonResponse(200, {
+          events: [
+            {
+              id: 'e1',
+              workspace_id: null,
+              kind: 'class',
+              title: 'UAS Jaringan Komputer',
+              starts_at: '2026-10-11T09:00:00Z',
+              ends_at: '2026-10-11T11:00:00Z',
+              source: 'app',
+              task_id: null,
+            },
+            {
+              id: 'e2',
+              workspace_id: null,
+              kind: 'external',
+              title: 'Rapat himpunan',
+              starts_at: '2026-10-11T12:00:00Z',
+              ends_at: '2026-10-11T13:00:00Z',
+              source: 'ics',
+              task_id: null,
+            },
+          ],
+        })
+      }
+      if (path === '/workspaces') return jsonResponse(200, { workspaces: [WORKSPACE] })
+      if (path === '/calendar/connections') return jsonResponse(200, { connections: [] })
+      if (path === '/calendar/ics-token') return jsonResponse(200, { ics_feed_token: null })
+      if (path === '/usage') return jsonResponse(200, USAGE_BODY)
+      return notFound()
+    })
+    const { container } = renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    await screen.findByRole('heading', { name: 'Calendar' })
+    await expectAccessible(container, () => heading(container, 'the calendar screen'))
   })
 })

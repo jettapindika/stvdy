@@ -73,9 +73,6 @@
     "skipToContent": "Lewati ke konten"
   },
   "routes": {
-    "calendar": {
-      "what": "tampilan minggu dan bulan untuk kelas, tenggat, dan blok belajar yang diusulkan jadwal, plus koneksi Google Calendar dan ICS"
-    },
     "notFound": {
       "title": "Tidak ditemukan",
       "what": "tidak ada: alamat ini tidak cocok dengan layar mana pun"
@@ -971,6 +968,104 @@
       "lockedReason": "Asisten mengusulkan sub-tugas beserta perkiraannya, dan kamu yang memutuskan mana yang disimpan."
     }
   },
+  "calendar": {
+    "title": "Kalender",
+    "subtitle": "Kelas, ujian, blok belajar, dan tenggatmu, dibaca dalam {{zone}}.",
+    "loading": "Memuat kalendermu",
+    "view": {
+      "title": "Tampilan",
+      "week": "Minggu",
+      "month": "Bulan"
+    },
+    "week": {
+      "title": "Minggu ini"
+    },
+    "month": {
+      "title": "Bulan ini",
+      "caption": "Tampilan bulan: satu baris per minggu, satu sel per hari"
+    },
+    "weekOf": "{{from}} sampai {{to}}",
+    "column": {
+      "day": "Hari",
+      "events": "Acara"
+    },
+    "today": "Hari ini",
+    "eventCount_other": "{{count}} acara di tampilan ini",
+    "day": {
+      "empty": "Tidak ada jadwal",
+      "cellEmpty": "{{day}}. Tidak ada jadwal",
+      "cellTodayEmpty": "{{day}}, hari ini. Tidak ada jadwal",
+      "cell_other": "{{day}}, {{count}} acara: {{events}}",
+      "cellToday_other": "{{day}}, hari ini, {{count}} acara: {{events}}"
+    },
+    "empty": {
+      "title": "Tidak ada jadwal",
+      "reason": "Belum ada kelas, ujian, blok belajar, atau tenggat di tampilan ini. Tambahkan dari Tugas, atau sambungkan kalender di bawah."
+    },
+    "event": {
+      "when": "{{start}} sampai {{end}}",
+      "kind": "Jenis: {{kind}}",
+      "readOnly": "Hanya baca",
+      "readOnlyLabel": "{{title}} pukul {{time}}, hanya baca",
+      "readOnlyGoogle": "Acara ini datang dari Google Calendar. Ubah di sana, dan perubahannya sampai ke sini pada sinkronisasi berikutnya.",
+      "readOnlyIcs": "Acara ini datang dari kalender langganan. Ubah di sumbernya, dan perubahannya sampai ke sini pada penarikan berikutnya."
+    },
+    "kind": {
+      "class": "Kelas",
+      "exam": "Ujian",
+      "study_block": "Blok belajar",
+      "deadline": "Tenggat",
+      "external": "Dari kalender yang tersambung"
+    },
+    "connections": {
+      "loading": "Memuat sambunganmu",
+      "empty": {
+        "title": "Belum ada sambungan",
+        "reason": "Belum ada yang mengisi kalender ini. Tambahkan URL ICS, atau sambungkan Google Calendar."
+      },
+      "provider": {
+        "google": "Google Calendar",
+        "ics": "Kalender langganan"
+      },
+      "status": {
+        "title": "Sambungan",
+        "connected": "Tersambung",
+        "error": "Perlu diperiksa",
+        "revoked": "Akses dicabut"
+      },
+      "neverSynced": "Belum pernah sinkron",
+      "lastSynced": "Terakhir sinkron {{when}}",
+      "disconnect": "Putuskan",
+      "syncNow": "Sinkron sekarang",
+      "syncQueued_other": "{{count}} sinkronisasi masuk antrean. Sebentar lagi jalan.",
+      "feed": {
+        "title": "Umpan kalendermu",
+        "hint": "Langgani tautan ini di Google Calendar, Apple Calendar, atau Outlook untuk melihat kelas, ujian, blok belajar, dan tenggat Stvdy-mu di sana. Tidak ada isi lain.",
+        "none": "Kamu belum punya tautan umpan.",
+        "create": "Buat tautan umpan saya",
+        "copy": "Salin tautan",
+        "copied": "Tautan disalin",
+        "regenerate": "Buat ulang",
+        "regenerateHint": "Membuat ulang akan mengganti tautannya. Apa pun yang sudah berlangganan tautan lama berhenti diperbarui sampai kamu memberinya tautan baru."
+      },
+      "google": {
+        "title": "Google Calendar",
+        "hint": "Sambungkan akun Google untuk melihat acaranya di sini, dan untuk mengirim blok belajarmu ke kalender Study Plan tersendiri.",
+        "connect": "Sambungkan Google Calendar",
+        "lockedReason": "Sinkronisasi dua arah dengan Google Calendar, supaya kelas dan blok belajarmu tetap sama di setiap perangkat.",
+        "denied": "Google Calendar tidak disambungkan",
+        "failed": "Google Calendar tidak bisa disambungkan"
+      },
+      "ics": {
+        "title": "Tambahkan URL ICS",
+        "hint": "Tempel alamat kalender fakultasmu, tautan .ics-nya. Kelas dan ujiannya muncul di sini sebagai acara hanya baca.",
+        "label": "URL ICS",
+        "add": "Tambahkan",
+        "queued": "Ditambahkan. Impor pertama masuk antrean dan sebentar lagi jalan.",
+        "connected": "Berlangganan: {{id}}"
+      }
+    }
+  },
   "settings": {
     "subtitle": "Jam belajar, notifikasi, bahasa, dan perangkatmu.",
     "noun": "pengaturan",
@@ -1027,6 +1122,19 @@
       "resetHint": "Reset menghapus semua yang tersimpan di perangkat ini, termasuk perubahan yang belum tersinkron, lalu mengunduhnya lagi.",
       "reset": "Reset data lokal dan sinkronkan ulang"
     },
+    "updates": {
+      "title": "Pembaruan",
+      "hint": "Periksa apakah versi Stvdy yang lebih baru sudah diterbitkan.",
+      "check": "Periksa pembaruan",
+      "checking": "Memeriksa…",
+      "upToDate": "Kamu sudah memakai versi terbaru. Ini versi {{version}}.",
+      "available": "Versi {{version}} sudah tersedia. Kamu memakai {{current}}.",
+      "failed": "Pemeriksaan tidak selesai: {{message}}",
+      "install": "Unduh dan pasang",
+      "downloading": "Mengunduh pembaruan…",
+      "installing": "Memasang pembaruan…",
+      "restartRequired": "Sudah terpasang. Buka ulang Stvdy untuk memakai versi baru."
+    },
     "later": {
       "title": "Belum dibuat",
       "calendar": "Sambungan kalender",
@@ -1035,6 +1143,87 @@
       "dataPhase": "Ekspor dan penghapusan akun datang di Fase 15.",
       "byok": "Pakai kunci model sendiri",
       "byokPhase": "BYOK datang di Fase 13."
+    }
+  },
+  "agent": {
+    "list": {
+      "label": "Tindakan yang disarankan"
+    },
+    "card": {
+      "label": "Tindakan yang disarankan",
+      "confirmed": "Sudah dikonfirmasi",
+      "created": "Ditambahkan: {{title}}",
+      "failed": "Sudah dikonfirmasi, tapi prosesnya tidak dimulai: {{error}}",
+      "cost": "Butuh {{credits}} kredit saat kamu konfirmasi.",
+      "noCost": "Tidak ada kredit yang dikenakan untuk tindakan ini.",
+      "expires": "Menunggu sampai {{when}}.",
+      "editLabel": "Ubah apa yang akan ditambahkan",
+      "editHint": "Field yang diterima tindakan ini, dalam JSON. Konfirmasi tanpa mengubahnya untuk menambahkan persis seperti yang disarankan.",
+      "editInvalidJson": "Itu bukan JSON yang valid. Perbaiki, atau batalkan perubahan untuk mengonfirmasi yang disarankan.",
+      "editNotObject": "Field tindakan ini harus berupa objek JSON.",
+      "noun": "tindakan"
+    },
+    "tool": {
+      "create_task": "Tambah tugas",
+      "update_task": "Ubah tugas",
+      "create_event": "Tambah acara",
+      "schedule_study_block": "Jadwalkan blok belajar",
+      "create_flashcards": "Buat kartu",
+      "create_quiz": "Buat kuis"
+    },
+    "field": {
+      "title": "Judul",
+      "notes": "Catatan",
+      "due": "Tenggat",
+      "starts": "Mulai",
+      "ends": "Selesai",
+      "estimate": "Perkiraan (menit)",
+      "duration": "Durasi (menit)",
+      "priority": "Prioritas",
+      "status": "Status",
+      "count": "Jumlah",
+      "sources": "Sumber",
+      "difficulty": "Tingkat kesulitan"
+    }
+  },
+  "dashboard": {
+    "title": "Kemajuan",
+    "subtitle": "Waktu per mata kuliah, aktivitas ulangan dan penguasaan kuis, dihitung dari barismu sendiri.",
+    "loading": "Memuat kemajuanmu",
+    "noun": "kemajuan",
+    "empty": "Belum ada yang tercatat di rentang ini. Menit belajar, ulangan kartu dan percobaan kuis muncul di sini setelah ada.",
+    "window": "{{from}} sampai {{to}}",
+    "totals": "Total",
+    "total": {
+      "minutes": "Menit belajar",
+      "reviews": "Ulangan kartu",
+      "cardsDue": "Kartu jatuh tempo",
+      "quizzes": "Percobaan kuis"
+    },
+    "summary": "{{minutes}} menit belajar dan {{reviews}} ulangan kartu di rentang ini.",
+    "timePerCourse": "Waktu per mata kuliah",
+    "timePerCourseSummary": "{{courses}} mata kuliah dipelajari, total {{minutes}} menit.",
+    "noCourses": "Belum ada waktu belajar yang tercatat di rentang ini.",
+    "minutes": "{{count}} menit",
+    "reviewActivity": "Aktivitas ulangan",
+    "reviewActivitySummary": "{{days}} hari ada ulangan, total {{reviews}} ulangan.",
+    "noReviews": "Belum ada ulangan kartu di rentang ini.",
+    "reviews": "{{count}} ulangan",
+    "mastery": "Penguasaan kuis per topik",
+    "masterySummary": "{{topics}} topik sudah dicoba.",
+    "masteryLabel": "{{title}}: {{correct}} dari {{attempts}} benar, {{accuracy}} persen",
+    "noMastery": "Belum ada percobaan kuis, jadi belum ada penguasaan yang bisa ditampilkan.",
+    "weakTopics": "Topik lemah",
+    "weakTopicsHint": "Topik dengan akurasi paling rendah sejauh ini. Pilih tujuan dan perencana akan mengusulkan blok ulangan untuknya.",
+    "shareLabel": "{{title}}: {{percent}} persen dari waktu belajarmu"
+  },
+  "reminders": {
+    "local": {
+      "taskTitle": "Tugas segera jatuh tempo",
+      "taskBody": "{{title}} jatuh tempo dalam {{minutes}} menit.",
+      "eventTitle": "Segera mulai",
+      "eventBody": "{{title}} mulai dalam {{minutes}} menit.",
+      "unknownSubject": "Sesuatu di daftarmu"
     }
   }
 }

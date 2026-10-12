@@ -10,6 +10,7 @@ import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
+import { CalendarScreen } from './features/calendar/CalendarScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { SettingsScreen } from './features/settings/SettingsScreen'
@@ -115,10 +116,10 @@ export const router = createBrowserRouter([
           // needs the whole width and its own URL to come back to.
           { path: 'reports/:reportId', element: <ReportScreen /> },
           { path: 'cheatsheets/:cheatsheetId', element: <CheatsheetScreen /> },
-          {
-            path: 'calendar',
-            element: <NotBuiltRoute titleKey="nav.calendar" whatKey="routes.calendar.what" />,
-          },
+          // The calendar: the week and month views, and the connections that feed
+          // them. It is a real screen as of Phase 10, so the `NotBuiltRoute` that
+          // named the phase is gone with its copy.
+          { path: 'calendar', element: <CalendarScreen /> },
           {
             path: 'tasks',
             element: <TasksScreen />,
