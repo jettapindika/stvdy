@@ -32,12 +32,36 @@ disk only). The short version:
 | Phase | Status |
 |---|---|
 | 0–5 | Done before this session; verified green again here |
-| 6 (reports, cheatsheet, PDF) | Done: implementation, review round with one Critical fix (an SVG attribute-value injection that reached a printed PDF), the three roadmap gates measured in a real browser, the smoke run passing |
-| 7 (entitlements, credits, limits) | Done: the engine, the sweep, the ledger with a mutation-proved concurrency test, the period, the abuse controls, the ingestion formats, the tamper suite, admin, the SPA, the gates, the smoke run |
-| 8 (sync engine) | In progress: the protocol, the three routes, the conflict table and the compaction job are done; the client engine and the convergence suite are landing |
-| 9 (tasks, events, Today, timer) | In progress: the prompt modules and the pure rules are done; the server modules are landing |
-| 10 (calendar) | In progress: the pure ICS feed and bounded recurrence expansion |
-| 11–15 | Planned in full (see `docs/superpowers/plans/`), executing in order |
+| 6 (reports, cheatsheet, PDF) | **Done.** Implementation, a review round with one Critical fix (an SVG attribute-value injection that reached a printed PDF), the three roadmap gates measured in a real browser (four defects found and fixed), the smoke run passing |
+| 7 (entitlements, credits, limits) | **Done.** The engine, the sweep, the ledger with a mutation-proved concurrency test, the period, the abuse controls, the ingestion formats, the tamper suite (doc-driven, 14 cases), admin, the SPA, the gates (one defect found: a 70×19 upgrade link, fixed and re-measured), the smoke run |
+| 8 (sync engine) | Implementation complete and the convergence gate passing. A consumer-visible defect was found and fixed: a pull shipped only the *first* change of a row, so every later change arrived as `data: null` — which the client applies as a **delete**. Docs, gates and the smoke run are landing |
+| 9 (tasks, events, Today, timer) | Implementation complete, including the offline exit gate. Four defects found and fixed, all of them "two write paths disagreeing" — a push delete that did not cascade, a restore that did not restore the cascade, a calendar-owned event writable through push, and a local apply that did not cascade. Gates measured; three `QuickCapture` defects found (Escape not closing the draft, a raw ISO date naming the wrong day in Jakarta, and 34px of overflow at 200% text) and being fixed |
+| 10 (calendar) | Pure core done (the ICS feed, bounded recurrence expansion — the plan's bound was wrong and the crate's own behaviour proved it). Server landing |
+| 11 (syllabus, planner) | Planner done (the purity sweep, the DST cases, and a determinism fixture that had to be strengthened before it could fail). Syllabus and the planner server landing |
+| 12 (agent, reminders, dashboard) | Agent core done: the ten tools, the gate that cannot execute a write, and a tool-calling double so the injection test is not vacuous. Actions, reminders and the dashboard landing |
+| 13 (payments) | Trait and pure math done (a real-HMAC mock, and the pricing rule in one function). Checkout, webhook, polling, periods and the margin report landing |
+| 14 (mobile) | The bundle-absence proof, the read-only plan screen and the phone measurements landing. The native work (push receive, share extension, background scheduler) needs **your** accounts and a device |
+| 15 (release) | The server image and the print assets landing. Signing, notarization, the updater and the store checklists need **your** certificates and a production host |
+
+## Things found that you should know about
+
+- **A defect in the roadmap itself, found by Phase 13's plan:** the margin report's attribution
+  was specified as a join on `users.plan_id`, which is wrong in the one month the report exists
+  for (it holds only the *current* plan, so a converting user re-attributes their own earlier
+  free-tier cost). Corrected in the roadmap, with a test that seeds a June-free/July-paid user.
+- **A defect in Phase 10's plan, found by its own implementation:** `rrule` 0.14 reports
+  `limited == true` when the collection merely *reached* the limit, so the planned bound would
+  have marked a rule with exactly 500 occurrences as truncated — a connection that looks broken
+  while it is fine. Corrected, with two cases that have the same occurrence count and opposite
+  answers.
+- **Three defects in the app's `QuickCapture`**, all found by measuring rather than looking:
+  Escape does not close the draft or return focus, the Due line renders a raw UTC instant (so a
+  task due 06:00 in Jakarta names the wrong day), and the ISO token pushes the page 34px wide at
+  200% text on a phone.
+- **A WCAG Level A failure in the SPA:** `index.html` is a static `lang="en"` and nothing updates
+  it, so a screen reader pronounces the entire Indonesian UI with an English voice. Found by
+  Phase 8's gate; being fixed.
+
 
 ## One thing worth knowing about the plan set
 
