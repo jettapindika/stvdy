@@ -132,6 +132,29 @@ pub async fn snapshot_in(
     .snapshot)
 }
 
+/// Whether the plan grants `feature`, as a question rather than a refusal.
+///
+/// [`require`] is for a handler that must stop. This is for a caller that has to decide **what
+/// to send** — the agent's tool list is the one such caller (A272), and asking that question
+/// through `require` would make a free account's every chat turn fail instead of being offered
+/// the four READ tools.
+///
+/// The answer comes from the same [`check_with`] the refusal does, and it is computed here
+/// rather than by reading `plans.get(plan).<feature>` at the call site: a second reader of a
+/// plan field is a second answer to "does this plan have it", which is what A149 exists to
+/// prevent — and `crates/server/tests/route_sweep.rs::no_file_outside_the_entitlements_layer_reads_a_plan_limit`
+/// fails on exactly that.
+///
+/// **Fails closed.** A snapshot that cannot be read answers `false`, so a database error
+/// narrows the tool list rather than widening it: offering a WRITE tool the engine could not
+/// confirm is the direction that costs the student a refusal at confirm time.
+pub async fn grants(state: &AppState, user: &AuthUser, feature: Feature) -> bool {
+    let Ok(snapshot) = snapshot(state, user).await else {
+        return false;
+    };
+    check_with(&state.config.plans, &facts(state, user), &snapshot, feature).is_ok()
+}
+
 /// The one decision every handler makes.
 ///
 /// Returns `AppError` so a handler writes `entitlements::require(&state, &user,
@@ -254,14 +277,16 @@ where
         state,
         user.user_id,
         user.effective_plan(),
-        action,
-        cost,
-        [None, None],
-        // Never BYOK. Every caller of this sequence — a deck, a quiz, a report, a cheatsheet,
-        // a syllabus import, a task breakdown — spends our provider's money, and none of them
-        // has a user-key seam. A `true` here would be a claim about a call that never went to
-        // the student's endpoint, and the margin report would believe it.
-        false,
+        crate::credits::Charge {
+            action,
+            credits: cost,
+            daily_caps: [None, None],
+            // Never BYOK. Every caller of this sequence — a deck, a quiz, a report, a cheatsheet,
+            // a syllabus import, a task breakdown — spends our provider's money, and none of them
+            // has a user-key seam. A `true` here would be a claim about a call that never went to
+            // the student's endpoint, and the margin report would believe it.
+            byok: false,
+        },
     )
     .await?;
 
