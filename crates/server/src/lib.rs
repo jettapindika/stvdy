@@ -1,5 +1,6 @@
 //! The Stvdy server: Axum routes, auth, sync, job worker and integrations.
 
+pub mod actions;
 pub mod admin;
 pub mod assets;
 pub mod auth;
@@ -16,11 +17,14 @@ pub mod entitlements;
 pub mod error;
 pub mod events;
 pub mod flashcards;
+pub mod goals;
 pub mod integrations;
 pub mod jobs;
 pub mod limits;
+pub mod planner;
 pub mod quizzes;
 pub mod ratelimit;
+pub mod reminders;
 pub mod render;
 pub mod reports;
 pub mod routes;

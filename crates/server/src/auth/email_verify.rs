@@ -16,14 +16,14 @@ use stvdy_core::traits::mailer::Email;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
-fn new_token() -> String {
+pub(crate) fn new_token() -> String {
     use base64::Engine;
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn hash_token(token: &str) -> String {
+pub(crate) fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     hex::encode(hasher.finalize())

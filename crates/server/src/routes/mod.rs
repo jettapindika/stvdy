@@ -28,7 +28,10 @@ use crate::config::AppConfig;
 use crate::devices;
 use crate::events;
 use crate::flashcards;
+use crate::goals;
+use crate::planner;
 use crate::quizzes;
+use crate::reminders;
 use crate::reports;
 use crate::settings;
 use crate::sources;
@@ -110,6 +113,13 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .route("/health", get(health::health))
         .route("/auth/google/start", get(auth::routes::google_start))
         .route("/auth/google/callback", get(auth::routes::google_callback))
+        // The gateway's callback. No bearer token: the gateway has no session, and the
+        // signature over the raw body is its authorisation (A292/A309). It is in the
+        // public group rather than the authenticated one because a route that
+        // authenticates by HMAC and one that authenticates by session are different
+        // things, and a shared `.merge()` is how the wrong one gets a layer it must not
+        // have.
+        .merge(crate::billing::routes::public_routes())
         // The print assets. Public because the browser that fetches them is headless
         // Chromium rendering a document with no credentials, and because every file is a
         // vendored upstream release with no user data in it (A339). The renderer rewrites
@@ -122,8 +132,14 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
     // target, so it shares the credential bucket rather than the unlimited public group
     // (A243). The same limiter instance, not a second one: two buckets for one client would
     // double the attempts a script gets.
+    //
+    // The student-verification route is here for a different reason: it *sends mail* to an
+    // address the caller supplies. The suffix list is the content rule and this is the
+    // volume rule (A299) — without it the endpoint is a mail amplifier pointed at whatever
+    // campus domain the list accepts.
     let limited_public_routes = Router::new()
         .merge(calendar::public_routes())
+        .merge(crate::billing::routes::limited_routes())
         .layer(auth_limiter);
 
     let authenticated = Router::new()
@@ -151,12 +167,19 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(events::routes())
         .merge(calendar::routes())
         .merge(study::routes())
+        .merge(reminders::routes())
         .merge(settings::routes())
+        .merge(crate::actions::routes())
         .merge(usage::routes())
         .merge(admin::routes())
+        .merge(crate::billing::routes::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
         )))
+        // Goals are not plan-gated (the free plan has goals and a manual planner); the two
+        // generating routes under `planner` are, and they carry their own refusal.
+        .merge(goals::routes())
+        .merge(planner::routes())
         // The same body limit the generic upload gets, for the same reason: the plan check is
         // what produces the precise refusal, and this only stops a body no plan could accept
         // from being read at all. A syllabus is a PDF or pasted text, so the ceiling is the

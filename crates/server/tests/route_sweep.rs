@@ -536,6 +536,30 @@ fn exempt_rows() -> Vec<Row> {
             "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
         ),
         exempt(
+            "GET",
+            "/admin/payments",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
+        ),
+        exempt(
+            "POST",
+            "/admin/payments/{id}/mark-paid",
+            "AdminUser only, and it runs the webhook's own `apply_paid` rather than a second \
+             activation path (A308); tests/admin_margin.rs asserts both the activation and the \
+             404 a non-admin sees",
+        ),
+        exempt(
+            "POST",
+            "/admin/payments/{id}/refund",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7). A refund records \
+             the row and leaves the subscription alone (A308)",
+        ),
+        exempt(
+            "PATCH",
+            "/admin/subscriptions/{user_id}",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7). A manual \
+             extension recomputes the read-only flags through the same path the rollover uses",
+        ),
+        exempt(
             "POST",
             "/webhooks/qris",
             "the gateway's callback: no session and no bearer token, and the signature over \

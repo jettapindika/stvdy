@@ -1,10 +1,24 @@
-//! Checkout policy — the platform refusal Phase 13's checkout route calls first.
+//! Billing: the checkout policy Phase 7 landed, and Phase 13's money path.
 //!
-//! One function, landed here rather than in Phase 13 (A151), for the same reason
-//! `sync::push::decide` is: the threat model's "Enable checkout on iOS/Android" row is a
-//! Phase 7 gate while the route that would call it is Phase 13's, so the *control* is
-//! testable now and the transport is added later. Phase 13's handler calls this as its
-//! first statement and re-implements nothing.
+//! Two layers, and the split is the point. `crates/core/src/billing/` is **pure** —
+//! `price()`, `apply_payment()`, `upgrade_delta()` — and knows nothing about a database.
+//! This module owns the `payments` row, the checkout route, the webhook and the period
+//! rules; `crates/server/src/integrations/payment/` owns the wire. The amount a student
+//! is quoted and the amount the webhook checks come out of the same pure function, so
+//! they cannot disagree.
+//!
+//! [`checkout_allowed`] is Phase 7's platform refusal (A151). It lives here rather than
+//! in `checkout` because the *control* is testable without a route, and because a second
+//! copy of the rule in the handler would be a second place to forget it.
+
+pub mod apply;
+pub mod byok;
+pub mod checkout;
+pub mod periods;
+pub mod poll;
+pub mod routes;
+pub mod student;
+pub mod webhook;
 
 use stvdy_core::config::{BillingPolicy, Platform};
 
