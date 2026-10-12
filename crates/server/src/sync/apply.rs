@@ -378,11 +378,20 @@ async fn apply_patch(
     };
     if result.rows_affected() == 0 {
         // The id exists and belongs to another account: the conflict guard refused it.
-        return Ok(Outcome::Rejected {
-            code: ErrorCode::NotFound,
-            message: "no such row for this account".to_string(),
-        });
+        return Ok(not_found());
     }
+
+    // A restored task brings back the descendants its delete tombstoned (A197), and the
+    // flag that marks them is cleared. `restore_cascaded_subtree`'s own `where` makes this
+    // a statement that touches nothing for an ordinary edit, so a live task's patch logs no
+    // extra change.
+    //
+    // Only the push path restores: `PATCH /tasks/:id` drops a body's `deleted_at`, because
+    // restoring is the sync contract's act and not REST's (A178).
+    if entity == Entity::Task {
+        crate::tasks::restore_cascaded_subtree(conn, user_id, mutation.id).await?;
+    }
+
     Ok(Outcome::Applied {
         seq: seq_after(conn, user_id, entity, mutation.id).await?,
     })
@@ -417,10 +426,7 @@ async fn apply_upsert(
     };
     if result.rows_affected() == 0 {
         // The id exists and belongs to another account: the conflict guard refused it.
-        return Ok(Outcome::Rejected {
-            code: ErrorCode::NotFound,
-            message: "no such row for this account".to_string(),
-        });
+        return Ok(not_found());
     }
     Ok(Outcome::Applied {
         seq: seq_after(conn, user_id, entity, mutation.id).await?,
@@ -428,28 +434,64 @@ async fn apply_upsert(
 }
 
 /// A tombstone: set `deleted_at` and let the trigger log a `delete`.
+///
+/// Two entities are not one row, and both rules are the REST route's, so the two write paths
+/// produce the same `change_log` entries and the same LWW outcome:
+///
+///   * a **task** tombstones its live descendants too, through `tasks::tombstone_subtree` —
+///     the same function `DELETE /tasks/:id` calls. This arm used to be the plain
+///     single-row update below, which meant a task deleted offline left its subtasks live on
+///     the server and on every other device while the same delete through REST removed the
+///     subtree. The walk cannot be left to the client: the subtree the device holds is not
+///     the subtree the account has, because another device may have added a subtask since
+///     this one last pulled.
+///   * an **event** a connected calendar owns is not a client's to delete (A198), and the
+///     row has to be read to know — which is why this is here rather than in `decide`,
+///     which is pure and has no row.
 async fn apply_delete(
     conn: &mut PgConnection,
     user_id: Uuid,
     mutation: &Mutation,
 ) -> AppResult<Outcome> {
-    let table = mutation.entity.table_name();
-    let sql = format!("update {table} set deleted_at = now() where id = $1 and user_id = $2");
-    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
-        .bind(mutation.id)
-        .bind(user_id)
-        .execute(&mut *conn)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("applying a tombstone: {error}")))?;
-    if result.rows_affected() == 0 {
-        return Ok(Outcome::Rejected {
-            code: ErrorCode::NotFound,
-            message: "no such row for this account".to_string(),
-        });
+    let rows = match mutation.entity {
+        Entity::Task => crate::tasks::tombstone_subtree(conn, user_id, mutation.id).await?,
+        _ => tombstone_row(conn, user_id, mutation).await?,
+    };
+    if rows == 0 {
+        return Ok(not_found());
     }
     Ok(Outcome::Applied {
         seq: seq_after(conn, user_id, mutation.entity, mutation.id).await?,
     })
+}
+
+/// The plain tombstone: one row, by id and owner.
+async fn tombstone_row(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    mutation: &Mutation,
+) -> AppResult<u64> {
+    let table = mutation.entity.table_name();
+    let sql = format!("update {table} set deleted_at = now() where id = $1 and user_id = $2");
+    let affected = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(mutation.id)
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("applying a tombstone: {error}")))?
+        .rows_affected();
+    Ok(affected)
+}
+
+/// The refusal for a row that is not this account's, or is already gone.
+///
+/// The two are deliberately one answer: a client that could tell them apart could probe for
+/// another account's ids (A173).
+fn not_found() -> Outcome {
+    Outcome::Rejected {
+        code: ErrorCode::NotFound,
+        message: "no such row for this account".to_string(),
+    }
 }
 
 /// An append-only row: inserted once, and a duplicate reports the existing seq (A174).
@@ -489,10 +531,7 @@ async fn apply_append_only(
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("checking an append-only id: {error}")))?;
     if exists.is_none() {
-        return Ok(Outcome::Rejected {
-            code: ErrorCode::NotFound,
-            message: "no such row for this account".to_string(),
-        });
+        return Ok(not_found());
     }
     Ok(Outcome::Applied {
         seq: seq_after(conn, user_id, entity, mutation.id).await?,

@@ -551,12 +551,103 @@ pub async fn update(
     Ok(Json(json!({ "task": updated })))
 }
 
-/// `DELETE /tasks/:id`. 204, and the tombstone is the whole subtree (A197).
+/// Tombstones a task **and its live descendants** (A197), in the caller's transaction.
 ///
 /// Postgres's `on delete cascade` would fire the children's DELETE triggers on a real
 /// delete, but a tombstone is an UPDATE, so the children have to be reached explicitly. The
 /// recursive walk is bounded by `deleted_at is null` on both arms, which is also what makes
 /// a second delete of the same parent a no-op rather than a re-tombstone.
+///
+/// This is the **one** implementation of that walk, and both writers of a task tombstone
+/// call it: [`delete_one`] for `DELETE /tasks/:id`, and `sync::apply::apply_delete` for a
+/// tombstone arriving through `POST /sync/push`. The two paths must produce the same
+/// `change_log` entries and the same LWW outcome — the roadmap's own rule — and a second
+/// copy of the walk is how they stop doing that: the push path had a single-row update, so
+/// a task deleted offline left its subtasks live on the server and on every other device,
+/// while the same delete through REST removed the subtree.
+///
+/// The walk has to be here rather than on the client, which cannot do it correctly: the
+/// subtree the device holds is not the subtree the account has, because another device may
+/// have added a subtask since this one last pulled. Only the server knows the tree's
+/// current shape, so only the server can tombstone it.
+///
+/// Returns the number of rows tombstoned, so a caller can tell "this row is not this
+/// account's, or is already gone" from "the subtree is now deleted".
+///
+/// The root row is deleted **deliberately** and the descendants are not, so the flag is set
+/// on the descendants alone (`depth > 0`). That is what makes a later restore able to tell
+/// "the cascade took this child" from "the student took this child", which is the whole
+/// reason the column exists.
+pub(crate) async fn tombstone_subtree(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    id: Uuid,
+) -> AppResult<u64> {
+    let affected = sqlx::query(
+        "with recursive subtree as (
+             select id, 0 as depth from tasks
+              where id = $1 and user_id = $2 and deleted_at is null
+             union all
+             select child.id, parent.depth + 1 from tasks child
+               join subtree parent on child.parent_id = parent.id
+              where child.user_id = $2 and child.deleted_at is null
+         )
+         update tasks t set deleted_at = now(), deleted_with_parent = (s.depth > 0)
+           from subtree s
+          where t.id = s.id and t.user_id = $2",
+    )
+    .bind(id)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting a task: {error}")))?;
+    Ok(affected.rows_affected())
+}
+
+/// Brings back the descendants a cascade tombstoned, when their parent comes back (A197).
+///
+/// A row tombstoned by [`tombstone_subtree`] carries `deleted_with_parent`, and only those
+/// rows are restored: a child the student deleted deliberately has the flag false and stays
+/// deleted, because bringing it back would be a resurrection of the kind A207 refuses for
+/// the timer — a subtask that reappears under a parent the student restored is data they
+/// never asked to have again.
+///
+/// The walk is recursive for the same reason the tombstone's is: `tasks.parent_id` has no
+/// depth constraint, so a restored parent may have a cascade-tombstoned grandchild.
+///
+/// The root's own flag is cleared here as well. A cascade-tombstoned child restored
+/// **directly** by the student (a push whose patch names `deleted_at: null`) must not keep
+/// the flag, or a later restore of its parent would bring it back a second time.
+pub(crate) async fn restore_cascaded_subtree(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    id: Uuid,
+) -> AppResult<u64> {
+    let affected = sqlx::query(
+        "with recursive subtree as (
+             select id from tasks
+              where id = $1 and user_id = $2 and deleted_at is null
+             union all
+             select child.id from tasks child
+               join subtree parent on child.parent_id = parent.id
+              where child.user_id = $2
+                and child.deleted_at is not null
+                and child.deleted_with_parent
+         )
+         update tasks t set deleted_at = null, deleted_with_parent = false
+           from subtree s
+          where t.id = s.id and t.user_id = $2
+            and (t.deleted_at is not null or t.deleted_with_parent)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("restoring a task: {error}")))?;
+    Ok(affected.rows_affected())
+}
+
+/// `DELETE /tasks/:id`. 204, and the tombstone is the whole subtree (A197).
 pub async fn delete_one(
     State(state): State<AppState>,
     user: AuthUser,
@@ -567,29 +658,13 @@ pub async fn delete_one(
             AppError::Internal(anyhow::anyhow!("beginning a task delete: {error}"))
         })?;
 
-    let affected = sqlx::query(
-        "with recursive subtree as (
-             select id from tasks
-              where id = $1 and user_id = $2 and deleted_at is null
-             union all
-             select child.id from tasks child
-               join subtree parent on child.parent_id = parent.id
-              where child.user_id = $2 and child.deleted_at is null
-         )
-         update tasks set deleted_at = now()
-          where id in (select id from subtree) and user_id = $2",
-    )
-    .bind(id)
-    .bind(user.user_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting a task: {error}")))?;
+    let affected = tombstone_subtree(&mut tx, user.user_id, id).await?;
 
     tx.commit().await.map_err(|error| {
         AppError::Internal(anyhow::anyhow!("committing a task delete: {error}"))
     })?;
 
-    if affected.rows_affected() == 0 {
+    if affected == 0 {
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)
