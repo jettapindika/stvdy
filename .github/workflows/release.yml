@@ -1,0 +1,730 @@
+name: Release
+
+# The release pipeline (A345, A353). It is the only place a signing secret is used (A332),
+# and it is triggered by a **tag**, because tags are not commits: a pipeline that trusts a
+# green badge from a branch can ship a commit CI never saw. The first job therefore re-runs
+# what `ci.yml` runs, on the tagged commit, before anything is built.
+#
+# Two tag shapes, two releases (A353). `v…` names the shell and builds the client artifacts;
+# `server-v…` names the server alone, so the client jobs are skipped and no update prompt is
+# offered for a fix that does not touch a client — clients are not recallable, and an update
+# for an unchanged client is noise.
+#
+# **Every credential is a GitHub Actions secret and none of them is a file in this
+# repository.** The workflow needs, and nothing else:
+#
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD   the minisign key that
+#       signs `latest.json` (A332). The public half is committed in `plugins.updater.pubkey`.
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY / APPLE_ID /
+#       APPLE_PASSWORD / APPLE_TEAM_ID                               macOS (A333)
+#   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD               Windows (A334)
+#   ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD /
+#       ANDROID_KEY_ALIAS                                            the direct APK (A352)
+#   UPDATES_DEPLOY_KEY / UPDATES_KNOWN_HOSTS                         publication (A345)
+#   GITHUB_TOKEN                                                     the Release itself
+#
+# Repository **variables** (not secrets): `UPDATES_HOST`, `UPDATES_USER`, `UPDATES_PATH`
+# (where the manifest and the APK are published) and `UPDATES_NOTES` (the release notes the
+# manifest carries, if any).
+#
+# **This workflow has not been executed, and cannot be here.** It needs a tag, an Apple
+# Developer ID certificate, an Authenticode certificate, an Android keystore, the minisign
+# private key and a production static endpoint. What has been verified is that it parses and
+# that every credential it names is an Actions secret; a green run is the tag's to produce,
+# not this file's claim. The dependencies it does not yet have are named in the steps that
+# need them rather than discovered by a failing release.
+
+on:
+  push:
+    tags:
+      - 'v*' # the shell's version (A353)
+      - 'server-v*' # a server-only hotfix: the client jobs are skipped (A353)
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two pushes of the same tag must not race into one Release.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # -------------------------------------------------------------------------
+  # The gate. A345: the same checks `ci.yml` runs, on the tagged commit.
+  # -------------------------------------------------------------------------
+  gate:
+    name: the checks ci.yml runs, on the tagged commit
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        # pgvector, not plain postgres: migration 0001 runs `create extension vector`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stvdy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/stvdy
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres,rustls
+      - run: sqlx migrate run
+      - run: cargo sqlx prepare --workspace --check
+      - run: cargo test --workspace
+
+      - name: The PDF acceptance test, on this commit
+        # `#[ignore]`d so a laptop without a browser still gets a green `cargo test`, which is
+        # why the job that ships a PDF pipeline has to run it explicitly. The same assertion
+        # `ci.yml`'s `pdf` job makes, on the same runner image, on the tagged commit.
+        env:
+          SQLX_OFFLINE: "true"
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          test -x "$CHROME_PATH" || { echo "no Chrome at $CHROME_PATH"; exit 1; }
+          cargo test -p stvdy-server --test pdf -- --ignored
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+      - run: npm --prefix app test
+      - run: npm --prefix app run build
+      - run: node scripts/check-no-cdn.mjs
+      # The store build, produced the way `tauri build` produces it, and the absence proof in
+      # the bytes a phone installs (A321, A351). Both are in `ci.yml`'s `web` job; a release
+      # that skipped them would be trusting a branch's result for a tag.
+      - run: TAURI_ENV_PLATFORM=ios npm --prefix app run build
+      - run: node scripts/check-no-purchase-ui.mjs
+      - run: node --test scripts/check-no-purchase-ui.test.mjs
+      - run: bash scripts/check-mobile-no-purchase.sh
+
+  gate-shell:
+    name: the shell's checks, on the tagged commit
+    runs-on: macos-15
+    # `src-tauri` is outside the workspace, so `cargo test --workspace` never sees it, and a
+    # release ships the shell. macOS runner for the same reason `ci.yml`'s `shell` job uses
+    # one: the keychain round-trip test needs a real OS credential store.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+      # REQUIRED: `generate_context!()` panics at compile time when `app/dist` is absent.
+      - run: npm --prefix app run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # -------------------------------------------------------------------------
+  # The version, in one place (Task 5 step 4, A353).
+  # -------------------------------------------------------------------------
+  version:
+    name: the version, in one place
+    runs-on: ubuntu-24.04
+    outputs:
+      server_only: ${{ steps.agree.outputs.server_only }}
+      version: ${{ steps.agree.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag, Cargo.toml and tauri.conf.json agree
+        id: agree
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          workspace="$(awk '/^\[workspace\.package\]/{found=1} found && /^version *=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)"
+          shell="$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+
+          echo "tag:             $tag"
+          echo "Cargo.toml:      $workspace"
+          echo "tauri.conf.json: $shell"
+
+          case "$tag" in
+            server-*)
+              # A353: a server-only hotfix names the server alone. The shell's version is
+              # printed and deliberately not compared, because the shell is not part of this
+              # release. `scripts/verify-release-artifacts.sh --version` makes the same
+              # distinction on demand.
+              want="${tag#server-v}"
+              want="${want#server-}"
+              if [ "$want" != "$workspace" ]; then
+                echo "::error::the tag says '$want', Cargo.toml says '$workspace', tauri.conf.json says '$shell' (all three printed above)"
+                exit 1
+              fi
+              echo "server_only=true" >> "$GITHUB_OUTPUT"
+              echo "version=$workspace" >> "$GITHUB_OUTPUT"
+              echo "a server-only release: the client jobs are skipped and no update is offered (A353)"
+              ;;
+            v*)
+              want="${tag#v}"
+              if [ "$want" != "$workspace" ] || [ "$want" != "$shell" ]; then
+                echo "::error::the tag says '$want', Cargo.toml says '$workspace', tauri.conf.json says '$shell' (all three printed above)"
+                exit 1
+              fi
+              echo "server_only=false" >> "$GITHUB_OUTPUT"
+              echo "version=$want" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::unexpected tag '$tag': this workflow triggers on v* and server-v*"
+              exit 1
+              ;;
+          esac
+
+  # -------------------------------------------------------------------------
+  # macOS: universal, signed, notarized, stapled (Task 3, A333).
+  # -------------------------------------------------------------------------
+  macos:
+    name: macOS — universal, signed, notarized, stapled
+    runs-on: macos-15
+    needs: [gate, gate-shell, version]
+    if: needs.version.outputs.server_only != 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: The certificate must be present, or this build is not distributable
+        # A333: without it `tauri build` still produces a universal `.app`/`.dmg`, and it runs
+        # only on the machine that built it — Gatekeeper trusts a locally built app and blocks
+        # it everywhere else. Publishing that as a release is worse than a failed release, so
+        # the job stops here rather than uploading it. docs/RELEASE.md § Desktop distribution
+        # states the same thing in the same words.
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "::error::APPLE_CERTIFICATE is not set: refusing to publish an unsigned, unnotarized macOS build (A333)."
+            exit 1
+          fi
+
+      - name: The notarization script is present
+        # Phase 15 Task 3 step 2 owns `scripts/notarize-macos.sh`, and it is not in the tree
+        # yet. Failing here names the missing piece; failing three steps later, inside a
+        # release that has already signed an app, names nothing useful.
+        run: |
+          if [ ! -x scripts/notarize-macos.sh ]; then
+            echo "::error::scripts/notarize-macos.sh is missing (Phase 15 Task 3 step 2). The ticket has to be stapled into both the .app and the .dmg (A333), and that script is where that lives."
+            exit 1
+          fi
+
+      - name: Build the universal bundle
+        # `bundle.macOS.hardenedRuntime` and `bundle.macOS.entitlements` are committed in
+        # `tauri.conf.json` and asserted by `crates/server/tests/release.rs`, so the job does
+        # not pass a second copy of them on the command line — two places to change is how
+        # one of them ends up stale.
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: ./app/node_modules/.bin/tauri build --target universal-apple-darwin
+
+      - name: Notarize, and staple the ticket into both the .app and the .dmg
+        # The notary credentials are the app-specific-password pair. `notarytool` also accepts
+        # an App Store Connect API key (`--key`/`--key-id`/`--issuer`); whichever the operator
+        # holds is the script's business, and it reads them from the environment it is given.
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          dmg="$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)"
+          echo "notarizing $dmg"
+          bash scripts/notarize-macos.sh "$dmg"
+
+      - name: What was built is signed, accepted, stapled and universal
+        run: |
+          set -euo pipefail
+          app="$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)"
+          dmg="$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)"
+          echo "app: $app"
+          echo "dmg: $dmg"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl -a -vvv -t install "$app"
+          # Both, because Gatekeeper checks the .app inside the dmg: a stapled dmg alone
+          # fails on a second machine with no network (A333).
+          xcrun stapler validate "$app"
+          xcrun stapler validate "$dmg"
+
+          archs="$(lipo -archs "$app/Contents/MacOS/Stvdy")"
+          echo "archs: $archs"
+          case "$archs" in *x86_64*) ;; *) echo "not universal: $archs"; exit 1 ;; esac
+          case "$archs" in *arm64*) ;; *) echo "not universal: $archs"; exit 1 ;; esac
+
+      - name: The updater archive carries its signature
+        # `createUpdaterArtifacts: true` makes Tauri emit the archive and its `.sig`. A job
+        # that produced the archive and not the signature is a failure (A345), and the
+        # bundler's exit code does not say which of the two happened.
+        run: |
+          set -euo pipefail
+          for archive in src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz; do
+            test -s "$archive.sig" || {
+              echo "::error::$archive has no .sig next to it (A345)"; exit 1; }
+            echo "signed: $(basename "$archive")"
+          done
+
+      - name: The machine-readable gate
+        # The last step of every job, against what this job just produced (A333).
+        run: bash scripts/verify-release-artifacts.sh --macos --dir src-tauri/target/universal-apple-darwin/release/bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+  # -------------------------------------------------------------------------
+  # Windows: the NSIS perMachine installer, signed (Task 4, A334).
+  # -------------------------------------------------------------------------
+  windows:
+    name: Windows — the NSIS installer
+    runs-on: windows-2025
+    needs: [gate, gate-shell, version]
+    if: needs.version.outputs.server_only != 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: What the certificate's absence costs, said before the build
+        # A334's degraded path, and it is a warning rather than a failure on purpose: an
+        # unsigned installer is a **known degraded state**, not a release failure. What would
+        # be a failure is publishing one without saying so, which is what this line prevents.
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if [ -z "${WINDOWS_CERTIFICATE:-}" ]; then
+            echo "::warning::WINDOWS_CERTIFICATE is not set: the installer will be published UNSIGNED and SmartScreen will warn on every install. The warning is per-publisher reputation and an unsigned binary never accrues any. Recorded degraded state, docs/RELEASE.md § Desktop distribution."
+          fi
+
+      - name: Build the NSIS installer
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./app/node_modules/.bin/tauri build --bundles nsis
+
+      - name: The updater archive carries its signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          for archive in src-tauri/target/release/bundle/nsis/*.nsis.zip; do
+            test -s "$archive.sig" || {
+              echo "::error::$archive has no .sig next to it (A345)"; exit 1; }
+            echo "signed: $(basename "$archive")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+
+  verify-windows:
+    name: the installer's signature, digest and timestamp
+    runs-on: ubuntu-24.04
+    needs: [windows, version]
+    if: needs.version.outputs.server_only != 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - name: osslsigncode
+        # The verification runs here rather than in the job that built the installer, for two
+        # reasons and neither is convenience. The Windows runner image does not ship
+        # osslsigncode, and the verifier **fails closed** when it cannot find a tool — a gate
+        # that passes because it inspected nothing is worse than no gate. Ubuntu packages it.
+        # And the `--windows` mode reads PE bytes, so it needs nothing from Windows: this way
+        # the verification runs in an environment that holds no certificate at all.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends osslsigncode
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: bundle
+      - name: The machine-readable gate
+        # Asserts all three facts A334 rests on: the signature verifies, the digest algorithm
+        # is SHA-256 (a SHA-1 signature verifies and is refused by SmartScreen), and a
+        # timestamp is present (without one the signature stops validating when the
+        # certificate expires).
+        run: bash scripts/verify-release-artifacts.sh --windows --dir bundle
+
+  # -------------------------------------------------------------------------
+  # Android: the direct-channel APK, signed by the operator's key (A352).
+  # -------------------------------------------------------------------------
+  android:
+    name: Android — the direct-channel APK
+    runs-on: ubuntu-24.04
+    needs: [gate, gate-shell, version]
+    if: needs.version.outputs.server_only != 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: The Android project exists
+        # Phase 14 owns `src-tauri/gen/android` (`tauri android init`, tracked in git), and
+        # the keystore properties file below belongs inside it.
+        run: |
+          if [ ! -d src-tauri/gen/android ]; then
+            echo "::error::src-tauri/gen/android is missing: run 'tauri android init' and commit the project (Phase 14), or this release cannot build an APK."
+            exit 1
+          fi
+
+      - name: The direct-APK keystore, from secrets, for this run only
+        # A352: the direct APK is signed by the operator's key, and it is **not** Play's key —
+        # Play App Signing holds its own and re-signs the Play build. Confusing the two is how
+        # an upgrade fails to install, which is why docs/RELEASE.md records which key signs
+        # which artifact. `keystore.properties` is the hook the generated Android project
+        # reads (https://v2.tauri.app/distribute/sign/android/); it is written here from
+        # secrets, never committed, and gone with the runner.
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set: the direct APK must be signed by the operator's key, not Play's (A352)."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/direct-apk.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          EOF
+          chmod 600 "$keystore" src-tauri/gen/android/keystore.properties
+
+      - name: The store build carries no purchase UI
+        # Before the shell packages anything: the policy is a compile-time config read
+        # (`config/billing_policy.toml`), not a store rule, so the same absence holds for the
+        # direct channel (A352).
+        run: |
+          TAURI_ENV_PLATFORM=android npm --prefix app run build
+          node scripts/check-no-purchase-ui.mjs
+
+      - name: Build the signed release APK
+        # `--apk` and not `--aab`: the App Bundle is Play's artifact and Play re-signs it with
+        # its own key. `--ci` skips the CLI's interactive prompts, which a runner cannot answer.
+        run: ./app/node_modules/.bin/tauri android build --apk --ci
+
+      - name: The APK carries no purchase UI either (A351, A352)
+        run: |
+          set -euo pipefail
+          apk="$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -type f | head -1)"
+          if [ -z "$apk" ]; then
+            echo "::error::no APK under src-tauri/gen/android/app/build/outputs/apk"
+            exit 1
+          fi
+          echo "checking $apk"
+          # The release-time wrapper around the same check, against the artifact rather than
+          # against a build directory: "the build output was clean" and "the artifact is
+          # clean" are different claims.
+          bash scripts/check-mobile-no-purchase.sh "$apk"
+          mkdir -p dist/release
+          cp "$apk" "dist/release/$(basename "$apk")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: dist/release/*.apk
+
+  # -------------------------------------------------------------------------
+  # The manifest (Task 5 step 3, A345).
+  # -------------------------------------------------------------------------
+  manifest:
+    name: latest.json, signed
+    runs-on: ubuntu-24.04
+    needs: [macos, windows, version]
+    if: needs.version.outputs.server_only != 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Build latest.json from the archives that were just built
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          NOTES: ${{ vars.UPDATES_NOTES }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          python3 - <<'PY'
+          import datetime, glob, json, os, sys
+
+          base = ("https://github.com/" + os.environ["GITHUB_REPOSITORY"]
+                  + "/releases/download/" + os.environ["GITHUB_REF_NAME"])
+          version = os.environ["VERSION"]
+
+
+          def entry(pattern):
+              matches = sorted(glob.glob(pattern, recursive=True))
+              if not matches:
+                  sys.exit("no artifact matches " + pattern
+                           + ": the manifest would name a file that does not exist")
+              path = matches[0]
+              if not os.path.exists(path + ".sig"):
+                  sys.exit(path + " has no .sig: an artifact the updater cannot verify")
+              with open(path + ".sig") as handle:
+                  signature = handle.read().strip()
+              return {"signature": signature, "url": base + "/" + os.path.basename(path)}
+
+
+          # One entry per {{target}}/{{arch}} pair. The macOS archive is universal, so both
+          # darwin arches name the same file — whichever architecture the installed app runs,
+          # the archive it downloads contains both (A333).
+          manifest = {
+              "version": version,
+              "notes": os.environ.get("NOTES") or ("Stvdy " + version),
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "darwin-aarch64": entry("artifacts/**/*.app.tar.gz"),
+                  "darwin-x86_64": entry("artifacts/**/*.app.tar.gz"),
+                  "windows-x86_64": entry("artifacts/**/*.nsis.zip"),
+              },
+          }
+          with open("dist/release/latest.json", "w") as handle:
+              json.dump(manifest, handle, indent=2)
+              handle.write("\n")
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Sign it with the minisign key
+        # The private key is scoped to this **step** and nothing else (A332).
+        # `scripts/verify-release-artifacts.sh` refuses to run with it in the environment, and
+        # the release job's own verification is a later step in a different job — so a
+        # job-wide secret here would be both the leak A332 forbids and a refused gate.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set: an unsigned manifest is a channel that trusts anything (A332)."
+            exit 1
+          fi
+          # `--app-version` binds the signature to the version in the trusted comment, the way
+          # the plugin's `requireSignedVersion` expects and the way the fixture in
+          # `crates/server/tests/release.rs` is signed.
+          ./app/node_modules/.bin/tauri signer sign \
+            --app-version "${{ needs.version.outputs.version }}" \
+            dist/release/latest.json
+          test -s dist/release/latest.json.sig || {
+            echo "::error::the manifest was not signed"; exit 1; }
+          echo "--- latest.json"
+          cat dist/release/latest.json
+          echo "--- latest.json.sig"
+          cat dist/release/latest.json.sig
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest
+          if-no-files-found: error
+          path: |
+            dist/release/latest.json
+            dist/release/latest.json.sig
+
+  # -------------------------------------------------------------------------
+  # Publish, and verify what was published (Task 5 step 3, A345).
+  # -------------------------------------------------------------------------
+  release:
+    name: the GitHub Release, and the round trip
+    runs-on: ubuntu-24.04
+    needs: [gate, gate-shell, version, macos, windows, verify-windows, android, manifest]
+    if: >-
+      always()
+      && needs.version.outputs.server_only != 'true'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/release
+          merge-multiple: true
+
+      - name: What is about to be published
+        run: ls -lR dist/release
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Stvdy $VERSION. The installers, the updater archives, their signatures and latest.json
+          are attached below. The updater manifest is published to the endpoint that
+          plugins.updater.endpoints names; see docs/RELEASE.md for the release process and
+          docs/OPERATIONS.md for the deploy that follows it.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            dist/release/*
+
+      - name: Publish the manifest and the APK to the static endpoint
+        # A345: the endpoint is `plugins.updater.endpoints`' host, and it is the operator's
+        # value. It is a static file host, so publication is a copy over SSH with a deploy
+        # key — and the host key is a **secret** rather than something `ssh-keyscan` learned
+        # at connect time, because a key fetched from whoever answered authenticates whoever
+        # answered, which is the one thing this channel must not do.
+        env:
+          DEPLOY_KEY: ${{ secrets.UPDATES_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.UPDATES_KNOWN_HOSTS }}
+          HOST: ${{ vars.UPDATES_HOST }}
+          USER: ${{ vars.UPDATES_USER }}
+          TARGET_DIR: ${{ vars.UPDATES_PATH }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_KEY:-}" ]; then
+            echo "::error::UPDATES_DEPLOY_KEY is not set: nothing can be published to the endpoint plugins.updater.endpoints names (A345)."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
+            dist/release/latest.json dist/release/latest.json.sig \
+            dist/release/*.apk \
+            "$USER@$HOST:$TARGET_DIR/"
+
+      - name: Verify its own output, over HTTPS, against the committed public key
+        # The round trip A345 asks for: the manifest is the one artifact whose integrity the
+        # whole channel trusts blindly, so the workflow downloads what it published and
+        # verifies it. The URLs are built from the endpoint the **config** names, with the
+        # pairs the manifest carries, so the URL verified here and the URL the app fetches
+        # cannot drift.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > urls.txt
+          import json
+
+          with open("src-tauri/tauri.conf.json") as handle:
+              template = json.load(handle)["plugins"]["updater"]["endpoints"][0]
+          with open("dist/release/latest.json") as handle:
+              manifest = json.load(handle)
+
+          for platform in manifest["platforms"]:
+              target, _, arch = platform.partition("-")
+              print(template
+                    .replace("{{target}}", target)
+                    .replace("{{arch}}", arch)
+                    .replace("{{current_version}}", manifest["version"]))
+          PY
+          cat urls.txt
+          while IFS= read -r url; do
+            echo "=== $url"
+            # Deliberately **no** `--manifest-dir`: the verifier prefers a directory over a
+            # URL, so passing one would check the local file and never fetch the published
+            # bytes — which is exactly the round trip being asserted here.
+            bash scripts/verify-release-artifacts.sh --manifest --manifest-url "$url"
+          done < urls.txt
+
+  release-server:
+    name: the GitHub Release for a server-only hotfix
+    runs-on: ubuntu-24.04
+    needs: [gate, gate-shell, version]
+    if: needs.version.outputs.server_only == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Record the release, with no client artifacts
+        # A353: clients are not recallable and an update prompt for a fix that does not touch
+        # them is noise, so a `server-v…` tag publishes no manifest and leaves the updater
+        # channel exactly as it was. The image at this tag is the artifact, and deploying it
+        # is docs/OPERATIONS.md § Deploying a new image.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Server-only hotfix for $VERSION. No client artifacts: clients are not recallable and an
+          update prompt for a fix that does not touch them is noise, so no latest.json was
+          published and the updater channel is unchanged. Deploy the image at this tag; see
+          docs/OPERATIONS.md.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md
