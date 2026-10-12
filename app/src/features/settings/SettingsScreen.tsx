@@ -386,10 +386,6 @@ export function SettingsScreen() {
       <Section title={t('settings.later.title')}>
         <ul className="card flex flex-col gap-3 p-4">
           <li className="flex flex-col gap-1">
-            <span className="text-body">{t('settings.later.calendar')}</span>
-            <span className="meta">{t('settings.later.calendarPhase')}</span>
-          </li>
-          <li className="flex flex-col gap-1">
             <span className="text-body">{t('settings.later.data')}</span>
             <span className="meta">{t('settings.later.dataPhase')}</span>
           </li>

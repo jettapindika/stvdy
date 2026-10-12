@@ -1155,8 +1155,6 @@
     },
     "later": {
       "title": "Not built yet",
-      "calendar": "Calendar connections",
-      "calendarPhase": "Google Calendar and ICS arrive in Phase 10.",
       "data": "Data export and deletion",
       "dataPhase": "Exporting and deleting your account arrive in Phase 15.",
       "byok": "Bring your own model key",
