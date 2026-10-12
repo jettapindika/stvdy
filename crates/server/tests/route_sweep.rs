@@ -221,6 +221,10 @@ fn read_only_rows() -> Vec<Row> {
             "/sync/stream",
             "an SSE hint; it reads the caller's own clock and spends nothing",
         ),
+        ro("GET", "/tasks", "reads the caller's own tasks"),
+        ro("POST", "/tasks", "creating a task spends nothing"),
+        ro("PATCH", "/tasks/{id}", "editing a task spends nothing"),
+        ro("DELETE", "/tasks/{id}", "deleting a task spends nothing"),
     ]
 }
 
@@ -308,6 +312,23 @@ fn swept_rows() -> Vec<Row> {
             "GET",
             "/cheatsheets/{id}/pdf",
             "ExportFormat{Pdf}",
+            403,
+            "plan_required",
+        ),
+        // Both are refused before the model is reached, and both are refused by the matrix
+        // rather than by a literal here: free has `quick_capture` and `task_ai_breakdown`
+        // false, so the engine's `plan_required` is what an exhausted free account meets.
+        swept(
+            "POST",
+            "/tasks/quick-capture",
+            "QuickCapture",
+            403,
+            "plan_required",
+        ),
+        swept(
+            "POST",
+            "/tasks/{id}/breakdown",
+            "TaskBreakdown",
             403,
             "plan_required",
         ),
@@ -832,6 +853,7 @@ struct Fixture {
     source_id: Uuid,
     report_id: Uuid,
     cheatsheet_id: Uuid,
+    task_id: Uuid,
     user_id: Uuid,
 }
 
@@ -860,6 +882,7 @@ impl Fixture {
         let source_id = Uuid::now_v7();
         let report_id = Uuid::now_v7();
         let cheatsheet_id = Uuid::now_v7();
+        let task_id = Uuid::now_v7();
 
         // The workspace the routes address, plus enough filler to reach the cap.
         for index in 0..workspaces {
@@ -1006,12 +1029,23 @@ impl Fixture {
         .await
         .unwrap();
 
+        // The task the break-down row addresses. Its own row is enough: the route refuses
+        // on the plan before it reads the task, which is the order a counted refusal must
+        // take.
+        sqlx::query("insert into tasks (id, user_id, title) values ($1, $2, 'Tugas')")
+            .bind(task_id)
+            .bind(user_id)
+            .execute(&harness.state.pool)
+            .await
+            .unwrap();
+
         Self {
             pool: harness.state.pool.clone(),
             workspace_id,
             source_id,
             report_id,
             cheatsheet_id,
+            task_id,
             user_id,
         }
     }
@@ -1036,6 +1070,7 @@ impl Fixture {
         let report = self.report_id.to_string();
         let cheatsheet = self.cheatsheet_id.to_string();
         let source = self.source_id.to_string();
+        let task = self.task_id.to_string();
 
         match (method, path) {
             ("POST", "/workspaces") => {
@@ -1157,6 +1192,26 @@ impl Fixture {
                     &format!("/cheatsheets/{cheatsheet}/pdf"),
                     token,
                     serde_json::Value::Null,
+                )
+                .await
+            }
+            ("POST", "/tasks/quick-capture") => {
+                json(
+                    app,
+                    "POST",
+                    "/tasks/quick-capture",
+                    token,
+                    serde_json::json!({ "text": "selesaikan tugas kripto hari Jumat" }),
+                )
+                .await
+            }
+            ("POST", "/tasks/{id}/breakdown") => {
+                json(
+                    app,
+                    "POST",
+                    &format!("/tasks/{task}/breakdown"),
+                    token,
+                    serde_json::json!({}),
                 )
                 .await
             }

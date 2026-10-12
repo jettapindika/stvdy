@@ -30,6 +30,7 @@ use crate::reports;
 use crate::sources;
 use crate::state::AppState;
 use crate::sync;
+use crate::tasks;
 use crate::workspaces;
 use crate::{admin, usage};
 
@@ -125,6 +126,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(quizzes::routes())
         .merge(reports::routes())
         .merge(cheatsheets::routes())
+        .merge(tasks::routes())
         .merge(usage::routes())
         .merge(admin::routes())
         .merge(sources::routes(sources::max_upload_bytes(

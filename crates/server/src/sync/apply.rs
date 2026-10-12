@@ -205,7 +205,12 @@ async fn run_statement<'q>(
 }
 
 /// The message for a database error the client caused, or `None` for a server fault.
-fn client_error(error: &sqlx::Error) -> Option<String> {
+///
+/// `pub(crate)` because the REST writers need the same classification: a dangling
+/// `parent_id` in a `POST /tasks` body is the body's fault and must be a 400, exactly as it
+/// is a per-mutation rejection here. Two copies of the class-22/23 test would be two
+/// answers to "is this the payload's fault".
+pub(crate) fn client_error(error: &sqlx::Error) -> Option<String> {
     let database = error.as_database_error()?;
     let code = database.code()?;
     // Class 22 is a data exception, class 23 an integrity constraint: a missing required
