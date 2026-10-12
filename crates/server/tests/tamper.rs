@@ -986,6 +986,185 @@ async fn another_users_rows_are_not_readable(pool: PgPool) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Exceed the provider-cost ceiling
+// ---------------------------------------------------------------------------------------
+
+/// The plan's provider-cost ceiling stops the spend, through the real route.
+///
+/// The ceiling is enforced inside the spend's own transaction (`credits::spend_in`), so
+/// this drives the HTTP path rather than the pure engine: an account whose month has
+/// already cost the plan's whole ceiling gets `422 limit_reached` naming the plan whose
+/// ceiling is higher, and **nothing** is written — no ledger row and no second usage row.
+///
+/// A bare 422 would not distinguish "the ceiling stopped it" from "the request was
+/// malformed", which is why the status, the code and `min_plan` are all asserted. The
+/// ledger and usage assertions are the other half: a refusal that still charged would be
+/// a refusal an attacker could not care less about.
+///
+/// `crates/server/tests/credits.rs` owns the deeper suite (the ceiling's exact comparison,
+/// the BYOK exclusion, the higher plan's ceiling); this case exists because §5's row needs
+/// a case in this file, and it is the one an HTTP client can reach.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_account_at_its_provider_cost_ceiling_is_refused(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    // The chat route resolves its provider *before* the spend (a server with no model
+    // configured could never succeed on retry, so charging for it would take a credit for
+    // nothing). A stub is therefore what gets this request as far as the ceiling check —
+    // and the stub is never called, because the refusal happens first.
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec!["An answer.".to_string()])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "ceiling@example.test").await;
+    let user_id = user_id_of(&harness, "ceiling@example.test").await;
+    let (workspace_id, _) =
+        common::workspace_with_text(&app, &harness, &token, "Ceiling", "Notes", "the material")
+            .await;
+
+    // The ceiling, read from the loaded matrix rather than written as a literal: a
+    // retuned `config/plans.toml` must move this case with it.
+    let ceiling = *harness
+        .state
+        .config
+        .plans
+        .provider_cost_ceiling_usd
+        .get(&PlanId::Free)
+        .expect("every plan has a ceiling (the config validates it)");
+    sqlx::query(
+        "insert into usage_events (user_id, action, credits, provider_cost_usd)
+         values ($1, 'chat_message', 0, $2)",
+    )
+    .bind(user_id)
+    .bind(ceiling)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let balance_before = balance_of(&harness, user_id).await;
+    let events_before = usage_events_of(&harness, user_id).await;
+
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "one more" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "limit_reached", "{body}");
+    assert_eq!(
+        body["min_plan"], "pro",
+        "the refusal must name the plan whose ceiling is higher: {body}"
+    );
+    // Dollars are not plan-matrix numbers: a client that rendered these would read "the
+    // limit is 0.5 and you have 0.5" (A148).
+    assert!(body["limit"].is_null(), "{body}");
+    assert!(body["used"].is_null(), "{body}");
+
+    assert_eq!(
+        balance_of(&harness, user_id).await,
+        balance_before,
+        "a spend refused by the ceiling must not write a ledger row"
+    );
+    assert_eq!(
+        usage_events_of(&harness, user_id).await,
+        events_before,
+        "a spend refused by the ceiling must not record usage"
+    );
+}
+
+/// The account's credit balance, as `sum(delta)` over the ledger (A9).
+async fn balance_of(harness: &TestState, user_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap()
+}
+
+/// How many `usage_events` rows the account has, so "nothing was recorded" is countable.
+async fn usage_events_of(harness: &TestState, user_id: Uuid) -> i64 {
+    sqlx::query_scalar("select count(*)::bigint from usage_events where user_id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap()
+}
+
+// ---------------------------------------------------------------------------------------
+// Farm signups past the per-IP limit
+// ---------------------------------------------------------------------------------------
+
+/// A signup farm from one address is refused, and the address is the **connection's**.
+///
+/// The limiter is database-backed (A154), so this drives real signups: the first
+/// `SIGNUP_PER_IP_PER_DAY` succeed and the next is `429 rate_limited`. Every request
+/// carries `x-forwarded-for` naming a different address, and the refusal proves the header
+/// bought nothing — the peer address comes from `ConnectInfo`, which is what a listener
+/// inserts and what a client cannot forge. That is the tamper half: a modified client's
+/// cheapest move against a per-IP limit is to claim a second IP.
+///
+/// `crates/server/tests/abuse.rs::the_per_ip_signup_limit_trips_and_logs` owns the deeper
+/// suite (the four fields of the log line, the database count, the public-domain
+/// exemption); this case exists because §5's row needs a case in this file.
+#[sqlx::test(migrations = "../../migrations")]
+async fn signing_up_past_the_per_ip_limit_is_refused(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let ip = "203.0.113.7";
+    let limit = stvdy_server::ratelimit::SIGNUP_PER_IP_PER_DAY;
+    for index in 0..limit {
+        let (status, body) = signup_from(&app, ip, &format!("tamper{index}@ugm.ac.id")).await;
+        assert_eq!(status, StatusCode::CREATED, "attempt {index}: {body}");
+    }
+
+    let (status, refused) = signup_from(&app, ip, "one-too-many@ugm.ac.id").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{refused}");
+    assert_eq!(refused["code"], "rate_limited", "{refused}");
+}
+
+/// A signup carrying an explicit peer address, and a **false** `x-forwarded-for`.
+///
+/// The limiter reads the address from the connection (`ConnectInfo`), never from a
+/// header, so supplying one the way a listener would is the only way to test a second IP
+/// — and setting the header to a third address is the assertion that it is ignored.
+async fn signup_from(app: &axum::Router, ip: &str, email: &str) -> (StatusCode, serde_json::Value) {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "email": email,
+        "password": "correct horse battery",
+        "device": { "name": "Laptop", "platform": "macos" }
+    }))
+    .expect("serialize");
+    let mut request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/auth/signup")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", "198.51.100.200")
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    let address = ip.parse::<std::net::IpAddr>().expect("a peer address");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+            address, 4242,
+        )));
+
+    let response = tower::ServiceExt::oneshot(app.clone(), request)
+        .await
+        .expect("response");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, value)
+}
+
+// ---------------------------------------------------------------------------------------
 // The document is the input
 // ---------------------------------------------------------------------------------------
 
@@ -1040,6 +1219,14 @@ const COVERED: &[(&str, &str)] = &[
         "Read another user's rows",
         "another_users_rows_are_not_readable",
     ),
+    (
+        "Exceed the provider-cost ceiling",
+        "an_account_at_its_provider_cost_ceiling_is_refused",
+    ),
+    (
+        "Farm signups past the per-IP limit",
+        "signing_up_past_the_per_ip_limit_is_refused",
+    ),
 ];
 
 /// The `Attempt` cells of every §5 row whose outcome begins "**Fails.**".
@@ -1079,8 +1266,8 @@ fn every_section_5_fails_row_has_a_case() {
     let rows = fails_rows(&document);
     assert_eq!(
         rows.len(),
-        11,
-        "§5 must carry 11 \"Fails.\" rows; found {rows:?}"
+        13,
+        "§5 must carry 13 \"Fails.\" rows; found {rows:?}"
     );
 
     for row in &rows {
