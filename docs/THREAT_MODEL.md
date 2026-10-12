@@ -36,6 +36,7 @@ not exist or "fix" an accepted risk by adding client-side checks that provide no
 | Credit balance and plan entitlement | Free access to paid features | `credit_ledger`, `users.plan_id`, `subscriptions` (server) |
 | Other users' data | Privacy harm, plagiarism | Postgres, scoped per `user_id` |
 | Google Calendar refresh tokens | Full calendar read/write | Encrypted in `calendar_connections` (server) |
+| ICS feed tokens | Read the user's own calendar feed; a **capability URL** | `users.ics_feed_token` (server, **plaintext** — the settings screen must be able to show the link again, A242) |
 | BYOK keys (Power) | The user's own provider key | Encrypted (`aes-gcm`) in `user_api_keys` (server) |
 | Payment integrity | Getting a plan without paying | `payments` + gateway webhook (server) |
 | Content (uploaded sources, chunks, embeddings) | IP, or another user's corpus | Object storage + `chunks` (server); **never synced to clients** |
@@ -115,6 +116,7 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 | Enable checkout on iOS/Android | **Fails.** Server refuses `platform in (ios, android)` | A24 |
 | Read another user's rows | **Fails.** Every query scoped by `user_id`; pull is filtered; signed URLs are short-lived and scoped | `docs/SPEC.md` § AUTH AND SECURITY; Phase 8 test |
 | Exceed the provider-cost ceiling | **Fails.** The next spend → `422 limit_reached`, naming the plan whose ceiling is higher; the ledger and `usage_events` are untouched | `credits::spend_in` sums the month's `provider_cost_usd` inside the spend's own transaction, `byok = false` only (A148, A155, A156) |
+| Reach a private address through an ICS URL | **Fails.** The next fetch → `Refused`, at save time as a 400 `validation` and at fetch time by the guard | `fetch_guarded_text` shares `parse_target`/`resolve_public` with ingestion and re-checks every redirect hop (A233); the refusal is asserted against `fetch_guarded_text` itself in `crates/server/tests/ssrf.rs`, because a route test cannot point the real guard at a local stub |
 | Farm signups past the per-IP limit | **Fails.** The next attempt → `429 rate_limited`, logged with the IP, the domain, the count and the rule that tripped | `signup_attempts` is database-backed, so a restart is not a reset (A154, A43) |
 | Farm free accounts | **Slowed, not eliminated.** Verification + signup limits + per-account cap bound the cost | A43 |
 | Fabricate `study_sessions` / `quiz_attempts` / `flashcard_reviews` | **Succeeds.** Accepted — see R1 | — |
@@ -165,6 +167,16 @@ at an older, genuinely signed release therefore fails rather than downgrading th
 
 Each is a deliberate decision with a stated revisit trigger. Do not close one without updating this
 section and the corresponding assumption row.
+
+**R7 — the feed token is a capability URL.** `users.ics_feed_token` is stored in plaintext because the
+spec's settings screen requires the link to be shown again at any time (A242), and a hash — the rule for
+refresh tokens and login tickets (A53) — cannot be shown again. So a token in a share sheet, a screenshot,
+a referrer or a browser preview is a token someone else has, and a database leak hands over every feed.
+*Bounded because:* the feed is read-only and carries **only** the user's own app-owned events — never
+sources, chunks, chat, or account data (A241) — it is `Cache-Control: no-store` and `X-Robots-Tag: noindex`
+so a proxy and a crawler both refuse it, it is revoked and replaced in one click with the old token
+asserted dead, and the route logs the resolved `user_id` and the byte length and never the token (A243).
+*Revisit if:* the feed ever carries anything beyond the user's own app-owned events.
 
 **R1 — Fabricated append-only rows.** `flashcard_reviews`, `quiz_attempts` and `study_sessions` accept
 client `upsert` by design (they are the offline-write scope, `docs/SPEC.md` § PLATFORMS AND ARCHITECTURE, "Offline scope"). A modified client can
@@ -359,6 +371,7 @@ The design never depends on this column. It is recorded so that no phase mistake
 | Both generative actions are refused on a plan that does not grant them | 9 | `crates/server/tests/route_sweep.rs::every_swept_route_refuses_an_exhausted_account` drives `POST /tasks/quick-capture` and `POST /tasks/{id}/breakdown` through the real router asserting 403 `plan_required`, and `crates/server/tests/tasks.rs::quick_capture_is_refused_on_a_plan_that_does_not_grant_it` is the direct half |
 | The two generative routes write no row | 9 | `tasks.rs::a_capture_returns_a_draft_and_writes_no_task`, `a_breakdown_returns_a_proposal_and_writes_no_subtasks`, `accepting_a_proposal_creates_ordered_subtasks` — the task count is read before and after, and the accepted subtasks come back in the proposed order |
 | Every new route is classified, and no handler reads a plan limit | 9 | `route_sweep.rs::every_registered_route_is_classified` (both directions: an unclassified route **and** a stale row), `no_file_outside_the_entitlements_layer_reads_a_plan_limit` |
+| ICS feed cannot be brute-forced or indexed | 10 | `crates/server/tests/calendar.rs` — the feed is `text/calendar`, `no-store` and `noindex`, the route is in the 30/min/IP auth bucket, and a regenerated token 404s the old one while the new one serves |
 | A task deleted offline tombstones its subtree, and a restore brings back only what the cascade took | 9 | `offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`, `restoring_a_parent_restores_only_the_children_its_delete_tombstoned` (A197) |
 
 An unverified claim in this document is a claim the repo does not have. When a phase closes a row of
