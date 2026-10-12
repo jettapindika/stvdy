@@ -293,6 +293,11 @@ fn parents_of(entity: Entity, data: Option<&Value>) -> Vec<(Entity, Uuid)> {
         Entity::Event => vec![
             (Entity::Workspace, named("workspace_id")),
             (Entity::Task, named("task_id")),
+            // A263: a planned block names the goal it was planned for. This arm and the
+            // `Event` arm of `src-tauri/src/cache/schema.rs::parents` are a **pair**: edit
+            // one and you must edit the other, or the engine's double and the cache disagree
+            // about whether an event can defer on a goal.
+            (Entity::Goal, named("goal_id")),
         ],
         Entity::StudySession => vec![
             (Entity::Workspace, named("workspace_id")),

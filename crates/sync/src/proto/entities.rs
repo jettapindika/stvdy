@@ -295,6 +295,11 @@ impl Entity {
                 "connection_id",
                 "source",
                 "task_id",
+                // A263: a planned block belongs to the goal it was planned for. Absent from
+                // this list, a pull never ships it and the workload meter and the timeline
+                // group by a field the device does not hold — the same silent-drop failure
+                // `position` had (A196).
+                "goal_id",
                 "created_at",
                 "updated_at",
                 "deleted_at",

@@ -125,6 +125,11 @@ pub fn parents(entity: Entity) -> &'static [(&'static str, Entity, ParentAction)
         Event => &[
             ("workspace_id", Workspace, SetNull),
             ("task_id", Task, SetNull),
+            // A263: a planned block names the goal it was planned for. This entry and the
+            // `Entity::Event` arm of `stvdy_sync::client::testing::parents` are a **pair**:
+            // edit one and you must edit the other, or the cache and the engine's double
+            // disagree about whether an event can defer on a goal.
+            ("goal_id", Goal, SetNull),
         ],
         StudySession => &[
             ("workspace_id", Workspace, SetNull),
