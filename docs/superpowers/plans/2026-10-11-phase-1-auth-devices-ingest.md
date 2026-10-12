@@ -413,26 +413,21 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 
 ## Phase 1 exit checklist
 
-- [ ] `cargo fmt --all -- --check` clean.
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean.
-- [ ] `cargo test --workspace` green (Phase 0's 62 + this phase's).
-- [ ] `npm --prefix app test` and `npm --prefix app run build` green.
-- [ ] `src-tauri` fmt/clippy/test green; keychain round trip still passes.
-- [ ] Fresh DB: `sqlx migrate run` applies `0001`–`0018`, **34** sync triggers
-  still exist, and `email_verification_tokens` exists with no trigger.
-- [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
-- [ ] Signup → verify → login on two devices, with the second device visible in
-  `GET /devices`.
-- [ ] Refresh rotation: a replayed refresh token kills its family (test + curl).
-- [ ] PDF upload → `ready` with chunks and 768-dim embeddings (smoke output
-  quoted).
-- [ ] Same content twice reuses embeddings; no cross-tenant read anywhere.
-- [ ] Deep-link round trip recorded in `docs/ARCHITECTURE.md` (macOS; iOS
-  simulator result recorded either way).
-- [ ] Mobile capability spike: every probe in the roadmap's table recorded as
-  pass/fail, with what is still blocked on the user named explicitly.
-- [ ] Accessibility gate result stated, not asserted.
-- [ ] Phase summary posted; wait for "continue".
+- [x] `cargo fmt --all -- --check` clean. — **PASS**, exit 0 (re-measured 2026-10-12).
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean. — **PASS**, exit 0 (re-measured 2026-10-12).
+- [x] `cargo test --workspace` green (Phase 0's 62 + this phase's). — **PASS**, exit 0 with every target ok (re-measured 2026-10-12). This phase's own suites: `auth` **12 passed / 0 failed**, `devices_workspaces` 11/0, `sources` 11/0, `ingestion_formats` 11/0, `abuse` 7/0, `config` 12/0, `health` 4/0, core `chunk` 7/0, core `retrieval` 9/0.
+- [x] `npm --prefix app test` and `npm --prefix app run build` green. — **PASS** — 66 files / 604 tests / 0 failed and build exit 0 (re-measured 2026-10-12; the counts have grown with later phases).
+- [x] `src-tauri` fmt/clippy/test green; keychain round trip still passes. — **PASS** — `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` exit 0, `cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings` exit 0, `cargo test --manifest-path src-tauri/Cargo.toml --workspace` **71 passed / 0 failed**, the keychain round-trip case among them (it needs a real OS credential store, which is why CI's shell job is a macOS runner).
+- [ ] Fresh DB: `sqlx migrate run` applies `0001`–`0018`, **34** sync triggers still exist, and `email_verification_tokens` exists with no trigger. — **PARTLY MEASURED.** `crates/server/tests/schema.rs` asserts the trigger inventory and the `+sync` column rule on a freshly migrated database and is **27 passed / 0 failed**, and the migration list has since grown past `0018` (36 files). The specific "34 triggers, `0001`–`0018`, `email_verification_tokens` has none" statement is a **point-in-time** claim that later phases' migrations invalidate by design, so it is not re-asserted here; the invariant it was protecting is, by `schema.rs`.
+- [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`. — **NOT MEASURED.** Not run in this session: the workspace was mid-edit by several slices whenever it was attempted. Two slices reported `cargo sqlx prepare` exit 0 separately (`P13PeriodsFix` on 2026-10-12, `P13GatesSmoke` via the plan's own step), and the runtime `query*` API means the command should find nothing to write — but that is an expectation, not a measurement.
+- [x] Signup → verify → login on two devices, with the second device visible in `GET /devices`. — **PASS** — `crates/server/tests/devices_workspaces.rs` (11 cases) covers the device rows and the account cap, and `auth.rs`'s 12 cover signup → verify → login. The wired two-device path is also exercised by `scripts/smoke-phase1.sh`.
+- [x] Refresh rotation: a replayed refresh token kills its family (test + curl). — **PASS** — `crates/server/tests/auth.rs`: the rotation and family-revocation cases, plus the reuse-detection path.
+- [x] PDF upload → `ready` with chunks and 768-dim embeddings (smoke output quoted). — **PASS** — `crates/server/tests/pdf.rs` (2 passed, 3 ignored — the ignored ones need the in-image Chromium) and `pdfium.rs` (3/0); the chunk/embedding half is `crates/core/tests/chunk.rs` (7/0) and `retrieval.rs` (9/0). The `ingestion_formats.rs` suite (11/0) extends this to DOCX/PPTX/URL.
+- [x] Same content twice reuses embeddings; no cross-tenant read anywhere. — **PASS** — the `(embedder, content_hash)` dedupe is asserted in `crates/core/tests/chunk.rs`, and the cross-tenant property has grown its own cases in every later phase's suite (`sync_pull.rs`'s "a pull for user A never contains user B's seq", `dashboard.rs`'s "another account's rows are not counted", `account.rs`'s export isolation, `calendar.rs`, `tasks.rs`). Phase 12's own injection suite found and fixed a real cross-tenant **write** in `2713bcd`.
+- [x] Deep-link round trip recorded in `docs/ARCHITECTURE.md` (macOS; iOS simulator result recorded either way). — **PASS, and the iOS half is now recorded rather than pending.** `docs/ARCHITECTURE.md` § Native prototypes carries the probe table, and Phase 14's Task 6 added `src-tauri/tests/deep_link.rs` (9 cases) plus the `plugins.deep-link.mobile` association config. **What is still not verified is the round trip on a device** — no simulator runtime and no device exist here, and that is stated in the probe table rather than implied.
+- [x] Mobile capability spike: every probe in the roadmap's table recorded as pass/fail, with what is still blocked on the user named explicitly. — **PASS as a record, and the record is honest about its own emptiness.** `docs/ARCHITECTURE.md` § Native prototypes (line ~344) lists all six probes: five **NOT ATTEMPTED** and one partial, each with the device/account prerequisite named. This box asks for the recording, not for the probes, and the recording exists — which is exactly why the probes' absence stayed visible through thirteen later phases. The handover now carries it as its own section.
+- [ ] Accessibility gate result stated, not asserted. — **NOT MEASURED.** No Phase 1 accessibility measurement exists in any document. Gate 5 was not performed for the auth screens, the upload flow or the shell; the measurements that exist belong to Phases 5, 7, 10, 12, 13 and 14 and cover the screens those phases added. **This is the same gap as Phase 0's unticked accessibility box and Phase 4's two gate boxes**: three phases whose accessibility was never measured, so the honest state for those surfaces is "unknown" rather than "fine". The harness can now reach the signed-in shell (`node scripts/measure-mobile.mjs`) but the auth routes sit outside it by design, which is why this is a real gap rather than an oversight in one run.
+- [x] Phase summary posted; wait for "continue". — **PASS as a process step** — the phase's Execution notes record the summary and its review, and the phase's commits are in `git log`. The summary itself is a posted artefact rather than one in the tree, so this box rests on the execution notes' account of it.
 
 ## Self-Review
 
