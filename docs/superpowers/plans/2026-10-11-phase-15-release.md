@@ -905,14 +905,49 @@ in case" is a hole that survives review:
 loading unsigned plugins, and the shell loads none. If a future plugin needs it, that is
 a decision with a reason, not a default.
 
-- [ ] **Step 2: The notarization script**
-
-*(Not ticked: `scripts/notarize-macos.sh` does not exist in the tree — the one artefact this step names. `.github/workflows/release.yml`'s `macos` job asserts it is present and fails with that sentence rather than signing an app it cannot staple.)*
+- [x] **Step 2: The notarization script**
 
 `scripts/notarize-macos.sh` takes the `.dmg` path, submits it with `notarytool submit
 --wait`, and **staples the ticket to both the `.dmg` and the `.app` inside it** before
 re-packing. Two details that are easy to get wrong and are the reason this is a script
 rather than three workflow lines:
+
+**Measured 2026-10-12.** `bash -n scripts/notarize-macos.sh` is clean and the file is
+executable. Every branch reachable without Apple was exercised:
+
+```
+$ bash scripts/notarize-macos.sh
+notarize-macos: a .dmg path is required
+run with --help for the usage                                              # exit 2
+$ bash scripts/notarize-macos.sh --frobnicate x.dmg
+notarize-macos: unknown argument --frobnicate                             # exit 2
+$ bash scripts/notarize-macos.sh /nonexistent/Stvdy.dmg
+notarize-macos: refusing to notarize without credentials                  # exit 2, names both shapes
+$ APPLE_ID=a bash scripts/notarize-macos.sh /tmp/x.dmg
+notarize-macos: refusing to run: the Apple ID credential shape is incomplete:
+  APPLE_PASSWORD APPLE_TEAM_ID is not set                                 # exit 2
+$ TAURI_SIGNING_PRIVATE_KEY=x bash scripts/notarize-macos.sh /tmp/x.dmg
+notarize-macos: refusing to run with the updater signing key in the environment   # exit 2 (A332)
+$ APPLE_ID=a APPLE_PASSWORD=b APPLE_TEAM_ID=c bash scripts/notarize-macos.sh /nonexistent/Stvdy.dmg
+notarize-macos: no such file: /nonexistent/Stvdy.dmg                      # exit 2
+$ printf x > /tmp/fake.dmg; APPLE_ID=a APPLE_PASSWORD=b APPLE_TEAM_ID=c bash scripts/notarize-macos.sh /tmp/fake.dmg
+FAIL could not mount /tmp/fake.dmg (is it a disk image?)                  # exit 1
+```
+
+The control flow was then exercised against a real (tiny, locally built) `.dmg` with a
+**stubbed `xcrun`** standing in for `notarytool` and `stapler`, because no Apple service is
+reachable from this machine and none was contacted. With `status: Accepted` it mounts,
+extracts the app, submits it, staples the app and the app beside the dmg, re-packs the dmg,
+submits and staples the dmg, and exits 0. With `status: Invalid` it prints `FAIL the notary
+did not accept the .app (status: Invalid)`, prints the submission log id, and exits 1
+**before** re-packing. The app staple precedes the rebuild on purpose: stapling the app
+changes the dmg's bytes, so the dmg built around the stapled app is a different file and
+gets its own submission and staple.
+
+**What is not measured, and why.** The real `notarytool`/`stapler` round trip is not: there
+is no Apple Developer ID certificate, no notary credential and no signed `.dmg` on this
+machine, and Apple's notary service is unreachable from here. The submit-and-staple path is
+written from the documented contract and is **unverified against Apple**.
 
 - `--wait` returns exit 0 for a submission that was *rejected*; the script parses
   `status: Accepted` out of the JSON output and fails otherwise, printing the log id.
@@ -1858,9 +1893,10 @@ node scripts/check-no-cdn.mjs
       **NOT MEASURED** — no universal build was produced and no notarization was submitted:
       the tree carries one valid identity, `Apple Development: jettapindika@gmail.com
       (3A2BQR598M)` (`security find-identity -v -p codesigning`), which is not a Developer ID
-      Application certificate, and there is no `~/.appstoreconnect` notarytool profile. The
-      runner's `scripts/notarize-macos.sh` that `release.yml`'s `macos` job calls is absent
-      (Phase 15 Task 3 step 2), and the job exits before `codesign` with that sentence.
+      Application certificate, and there is no `~/.appstoreconnect` notarytool profile.
+      `scripts/notarize-macos.sh` now exists (Phase 15 Task 3 step 2) and its argument and
+      refusal paths are measured, but its submit-and-staple path is unverified against
+      Apple, so no notarization was submitted here.
 - [ ] The NSIS installer is signed, SHA-256, and timestamped, and `osslsigncode verify`
       says so.
       **NOT MEASURED** — no NSIS installer was built or signed here: `tauri build` for
@@ -1961,7 +1997,7 @@ node scripts/check-no-cdn.mjs
 | Assets | `node scripts/check-no-cdn.mjs` | **PASS** — `no third-party loads in 3 shipped file(s)`, exit 0 |
 | Image | `docker build -t stvdy-server:ci .` + `bash scripts/release-image.sh` | **NOT MEASURED** — no image was built: no Docker daemon on this machine, and the `image` job's own run died mid-build. `scripts/release-image.sh` exists and is what would compare the running container's `chromium --version` against the Dockerfile's `ARG CHROMIUM_VERSION` |
 | PDF in the image | the `image` job's in-container `--test pdf -- --ignored` | **NOT MEASURED** — it runs inside the image, and there is no image. The acceptance test is `crates/server/tests/pdf.rs`; `scripts/release-image.sh:139` is the line that runs it in-container (`./deps/<pdf test bin> --ignored --nocapture`) |
-| Release artifacts | `bash scripts/verify-release-artifacts.sh --all <dir>` | **NOT MEASURED** — no release artifacts exist to verify (no macOS build: `scripts/notarize-macos.sh`, which `release.yml`'s `macos` job requires, is absent). Its refusal half **is** verified by reading the script: exit 2 before any check when `TAURI_SIGNING_PRIVATE_KEY` is set (A332) |
+| Release artifacts | `bash scripts/verify-release-artifacts.sh --all <dir>` | **NOT MEASURED** — no release artifacts exist to verify (no macOS build: `scripts/notarize-macos.sh` now exists, but there is no certificate, no notary credential and no notary service here). Its refusal half **is** verified by reading the script: exit 2 before any check when `TAURI_SIGNING_PRIVATE_KEY` is set (A332) |
 | Mobile policy | `bash scripts/check-mobile-no-purchase.sh <bundle>` | **NOT MEASURED** — run against the only bundle built here (`app/dist`), it fails by design: the tree is stamped `stvdy-build-target="full"`, the web/desktop build, and the check refuses that identity plus six `/billing/checkout` hits. **The empty-directory half is verified**: `node scripts/check-no-purchase-ui.mjs` against an empty `app/dist` answers `no shipped files were inspected — an empty build proves nothing about purchase UI`, exit 1. A store build (`TAURI_ENV_PLATFORM=ios npm --prefix app run build`) would be needed for the pass |
 | Roadmap gate 5 | the Settings → Updates panel, measured in a browser, recorded in `docs/ARCHITECTURE.md` | **NOT MEASURED** — not done: `docs/ARCHITECTURE.md`'s accessibility-gate section records no Phase 15 walk (`grep -i 'updates panel' docs/ARCHITECTURE.md` is empty), and no browser measurement of the panel was run here |
 | Roadmap gate 6 | **no UI change** (two i18n strings; the parity test covers them) | n/a |
