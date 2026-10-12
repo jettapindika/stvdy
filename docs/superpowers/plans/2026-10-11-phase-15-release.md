@@ -1989,14 +1989,19 @@ node scripts/check-no-cdn.mjs
       change is `31900fb`, and its exempt/read-only/swept sets hold nothing this phase added
       — the `exempt("GET", "/assets/{*path}")` row is Phase 10's `070ac89`. The item's "and
       the route sweep" half is not met.
-- [ ] The full quality gate is green.
-      **NOT MEASURED** — `cargo test --workspace` cannot be quoted: the tree is mid-edit by
-      other slices, `cargo clippy --workspace --all-targets -- -D warnings` is **red** with
-      `crates/server/src/account.rs:819` (`expect_used`, an uncommitted peer file), and
-      `cargo fmt --all -- --check` reports diffs in peer files (`crates/server/src/account.rs`,
-      `crates/server/src/calendar/google.rs`, `crates/server/tests/calendar.rs`, …). The
-      `src-tauri` half is green: `cargo clippy --manifest-path src-tauri/Cargo.toml
-      --all-targets -- -D warnings` finished clean, exit 0.
+- [x] The full quality gate is green.
+      **PASS, measured 2026-10-12 — the first green run of this gate in the project's history.**
+      `cargo fmt --all -- --check` clean, exit 0. `cargo clippy --workspace --all-targets -- -D
+      warnings` clean, exit 0. `cargo test --workspace --no-fail-fast` **exit 0**, every target
+      ok. `cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D
+      warnings` clean, exit 0, and `cargo test --manifest-path src-tauri/Cargo.toml --workspace`
+      **71 passed / 0 failed** — with `--workspace` because `src-tauri/plugins/mobile` is a
+      workspace member that the trio was silently skipping (`a5f9463`). `cargo sqlx prepare
+      --workspace --check` exit 0 with `SQLX_OFFLINE=true`. `npm --prefix app test` 66 files /
+      604 tests / 0 failed; `npm --prefix app run build` exit 0; `node scripts/check-no-cdn.mjs`
+      exit 0. `just check-shell` exit 0 end to end. The earlier **NOT MEASURED** was true when
+      written — three peer files were mid-edit and one failed `expect_used` — and every one of
+      those was fixed by its owner.
 
 ### Exit checklist table (gate | command | result)
 
