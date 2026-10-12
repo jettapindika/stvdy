@@ -379,6 +379,14 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     The walk is **phone-width by default** — `VIEWPORT_WIDTH`/`VIEWPORT_HEIGHT`/
     `VIEWPORT_DPR`/`SCALES`/`OUTPUT` override it so gate 5's desktop leg uses this
     harness rather than a second copy of it.
+    **The class is not limited to text-scale inflation, and a walk that measured only
+    at 200% would have missed the most valuable defect this series found.** The
+    dashboard's overflow measured `423 > 390` **at 100% text** — the first defect in
+    the whole series visible at normal size, and a different mechanism from the
+    rem-doubling one: a `truncate`'s `white-space: nowrap` min-content propagating up
+    through a flex column until an *ancestor* reports the overflow, where the element
+    that is too wide reports no overflow of its own. Both scales are therefore
+    measured, and both are part of the pass condition.
 15. **A324 — The adaptive UI is width-based, and Phase 14 verifies it rather than
     introducing a second convention.** `useFormFactor` (768/1024px) is the only
     form-factor source. Phase 14 adds a `phone`/`tablet` render test and the measured
