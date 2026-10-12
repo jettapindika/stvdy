@@ -175,7 +175,7 @@ below name it rather than repeating it, so the two cannot drift.
 | 2 | macOS signed + notarized + stapled | **code** | `scripts/verify-release-artifacts.sh --macos` |
 | 3 | Windows installer signed | **code** | `scripts/verify-release-artifacts.sh --windows` |
 | 4 | Updater manifest signed and published | **code** | `scripts/verify-release-artifacts.sh --manifest` |
-| 5 | Image built and the PDF test passes inside it | **code** | `scripts/verify-release-artifacts.sh --all` + the `image` job |
+| 5 | Image built and the PDF test passes inside it | **code** | `scripts/release-image.sh` (builds, boots against Postgres, runs the PDF acceptance test inside the container, compares the running Chromium to the pin) + the `image` job in `ci.yml`. `verify-release-artifacts.sh --all` is **not** this row: `--all` is version + macos + windows + manifest |
 | 6 | Store checklists complete | **code** | § Store submission checklists above |
 | 7 | Mobile bundle has no purchase UI | **code** | `scripts/check-mobile-no-purchase.sh` (exit 0, with the file count in its output) |
 | 8 | EULA/privacy reviewed and published | **user** | `docs/EULA.md` is a marked draft; legal review, `HANDOVER.md` B2 |
