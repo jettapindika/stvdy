@@ -22,16 +22,15 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce};
-use base64::Engine;
-use chrono::Utc;
-use rand::Rng;
 use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::oauth_state::{
+    Purpose, StatePayload, decrypt_state, encrypt_state, hash, pkce_pair, random_token,
+    state_expiry,
+};
 use crate::auth::{extract::AuthUser, tokens};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -41,8 +40,6 @@ const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_URI: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUERS: &[&str] = &["https://accounts.google.com", "accounts.google.com"];
 
-/// How long a `state` (and therefore a PKCE verifier) stays valid.
-const STATE_TTL: Duration = Duration::from_secs(600);
 /// How long an issued login ticket stays valid. Short: the app exchanges it
 /// immediately on the deep link.
 const TICKET_TTL_MINUTES: i64 = 5;
@@ -51,97 +48,28 @@ const TICKET_TTL_MINUTES: i64 = 5;
 /// refresh-on-miss path below covers.
 const JWKS_TTL: Duration = Duration::from_secs(3600);
 
-/// What travels in `state`. Everything here is sensitive: the verifier is a
-/// credential and the nonce is what binds the `id_token` to this request.
-#[derive(Debug, Serialize, Deserialize)]
-struct StatePayload {
-    verifier: String,
-    nonce: String,
-    exp: i64,
-    /// The device the app declared, carried through the browser round trip so
-    /// the callback can create it.
-    device_name: String,
-    device_platform: String,
-    app_version: Option<String>,
-}
-
-fn cipher(state: &AppState) -> AppResult<Aes256Gcm> {
-    let key = hex::decode(&state.config.encryption_key_hex)
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("ENCRYPTION_KEY_HEX: {error}")))?;
-    Aes256Gcm::new_from_slice(&key)
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("encryption key length: {error}")))
-}
-
-fn encrypt_state(state: &AppState, payload: &StatePayload) -> AppResult<String> {
-    let plaintext = serde_json::to_vec(payload)
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("state payload: {error}")))?;
-    let mut nonce_bytes = [0u8; 12];
-    rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from(nonce_bytes);
-
-    let ciphertext = cipher(state)?
-        .encrypt(&nonce, plaintext.as_ref())
-        .map_err(|_| AppError::Internal(anyhow::anyhow!("encrypting the OAuth state")))?;
-
-    let mut combined = nonce_bytes.to_vec();
-    combined.extend_from_slice(&ciphertext);
-    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(combined))
-}
-
-fn decrypt_state(state: &AppState, encoded: &str) -> AppResult<StatePayload> {
-    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(encoded)
-        .map_err(|_| AppError::Validation("the OAuth state is not valid".to_string()))?;
-    if raw.len() < 13 {
-        return Err(AppError::Validation(
-            "the OAuth state is not valid".to_string(),
-        ));
+/// The `state` codec, the PKCE pair and the hash live in [`super::oauth_state`] (A235): the
+/// calendar consent flow needs the same four things, and a second AES-GCM `state` codec is a
+/// second place to get the nonce handling wrong. What stays here is the *payload* this flow
+/// puts in it.
+fn state_payload(query: &StartQuery, verifier: String, nonce: String) -> StatePayload {
+    StatePayload {
+        purpose: Purpose::Login,
+        verifier,
+        nonce,
+        exp: state_expiry(),
+        // A login has no account yet: resolving one is what the callback does.
+        user_id: None,
+        device_name: query
+            .device_name
+            .clone()
+            .unwrap_or_else(|| "Google sign-in".to_string()),
+        device_platform: query
+            .device_platform
+            .clone()
+            .unwrap_or_else(|| "web".to_string()),
+        app_version: query.app_version.clone(),
     }
-    let (nonce_bytes, ciphertext) = raw.split_at(12);
-    let nonce: [u8; 12] = nonce_bytes
-        .try_into()
-        .map_err(|_| AppError::Validation("the OAuth state is not valid".to_string()))?;
-    let nonce = Nonce::from(nonce);
-
-    let plaintext = cipher(state)?
-        .decrypt(&nonce, ciphertext)
-        .map_err(|_| AppError::Validation("the OAuth state is not valid".to_string()))?;
-
-    let payload: StatePayload = serde_json::from_slice(&plaintext)
-        .map_err(|_| AppError::Validation("the OAuth state is not valid".to_string()))?;
-
-    if payload.exp < Utc::now().timestamp() {
-        return Err(AppError::Validation(
-            "this sign-in attempt expired; start again".to_string(),
-        ));
-    }
-    Ok(payload)
-}
-
-fn pkce_pair() -> (String, String) {
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let challenge = {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(verifier.as_bytes());
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize())
-    };
-    (verifier, challenge)
-}
-
-fn random_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn hash(value: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(value.as_bytes());
-    hex::encode(hasher.finalize())
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,20 +89,7 @@ pub async fn start(state: &AppState, query: &StartQuery) -> AppResult<String> {
 
     let (verifier, challenge) = pkce_pair();
     let nonce = random_token();
-    let payload = StatePayload {
-        verifier,
-        nonce: nonce.clone(),
-        exp: (Utc::now() + chrono::Duration::from_std(STATE_TTL).unwrap_or_default()).timestamp(),
-        device_name: query
-            .device_name
-            .clone()
-            .unwrap_or_else(|| "Google sign-in".to_string()),
-        device_platform: query
-            .device_platform
-            .clone()
-            .unwrap_or_else(|| "web".to_string()),
-        app_version: query.app_version.clone(),
-    };
+    let payload = state_payload(query, verifier, nonce.clone());
     let state_param = encrypt_state(state, &payload)?;
 
     let url = url::Url::parse_with_params(
@@ -224,7 +139,7 @@ pub async fn callback(state: &AppState, query: &CallbackQuery) -> AppResult<Stri
         .state
         .as_deref()
         .ok_or_else(|| AppError::Validation("missing OAuth state".to_string()))?;
-    let payload = decrypt_state(state, state_param)?;
+    let payload = decrypt_state(state, Purpose::Login, state_param)?;
     let code = query
         .code
         .as_deref()
@@ -573,56 +488,37 @@ pub async fn set_password(state: &AppState, user: AuthUser, new_password: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
+    /// What stays here after the codec moved to `super::oauth_state`: the payload this flow
+    /// builds, which is the part the calendar flow must *not* share. The codec's own tests
+    /// (round-trip, tamper, cross-purpose replay, nonce freshness) live with the codec.
     #[test]
-    fn a_state_round_trips_and_rejects_tampering() {
-        // The state is encrypted, so a flipped byte must fail to decrypt rather
-        // than produce different claims.
-        let key = [7u8; 32];
-        let cipher = Aes256Gcm::new_from_slice(&key).expect("key");
-        let payload = StatePayload {
-            verifier: "v".to_string(),
-            nonce: "n".to_string(),
-            exp: Utc::now().timestamp() + 60,
-            device_name: "laptop".to_string(),
-            device_platform: "macos".to_string(),
+    fn a_login_state_names_its_purpose_and_carries_no_account() {
+        let query = StartQuery {
+            device_name: Some("laptop".to_string()),
+            device_platform: Some("macos".to_string()),
+            app_version: Some("1.2.3".to_string()),
+        };
+        let payload = state_payload(&query, "verifier".to_string(), "nonce".to_string());
+        assert_eq!(payload.purpose, Purpose::Login);
+        assert_eq!(payload.verifier, "verifier");
+        assert_eq!(payload.nonce, "nonce");
+        // The login callback resolves the account from the `id_token`; a `user_id` here would
+        // be a second source of truth for who is signing in.
+        assert!(payload.user_id.is_none());
+        assert!(payload.exp > Utc::now().timestamp());
+
+        // The defaults are the ones the deep-link contract expects for a bare start.
+        let bare = StartQuery {
+            device_name: None,
+            device_platform: None,
             app_version: None,
         };
-        let plaintext = serde_json::to_vec(&payload).expect("serialize");
-        let mut nonce_bytes = [0u8; 12];
-        rand::rng().fill_bytes(&mut nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(&Nonce::from(nonce_bytes), plaintext.as_ref())
-            .expect("encrypt");
-
-        assert!(
-            cipher
-                .decrypt(&Nonce::from(nonce_bytes), ciphertext.as_ref())
-                .is_ok()
-        );
-
-        let mut tampered = ciphertext.clone();
-        tampered[0] ^= 0x01;
-        assert!(
-            cipher
-                .decrypt(&Nonce::from(nonce_bytes), tampered.as_ref())
-                .is_err(),
-            "AES-GCM must authenticate the ciphertext"
-        );
-    }
-
-    #[test]
-    fn pkce_uses_s256_and_a_fresh_verifier() {
-        let (a, challenge_a) = pkce_pair();
-        let (b, challenge_b) = pkce_pair();
-        assert_ne!(a, b);
-        assert_ne!(challenge_a, challenge_b);
-
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(a.as_bytes());
-        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize());
-        assert_eq!(challenge_a, expected);
+        let payload = state_payload(&bare, "v".to_string(), "n".to_string());
+        assert_eq!(payload.device_name, "Google sign-in");
+        assert_eq!(payload.device_platform, "web");
+        assert!(payload.app_version.is_none());
     }
 
     #[test]
