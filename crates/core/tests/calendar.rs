@@ -11,6 +11,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use stvdy_core::calendar::expand::{
+    ExpandError, HORIZON_DAYS, MAX_BODY_BYTES, MAX_OCCURRENCES, Window, expand_feed,
+};
 use stvdy_core::calendar::feed::{FeedEvent, FeedKind, render_feed, sequence};
 
 fn at(y: i32, m: u32, d: u32, h: u32) -> DateTime<Utc> {
@@ -277,4 +280,364 @@ fn the_sequence_is_zero_until_the_first_edit_and_never_negative() {
     // A row whose `updated_at` is before its `created_at` (a clock that moved) is treated as
     // unedited rather than as a negative sequence, which a client would reject.
     assert_eq!(sequence(created, created - Duration::hours(1)), 0);
+}
+
+// --- the bounded expansion (A232) ---------------------------------------------------------
+
+/// A one-`VEVENT` calendar body, CRLF-terminated as RFC 5545 requires, with the `UID` first
+/// so a case cannot forget it.
+fn feed_of(uid: &str, lines: &[&str]) -> String {
+    let mut body = String::from(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Fakultas//EN\r\nBEGIN:VEVENT\r\n",
+    );
+    body.push_str(&format!("UID:{uid}\r\n"));
+    for line in lines {
+        body.push_str(line);
+        body.push_str("\r\n");
+    }
+    body.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");
+    body
+}
+
+/// A calendar with several `VEVENT`s in it, for the cases where one component must not take
+/// the others down with it.
+fn feed_of_many(components: &[(&str, Vec<&str>)]) -> String {
+    let mut body = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    for (uid, lines) in components {
+        body.push_str("BEGIN:VEVENT\r\n");
+        body.push_str(&format!("UID:{uid}\r\n"));
+        for line in lines {
+            body.push_str(line);
+            body.push_str("\r\n");
+        }
+        body.push_str("END:VEVENT\r\n");
+    }
+    body.push_str("END:VCALENDAR\r\n");
+    body
+}
+
+/// An unbounded recurrence iteration is a hang, not a wrong answer — and the cap firing is
+/// not the same thing as the rule ending.
+///
+/// `rrule` 0.14 sets `RRuleResult.limited` when the collection stopped at the limit *or* when
+/// its own loop cap tripped. With `all(MAX_OCCURRENCES)` that makes a rule with exactly
+/// `MAX_OCCURRENCES` occurrences report a truncation it did not have. The first two cases
+/// below produce the **same number of occurrences** and must report opposite answers, which
+/// is the only way to tell "exactly at the limit" from "stopped by the limit".
+#[test]
+fn expansion_is_bounded_and_reports_truncation() {
+    // No UNTIL and no COUNT: `all()` without a limit never returns. One second apart, so the
+    // cap binds long before the horizon does.
+    let endless = feed_of(
+        "x@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260101T090000",
+            "DTEND;TZID=Asia/Jakarta:20260101T100000",
+            "RRULE:FREQ=SECONDLY",
+            "SUMMARY:Bogus",
+        ],
+    );
+    let out = expand_feed(&endless, Window::days_from(at(2026, 1, 1, 0), HORIZON_DAYS)).unwrap();
+    assert_eq!(out.occurrences.len(), MAX_OCCURRENCES, "the cap must bind");
+    assert!(out.truncated, "a rule the cap cut must say so");
+    // What it read, it keeps: the *earliest* occurrences survive, not the last ones. Dropping
+    // the head would put the student's timetable six months out.
+    assert_eq!(
+        out.occurrences[0].starts_at,
+        at(2026, 1, 1, 2),
+        "09:00+07:00"
+    );
+    assert_eq!(
+        out.occurrences[MAX_OCCURRENCES - 1].starts_at,
+        at(2026, 1, 1, 2) + Duration::seconds(499)
+    );
+
+    // Exactly at the limit, and *not* truncated: this rule has 500 occurrences because that
+    // is how many it has. Same length as the case above, opposite answer. The window is wider
+    // than the horizon so that the horizon is not what ends it either.
+    let exactly = feed_of(
+        "e@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260101T090000",
+            "DTEND;TZID=Asia/Jakarta:20260101T100000",
+            "RRULE:FREQ=DAILY;COUNT=500",
+            "SUMMARY:Tepat lima ratus",
+        ],
+    );
+    let out = expand_feed(&exactly, Window::days_from(at(2026, 1, 1, 0), 600)).unwrap();
+    assert_eq!(
+        out.occurrences.len(),
+        MAX_OCCURRENCES,
+        "the same count as the truncated case"
+    );
+    assert!(
+        !out.truncated,
+        "a rule that ended on its own is not a truncation"
+    );
+
+    // One more than the cap: 501 occurrences, so the cap does cut one, and the report is a
+    // truncation again. This is the boundary the probe's `+1` exists for.
+    let over = feed_of(
+        "o@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260101T090000",
+            "DTEND;TZID=Asia/Jakarta:20260101T100000",
+            "RRULE:FREQ=DAILY;COUNT=501",
+            "SUMMARY:Lebih satu",
+        ],
+    );
+    let out = expand_feed(&over, Window::days_from(at(2026, 1, 1, 0), 600)).unwrap();
+    assert_eq!(out.occurrences.len(), MAX_OCCURRENCES);
+    assert!(out.truncated, "the 501st occurrence was dropped");
+
+    // A rule that ends on its own well inside both bounds, and the horizon cutting an endless
+    // one: neither is a truncation. The horizon is the design, not a lost occurrence.
+    let weekly = feed_of(
+        "w@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260105T080000",
+            "DTEND;TZID=Asia/Jakarta:20260105T100000",
+            "RRULE:FREQ=WEEKLY;COUNT=8",
+            "SUMMARY:Kuliah",
+        ],
+    );
+    let out = expand_feed(&weekly, Window::days_from(at(2026, 1, 1, 0), HORIZON_DAYS)).unwrap();
+    assert_eq!(out.occurrences.len(), 8);
+    assert!(!out.truncated, "a rule that ended is not a truncation");
+
+    let endless_but_short = feed_of(
+        "d@f",
+        &[
+            "DTSTART:20260101T090000Z",
+            "RRULE:FREQ=DAILY",
+            "SUMMARY:Harian",
+        ],
+    );
+    let out = expand_feed(
+        &endless_but_short,
+        Window::days_from(at(2026, 1, 1, 0), HORIZON_DAYS),
+    )
+    .unwrap();
+    assert_eq!(out.occurrences.len(), HORIZON_DAYS as usize, "one a day");
+    assert!(
+        !out.truncated,
+        "the horizon ending the walk is not a truncation"
+    );
+}
+
+/// A `TZID` is resolved through `chrono_tz`, and the rule is expanded *in that zone*: the
+/// wall clock is what repeats, so the UTC instant moves across a DST transition.
+///
+/// Expanding in UTC and adding a fixed offset passes every Jakarta test (no DST) and puts
+/// every New York class an hour out for half the year — a silent wrong answer for the
+/// students the feature is for.
+#[test]
+fn a_tzid_event_keeps_its_wall_clock_across_a_dst_boundary() {
+    let jakarta = feed_of(
+        "j@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260105T080000",
+            "DTEND;TZID=Asia/Jakarta:20260105T100000",
+            "RRULE:FREQ=WEEKLY;COUNT=2",
+            "SUMMARY:Kuliah Jaringan Komputer",
+        ],
+    );
+    let out = expand_feed(&jakarta, Window::days_from(at(2026, 1, 1, 0), 30)).unwrap();
+    assert_eq!(
+        out.occurrences[0].starts_at,
+        at(2026, 1, 5, 1),
+        "08:00+07:00"
+    );
+    assert_eq!(out.occurrences[0].ends_at, at(2026, 1, 5, 3), "10:00+07:00");
+    assert_eq!(out.occurrences[1].starts_at, at(2026, 1, 12, 1));
+    assert_eq!(out.occurrences[0].recurrence_id, Some(at(2026, 1, 5, 1)));
+
+    // 2026-03-06 is EST (-05) and 2026-03-13 is EDT (-04): 09:00 local is 14:00Z and then
+    // 13:00Z, and the hour-long length is preserved on both sides of the transition.
+    let new_york = feed_of(
+        "n@f",
+        &[
+            "DTSTART;TZID=America/New_York:20260306T090000",
+            "DTEND;TZID=America/New_York:20260306T100000",
+            "RRULE:FREQ=WEEKLY;COUNT=2",
+            "SUMMARY:Lecture",
+        ],
+    );
+    let out = expand_feed(&new_york, Window::days_from(at(2026, 3, 1, 0), 30)).unwrap();
+    assert_eq!(
+        out.occurrences[0].starts_at,
+        at(2026, 3, 6, 14),
+        "09:00 EST"
+    );
+    assert_eq!(out.occurrences[0].ends_at, at(2026, 3, 6, 15));
+    assert_eq!(
+        out.occurrences[1].starts_at,
+        at(2026, 3, 13, 13),
+        "09:00 EDT"
+    );
+    assert_eq!(out.occurrences[1].ends_at, at(2026, 3, 13, 14));
+}
+
+/// A `DTSTART` ending in `Z` is an absolute instant, not a floating wall clock, and must not
+/// be re-zoned. Re-zoning `08:00Z` into Jakarta's zone moves it seven hours.
+///
+/// The same case covers a one-off event: a `VEVENT` with no `RRULE` has exactly one
+/// occurrence, and an implementation that hands `rrule` an empty set stores nothing at all —
+/// every non-recurring event in the feed silently disappears.
+#[test]
+fn a_utc_event_is_taken_as_utc() {
+    let utc = feed_of(
+        "u@f",
+        &[
+            "DTSTART:20260105T080000Z",
+            "DTEND:20260105T093000Z",
+            "SUMMARY:Deadline",
+        ],
+    );
+    let out = expand_feed(&utc, Window::days_from(at(2026, 1, 1, 0), 30)).unwrap();
+    assert_eq!(
+        out.occurrences.len(),
+        1,
+        "a one-off event is one occurrence"
+    );
+    assert_eq!(out.occurrences[0].starts_at, at(2026, 1, 5, 8));
+    assert_eq!(
+        out.occurrences[0].ends_at,
+        at(2026, 1, 5, 9) + Duration::minutes(30)
+    );
+    assert_eq!(
+        out.occurrences[0].recurrence_id, None,
+        "a non-recurring occurrence has no recurrence id (A231)"
+    );
+
+    // The same value as a recurring series: the UTC instant repeats, the wall clock does not
+    // move because there is no zone for it to move in.
+    let repeating = feed_of(
+        "r@f",
+        &[
+            "DTSTART:20260105T080000Z",
+            "DTEND:20260105T090000Z",
+            "RRULE:FREQ=WEEKLY;COUNT=2",
+            "SUMMARY:UTC weekly",
+        ],
+    );
+    let out = expand_feed(&repeating, Window::days_from(at(2026, 1, 1, 0), 30)).unwrap();
+    assert_eq!(out.occurrences[0].starts_at, at(2026, 1, 5, 8));
+    assert_eq!(out.occurrences[1].starts_at, at(2026, 1, 12, 8));
+    assert_eq!(out.occurrences[1].recurrence_id, Some(at(2026, 1, 12, 8)));
+}
+
+/// A malformed component is skipped and named, not fatal (A247): one broken rule in a faculty
+/// calendar must not mean the student gets nothing.
+///
+/// The defect the first half prevents is subtler than a crash: an unknown `TZID` treated as a
+/// fallback to UTC stores the class seven hours early, with no error and no way to tell from
+/// the app that anything went wrong.
+#[test]
+fn a_malformed_vevent_is_reported_and_the_rest_survive() {
+    let body = feed_of_many(&[
+        (
+            "bad@f",
+            vec![
+                "DTSTART;TZID=Mars/Olympus:20260105T080000",
+                "DTEND;TZID=Mars/Olympus:20260105T090000",
+                "SUMMARY:Kelas di Mars",
+            ],
+        ),
+        (
+            "good@f",
+            vec![
+                "DTSTART;TZID=Asia/Jakarta:20260105T080000",
+                "DTEND;TZID=Asia/Jakarta:20260105T090000",
+                "SUMMARY:Kelas nyata",
+            ],
+        ),
+    ]);
+    let out = expand_feed(&body, Window::days_from(at(2026, 1, 1, 0), 30)).unwrap();
+
+    assert_eq!(out.occurrences.len(), 1, "the good component survives");
+    assert_eq!(out.occurrences[0].uid, "good@f");
+    assert_eq!(out.occurrences[0].title, "Kelas nyata");
+    assert_eq!(out.occurrences[0].starts_at, at(2026, 1, 5, 1));
+    assert_eq!(out.skipped.len(), 1, "{:?}", out.skipped);
+    assert!(out.skipped[0].contains("bad@f"), "{:?}", out.skipped);
+    assert!(out.skipped[0].contains("Mars/Olympus"), "{:?}", out.skipped);
+
+    // A body that is not a calendar at all is an error rather than an empty expansion: an
+    // empty expansion is indistinguishable from a feed with no events, and the connection
+    // would look healthy while every poll imported nothing.
+    let error = expand_feed(
+        "<html><body>not a calendar</body></html>",
+        Window::days_from(at(2026, 1, 1, 0), 30),
+    )
+    .unwrap_err();
+    assert!(matches!(error, ExpandError::NotACalendar(_)), "{error:?}");
+
+    // And the size guard, which is why the parse cannot be made to run over hundreds of
+    // megabytes by a URL the user pasted.
+    let huge = "x".repeat(MAX_BODY_BYTES + 1);
+    let error = expand_feed(&huge, Window::days_from(at(2026, 1, 1, 0), 30)).unwrap_err();
+    assert!(
+        matches!(error, ExpandError::TooLarge(bytes) if bytes == MAX_BODY_BYTES + 1),
+        "{error:?}"
+    );
+}
+
+/// An `EXDATE` is a cancelled occurrence, and a cancelled class stored as present is a wrong
+/// answer the student acts on.
+///
+/// The same case covers `RDATE` (an extra session the faculty added) and the `VALUE=DATE`
+/// form, which the parser hands over as a date rather than a date-time.
+#[test]
+fn exdates_are_removed_rdate_added_and_a_date_only_event_is_a_whole_day() {
+    let cancelled = feed_of(
+        "c@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260105T080000",
+            "DTEND;TZID=Asia/Jakarta:20260105T100000",
+            "RRULE:FREQ=WEEKLY;COUNT=3",
+            "EXDATE;TZID=Asia/Jakarta:20260112T080000",
+            "SUMMARY:Kuliah dengan libur",
+        ],
+    );
+    let out = expand_feed(&cancelled, Window::days_from(at(2026, 1, 1, 0), 60)).unwrap();
+    let starts: Vec<DateTime<Utc>> = out.occurrences.iter().map(|o| o.starts_at).collect();
+    assert_eq!(
+        starts,
+        vec![at(2026, 1, 5, 1), at(2026, 1, 19, 1)],
+        "the 12th is cancelled, the 5th and the 19th are not"
+    );
+
+    let extra = feed_of(
+        "a@f",
+        &[
+            "DTSTART;TZID=Asia/Jakarta:20260105T080000",
+            "DTEND;TZID=Asia/Jakarta:20260105T100000",
+            "RDATE;TZID=Asia/Jakarta:20260107T080000",
+            "SUMMARY:Sesi tambahan",
+        ],
+    );
+    let out = expand_feed(&extra, Window::days_from(at(2026, 1, 1, 0), 60)).unwrap();
+    let starts: Vec<DateTime<Utc>> = out.occurrences.iter().map(|o| o.starts_at).collect();
+    assert_eq!(starts, vec![at(2026, 1, 5, 1), at(2026, 1, 7, 1)]);
+
+    // A `VALUE=DATE` event: one whole day, and `DTEND` is exclusive so two days means two
+    // days. A UTC anchor is the only deterministic choice in a pure function — there is no
+    // user zone here to resolve a date against.
+    let all_day = feed_of(
+        "h@f",
+        &[
+            "DTSTART;VALUE=DATE:20260105",
+            "DTEND;VALUE=DATE:20260107",
+            "SUMMARY:UAS Jaringan Komputer",
+        ],
+    );
+    let out = expand_feed(&all_day, Window::days_from(at(2026, 1, 1, 0), 60)).unwrap();
+    assert_eq!(out.occurrences.len(), 1);
+    assert_eq!(out.occurrences[0].starts_at, at(2026, 1, 5, 0));
+    assert_eq!(out.occurrences[0].ends_at, at(2026, 1, 7, 0));
+    assert_eq!(
+        out.occurrences[0].title, "UAS Jaringan Komputer",
+        "an Indonesian title survives the import (gate 6)"
+    );
 }
