@@ -24,16 +24,22 @@
 /* Begin PBXFileReference section */
 		153CE62F38AE52DE4ED22CAA /* stvdy-shell_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "stvdy-shell_iOS.entitlements"; sourceTree = "<group>"; };
 		18EC27DCF79DD7B37F5DCEC4 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		19C273CBA385F8CE19C60793 /* queries.rs */ = {isa = PBXFileReference; path = queries.rs; sourceTree = "<group>"; };
+		299EDBDFE732F74E1E545312 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		29E32921BEFADAF0B7368A01 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		2CD1096D90F5D3331B5152E0 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		3028773F55891E5AFBA85D12 /* stvdy-shell_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "stvdy-shell_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		32B35B3AA603DCCD30EC1BCC /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		36C4510CE87E3090FE5B3D3D /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		560BC1F438DD18B6F0397635 /* transport.rs */ = {isa = PBXFileReference; path = transport.rs; sourceTree = "<group>"; };
 		5AA4F0E476A30DECBDF87C4E /* deeplink.rs */ = {isa = PBXFileReference; path = deeplink.rs; sourceTree = "<group>"; };
 		61E8D8C2B7E28ACF3237EFF2 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		6C5B5EB620C7665E143D9C2A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6D230DF6359AE37E4E3B7DB0 /* schema.rs */ = {isa = PBXFileReference; path = schema.rs; sourceTree = "<group>"; };
 		7A3AB3513774352127041357 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		8365D23E9C263B56BA46A0CD /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		849792F3ABC76A8B36941FA2 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		899C5727C3E72D5566A70C7A /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		A17B78C4C12D57F2F0C54257 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		A7E87B2E866D04F508D9C09D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		A7EA9A1FA900298FEB213303 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -77,6 +83,16 @@
 				61E8D8C2B7E28ACF3237EFF2 /* WebKit.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		367B3FC9A8C9340F9EA5C900 /* cache */ = {
+			isa = PBXGroup;
+			children = (
+				8365D23E9C263B56BA46A0CD /* mod.rs */,
+				19C273CBA385F8CE19C60793 /* queries.rs */,
+				6D230DF6359AE37E4E3B7DB0 /* schema.rs */,
+			);
+			path = cache;
 			sourceTree = "<group>";
 		};
 		3A05AEF93FA781D997CFD21A = {
@@ -126,6 +142,8 @@
 				C148D9AC6A3B078681BB8718 /* keychain.rs */,
 				849792F3ABC76A8B36941FA2 /* lib.rs */,
 				29E32921BEFADAF0B7368A01 /* main.rs */,
+				367B3FC9A8C9340F9EA5C900 /* cache */,
+				E91452E0222503062156A952 /* sync */,
 			);
 			name = src;
 			path = ../../src;
@@ -147,6 +165,16 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
+		E91452E0222503062156A952 /* sync */ = {
+			isa = PBXGroup;
+			children = (
+				899C5727C3E72D5566A70C7A /* commands.rs */,
+				299EDBDFE732F74E1E545312 /* mod.rs */,
+				560BC1F438DD18B6F0397635 /* transport.rs */,
+			);
+			path = sync;
+			sourceTree = "<group>";
+		};
 		FA8A15F4C4538347C94A9008 /* stvdy-shell_iOS */ = {
 			isa = PBXGroup;
 			children = (
@@ -154,6 +182,20 @@
 				153CE62F38AE52DE4ED22CAA /* stvdy-shell_iOS.entitlements */,
 			);
 			path = "stvdy-shell_iOS";
+			sourceTree = "<group>";
+		};
+		"TEMP_3F8B7CAB-C3FC-412D-A876-F44B6760E3C9" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
+			sourceTree = "<group>";
+		};
+		"TEMP_5B70C685-EB2A-4F14-9F42-49783DA63796" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -242,7 +284,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "node tauri ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
+			shellScript = "node ../../../app/node_modules/@tauri-apps/cli/tauri.js ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -345,7 +387,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy;
-				PRODUCT_NAME = Stvdy;
+				PRODUCT_NAME = "Stvdy";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -432,7 +474,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy;
-				PRODUCT_NAME = Stvdy;
+				PRODUCT_NAME = "Stvdy";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;

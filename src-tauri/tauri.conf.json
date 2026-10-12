@@ -42,6 +42,21 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "iOS": {
+      "minimumSystemVersion": "15.0",
+      "infoPlist": "gen/apple/Info.ios.plist",
+      "template": "gen/apple/project.yml.template"
+    },
+    "android": { "minSdkVersion": 24, "versionCode": 1 },
+    "fileAssociations": [
+      { "ext": ["pdf"], "mimeType": "application/pdf", "name": "PDF" },
+      { "ext": ["epub"], "mimeType": "application/epub+zip", "name": "EPUB" },
+      {
+        "ext": ["docx"],
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "name": "DOCX"
+      }
+    ],
     "macOS": {
       "minimumSystemVersion": "11.0",
       "hardenedRuntime": true,

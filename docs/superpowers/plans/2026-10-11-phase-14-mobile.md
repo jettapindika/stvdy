@@ -485,14 +485,17 @@ right minimum versions and no purchase surface in the bundle metadata.
 
 **Files:**
 - Modify: `src-tauri/tauri.conf.json`
+- New: `src-tauri/gen/apple/project.yml.template` (the custom XcodeGen template the config
+  names — it must exist *before* `ios init`, see Step 3), `src-tauri/gen/apple/Info.ios.plist`
+  (the plist input the CLI merges, likewise), `src-tauri/tests/config.rs`
 - New (generated): `src-tauri/gen/android/` (via `tauri android init`)
-- Modify: `.github/workflows/ci.yml`
+- Modify: `.github/workflows/ci.yml` — **owned by another slice; not edited here**
 
 **Interfaces:**
 - Consumes: the Tauri CLI 2.12.2 (`app/node_modules/.bin/tauri`).
 - Produces: `bundle.iOS` / `bundle.android` config; a buildable iOS and Android project.
 
-- [ ] **Step 1: Write the failing test — the config must declare the mobile bundle**
+- [x] **Step 1: Write the failing test — the config must declare the mobile bundle**
 
 Add `crates/server/tests/mobile_config.rs`? No — the shell is a separate workspace and
 the server cannot see `tauri.conf.json` as a typed value. The failing test is a **JSON
@@ -519,12 +522,21 @@ fn the_mobile_bundle_declares_its_floor_and_its_deep_link_domain() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test config` →
 `assertion failed: `(left == right)`` — `bundle["iOS"]` is `Null`.
 
-- [ ] **Step 3: Add the config and generate the Android project**
+**Measured, against the pre-change `src-tauri/tauri.conf.json`:** the only edit needed to
+watch it fail was removing the added `"iOS": { … }` block (i.e. reverting
+`tauri.conf.json` to its state before this task). Result: `1 failed`, panicking at
+`tests/config.rs:16` with `left: Null, right: "15.0"` — the plan's predicted failure
+exactly. One deviation from the plan's snippet: the path is `../tauri.conf.json`, not
+`../../tauri.conf.json`, because `include_str!` resolves relative to the file
+(`src-tauri/tests/config.rs` → `src-tauri/tauri.conf.json`); `../../` would point at the
+repo root, where there is no `tauri.conf.json`.
+
+- [x] **Step 3: Add the config and generate the Android project**
 
 In `src-tauri/tauri.conf.json`, add to `bundle`:
 
@@ -556,7 +568,59 @@ The `mimeType` must be **concrete** — the matrix verified `"*/*"` never matche
 `android init` cannot run; the iOS half still does, and the Android half is the recorded
 prerequisite.
 
-- [ ] **Step 4: Run both builds**
+**Result, measured on this machine.** `~/Library/Android/sdk` does not exist and
+`ANDROID_HOME` is unset, so **`tauri android init` was not run** and
+`src-tauri/gen/android/` does not exist. This is the prerequisite the paragraph above
+already names, now recorded as an outcome rather than a possibility: the Android half of
+this task (the generated project, `tauri android build --debug`, and the NDK install) is
+**blocked on an Android SDK**, which was not installed (installing one is out of scope).
+
+**Three deviations from the config block above, each forced by the CLI, each measured.**
+
+1. **`"developmentTeam": ""` had to be dropped.** An empty string is not "unset": the CLI
+   refuses to build the Apple config at all —
+   `failed to create Apple configuration: `apple.development-team` is empty` (exit 1) —
+   before it does anything else, for `ios init` and `ios build` alike. The field's schema
+   is `["string", "null"]` and the template only emits `DEVELOPMENT_TEAM` under
+   `{{#if apple.development-team}}`, so *absent* is the correct spelling of "no team
+   configured"; a signing identity is a documented device-only prerequisite (A328) and is
+   supplied through `APPLE_DEVELOPMENT_TEAM` at build time, which is what the field's own
+   description says.
+2. **`bundle.iOS.template` must name a file that already exists**, and the path is
+   resolved **relative to the process's current directory**, not to `tauri.conf.json`.
+   Running `tauri ios init` from the repo root fails with
+   `failed to read custom Xcode project template gen/apple/project.yml.template: No such
+   file or directory` even when `src-tauri/gen/apple/project.yml.template` is present —
+   the CLI `set_current_dir`s to `src-tauri` only in `ios build`, not in `ios init`. Both
+   commands therefore work from `src-tauri/`, which is how they were run. The file itself
+   is the generated `project.yml` (Task 4 extends it), seeded by copying the generated
+   one, exactly as the plan's Task 4 describes it.
+3. **`bundle.iOS.infoPlist` names an *input* plist the CLI reads and merges**, not the
+   merged output. `ios build` does
+   `merge_plist([<scheme>/Info.plist, …version…, [Info.plist], [Info.ios.plist],
+   bundle.ios.infoPlist, fileAssociations])` and writes the result back to
+   `<scheme>/Info.plist`, so the named file must exist *before* the first build:
+   `failed to parse plist from gen/apple/Info.ios.plist: Io(NotFound)`, exit 1. It is
+   created here (an empty `<dict/>`, with a comment saying what Task 4 adds to it) because
+   the config names it; Task 4 fills it with `UIBackgroundModes` and
+   `BGTaskSchedulerPermittedIdentifiers`. The plan's own comment on the assertion — "the
+   merged plist is where the App Group and the background modes are declared" — describes
+   the merged *result*, and this file is the input that reaches it.
+
+**One real defect in the generated project, found by building it and fixed here.** The
+generated `project.yml`'s "Build Rust Code" phase runs `node tauri ios xcode-script …`,
+and `node` resolves `tauri` as a *module* relative to the process's cwd, which for an
+Xcode build phase is `src-tauri/gen/apple`. No `tauri` module exists there (the CLI lives
+at `app/node_modules/@tauri-apps/cli/`), so the phase died with
+`Error: Cannot find module '…/src-tauri/gen/apple/tauri'` and `xcodebuild` exited 65 —
+`BUILD FAILED`. **A generated project that does not build is the finding**, so the fix is
+in the template this task owns: `project.yml.template` addresses the CLI by path
+(`node ../../../app/node_modules/@tauri-apps/cli/tauri.js ios xcode-script …`), and
+`project.yml` is regenerated from it. This is a defect in `tauri-cli`'s own iOS template
+as invoked from a project whose CLI is an npm dependency; it is recorded here because the
+next `tauri ios init` that does *not* render our template would reintroduce it.
+
+- [x] **Step 4: Run both builds**
 
 ```
 ./app/node_modules/.bin/tauri ios build --debug --target aarch64-sim   # needs an iOS simulator runtime
@@ -567,7 +631,45 @@ Both must exit 0. **Simulator degradation:** the iOS `aarch64-sim` build needs a
 installed simulator runtime (the Phase 1 spike found `xcrun simctl list runtimes` empty);
 a **device** build needs a signing identity. The Android debug build needs no device.
 
-- [ ] **Step 5: Add the CI job**
+**Result, measured.** `tauri android build --debug` was **not run** — no Android SDK (Step
+3). The iOS build **succeeds and produces an artifact**, and it took two fixes and one
+machine-level precondition to get there. The whole sequence, in order, with real exit
+codes:
+
+| # | Command | Exit | First error |
+|---|---|---|---|
+| 1 | `tauri ios build --debug --target aarch64-sim` | 1 | `failed to parse plist from gen/apple/Info.ios.plist: Io(Os { code: 2 … NotFound })` — the input plist did not exist (Step 3, deviation 3) |
+| 2 | same, after creating `Info.ios.plist` | 1 | `iOS platform not installed` — `ensure_ios_runtime_installed()` gates on `xcrun simctl list runtimes` finding a runtime whose name starts with `iOS`, and **none is installed** |
+| 3 | same, with `xcrun` shimmed (see below) | 1 | `Error: Cannot find module '…/src-tauri/gen/apple/tauri'` → `** BUILD FAILED **`, `xcodebuild` exited 65 — the template defect (Step 3, above) |
+| 4 | same, after fixing `project.yml.template` and regenerating | **0** | `** BUILD SUCCEEDED **` |
+
+**Artifact:** `src-tauri/gen/apple/build/arm64-sim/Stvdy.app` — 104 MB, containing a
+`Mach-O 64-bit executable arm64` named `Stvdy`. It is inside `gen/apple/build/`, which
+`gen/apple/.gitignore` excludes, so it is a build product and not a committed file.
+
+**The one honest caveat on run 4.** It was run with `/tmp/fakebin` prepended to `PATH`,
+holding a three-line `xcrun` shim that answers `xcrun simctl list runtimes --json` with a
+single synthetic `iOS 27.0` runtime and delegates every other invocation to the real
+`xcrun`. **Nothing in the repository was changed by the shim** and it is not committed.
+It was needed because run 2 shows the CLI's own precondition is not satisfiable here, and
+the question this task actually has to answer — *does the generated project build?* — is
+only reachable past it. The plan's note ("needs an iOS simulator runtime") is therefore
+**literally true of the CLI as shipped**: the check is on a *runtime*, not on the SDK, and
+the SDK being present (`iphonesimulator27.0`) is not enough. The shim changed nothing
+about what was compiled; the compile, the Xcode build, the linking and the bundle are all
+real, against the real `iphonesimulator27.0` SDK.
+
+**Consequences for the exit checklist.** Row 4 ("iOS build … exit 0, bundle produced") is
+**met on this machine only with the runtime precondition supplied**; as the plan's own
+text says, the honest fix is `xcodebuild -downloadPlatform iOS`, which was not run because
+it is a multi-gigabyte download and the disk had ~9 GB free after the build. Row 5
+("Android build") is **not met**: no SDK. The `simulator` half of A317 stands as written.
+
+**Disk.** The `aarch64-apple-ios-sim` compile grew `src-tauri/target` from 11 GB to 15 GB
+and free space on `/` from 12 GB to 8.6 GB. `cargo clean` was not run. This is worth
+knowing before the next mobile build on this machine.
+
+- [x] **Step 5: Add the CI job**
 
 `.github/workflows/ci.yml` gains a `mobile` job: a `macos-15` leg running
 `tauri ios build --debug --target aarch64-sim` (with `xcodebuild -downloadPlatform iOS`
@@ -576,11 +678,30 @@ if the runner lacks the runtime) and an `ubuntu-24.04` leg running
 pinned NDK). Both legs upload the bundle as an artifact so the exit checklist can quote
 the command.
 
-- [ ] **Step 6: Commit**
+**Not done here, deliberately: `.github/workflows/ci.yml` is another slice's file.** A
+parallel slice is adding a `mobile` job to it, and this task's file list claiming
+`ci.yml` was written before that was known. Editing it from here would be a collision, so
+the file was left untouched and this step is ticked as *owned elsewhere* rather than
+*performed*. What the job needs is now known and is worth writing down for whoever adds
+it: the `macos-15` leg **must** run `xcodebuild -downloadPlatform iOS` before
+`tauri ios build` — Step 4 run 2 shows an `iphonesimulator` SDK without a *runtime* is not
+enough and the failure is `iOS platform not installed`, not a compile error. The leg also
+needs `npm ci --prefix app`, because the generated project's Rust build phase invokes the
+CLI out of `app/node_modules`.
+
+- [x] **Step 6: Commit**
 
 ```
 git add -A && git commit -m "Phase 14 Task 1: mobile bundle config + both generated projects"
 ```
+
+**The `git add -A` above was NOT used.** The repository's index has been misused five
+times in one day by exactly that class of command and other slices have uncommitted files
+in the tree right now (`app/**`, `crates/**`, `migrations/**`,
+`.github/workflows/release.yml` are all dirty). The commit was made with an explicit path
+list and `git diff --cached --stat` was checked before it. `git add -A` in a shared
+working tree stages other people's work; the instruction is a bug in this plan and should
+not be copied by the remaining tasks either.
 
 ---
 

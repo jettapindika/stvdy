@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The iOS plist the shell merges over the generated one, named by
+  `bundle.iOS.infoPlist` in tauri.conf.json.
+
+  The CLI reads this file and merges it *into* the project's own
+  `gen/apple/stvdy-shell_iOS/Info.plist`, so what lives here is only what the
+  generated plist cannot express. Empty at Task 1 (the config and the generated
+  project are the task); Task 4 adds `UIBackgroundModes` and
+  `BGTaskSchedulerPermittedIdentifiers` for the Share Extension and the
+  background scheduler, which is the same file the App Group entitlement is
+  declared beside.
+-->
+<plist version="1.0">
+<dict/>
+</plist>
