@@ -5,6 +5,11 @@
 //! is safe, that a page lands with foreign keys deferred, that a row whose parent has not
 //! arrived survives a restart, that the outbox is on disk, that a wipe takes the outbox with
 //! it, and that a token never reaches it.
+//!
+//! The allowance below is the workspace's: `unwrap`/`expect`/`panic` are denied in non-test
+//! code (a keychain and a cache are exactly where a silent `unwrap` hurts), and this file is
+//! test code, where they are the idiomatic way to state a precondition.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

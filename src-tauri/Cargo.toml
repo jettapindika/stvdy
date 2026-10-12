@@ -1,9 +1,20 @@
+# Its own workspace root, because the root workspace excludes this package (see the
+# comment there): `tauri_build::build()` must not run during `cargo clippy --workspace`
+# and the shell has a different target set. Being a separate root is also why it needs
+# these lints spelled out again -- `[workspace.lints]` in the root does not reach it, and
+# without them the project's "no unwrap in non-test code" rule is unenforced in the one
+# crate that holds a keychain and a SQLite cache.
+[workspace]
+
 [package]
 name = "stvdy-shell"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94.1"
 publish = false
+
+[lints]
+workspace = true
 
 [lib]
 name = "stvdy_shell_lib"
@@ -51,13 +62,20 @@ keyring-core = "1.0.0"
 
 # Desktop-only plugins must not be linked into mobile builds.
 #
-# tauri-plugin-updater is deliberately NOT here: it needs a signing keypair and a
-# release endpoint (both Phase 15), and registering it with placeholder config
-# panics at startup ("Error deserializing 'plugins.updater'"). An updater that
-# cannot check for updates is a fake capability, so it arrives with the release
-# pipeline instead.
+# tauri-plugin-updater arrived in Phase 15 with its signing keypair and release
+# endpoint (A35, A335). It is here rather than in the common block because the
+# plugin declares `ios: none, android: none` — mobile updates ship through
+# TestFlight and Play, and a mobile build that linked it would fail to compile
+# rather than silently expose an API that does nothing.
+#
+# The plugin's `Config.pubkey` field has no serde default, so an absent
+# `plugins.updater` block is a deserialization panic at startup ("Error
+# deserializing 'plugins.updater'"). That is why the config and this dependency
+# land in the same commit: an updater registered without a key is not a degraded
+# updater, it is an app that does not start.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-updater = "2.13.3"
 # The `deep-link` feature forwards a second process's CLI arguments (i.e. a
 # `stvdy://` URL) to the deep-link plugin on the surviving instance. Without it,
 # a Windows/Linux OAuth callback launches a second process, single-instance
@@ -95,3 +113,14 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+dbg_macro = "deny"

@@ -1,0 +1,8 @@
+# The workspace denies unwrap/expect/panic in non-test code (see
+# [workspace.lints.clippy] in Cargo.toml). `cargo clippy --all-targets` also
+# compiles test code, which legitimately unwraps and panics, so those lints must
+# be relaxed inside tests or CI can never be green.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true

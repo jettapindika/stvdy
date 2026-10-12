@@ -73,9 +73,18 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
-        // The updater is registered in Phase 15 alongside the signing keypair and
-        // the release endpoint; it cannot function before those exist, and
-        // registering it without config panics at startup.
+        // The updater, registered here rather than in the common block because the
+        // plugin's own platform matrix is `ios: none, android: none` (A335): mobile
+        // updates ship through TestFlight and Play, and a mobile build that linked
+        // it would fail to compile rather than silently expose an API that does
+        // nothing. The permission is desktop-only for the same reason
+        // (`capabilities/desktop.json`), and a plugin registered without it is a
+        // runtime failure that `cargo test` cannot see.
+        //
+        // This plugin panics at startup with an absent `plugins.updater` config —
+        // `Config.pubkey` has no serde default — so the config, the dependency and
+        // this line are one change, which is why Phase 0 left all three out (A35).
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
     #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -83,7 +92,7 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_haptics::init());
     }
 
-    builder
+    let result = builder
         .setup(|app| {
             #[cfg(desktop)]
             {
@@ -165,8 +174,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the Stvdy shell");
+        .run(tauri::generate_context!());
+
+    // The event loop is the whole app: if it cannot start there is nothing to continue
+    // into, so this is the one place a hard exit is right. Logged and exited non-zero
+    // rather than `expect`-ed, because a supervisor should see a failure rather than a
+    // process that quietly vanished -- and because a panic message on stderr is not a
+    // record anyone can search.
+    if let Err(error) = result {
+        tracing::error!(%error, "the Stvdy shell could not start");
+        std::process::exit(1);
+    }
 }
 
 /// Logs only the action label: a URL query string can carry an OAuth `code`,
