@@ -379,6 +379,24 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     The walk is **phone-width by default** — `VIEWPORT_WIDTH`/`VIEWPORT_HEIGHT`/
     `VIEWPORT_DPR`/`SCALES`/`OUTPUT` override it so gate 5's desktop leg uses this
     harness rather than a second copy of it.
+    **The desktop leg did not actually work until `bc7eed8`, and the failure was
+    silent until someone ran it:** a `nav` step names the phone tab bar's label, and
+    the tab bar is `md:hidden` with "Work"/"More" while the desktop sidebar is
+    `hidden md:flex` with "Workspaces"/"Settings", so at 1365px the walk died on
+    `FAIL: no nav a labelled "Work"` after the first surface. `bc7eed8` added a
+    one-step label alias and the leg now completes (80 combinations at 1365×900).
+    The first real desktop run found three things, none of them the rem class and
+    none of them fixed here: the sidebar's nav items measure **215×40** — under 44px
+    in height at 100% text, both themes, on every surface; `button.cite` is 36.4×15.2
+    because its 44px rule sits inside `@media (max-width: 767px)` (deliberate,
+    recorded so nobody "fixes" it); and two `p.text-xs` paragraphs in the workspace
+    panels overflow their box at 200% text, inside an `overflow-y-auto` panel whose
+    `overflow-x` computes to `auto`, in a grid track declared `minmax(200px, 1fr)` —
+    a **px** floor that does not grow with the text, so the panel scrolls sideways.
+    That last one is *reachable* by scrolling, which is why the `clipped` check was
+    left alone: extending `inScroller` to it would also have exempted the
+    `SourcePicker` rows (inside `div.max-h-32.overflow-y-auto`, `overflow-x` also
+    computed `auto`) that were clipping a source's title.
     **The class is not limited to text-scale inflation, and a walk that measured only
     at 200% would have missed the most valuable defect this series found.** The
     dashboard's overflow measured `423 > 390` **at 100% text** — the first defect in
