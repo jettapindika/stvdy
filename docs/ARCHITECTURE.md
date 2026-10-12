@@ -1133,3 +1133,103 @@ initial pass commits its cursor only when it is finished, because until then the
 the anchor rather than a position (A164). `docs/SYNC.md` is the normative statement of all
 of this.
 
+## Phase 9: offline writes and the focus timer
+
+This is the first phase that is a **client of** the sync engine rather than a producer of
+synced data, and four of the six offline-writable entities are its own. Two consequences
+shape everything below: every write goes through one path, and the Today view is a pure
+function of rows the device already has.
+
+### What the device holds
+
+The shell's cache has one table per entity, built from `Entity::ALL`, so `tasks`, `events`,
+`study_sessions` and `user_settings` are rows the device can read and write with the network
+down. Beside them sit the outbox, the deferred changes, the rejections and the cursor — the
+machinery Phase 8 landed and this phase consumes.
+
+The timer's running state is **not** one of those rows, and that is a decision rather than an
+omission (A206): an unfinished session is not a fact about the account, it is a fact about
+this device, so it lives in `local_state` — the app's own key-value table, which
+`schema::tables()` deliberately excludes and a wipe therefore leaves alone. Clearing a
+running timer's marker along with the synced rows would silently stop a timer the student is
+watching, so the two have different lifetimes and different lists.
+
+### The write path, and why there is only one
+
+The SPA never calls REST for a synced entity: it calls
+`platform.sync.write(entity, id, payload)`, which is the cache plus the outbox on native and
+the REST route on web. The REST routes therefore exist for the web build and for the first
+sync of an offline row, and they are **not** a second write path — they are the same table
+triggers, so both produce the same `change_log` entries and the same LWW outcome. Phase 9's
+part of that bargain is the validators: `tasks::validate_task`, `events::validate_event`,
+`study::validate_session` and `settings::validate_settings` are called by the routes **and**
+by `sync::push::decide`, so a field rule cannot hold on one path and not the other. The
+route sweep's `no_file_outside_the_entitlements_layer_reads_a_plan_limit` is the same idea
+for entitlements.
+
+The one place the two paths had already disagreed is the reason A197's row was amended: the
+REST delete walked a task's subtree and the push delete tombstoned a single row, so deleting
+a task with subtasks removed them when it arrived over REST and left them live everywhere
+when it arrived offline. The walk is now one function, `tasks::tombstone_subtree`, called by
+both. The client's half of the same rule is a **property of `apply_page`** rather than a new
+trait method — applying a delete removes the row and, for an entity whose rows nest, the
+descendants the store already holds — and it enqueues nothing, because the subtree a device
+holds is not the subtree the account has.
+
+### The Today view has no route, and that is the point
+
+The roadmap's gate for this phase is "the Today view works offline", and a server route
+cannot: there is no `GET /today`, and there is nothing to fall back to (A205). The screen's
+input is the rows this device already has, and the day buckets, the streak, the minutes and
+the due counts are pure functions in `app/src/features/today/day.ts`, unit-tested against a
+fixed clock and an explicit `timeZone`, mirroring `app/src/features/study/due.ts`. A second
+implementation on the server would be a second answer to "how many days in a row" and to
+which local day a task is on — and the second answer would be the one that is wrong for an
+Indonesian student, silently, because the first one is what the tests exercise.
+
+### The one asymmetry between the builds
+
+The web build has no local cache and no outbox (A183), so its reads are the REST routes:
+`GET /tasks`, `GET /events`, `GET /sessions` and — for the streak — `GET /activity`. That
+route ships the three arrays of instants the streak is made of and nothing else, because the
+*rule* that turns them into a streak is still the client's (A205); a server that computed the
+number would be the second implementation the paragraph above refuses. `GET /activity` is
+therefore the web build's only stand-in for a cache this phase otherwise does not need, and
+if a generic per-entity read ever arrives on the web adapter, the route becomes redundant.
+
+One read is more than one round trip on the web build and it is bounded rather than
+paginated: the due-card count walks workspaces → decks → each deck's queue, with the same
+limit the study screen itself reads, so the number is the size of the review queue the
+student would actually be shown rather than a claim about rows the device never fetched
+(A225).
+
+### The timer's single-log design
+
+A focus timer is the one place this phase can log the same session twice without anyone
+noticing, and the defence is that the **session id is minted at start** and persisted with
+the running timer. Three mechanisms act in order (A206):
+
+1. `start()` writes `{id, startedAt, taskId, workspaceId}` to `local_state` under
+   `focus_timer` before the first tick, and the id is never regenerated — a resume reads the
+   marker and flushes *that* id.
+2. The server's `on conflict (id) do nothing` makes a replay a no-op, so even a retry after a
+   lost response, or a second device replaying its outbox, leaves one row.
+3. The marker is cleared only **after** the write. A crash between the two leaves the marker
+   in place, so the next launch resumes the same id and the replay is the no-op above;
+   clearing first would lose the session with nothing on screen to say so.
+
+The logged duration is always the measured elapsed time derived from `startedAt`, floored at
+one minute (A226) — never the configured `block_len_min`, which is a plan rather than a
+record. A timer found running past `TIMER_STALE_AFTER_MIN = 240` minutes is not auto-resumed:
+the screen offers Save (editable) or Discard, because an overnight timer resumed silently
+would write a plausible-looking false session into the streak and the Today counts (A207).
+
+### The two generative actions write nothing
+
+`POST /tasks/quick-capture` and `POST /tasks/:id/breakdown` return a draft and a proposal,
+and neither persists anything (A193, A195). The only writer of a task row is `POST /tasks` or
+a push, so "accept" is N ordinary creates with `parent_id` and `position`, "dismiss" is free,
+and a reload loses an unaccepted draft — which is what "confirm" means. The draft and the
+proposal therefore live in the SPA's component state for as long as the student is looking at
+them, and no part of the server holds them.
+
