@@ -87,7 +87,15 @@ knowing before you trust the table below:** Phase 4's plan has no `## Execution 
 all, so its gates were never recorded anywhere — its tests are covered by the workspace run, and
 its two roadmap gates (5 and 6) have no measurement in any document. Phase 0's accessibility box
 and Phase 4's are the same gap: two surfaces whose accessibility has never been measured, and the
-honest state is "unknown" rather than "fine". The short version:
+honest state is "unknown" rather than "fine".
+
+**The workspace quality gate — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo test --workspace` — is green, and this is the first time in the project's
+history.** `cargo test --workspace --no-fail-fast` exits **0** with every target ok; the last
+blocker was Phase 11's own exit-gate suite, which had been written, committed and left unrun at
+14 passed / 5 failed until `9f1d6ae` fixed it. The shell's trio is green too, and it is run with
+`--workspace` now, because `src-tauri/plugins/mobile` is a workspace member that clippy and test
+were silently skipping. The short version:
 
 | Phase | Status |
 |---|---|
