@@ -702,3 +702,133 @@ fn the_same_input_produces_byte_identical_output() {
         "the same logical input must serialize byte for byte"
     );
 }
+
+/// The balancer terminates, respects its bound, moves the latest movable block, and strictly
+/// lowers the heavy day's load.
+///
+/// An unbounded `while` here is a hang rather than a wrong answer, so the returned iteration
+/// count is what lets this test assert the bound rather than merely observe that the call
+/// came back.
+#[test]
+fn the_balancer_terminates_and_moves_the_latest_movable_block() {
+    let tz = london();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 22, 200),
+        vec![
+            goal(
+                1,
+                utc(2026, 4, 1, 18, 0),
+                utc(2026, 4, 1, 0, 0),
+                vec![topic("A", 240, None)],
+            ),
+            goal(
+                2,
+                utc(2026, 4, 2, 18, 0),
+                utc(2026, 4, 1, 0, 0),
+                vec![topic("B", 30, None)],
+            ),
+        ],
+        0,
+        vec![],
+        vec![],
+        config(50, 0, 0, 0, 0.0),
+    );
+    let pre = propose(&input);
+    let heavy = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let before = pre
+        .day_load
+        .iter()
+        .find(|load| load.date == heavy)
+        .unwrap()
+        .planned_min;
+    assert_eq!(
+        before, 200,
+        "the fixture fills the first day to the daily maximum"
+    );
+    let latest_start = pre
+        .blocks
+        .iter()
+        .filter(|block| {
+            !block.pinned
+                && block.kind == stvdy_core::planner::BlockKind::NewMaterial
+                && local(block.starts_at, tz).date_naive() == heavy
+        })
+        .map(|block| block.starts_at)
+        .max()
+        .expect("the heavy day has movable blocks");
+
+    let mut blocks = pre.blocks.clone();
+    let mut day_load = pre.day_load.clone();
+    let iterations = stvdy_core::planner::rebalance(&input, &mut blocks, &mut day_load);
+    assert!(iterations >= 1, "the heavy day was rebalanced");
+    assert!(
+        iterations <= stvdy_core::planner::MAX_ITERATIONS,
+        "the balancer respected its bound"
+    );
+    let after = day_load
+        .iter()
+        .find(|load| load.date == heavy)
+        .unwrap()
+        .planned_min;
+    assert!(
+        after < before,
+        "the heavy day's load strictly fell: {before} -> {after}"
+    );
+
+    let moved = blocks
+        .iter()
+        .zip(&pre.blocks)
+        .position(|(now, then)| now.starts_at != then.starts_at)
+        .expect("a block moved");
+    assert_eq!(
+        pre.blocks[moved].starts_at, latest_start,
+        "the latest movable block is the one that moved"
+    );
+    assert_ne!(
+        local(blocks[moved].starts_at, tz).date_naive(),
+        heavy,
+        "the moved block left the heavy day"
+    );
+}
+
+/// A pinned block is never moved, and a plan whose only movable work is pinned is unchanged —
+/// byte for byte the same as the same input with the balancer off.
+#[test]
+fn the_balancer_never_moves_a_pinned_block() {
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        london(),
+        settings(8, 22, 200),
+        vec![goal(
+            1,
+            utc(2026, 4, 5, 18, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![],
+        )],
+        0,
+        vec![],
+        vec![interval(utc(2026, 4, 1, 7, 0), utc(2026, 4, 1, 10, 20))],
+        config(50, 0, 0, 0, 0.0),
+    );
+    let pre = propose(&input);
+    assert!(
+        pre.blocks.iter().any(|block| block.pinned),
+        "the pinned block is emitted"
+    );
+
+    let mut blocks = pre.blocks.clone();
+    let mut day_load = pre.day_load.clone();
+    let iterations = stvdy_core::planner::rebalance(&input, &mut blocks, &mut day_load);
+    assert_eq!(iterations, 0, "nothing movable exists to move");
+    assert_eq!(blocks, pre.blocks, "the blocks are untouched");
+
+    let mut enabled = input.clone();
+    enabled.config.balancer_enabled = true;
+    assert_eq!(
+        serde_json::to_vec(&propose(&enabled)).unwrap(),
+        serde_json::to_vec(&pre).unwrap(),
+        "a pinned-only plan is identical with the balancer on and off"
+    );
+}

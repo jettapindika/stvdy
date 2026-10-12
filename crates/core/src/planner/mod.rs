@@ -6,18 +6,26 @@
 //! and `tests/planner_purity.rs` enforces at the source level.
 //!
 //! Steps 1 and 2 live in [`slots`]; demand, the review pass and allocation (3–6) in
-//! [`allocate`]; the Power balancer (7) arrives in the next task.
+//! [`allocate`]; the Power balancer (7) in [`balance`]. Replanning and prep progress arrive in
+//! the next task.
 
 mod allocate;
+mod balance;
 mod model;
 mod slots;
 
+pub use balance::{MAX_ITERATIONS, OVERLOAD_PCT, rebalance};
 pub use model::*;
 
 use std::collections::BTreeMap;
 
 use chrono::{Duration, NaiveDate};
 use uuid::Uuid;
+
+/// The topic label a pinned block carries. The contract's `Interval` carries no goal
+/// attribution, so a pinned block is emitted with a nil goal id and this label; the server
+/// maps it back to the goal it was replanned for on accept.
+const PINNED_TOPIC: &str = "Pinned";
 
 /// The one entry point. The steps run in the contract's fixed order and no other.
 pub fn propose(input: &PlannerInput) -> PlanProposal {
@@ -55,8 +63,12 @@ pub fn propose(input: &PlannerInput) -> PlanProposal {
     let (new_blocks, deficit, overloaded) =
         allocate::allocate(input, &mut all_slots, total_capacity);
     blocks.extend(new_blocks);
+    blocks.extend(pinned_blocks(input));
 
-    let day_load = compute_day_load(input, &capacities, &blocks);
+    let mut day_load = compute_day_load(input, &capacities, &blocks);
+    if input.config.balancer_enabled {
+        balance::rebalance(input, &mut blocks, &mut day_load);
+    }
 
     // A266: a fixed serialization order, so two identical requests produce byte-identical
     // JSON. Blocks by `(starts_at, goal_id, topic)`.
@@ -75,6 +87,22 @@ pub fn propose(input: &PlannerInput) -> PlanProposal {
         deficit_min: deficit,
         warnings,
     }
+}
+
+/// The pinned intervals as blocks, unchanged (A265).
+fn pinned_blocks(input: &PlannerInput) -> Vec<ProposedBlock> {
+    input
+        .pinned
+        .iter()
+        .map(|interval| ProposedBlock {
+            starts_at: interval.starts_at,
+            ends_at: interval.ends_at,
+            goal_id: Uuid::nil(),
+            topic: PINNED_TOPIC.to_string(),
+            kind: BlockKind::NewMaterial,
+            pinned: true,
+        })
+        .collect()
 }
 
 /// The goals whose deadline is at or before `now`. Reported rather than dropped, and they do
