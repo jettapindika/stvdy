@@ -87,9 +87,22 @@ async fn reminder_rows(harness: &TestState) -> Vec<(String, chrono::DateTime<chr
 
 /// The exit gate's reminder half. Two devices compute the same due time an hour apart, and
 /// there is one row — whose `fire_at` is the FIRST one, which a fire-time key would fail.
+///
+/// **The clock is pinned, and it has to be.** `TestState::new` pins it to `Utc::now()`, and
+/// this case's fixtures are absolute instants — `08:00Z` and `09:00Z` on 2026-10-12 — because
+/// the dedupe key embeds the *local date* of the fire instant, so a relative fixture would
+/// assert a different key depending on the day it ran. Against a real `now` those instants are
+/// in the past, and `reminders.rs`'s registration window refuses anything more than
+/// `CLOCK_SKEW_MIN` behind it: this suite went red on 2026-10-12 at 09:05 UTC for exactly that
+/// reason, with `fire_at must be no earlier than 5 minutes ago`. Pinning is the same remedy the
+/// quiet-hours case below already documents. `08:00Z` is chosen so both fixture instants are
+/// inside the window (`earliest` is then 07:55Z, and the second device's *earlier* 08:00Z must
+/// be accepted for the row to keep the first one) and so both land on the same Jakarta date.
 #[sqlx::test(migrations = "../../migrations")]
 async fn two_devices_asking_for_the_same_reminder_produce_one_row(pool: PgPool) {
-    let harness = TestState::new(pool);
+    let harness = TestState::new(pool).with_clock(Arc::new(FixedClock::at(
+        "2026-10-12T08:00:00Z".parse().unwrap(),
+    )));
     harness.seed_plans().await.unwrap();
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
 
@@ -149,9 +162,18 @@ async fn two_devices_asking_for_the_same_reminder_produce_one_row(pool: PgPool) 
 }
 
 /// Another account's task is a 404, never a reminder about a stranger's deadline.
+///
+/// **The clock is pinned for the same reason as the case above**, and this one is worth
+/// reading for a second fact: the failure it produced when the fixture aged out was a
+/// **400, not the 404 the test expects**. Body validation runs before the ownership lookup,
+/// so a stale `fire_at` short-circuits ahead of the check this test exists to assert — which
+/// is the right order (validate the body, then authorize) and the wrong thing to leave the
+/// assertion resting on. The pin makes the request reach the ownership check.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_reminder_for_another_users_task_is_not_found(pool: PgPool) {
-    let harness = TestState::new(pool);
+    let harness = TestState::new(pool).with_clock(Arc::new(FixedClock::at(
+        "2026-10-12T08:00:00Z".parse().unwrap(),
+    )));
     harness.seed_plans().await.unwrap();
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
 
