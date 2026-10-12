@@ -162,6 +162,17 @@ smoke-server-phase7:
 smoke-phase7:
     BASE=http://localhost:8099 bash scripts/smoke-phase7.sh
 
+# Phase 8's run. **No model stub and no browser**: nothing on the sync path calls an LLM
+# and nothing here renders a document, so `just smoke-server-phase7` is a fine server for
+# it (the stub it points at is never reached) and CHROME_PATH is not part of the pairing.
+#
+# It does read the database back — the replayed mutation's unchanged `updated_at` and
+# `change_log` count, the isolation check's seq sets, the compaction watermark — so it
+# needs `DATABASE_URL`, which it reads out of `.env` itself. It prunes `signup_attempts`
+# for 127.0.0.1 at the start, because A154's window is 24h and every run adds to it.
+smoke-phase8:
+    BASE=http://localhost:8099 bash scripts/smoke-phase8.sh
+
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
 # The academic tier is keyless and reachable from this machine, so the run gets
