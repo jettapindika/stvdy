@@ -25,11 +25,13 @@ what the next one needs:
   when the row is edited. A feed that omits `SEQUENCE` is a feed whose edits are invisible
   forever (A230), which is why this is Task 1 and not a route detail.
 - **In.** `icalendar` parses, `rrule` expands, `chrono-tz` resolves. The expansion is
-  **bounded twice** (a horizon and a hard occurrence cap, with `limited()` checked), because
-  an unbounded recurrence iteration is a server hang rather than a wrong answer — the
-  roadmap's own risk register names it. The fetch goes through the *same* SSRF guard
-  ingestion uses, as a second function on it rather than a second guard (A233), because a
-  user-supplied ICS URL is exactly the primitive `--block-private-networks` exists for.
+  **bounded twice** (a horizon and a hard occurrence cap, with `limited()` checked — and the
+  request asks for one more occurrence than it keeps, because `rrule` 0.14 sets `limited` when
+  the collection merely *reached* the limit given), because an unbounded recurrence iteration
+  is a server hang rather than a wrong answer — the roadmap's own risk register names it. The
+  fetch goes through the *same* SSRF guard ingestion uses, as a second function on it rather
+  than a second guard (A233), because a user-supplied ICS URL is exactly the primitive
+  `--block-private-networks` exists for.
 - **Two-way.** Google is the only place this phase writes to a remote system, and it does so
   behind a trait (`crates/core/src/traits/calendar.rs`), so the sync is testable without
   Google and the roadmap's "providers are config, not code" line holds. The consent flow is
@@ -292,14 +294,25 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    recurrence engine in the planner, in the SPA's week grid and in the ICS feed, all three
    of which would drift.
 3. **A232 — expansion is bounded twice, and truncation is recorded.** `MAX_OCCURRENCES = 500`
-   and `HORIZON_DAYS = 180`; `RRuleSet::all(MAX_OCCURRENCES as u16)` is called and
-   `RRuleResult.limited` is **checked**, never assumed. A truncated expansion writes
-   `calendar_connections.error = 'recurrence_truncated'` and keeps every occurrence it read.
+   and `HORIZON_DAYS = 180`. The set asks for **one more than it keeps**
+   (`all((MAX_OCCURRENCES + 1) as u16)`), keeps the first `MAX_OCCURRENCES`, and reports
+   `truncated` when more were available. A truncated expansion writes
+   `calendar_connections.error = 'recurrence_truncated'` — the **server** reads the
+   `Expansion.truncated` flag, never `occurrences.len()`, or the same inference bug reappears
+   one layer up — and keeps every occurrence it read.
    *Rationale:* `all()` without a limit on a rule with no `UNTIL` never returns, which is a
    hang rather than a wrong answer — the roadmap's risk register names it in the planner row.
    The horizon is what Phase 11 needs; the count is what makes even an `FREQ=SECONDLY` rule
-   finite *inside* the horizon. `limited()` distinguishes "the rule ended" from "the cap cut
-   it", and only the second is a truncation.
+   finite *inside* the horizon.
+   **Measured against `rrule` 0.14.0, and it is why the "ask for exactly `MAX_OCCURRENCES`
+   and read `limited`" form is wrong:** `collect_with_error` ends with
+   `was_limited || limit == list.len()`, so `all(500)` on a rule with exactly 500 occurrences
+   reports `limited == true`. That is a rule with no more occurrences to give recorded as
+   truncated — a connection that looks broken while it is fine, which is the opposite of what
+   the honesty gate asks for. Asking for one more than are kept makes a natural end report
+   `false`, and the two cases that prove it have the **same occurrence count and opposite
+   answers**: `FREQ=DAILY;COUNT=500` over a window wider than the horizon is not truncated,
+   `FREQ=DAILY;COUNT=501` over the same window is.
 4. **A233 — the ICS fetch is a second *function* on the SSRF guard, not a second guard.**
    `crates/server/src/integrations/fetch.rs` gains
    `pub async fn fetch_guarded_text(url: &str, accept: &str) -> Result<GuardedText, FetchError>`
@@ -814,13 +827,12 @@ pub enum ExpandError {
     TooLarge(usize),
 }
 
-/// Parses and expands. **Never calls `all_unchecked()`**, and reads
-/// `RRuleResult.limited` rather than inferring truncation from `dates.len()`.
-/// The API, verified against rrule 0.14's docs rather than assumed:
+/// Parses and expands. **Never calls `all_unchecked()`**, and asks for one more
+/// occurrence than it keeps, so `limited` is a real answer rather than a tautology.
+/// The API, verified against rrule 0.14.0 by measurement rather than assumed:
 /// `RRuleSet::all(limit: u16) -> RRuleResult { dates: Vec<DateTime<Tz>>, limited: bool }`,
-/// where `limited == true` means the cap cut the rule and `false` means the rule
-/// ended on its own (`COUNT`/`UNTIL`). `all_unchecked()` is the unbounded call this
-/// function must not contain, and the `u16` is why `MAX_OCCURRENCES` is capped at
+/// where `limited == true` means the cap cut the rule. `all_unchecked()` is the unbounded
+/// call this function must not contain, and the `u16` is why `MAX_OCCURRENCES` is capped at
 /// 65535 by the crate rather than by this plan.
 pub fn expand_feed(body: &str, window: Window) -> Result<Expansion, ExpandError>;
 
@@ -840,10 +852,14 @@ fn resolve_tz(raw: &str) -> Option<chrono_tz::Tz>;
 The body-size guard (`TooLarge`) exists because a hostile or broken feed can be
 hundreds of megabytes and the parse is in a worker.
 
-**The `limited` check is the belt, and the cap is the braces.** `dates.len() == MAX_OCCURRENCES`
-does not mean the cap fired — a rule with exactly 500 remaining occurrences ends there
-naturally and is not truncated. Only `limited` distinguishes the two, which is why A232
-records `error = 'recurrence_truncated'` from `limited` and never from a length comparison.
+**The `limited` check is the belt, and the cap is the braces — but only if you ask for one
+more than you keep.** `dates.len() == MAX_OCCURRENCES` does not mean the cap fired: a rule with
+exactly 500 remaining occurrences ends there naturally and is not truncated. So neither the
+length comparison *nor* `limited` on a request for exactly `MAX_OCCURRENCES` distinguishes the
+two, because `collect_with_error` ends with `was_limited || limit == list.len()` and therefore
+sets `limited` when the collection merely *reached* the limit. Ask for `MAX_OCCURRENCES + 1`,
+keep the first `MAX_OCCURRENCES`, and `limited` then means what it says. A232 records
+`error = 'recurrence_truncated'` from that flag and never from a length comparison.
 
 - [ ] **Step 4: Run the tests**
 
