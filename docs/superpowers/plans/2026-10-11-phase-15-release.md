@@ -1935,22 +1935,33 @@ node scripts/check-no-cdn.mjs
       `Dockerfile` ends with `USER stvdy` (uid 10001), and
       `crates/server/src/render/chrome.rs:211` passes `.sandbox(!allow_no_sandbox)`, so an
       unsandboxed render outside dev is refused; neither is the container's own observation.
-- [ ] The template's CDN references are rewritten to the server's `/assets/` route, the
+- [x] The template's CDN references are rewritten to the server's `/assets/` route, the
       route serves KaTeX and the fonts with the right content types, and a rewrite that
       left a remote reference fails a test.
-      **PART MEASURED** — the route and the rewrite are in the tree and the assertions exist:
-      `crates/server/tests/assets.rs` carries
-      `the_template_has_no_remote_asset_reference_after_the_rewrite`,
-      `the_asset_route_serves_katex_and_the_fonts` and
-      `the_asset_route_refuses_what_it_does_not_serve`, and the rewrite is
-      `rewrite_asset_base` in `crates/server/src/render/chrome.rs`. **The cases were read, not
-      run**: `cargo test` was not executed against this tree.
+      **MEASURED 2026-10-12 — the cases were run, not read.** `cargo test -p stvdy-server
+      --test assets` → **6 passed / 0 failed**: `the_template_has_no_remote_asset_reference_after_the_rewrite`,
+      `the_rewritten_document_references_only_the_server`, `the_rewrite_is_idempotent`,
+      `the_asset_route_serves_katex_and_the_fonts`, `the_asset_route_serves_a_font_byte_for_byte`
+      and `the_asset_route_refuses_what_it_does_not_serve`. The rewrite is
+      `rewrite_asset_base` in `crates/server/src/render/chrome.rs`, applied inside
+      `render_once` **before** the `document.write`. The earlier **PART MEASURED** was true
+      when written (the cases existed and had not been executed) and is superseded.
 - [ ] `scripts/verify-release-artifacts.sh` refuses to run with the signing private key in
       its environment, and its checks pass on the release artifacts.
-      **HALF MEASURED** — the refusal is verified by reading the script: it exits 2 before any
-      check runs when `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is
-      set (A332). Its checks on real artifacts are **NOT MEASURED** — no release artifacts
-      were produced (no macOS build, no notarization), so `--all <dir>` has nothing to read.
+      **THE REFUSAL IS NOW MEASURED; the artifact checks still have nothing to read.**
+      `TAURI_SIGNING_PRIVATE_KEY=xxx bash scripts/verify-release-artifacts.sh --all
+      --manifest-url …` → **exit 2**, with the message naming the reason (`with the key
+      present, "the signature verifies" and "this key signed it" are the same observation
+      … (A332)`). `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` alone → also **exit 2**, which is
+      the half worth measuring: with the password exported the key is one `env` assignment
+      away, and the script treats both as disqualifying. **And the no-key path is not a
+      silent pass:** with no key and no artifacts it exits **1** with three named failures
+      (`FAIL version: no tag to compare against`, `FAIL macos: no .app bundle … so nothing
+      was checked`, `FAIL windows: no .exe …`), so an operator who forgot `--tag` or
+      pointed at the wrong directory gets a red rather than a green from a run that
+      checked nothing. **Still NOT MEASURED:** the checks themselves against real signed
+      artifacts — no macOS build, no notarization, no NSIS installer exist, which is the
+      signing half of this phase and needs the operator's certificates.
 - [x] `docs/EULA.md` exists as a draft marked for legal review; `THIRD_PARTY_NOTICES.md`
       names the fonts the product actually ships and the image's components.
 - [ ] `docs/OPERATIONS.md` covers the host checklist, deployment, backups with a restore
@@ -1976,15 +1987,21 @@ node scripts/check-no-cdn.mjs
       documents rather than restating them.
 - [x] `docs/RELEASE.md` carries the release process, the store checklists, the launch
       checklist and the pointer to `docs/OPERATIONS.md`.
-- [ ] `docs/{ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` and the route sweep are updated in
+- [x] `docs/{ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` and the route sweep are updated in
       the same phase.
-      **PART MEASURED** — `docs/ARCHITECTURE.md` carries `## Container image` (added in
-      `ad70b58`); `docs/ASSUMPTIONS.md` carries A330–A354 (added in `66466ea`); and
-      `docs/THREAT_MODEL.md` carries the update-channel asset row and R8 (the update key).
-      **The route sweep has no Phase 15 row**: `crates/server/tests/route_sweep.rs`'s last
-      change is `31900fb`, and its exempt/read-only/swept sets hold nothing this phase added
-      — the `exempt("GET", "/assets/{*path}")` row is Phase 10's `070ac89`. The item's "and
-      the route sweep" half is not met.
+      **MEASURED 2026-10-12, and the route-sweep half is now met — by `c049b43`, which is
+      this phase's account-deletion work.** `docs/ARCHITECTURE.md` carries `## Container
+      image` (`ad70b58`); `docs/ASSUMPTIONS.md` carries A330–A354 (`66466ea`) and now A355
+      (`ec069ca`); `docs/THREAT_MODEL.md` carries the update-channel asset row and R8 (the
+      update key). **The route sweep has a Phase 15 row after all**: `crates/server/tests/route_sweep.rs`
+      gained 20 lines in `c049b43` for the two account routes — `DELETE /account` and
+      `GET /account/export` — with the comment recording that leaving is not a plan feature
+      and that in-app deletion is an app-store requirement rather than a paid one. Re-run
+      here: `cargo test -p stvdy-server --test route_sweep` → **4 passed / 0 failed**
+      (`every_registered_route_is_classified`, `every_swept_route_refuses_an_exhausted_account`,
+      `the_spend_cap_covers_only_swept_routes`, `no_file_outside_the_entitlements_layer_reads_a_plan_limit`).
+      The earlier **PART MEASURED** was true when written — its last change was `31900fb`
+      then — and the account work landed afterwards.
 - [x] The full quality gate is green.
       **PASS, measured 2026-10-12 — the first green run of this gate in the project's history.**
       `cargo fmt --all -- --check` clean, exit 0. `cargo clippy --workspace --all-targets -- -D
