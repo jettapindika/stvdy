@@ -235,7 +235,11 @@ fn read_only_rows() -> Vec<Row> {
         ),
         ro("GET", "/goals/{id}", "reads the caller's own goal"),
         ro("PATCH", "/goals/{id}", "editing a goal spends nothing"),
-        ro("DELETE", "/goals/{id}", "deleting frees the anchor, not a slot"),
+        ro(
+            "DELETE",
+            "/goals/{id}",
+            "deleting frees the anchor, not a slot",
+        ),
         ro(
             "GET",
             "/goals/{id}/progress",
@@ -1079,6 +1083,7 @@ struct Fixture {
     report_id: Uuid,
     cheatsheet_id: Uuid,
     task_id: Uuid,
+    goal_id: Uuid,
     user_id: Uuid,
 }
 
@@ -1291,6 +1296,20 @@ impl Fixture {
             .await
             .unwrap();
 
+        // The goal the two plan routes address. Its own row is enough: the route refuses on
+        // the plan before it reads the goal, which is the order a counted refusal must take.
+        let goal_id = Uuid::now_v7();
+        sqlx::query(
+            "insert into goals (id, user_id, workspace_id, title, target_date)
+             values ($1, $2, $3, 'UAS', now() + interval '21 days')",
+        )
+        .bind(goal_id)
+        .bind(user_id)
+        .bind(workspace_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
         Self {
             pool: harness.state.pool.clone(),
             workspace_id,
@@ -1298,6 +1317,7 @@ impl Fixture {
             report_id,
             cheatsheet_id,
             task_id,
+            goal_id,
             user_id,
         }
     }
@@ -1464,6 +1484,32 @@ impl Fixture {
                     &format!("/tasks/{task}/breakdown"),
                     token,
                     serde_json::json!({}),
+                )
+                .await
+            }
+            // Phase 11. Both are refused before the goal is read: the refusal is the plan
+            // matrix's, which is what an exhausted free account meets. The goal id is a
+            // real one the fixture wrote, so a route that read it before deciding would
+            // still get past that read rather than 404 first.
+            ("POST", "/goals/{id}/plan") => {
+                let goal = self.goal_id.to_string();
+                json(
+                    app,
+                    "POST",
+                    &format!("/goals/{goal}/plan"),
+                    token,
+                    serde_json::Value::Null,
+                )
+                .await
+            }
+            ("POST", "/plan/replan") => {
+                let goal = self.goal_id.to_string();
+                json(
+                    app,
+                    "POST",
+                    "/plan/replan",
+                    token,
+                    serde_json::json!({ "goal_id": goal }),
                 )
                 .await
             }
