@@ -179,6 +179,9 @@ async fn the_snapshot_counts_the_same_rows_the_daily_cap_counts(pool: PgPool) {
             )),
             None,
         ],
+        // A server-provider call: the `byok` flag says the spend is on our key, which is
+        // what the ceiling counts.
+        false,
     )
     .await
     .expect("three rows before the local day start must not fill the cap");
@@ -220,6 +223,7 @@ async fn the_snapshot_counts_the_same_rows_the_daily_cap_counts(pool: PgPool) {
             )),
             None,
         ],
+        false,
     )
     .await
     .expect_err("the cap is full according to the snapshot, so the spend must be refused");
@@ -591,6 +595,7 @@ fn free_snapshot() -> UsageSnapshot {
         quizzes_this_month: 0,
         reports_this_month: 0,
         syllabus_imports: 0,
+        google_accounts: 0,
     }
 }
 

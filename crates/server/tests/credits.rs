@@ -59,6 +59,7 @@ async fn a_reached_cap_refuses_the_spend_and_writes_nothing(pool: PgPool) {
         "chat_message",
         1,
         [Some(cap), None],
+        false,
     )
     .await;
 
@@ -112,6 +113,7 @@ async fn a_cap_with_room_lets_the_spend_through(pool: PgPool) {
         "chat_message",
         1,
         [Some(cap), None],
+        false,
     )
     .await
     .expect("the first spend fits");
@@ -167,6 +169,7 @@ async fn a_provider_cost_lands_on_its_own_usage_row(pool: PgPool) {
         "chat_message",
         1,
         [None, None],
+        false,
     )
     .await
     .expect("the first spend");
@@ -177,6 +180,7 @@ async fn a_provider_cost_lands_on_its_own_usage_row(pool: PgPool) {
         "chat_message",
         1,
         [None, None],
+        false,
     )
     .await
     .expect("the second spend");
@@ -265,6 +269,7 @@ async fn the_monthly_bucket_is_spent_before_the_purchased_one(pool: PgPool) {
         "chat_message",
         3,
         [None, None],
+        false,
     )
     .await
     .expect("the purchased bucket covers it");
@@ -296,6 +301,7 @@ async fn the_monthly_bucket_is_spent_before_the_purchased_one(pool: PgPool) {
         "chat_message",
         2,
         [None, None],
+        false,
     )
     .await
     .expect("the monthly bucket covers it");
@@ -367,6 +373,7 @@ async fn the_spend_takes_the_lock_before_reading_the_ledger(pool: PgPool) {
             "chat_message",
             1,
             [None, None],
+            false,
         )
         .await
     });
@@ -440,6 +447,7 @@ async fn an_account_over_its_provider_cost_ceiling_is_refused(pool: PgPool) {
         "chat_message",
         1,
         [None, None],
+        false,
     )
     .await
     .expect_err("an account at its ceiling must not spend");
@@ -534,6 +542,7 @@ async fn a_higher_plan_has_a_higher_ceiling(pool: PgPool) {
         "chat_message",
         1,
         [None, None],
+        false,
     )
     .await
     .expect("pro's ceiling is higher than the spend that stops free");
@@ -566,6 +575,7 @@ async fn byok_usage_does_not_count_against_the_ceiling(pool: PgPool) {
         "chat_message",
         1,
         [None, None],
+        false,
     )
     .await
     .expect("a call on the user's own key is not our cost");
@@ -634,6 +644,7 @@ async fn concurrent_spends_never_double_spend(pool: PgPool) {
                 "chat_message",
                 1,
                 [None, None],
+                false,
             )
             .await
         }));
