@@ -1711,10 +1711,14 @@ the same check against the packaged archive, and that is the form A4 records.
 ## Native shims chosen
 
 Five native mechanisms carry the phone build, and the split between them is the platform's
-rather than a preference. **Each is marked with what the tree holds at the time of
-writing** — `landed` when the file exists, `in-flight` when it does not — because the
-difference between "the decision is recorded" and "the code is in the tree" is the one a
-later reader must not have to guess.
+rather than a preference. **Each is marked `landed` or `in-flight` against what the tree
+held when it was written** — `landed` when the file exists and is committed, `in-flight`
+when it does not — because the difference between "the decision is recorded" and "the code
+is in the tree" is the one a later reader must not have to guess. **Four of the five are
+now `landed`**, and the marks were re-checked rather than assumed: what remains in flight
+is the Android half of the share intake, because no Android SDK exists on this machine to
+compile it against, and the device-side behaviour of every one of them, which no machine
+here can verify at all.
 
 ### The push plugin, and its fallback (A310) — landed
 
@@ -1736,7 +1740,7 @@ string the server's `PUSH_PROVIDERS` rejects sits in `push_tokens` and never del
 a failure no device would reveal. The capability matrix budgets for the custom plugin
 regardless, so the fallback is a known cost rather than a surprise.
 
-### The one custom plugin (A311) — in-flight
+### The one custom plugin (A311) — landed
 
 `src-tauri/plugins/mobile/` is one crate for the native work no plugin layer can do: the
 iOS `BGTaskScheduler` registration and handlers, the Android `WorkManager` worker, the FCM
@@ -1746,14 +1750,17 @@ split is by **platform mechanism** (an app-extension target cannot be a plugin, 
 crate is not a scheduler) rather than by convenience. `intake.rs` and `scheduler.rs` are
 its two halves, and `tests/scheduler.rs` pins the seam.
 
-**In the tree, uncommitted and not yet registered.** The crate is present
-(`src-tauri/plugins/mobile/`, with its `Cargo.toml`, `build.rs`, the Rust modules, the
-Kotlin half `android/…/MobilePlugin.kt` and the scheduler test) and depends on
-`stvdy-shell`, but it is untracked in git and `src-tauri/src/lib.rs` does not yet call
-`tauri_plugin_stvdy_mobile::init()`, so no build wires it in. The design above is what the
-tree holds; the wiring is a sibling's in-flight work.
+**In the tree and registered.** The crate is committed (`src-tauri/plugins/mobile/`, with
+its `Cargo.toml`, `build.rs`, the Rust modules, the Kotlin half
+`android/…/MobilePlugin.kt` and the scheduler test), it depends on `stvdy-shell`, and
+`src-tauri/src/lib.rs` calls `tauri_plugin_stvdy_mobile::init()`. It is a **member of the
+shell's workspace** — a path dependency of a workspace root is a member — which is why it
+inherits the shell's lint block through `[lints] workspace = true`, and why the shell trio
+must be run with `--workspace`: without the flag, clippy and test select the `stvdy-shell`
+package alone and this crate's Rust and its tests are skipped. Both the `justfile`'s
+`check-shell` and CI's `shell` job pass it.
 
-### The Share Extension and the App Group (A312) — in-flight
+### The Share Extension and the App Group (A312) — landed
 
 The iOS Share Extension is a hand-wired **app-extension target**, not a plugin: a Share
 Extension cannot launch its host app (`NSExtensionContext.open(_:)` is supported only by
@@ -1762,18 +1769,20 @@ the Today and iMessage extension points), so it writes the shared file or URL in
 Group identifier is `group.app.stvdy`, the only shared-container name in the tree, and it
 is asserted unique.
 
-**Not in the tree yet.** `bundle.iOS.template` (`gen/apple/project.yml.template`) is present
-and Tauri has no `bundle` key for an app-extension target, so the target is added by
-rendering a custom XcodeGen `project.yml` over the generated one — but the extension target
-itself and the `group.app.stvdy` entitlement are not there yet, and the Android half of the
-intake is the plugin's `intake.rs` rather than an extension. The three intake channels
+**In the tree.** `bundle.iOS.template` (`gen/apple/project.yml.template`) declares the
+`type: app-extension` target with its `NSExtensionPointIdentifier:
+com.apple.share-services` and principal class, and it renders into the generated
+`project.yml` and `project.pbxproj`; the entitlement is in the generated
+`stvdy-shell_iOS.entitlements`; and `src-tauri/src/share.rs` is the Rust half the app reads
+the container with, asserted by `src-tauri/tests/share_group.rs`. The three intake channels
 (A313) are: iOS "Open in…" document associations delivered via `RunEvent::Opened`, the
 Share Extension writing to the App Group, and Android `bundle.fileAssociations[]` with a
 concrete `mimeType` delivering a `content://` URI — which is copied into app storage
 immediately, because an `ACTION_GET_CONTENT` grant is transient and dies with the receiving
-activity (A314).
+activity (A314). **The Android channel's Kotlin half is the one part still in flight**,
+because no Android SDK exists on this machine to compile it against.
 
-### The scheduler seam (A315) — in-flight
+### The scheduler seam (A315) — landed
 
 `src-tauri/plugins/mobile/src/scheduler.rs` calls `stvdy_shell_lib::sync::sync_once`
 **directly, never the webview**: iOS submits a `BGAppRefreshTaskRequest` and a
@@ -1785,10 +1794,12 @@ guarantee a webview exists, and one killed mid-run would make a sync depend on a
 Swift halves. JS observes the result on the next foreground through the Phase 8 sync-status
 surface.
 
-**The seam's source and its test are present, but inside the same uncommitted crate** as
-A311 above, so the assertion has not been run against a registered plugin. The design is
-pinned and the file exists; "in-flight" is the honest word until the crate is committed and
-wired.
+**Committed and executed.** The crate is in HEAD and registered, so the assertion runs
+against the real plugin rather than against a source file nobody builds — which was the
+whole reason for running the trio with `--workspace`. What is **not** verified is the part
+no machine here can verify: no simulator runtime, no Android SDK and no device exist, so
+the registration and the background window firing are unproven on hardware. The design is
+pinned and the seam is asserted; the native behaviour is not.
 
 **The scheduler is best-effort and its inaccuracy is documented (A317).** iOS scheduling
 is discretionary and Android periodic work is inexact and ≥15 min; the interval is clamped
