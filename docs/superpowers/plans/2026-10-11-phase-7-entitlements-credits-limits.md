@@ -2264,7 +2264,7 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 |---|---|---|
 | Format | `cargo fmt --all -- --check` | clean |
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | clean (`-p stvdy-server` re-run clean after this slice's test edit) |
-| Rust tests | `cargo test --workspace` | **NOT RE-RUN by this slice** — see the Execution notes |
+| Rust tests | `cargo test --workspace` | **NOT RUN by this slice** — the main agent ran it concurrently in this tree and it finished; its result is the main agent's to report |
 | Plan matrix | `cargo test -p stvdy-core --test entitlements_matrix` | green in Task 1's slice |
 | The sweep | `cargo test -p stvdy-server --test route_sweep` | green in Task A2's slice |
 | The tamper suite | `cargo test -p stvdy-server --test tamper` | **14 passed; 0 failed** (12 cases + 2 this slice added) |
@@ -2272,14 +2272,14 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 | The downgrade | `cargo test -p stvdy-server --test limits_periods a_downgrade_keeps_the_data` | green in Task B's slice; re-asserted end to end by the smoke run |
 | Abuse controls | `cargo test -p stvdy-server --test abuse` | green in Task C's slice |
 | Offline queries | `cargo sqlx prepare --workspace --check` | unchanged ("no queries found") |
-| Web tests | `npm --prefix app test` | **307 passed / 307** (36 files), Task E's slice |
-| Web build | `npm --prefix app run build` | clean |
-| No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)` |
-| Desktop + shell | `just check-shell` | **NOT RE-RUN by this slice** — see the Execution notes |
+| Web tests | `npm --prefix app test` | **307 passed / 307** (36 files), re-run in this pass |
+| Web build | `npm --prefix app run build` | clean, re-run in this pass (and the shipped bundle is what gate 7(c) grepped) |
+| No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)`, re-run in this pass |
+| Desktop + shell | `just check-shell` | **green** (fmt, clippy, the shell's tests) |
 | Roadmap gate 3 (this phase's acceptance) | `bash scripts/smoke-phase7.sh` | **PASS**, 8 scenarios, exit 0 (see the Execution notes) |
-| Roadmap gate 5 (accessibility) | measured in Chromium at 390×844, both themes, 200% text | **NOT PERFORMED** — see the Execution notes |
-| Roadmap gate 6 (Indonesian) | copy parity + the `Asia/Jakarta` month roll | partially: the copy half is asserted by Task E's suite, the data half by `limits_periods.rs` and the smoke run; **not quoted from a browser** |
-| Roadmap gate 7 (honesty) | clauses (a)–(f), each with the check named | **NOT PERFORMED** as a fresh pass — see the Execution notes |
+| Roadmap gate 5 (accessibility) | measured in Chromium, 390×844 + 1280×900, both themes, 200% text | **PASS**, one defect found and **not fixed** (`LockedFeature`'s upgrade link is 93×19 at phone width) — 79 + 46 contrast pairs, 0 below requirement, lowest 5.28:1; 8 stops at desktop, 6 at phone, all `solid 2px` at 2px offset; `scrollWidth == clientWidth == 390` at 200%. See the Execution notes |
+| Roadmap gate 6 (Indonesian) | copy driven from the Indonesian UI in the browser + the `Asia/Jakarta` month roll | **PASS** for `limit_reached`, quoted from the DOM ("Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan kamu sudah memakai 2. Pro menaikkan batas ini."); **`plan_required`/`insufficient_credits` not captured in the browser** (a hand-seeded report row crashed the report screen), so they remain unit-level assertions; the data half is `limits_periods.rs` + `indonesian.rs` + the smoke run. See the Execution notes |
+| Roadmap gate 7 (honesty) | clauses (a)–(f), each with the check named | **PASS** — (c) re-asserted by grepping the shipped bundle (1 match each, English and Indonesian); (a), (d) and (f) measured; (b) and (e) inherited evidence. See the Execution notes |
 | Everything | `just check` | not run |
 
 ---
@@ -2360,95 +2360,181 @@ only `127.0.0.1`, and `curl --interface 127.0.0.2` fails with `Can't assign requ
 address`), so the per-IP rule is driven by seeding the count for this run's own address and
 discriminating the 429 from the credential bucket's by a login from the same address.
 
-### Roadmap gate 5, accessibility: **NOT PERFORMED**
+### Roadmap gate 5, accessibility: PASS on the two new components, one defect found
 
-The brief is explicit that this gate is measured in a real browser and that "looks fine" is
-not a gate, and this pass did not measure it. What exists:
+Measured in a real Chromium (driven over CDP) on the built bundle against the real API on
+`:8097`, on the three surfaces this phase changed: `PlanUsageScreen` and `CreditMeter` at
+**390x844** and **1280x900** with `prefers-color-scheme` **dark and light**, and the
+add-source form (`WorkspaceScreen`'s `UploadForm`) at 1280x900. The instrument is
+`/tmp/gate7-a11y.js`, which installs a `window.__gate` on the page: `contrast()` composites
+each element's real backdrop (walking up until a non-transparent background) and applies WCAG
+2.1 relative luminance with the 4.5:1 / 3:1 thresholds chosen by computed font size and
+weight; `walk()` presses real `Tab` keys and measures the ring on the focused element itself;
+`targets()` measures `getBoundingClientRect()`; `overflow()` compares each element's
+`scrollWidth` to its `clientWidth` and the document's to the viewport. Nothing is asserted
+from the stylesheet.
 
-- The surfaces are known and small: `PlanUsageScreen` has **two** focusable elements (the
-  `ApiErrorNotice` plan link, present only on a non-mobile platform and absent for
-  `feature_locked`, and `LockedFeature`'s upgrade link, present only where
-  `config/billing_policy.toml` allows a CTA); `CreditMeter` is one `Link` to `/billing` with
-  `min-h-11` (44px) and `focus:outline-2 focus:outline-offset-2 focus:outline-ring`. The
-  add-source form's radios sit in a 44px `<label>` with `has-[:focus-visible]:outline-ring`.
-- The token-level contrast gate is already green in `npm test`
-  (`app/src/tokens/contrast.test.ts`, every documented pair, both themes, `MIN.text = 4.5`),
-  and `app/src/tokens/invariants.test.ts` fails any focus utility that is not `outline-ring`.
-  `app/src/features/a11y.test.tsx` runs axe over the plan screen.
+The screen was driven with real state, not a stub: an account with **2 of 2 workspaces**,
+**21 of 20 chat messages**, **1 of 1 reports** (each rendering "Sudah di batas" / "At the
+limit"), a **paused ceiling** (`provider_cost_usd = 0.50` on the free plan's ceiling), and
+three credit buckets (`60 / 12 / 72`).
 
-  That is a *stylesheet* gate and an *axe* gate, not the measurement the brief asks for: it
-  does not prove a visible ring on a real `Tab` walk, a computed ratio on the rendered
-  screen in both `prefers-color-scheme` values, a 44px target at 390px, or zero clipping at
-  200% text. **The instrument was written and not run**: `/tmp/gate7-a11y.js` installs a
-  `window.__gate` with `contrast()` (composites each element's real backdrop and applies
-  WCAG 2.1), `walk()` (real `Tab` presses, one entry per stop, wrapping detected), `ring()`,
-  `targets()` and `overflow()`; a Chromium tab was opened on the built bundle at 390×844,
-  `prefers-color-scheme: dark`, and the seeded gate account exists in `stvdy_smoke7`
-  (`gate7@example.test`, 20 of 20 chats used, 12 purchased credits, a paused ceiling, two
-  workspaces) so the screen has something to render. The walk was not completed before this
-  slice stopped.
+- **(a) Keyboard, with a visible ring.** At 1280x900 `Tab` from the document body reaches
+  **8 stops** and wraps to the first: the skip link, the five sidebar items (Today,
+  Workspaces, Calendar, Tasks, Settings), the credit meter (**"72 credits left"**, a link to
+  `/billing`) and the locked-format upgrade link. Every stop carries
+  `outline: solid 2px rgb(165, 180, 252)` at a **2px offset**, measured on the focused
+  element, at **6.29:1** against what it sits on. At 390x844 the walk reaches **6 stops** —
+  the upgrade link and the five tab-bar items — and wraps; **the meter is absent at phone
+  width**, which is Task 12's recorded decision (the tab bar is five destinations and the
+  meter lives on the sidebar rail; a sixth item would cost every item its 44px target at 200%
+  type).
+- **(b) Contrast, computed, both themes.** **79 text/background pairs on the plan screen and
+  46 on the add-source form; 0 below their requirement in either theme.** The lowest ratio on
+  the plan screen is **5.28:1** (light) / **5.69:1** (dark) for "Available on Pro" at 13px;
+  the **paused-ceiling notice** is **6.37:1** (light) — `--warning` on `--warning-tint`, the
+  pair the design tokens declare; the limit rows and the plan name sit on `--text`/
+  `--text-muted` over `--bg` and are above 7:1; the meter's balance is `--text-muted` over the
+  rail at the same pair. The lowest anywhere measured is **5.28:1**, against a 4.5:1
+  requirement.
+- **(c) 44px targets at phone width — one failure, reported not softened.** At 390px the tab
+  bar's five items are 44px tall. **`LockedFeature`'s upgrade link measures 93x19** at both
+  390px and 1280px — a real interactive target under 44px on this phase's surface (and on
+  Phase 6's report and cheatsheet screens, which share the component; Phase 6's gate listed
+  buttons and nav items but not this link, so it was missed there too). At 1280px the sidebar
+  items are **215x40**, also under 44, but the clause is about phone width, where the tab bar
+  carries navigation at 44px. The add-source form's radios measure **13x13 inside
+  79x58 / 114x58 / 97x44 / 97x44 / 201x44 labels** — the label is what is clicked and what
+  the finger hits, which is the wrapped-control case and not a failure; the two source-list
+  checkboxes are the same shape.
+- **(d) No state by colour alone.** A reached limit renders "**2 dari 2**" **and** the chip
+  "**Sudah di batas**" (the word carries the state; the chip's tone only repeats it); the
+  paused ceiling is the sentence "**Pembuatan baru dijeda sampai 1 Nov 2026**"; the low-balance
+  case is the meter's word ("**Kredit habis**" at zero, "**Kredit tidak tersedia**" when the
+  route failed, never a bare `0`); the subscription status is a word ("**Tanpa langganan**");
+  a locked export format is a lock icon, the format's name and a sentence.
+- **(e) 200% text at 390px.** Root 16px -> **32px**, measured back from `getComputedStyle`.
+  **`document.scrollingElement.scrollWidth === 390 === clientWidth`: no horizontal page
+  overflow, and 0 elements clipped off-screen.** Two measured soft findings, both recorded
+  rather than smoothed over: the fifth tab-bar item paints **45px past the right edge**
+  (`left 361, right 435`), which is Phase 6's documented fix — the bar is
+  `overflow-x: auto` (`scrollWidth 435 > clientWidth 390`, confirmed `scrollable: true`), so
+  the item is reachable by swipe and by `Tab`; and three row elements inside the limits and
+  costs `<dl>`s report a content width of **327 against a 310 box**, absorbed by the
+  surrounding padding with nothing clipped and no page overflow.
 
-  **What this degrades to:** the phase's UI is two new components and one form change, all of
-  whose styling is shared with Phase 6's surfaces (the same `Section`/`Link`/`LockedFeature`
-  and the same `:focus-visible` rule), and Phase 6's gate measured those at 390×844 in both
-  themes. That is an argument, not a measurement, and it is recorded as one.
+#### The one defect gate 5 found
 
-### Roadmap gate 6, Indonesian: partially performed
+**`LockedFeature`'s upgrade link is 93x19 at phone width**, against the 44px target the gate
+requires. It is a plain `Link` with `link mt-1 self-start text-small` and no height utility,
+where every other control on the surface has one (`min-h-11` on the meter, on the
+`ApiErrorNotice` plan link, and on the upload radios' labels). It sits on this phase's plan
+screen and on Phase 6's report and cheatsheet screens, and it is the control a user who has
+just been told a feature is locked is meant to reach.
 
-- **Copy.** Task E's slice asserts it and this pass read the assertions rather than re-running
-  them: `app/src/api/errors.test.ts`'s `describe('the refusals in Indonesian')` renders each
-  refusal through the real `t` and asserts the Indonesian sentences verbatim —
-  `limit_reached` → `"Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan
-  kamu sudah memakai 2. Pro menaikkan batas ini."`, `plan_required` → `"Ekspor PDF tidak
-  termasuk dalam paketmu saat ini. Fitur ini ada di Pro."`, `insufficient_credits` →
-  `"Kredit tidak cukup"` / `"Saldo kreditmu kurang dari biaya ini."` — with
-  `expect(sentence).not.toContain('plan has reached')` as the check that no English word
-  survives. `PlanUsageScreen.test.tsx` asserts the screen's rows in Indonesian
-  (`'Paket dan pemakaian'`, `'2 dari 2'`, `'Sudah di batas'`). **Not driven from the
-  Indonesian UI in a browser**, which is what the brief asks for.
+**Not fixed in this slice, and deliberately not fixed quietly.** The brief for this slice
+says `app/**` is settled and green and that a defect found there must be **reported, not
+fixed**, so a fix slice can be dispatched with the right ownership. The fix is one class
+(`min-h-11` + `inline-flex items-center`, the shape `States.tsx:196` already uses) plus a
+regression test asserting the link's rendered height at 390px, which is exactly the shape
+Phase 6's four fixes took.
+
+### Roadmap gate 6, Indonesian end to end: PASS
+
+- **Copy, driven from the Indonesian UI in a browser.** The browser's `navigator.languages`
+  was overridden to `id-ID` before the app booted, so the app resolved Indonesian itself —
+  the sign-in screen renders "**Masuk**" and the shell "**Ruang belajar, sumber, dan materi
+  belajarmu, di setiap perangkat yang kamu pakai**" — and the account was signed in through
+  that UI. The refusals were then forced with real state and the sentence **quoted from the
+  rendered DOM**, not from a unit test:
+
+  - **`limit_reached`** — creating a third workspace from the Indonesian UI against a free
+    account with two (the client believed `pro`, because `users.plan_id = 'pro'`, so the form
+    was offered; the server refused, because A146 honours a stored plan only while a
+    subscription is `active` or in grace, and there was no subscription row). The notice the
+    user reads:
+    "**Batas paket tercapai**" /
+    "**Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan kamu sudah
+    memakai 2. Pro menaikkan batas ini.**" / "**Lihat paket**".
+  - **`plan_required` and `insufficient_credits` — NOT captured from the browser.** The
+    report screen crashed with `Cannot read properties of undefined (reading 'length')` on the
+    row this gate seeded by hand into `reports` (a `status = 'ready'` row with a
+    `sections_md`/`outline` shape the API's own derivation may not accept), so the PDF export
+    button was never reachable, and the chat refusal was not driven. **This is stated as not
+    performed rather than upgraded**: whether that crash is my fixture or a real defect in the
+    screen's derivation could not be established without more work, so it is recorded as an
+    open question for whoever owns `app/**`, and it is **not** claimed as a defect.
+    The two sentences those codes produce are asserted through the real `t` in
+    `app/src/api/errors.test.ts` — `plan_required` → "**Ekspor PDF tidak termasuk dalam
+    paketmu saat ini. Fitur ini ada di Pro.**" and `insufficient_credits` → "**Kredit tidak
+    cukup**" / "**Saldo kreditmu kurang dari biaya ini.**" — which is one layer below the DOM.
+
 - **Data.** `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`
-  is the exact property: clock pinned at `2026-10-31T18:00:00Z`, 30 flashcards seeded on both
-  a `Asia/Jakarta` and a `UTC` account, and the Jakarta account reads
+  is the exact property, and it is the strongest evidence in this gate: the clock is pinned at
+  `2026-10-31T18:00:00Z` (Jakarta entered November at 17:00Z; UTC has not), 30 flashcards are
+  seeded on both a `Asia/Jakarta` and a `UTC` account, and the Jakarta account reads
   `flashcards_this_month == 0` and is admitted while UTC reads `== 30` and is refused
   `limit_reached`. `crates/server/tests/indonesian.rs::an_indonesian_question_is_answered_with_a_resolved_citation`
   is the retrieval half, and **no `entitlements::` call exists anywhere on the retrieval or
-  citation path** (`chat/retrieve.rs`, `web.rs`, `prompt.rs`, `sse.rs`: zero hits; the only
-  two are pre-retrieval in `routes.rs`). The smoke run is the wired half: an Indonesian text
-  source reaches `ready`, its chunks are cited, and a chat turn costs the matrix's
-  `chat_message = 1`. **The month-roll was not re-driven against the live server** — it needs
-  a pinned clock, which is the test's instrument.
+  citation path** (`chat/retrieve.rs`, `web.rs`, `prompt.rs`, `sse.rs`: zero hits; the only two
+  are pre-retrieval in `routes.rs`), so the sweep cannot have touched retrieval. The smoke run
+  is the wired half: an Indonesian text source reaches `ready`, its chunks are cited, and a
+  turn costs the matrix's `chat_message = 1`. **The month roll was not re-driven against the
+  live server** — it needs a pinned clock, which is the test's instrument, not the script's.
 
-### Roadmap gate 7, honesty: evidence gathered, not a fresh pass
+### Roadmap gate 7, honesty: PASS
 
-Every clause has an asserting test, and this pass read them rather than re-running the gate:
-(a) `admin.rs::the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_compute`
-asserts `revenue`/`conversion` are `null` on the wire, never `0`; (b)
-`PlanUsageScreen.test.tsx`'s "renders only the numbers the usage endpoint returned" asserts
-every digit run traces to the fixture (`expect(shown.filter((run) => !allowed.has(run)))
-.toEqual([])`); (c) the composer hint is `honesty.composerHint` = `"AI can make mistakes.
-Check the citations."` / `"AI bisa salah. Periksa kutipannya."`, pinned by
-`i18n.test.ts` and rendered under the composer — **not re-asserted by grepping the shipped
-bundle in this pass**, which is the check the brief names; (d)
-`crates/server/tests/entitlements.rs::the_usage_costs_are_the_costs_the_routes_charge` asserts
-`body["costs"] == credits::costs(&plans)` and `costs.chat_message == chat_message_cost()`, and
-the smoke run printed `costs.chat_message=1 costs.report_outline=3 costs.report_section=6`
-from the same file the server charges from; (e) no proposal surface is added by this phase —
-the plan says so and the surfaces were checked; (f)
-`PlanUsageScreen.test.tsx`'s mobile case asserts no `Rp` price and no upgrade link on `ios`,
-backed by `config/billing_policy.toml`'s `allow_purchase_ui = false` and the server's
-`feature_locked`.
+Each clause, with which were measured in this pass and which are inherited evidence from a
+test this phase did not touch:
+
+- **(a) No invented or uncomputable number — measured.** The plan screen renders **79 numbers
+  and no figure the payload does not carry**: the smoke run asserted `spent_usd`/`ceiling_usd`
+  are absent from `GET /usage`, and `admin.rs::the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_compute`
+  asserts `revenue`/`conversion` are `null` on the wire, never `0` ("a conversion of 0 would
+  be an invented number (gate 7(a))").
+- **(b) Every number traces to something the app computes — inherited, one test.**
+  `PlanUsageScreen.test.tsx`'s "renders only the numbers the usage endpoint returned" asserts
+  `expect(shown.filter((run) => !allowed.has(run))).toEqual([])`, with the allowed set built
+  from the fixture, and `Shell.test.tsx` pins the meter at `72 credits left` against
+  `credits: { monthly: 60, purchased: 12, total: 72 }` — the same three numbers the browser
+  rendered in this pass.
+- **(c) The composer hint, re-asserted by grepping the shipped copy — measured, as the brief
+  asks.** After `npm --prefix app run build`, the shipped bundle
+  `app/dist/assets/index-B-cCLv1q.js` contains **exactly 1 match** of
+  "**AI can make mistakes. Check the citations.**" and **exactly 1 match** of its Indonesian
+  pair "**AI bisa salah. Periksa kutipannya.**". The browser also rendered the English string
+  live under the composer on the workspace screen at **6.14:1**.
+- **(d) The credit cost is shown before a generative action runs, from `config/plans.toml` —
+  measured.** The smoke run printed `costs.chat_message=1 costs.report_outline=3
+  costs.report_section=6` from the same file the server charges from, and
+  `crates/server/tests/entitlements.rs::the_usage_costs_are_the_costs_the_routes_charge`
+  asserts `body["costs"] == credits::costs(&plans)` and
+  `body["costs"]["chat_message"] == credits::chat_message_cost(&state)`, so the number the
+  block quotes is the number the route charges. `plans.test.ts` asserts 3 and 6 against the
+  file from the app side.
+- **(e) AI proposals — inherited, no surface added.** A case-insensitive search for `proposal`
+  over `app/src`, `crates` and `config` hits only `docs/`; the only "Suggested …" surface is
+  Phase 6's report outline. Nothing to check beyond "not added", which was verified.
+- **(f) A locked feature follows `config/billing_policy.toml` — measured.** In the browser on
+  the phone-width plan screen the locked PDF format renders "Not available on your plan" with
+  **no price and no upgrade link** (`ios`/`android` set `allow_purchase_ui = false`,
+  `show_prices = false`, `allow_purchase_cta_in_locked_messages = false`); on desktop it
+  renders "Available on Pro" with the `/billing` link, which the policy allows. The server half
+  is `feature_locked` with `min_plan: null` (A143).
 
 ### The gates not re-run, and why
 
-`cargo test --workspace` and `just check-shell` were **not** run in this pass. `cargo fmt
---all -- --check` is clean and `cargo clippy -p stvdy-server --all-targets -- -D warnings` is
-clean on the tree as committed, and `cargo test -p stvdy-server --test tamper` is 14/14 — but
-the workspace-wide suite is the main agent's single post-fan-in run, and claiming a green
-`cargo test --workspace` from a scoped run would be exactly the kind of assertion this phase's
-own gate exists to prevent.
+`cargo test --workspace` was **not** run by this slice: the main agent was running it
+concurrently in this working tree, and it had finished by the time this pass ended, so its
+result is the main agent's to report. `cargo fmt --all -- --check` is clean,
+`cargo clippy -p stvdy-server --all-targets -- -D warnings` is clean, and
+`cargo test -p stvdy-server --test tamper` is **14 passed / 0 failed**, all on the committed
+tree. `just check-shell` was run and is **green** (fmt, clippy and the shell's tests).
+`npm --prefix app test` is **307 passed / 307** (36 files), `npm --prefix app run build` is
+clean, and `node scripts/check-no-cdn.mjs` reports **no third-party loads in 3 shipped
+file(s)**.
 
 ---
-
 
 ## Self-Review
 
