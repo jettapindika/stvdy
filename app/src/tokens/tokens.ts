@@ -140,6 +140,18 @@ export const PAIRS: Pair[] = [
   { fg: 'ring', bg: 'bg', min: MIN.ui, where: 'the focus ring on the ground' },
   { fg: 'ring', bg: 'surface', min: MIN.ui, where: 'the focus ring on a card' },
   { fg: 'ring', bg: 'surface-raised', min: MIN.ui, where: 'the focus ring on a raised block' },
+
+  // The QRIS code, and it is listed at the **text** threshold rather than the 3:1
+  // graphics one. `CheckoutScreen`'s `QrCode` draws the modules with `text-primary`
+  // (so `currentColor` is `--primary`) on a `bg-on-primary` ground — the one pair in
+  // the app that must NOT follow the theme, because light modules on a dark ground do
+  // not scan. The ratio is the same number as the primary button's label, since
+  // contrast is symmetric, and it is declared separately anyway: it is a different
+  // surface with a different failure mode. A label that is hard to read is a
+  // complaint; a code that will not scan is a student who cannot pay, and 4.5:1 is
+  // the threshold a code read by a camera has to clear, not the 3:1 one that covers
+  // an icon.
+  { fg: 'primary', bg: 'on-primary', min: MIN.text, where: 'the QRIS modules on their quiet zone' },
 ]
 
 /** The six course hues and their tints, per theme. */

@@ -421,6 +421,180 @@ const PENDING_ACTIONS = [
 ]
 
 /**
+ * Phase 13's four screens, and the one thing about them a fixture has to get right.
+ *
+ * The pricing page, the billing page, the checkout screen and the plan screen are the
+ * surfaces this phase adds, and the checkout screen is the one that needs care: **its state
+ * is derived from the payment row**, so measuring it once measures one of six states and
+ * says nothing about the other five. So the fixture below is *mutable* and each checkout
+ * surface sets it before it walks, which is how the walk reaches `paid`, `expired`,
+ * `review`, `failed` and `offline` as well as `waiting`.
+ *
+ * `offline` is the one that is not a body: the screen's own state when the request never
+ * arrived, which is why `checkoutStateFixture` flips a flag the request handler reads and
+ * *aborts* the poll rather than answering it. A 500 would be `waiting` with an error notice
+ * and would measure the wrong screen.
+ *
+ * The six states are asserted **in words** below (`words` on each surface), because gate
+ * 5(d) is that no state is carried by colour alone — and a screen whose whole subject is
+ * whether money moved is the likeliest place for a status that is only a chip's tone.
+ */
+const PAYMENT_ID = 'p1'
+const CHECKOUT = { status: 'pending', expiresInMs: 9 * 60 * 1000, offline: false, id: PAYMENT_ID }
+
+/**
+ * Switches the checkout fixture, and asserts the state name it was given.
+ *
+ * **Each state gets its own payment id**, and that is load-bearing rather than tidy: the
+ * screen's poll is a TanStack query keyed by the id, and two surfaces that navigate to the
+ * *same* URL do not remount the screen — so the second one would render the first one's
+ * cached row and the walk would measure `waiting` six times while reporting six states. A
+ * distinct id is a distinct query, fetched fresh, which is the only way a fixture can drive
+ * a state machine from outside.
+ */
+function checkoutStateFixture(state) {
+  const known = {
+    waiting: { status: 'pending', expiresInMs: 9 * 60 * 1000, offline: false },
+    paid: { status: 'paid', expiresInMs: 9 * 60 * 1000, offline: false },
+    expired: { status: 'pending', expiresInMs: -60 * 1000, offline: false },
+    review: { status: 'review', expiresInMs: 9 * 60 * 1000, offline: false },
+    failed: { status: 'failed', expiresInMs: 9 * 60 * 1000, offline: false },
+    offline: { status: 'pending', expiresInMs: 9 * 60 * 1000, offline: true },
+  }
+  const next = known[state]
+  if (next === undefined) fail(`unknown checkout state ${state}`)
+  Object.assign(CHECKOUT, next, { id: `p-${state}` })
+}
+
+/**
+ * One payment row, as `POST /billing/checkout` and the poll both send it.
+ *
+ * The numbers do **not** follow from each other on purpose (`amount_idr` 5,555 against a
+ * list price of 12,345 at 50% off): a screen that re-derived the total would render 6,172,
+ * and the assertion in the per-screen test is that it renders the server's number. Here
+ * they only have to be a plausible row for the layout to measure.
+ */
+function paymentRow() {
+  return {
+    id: CHECKOUT.id,
+    order_id: 'stvdy_01j0checkoutexample',
+    kind: 'subscription',
+    plan_id: 'pro',
+    billing_period: 'monthly',
+    credits: null,
+    amount_idr: 5555,
+    amount_before_discount_idr: 12345,
+    discount_percent: 50,
+    discount_code: null,
+    student_discount: true,
+    qr_string: 'STUBQRIS:stvdy_01j0checkoutexample:5555',
+    expires_at: new Date(Date.now() + CHECKOUT.expiresInMs).toISOString(),
+    status: CHECKOUT.status,
+    paid_at: CHECKOUT.status === 'paid' ? new Date().toISOString() : null,
+  }
+}
+
+/**
+ * `GET /plans`, with the prices present.
+ *
+ * A **student** account (`student_verified: true`), because that is the state the pricing
+ * page's banner renders in and the one with the larger numbers to fit — a screen measured
+ * with the banner absent would not measure the sentence that is hardest to hold.
+ *
+ * This fixture is also what the existing `plan` surface needed: `/billing` renders
+ * `BillingScreen`, which calls this route, and with no fixture the walk was measuring that
+ * panel's 404 notice rather than its content.
+ */
+const PLANS_VIEW = {
+  plans: [
+    {
+      id: 'free',
+      name: 'Free',
+      limits: { workspaces: 1, sources_total: 3, max_file_mb: 20, devices_max: 1 },
+      student_percent_off: 0,
+      byok: false,
+      credits_per_month: 60,
+      price_idr_monthly: 0,
+      price_idr_yearly: 0,
+      student_price_idr_monthly: 0,
+      student_price_idr_yearly: 0,
+    },
+    {
+      id: 'pro',
+      name: 'Pro',
+      limits: { workspaces: 5, sources_total: 50, max_file_mb: 50, devices_max: 3 },
+      student_percent_off: 50,
+      byok: false,
+      credits_per_month: 500,
+      price_idr_monthly: 10000,
+      price_idr_yearly: 100000,
+      student_price_idr_monthly: 5000,
+      student_price_idr_yearly: 50000,
+    },
+    {
+      id: 'power',
+      name: 'Power',
+      limits: { workspaces: 'unlimited', sources_total: 500, max_file_mb: 100, devices_max: 10 },
+      student_percent_off: 50,
+      byok: true,
+      credits_per_month: 2000,
+      price_idr_monthly: 25000,
+      price_idr_yearly: 250000,
+      student_price_idr_monthly: 12500,
+      student_price_idr_yearly: 125000,
+    },
+  ],
+  credit_packs: [
+    { credits: 100, price_idr: 3000 },
+    { credits: 500, price_idr: 12500 },
+    { credits: 1000, price_idr: 22000 },
+  ],
+  show_prices: true,
+  purchase_allowed: true,
+  currency: 'IDR',
+  current_plan: 'free',
+  student_verified: true,
+}
+
+/** `GET /billing/invoices`, with one row, so the history panel renders rather than its empty state. */
+const INVOICES_VIEW = {
+  invoices: [
+    {
+      id: 'p0',
+      order_id: 'stvdy_01j0earlier',
+      kind: 'credit_pack',
+      plan_id: null,
+      billing_period: null,
+      credits: 500,
+      amount_idr: 12500,
+      amount_before_discount_idr: 12500,
+      discount_percent: 0,
+      discount_code: null,
+      student_discount: false,
+      qr_string: null,
+      expires_at: '2026-10-01T08:15:00Z',
+      status: 'paid',
+      paid_at: '2026-10-01T08:04:00Z',
+    },
+  ],
+}
+
+/**
+ * The four taps that reach the checkout screen, shared by its six state surfaces.
+ *
+ * "Choose Pro" is `pricing.choose` rendered with the plan's name; the click drives the real
+ * `POST /billing/checkout` against the fixture, and the screen navigates to
+ * `/billing/checkout/<the id the fixture returned>` — so the surface measures the route the
+ * app actually takes rather than a URL typed into the address bar.
+ */
+const CHECKOUT_STEPS = [
+  { nav: 'More' },
+  { link: 'Open plan and usage' },
+  { button: 'See plans' },
+  { button: 'Choose Pro' },
+]
+
+/**
  * The phone surfaces this walks, by the taps a phone takes to reach them.
  *
  * The tab bar's five labels are the five destinations, and `/billing` is reached
@@ -487,6 +661,79 @@ const SURFACES = [
   {
     name: 'workspace-chat-proposal',
     steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Chat' }],
+  },
+  // --- Phase 13: the pricing page, and the checkout screen in all six of its states ------
+  //
+  // Reached the way a phone reaches them, and `/pricing` is the interesting one: it is a
+  // **button**, not a link (`BillingScreen`'s "See plans"), so measuring it by URL would
+  // pass while it was unreachable by tap — which is the defect the workspace surfaces'
+  // comment already names.
+  //
+  // The six checkout surfaces each `set` the fixture first and then walk the same four
+  // steps, because the state is derived from the payment row: one surface can only measure
+  // one of them. `offline` is the sixth and the one a fixture body cannot express.
+  {
+    name: 'pricing',
+    expect: 'Plans',
+    steps: [
+      { nav: 'More' },
+      { link: 'Open plan and usage' },
+      { button: 'See plans' },
+    ],
+  },
+  {
+    name: 'checkout-waiting',
+    expect: 'Waiting for confirmation',
+    set: () => {
+      checkoutStateFixture('waiting')
+    },
+    words: ['Waiting', 'Waiting for confirmation'],
+    steps: CHECKOUT_STEPS,
+  },
+  {
+    name: 'checkout-paid',
+    expect: 'Payment received',
+    set: () => {
+      checkoutStateFixture('paid')
+    },
+    words: ['Paid', 'Payment received'],
+    steps: CHECKOUT_STEPS,
+  },
+  {
+    name: 'checkout-expired',
+    expect: 'This code has expired',
+    set: () => {
+      checkoutStateFixture('expired')
+    },
+    words: ['Expired', 'This code has expired'],
+    steps: CHECKOUT_STEPS,
+  },
+  {
+    name: 'checkout-review',
+    expect: 'We are checking this payment',
+    set: () => {
+      checkoutStateFixture('review')
+    },
+    words: ['Under review', 'We are checking this payment', 'Do not pay again'],
+    steps: CHECKOUT_STEPS,
+  },
+  {
+    name: 'checkout-failed',
+    expect: 'The payment did not go through',
+    set: () => {
+      checkoutStateFixture('failed')
+    },
+    words: ['Failed', 'The payment did not go through'],
+    steps: CHECKOUT_STEPS,
+  },
+  {
+    name: 'checkout-offline',
+    expect: 'We could not reach Stvdy',
+    set: () => {
+      checkoutStateFixture('offline')
+    },
+    words: ['Not connected', 'We could not reach Stvdy'],
+    steps: CHECKOUT_STEPS,
   },
 ]
 
@@ -594,6 +841,32 @@ const ROUTES = {
   '/calendar/google/connect': () => ({ url: 'https://accounts.google.com/o/oauth2/v2/auth' }),
   '/sessions': () => ({ sessions: [] }),
   '/devices': () => ({ devices: [] }),
+  // Phase 13's three reads. `/plans` is also what the existing `plan` surface needed:
+  // `/billing` renders `BillingScreen`, and without this entry the walk measured that
+  // panel's 404 notice instead of its content.
+  '/plans': () => PLANS_VIEW,
+  '/billing/invoices': () => INVOICES_VIEW,
+  // The checkout screen's two calls. The poll is keyed by the id the checkout returns, and
+  // `CHECKOUT` is what the six state surfaces switch between walks — so every
+  // `/billing/payments/<id>` answers from the fixture rather than from a table keyed by one
+  // id. `PAYMENT_ID` is kept for the fixture's own default.
+  '/billing/checkout': () => paymentRow(),
+  [`/billing/payments/${PAYMENT_ID}`]: () => paymentRow(),
+}
+
+/**
+ * The route table, plus the one dynamic path it needs.
+ *
+ * `/billing/payments/<id>` cannot be a key in `ROUTES`, because the id is what the state
+ * fixture switches on and the table is built once. Looking it up here keeps the static map
+ * as the one place a fixture is written, and it is deliberately a prefix match on the
+ * documented route rather than a wildcard.
+ */
+function routeFor(pathname) {
+  const handler = ROUTES[pathname]
+  if (handler !== undefined) return handler
+  if (/^\/billing\/payments\/[A-Za-z0-9-]+$/.test(pathname)) return () => paymentRow()
+  return undefined
 }
 
 /** Fails the run with a readable reason rather than a stack trace. */
@@ -951,28 +1224,53 @@ async function signIn(page) {
  * the session and every measurement after the first surface would be of a sign-in
  * screen. Clicking is also what a phone does, and it exercises the tab bar itself.
  *
- * Three kinds of step, because a phone reaches a screen three ways: a `nav` is one
- * of the five tab-bar destinations, a `link` is any `<a>` the screen renders, and a
- * `tab` is a `role="tab"` button in one of the two panel strips. The last one is not
- * decoration: the workspace screen's panels are behind it, and a panel measured by
- * URL instead would pass while being unreachable by tap.
+ * Four kinds of step, because a phone reaches a screen four ways: a `nav` is one
+ * of the five tab-bar destinations, a `link` is any `<a>` the screen renders, a
+ * `tab` is a `role="tab"` button in one of the two panel strips, and a `button` is
+ * any other `<button>`. The last one was added by Phase 13 and it is not
+ * decoration either: `/pricing` and the checkout screen are reached through
+ * **buttons** (`BillingScreen`'s "See plans" and a plan card's "Choose Pro"), so a
+ * walk that could only follow links would have had to measure those two screens by
+ * URL — which passes while the screen is unreachable by tap.
+ *
+ * A `set` step is different in kind: it runs here, in Node, and changes a fixture
+ * for the surface about to be walked. The checkout screen's state is derived from
+ * the payment row, so reaching `paid`/`expired`/`review`/`failed`/`offline` means
+ * answering the next poll differently — one surface can only measure one of them.
  */
 async function openSurface(page, surface) {
+  // A fixture switch, not a tap: it changes what the *next* request is answered with, so
+  // it runs before the first step touches the page.
+  if (typeof surface.set === 'function') surface.set()
   for (const step of surface.steps) {
-    const wanted = step.nav ?? step.link ?? step.tab
-    const scope = step.nav === undefined ? (step.link === undefined ? '[role="tab"]' : 'a') : 'nav a'
-    const found = await page.evaluate(
-      (selector, label) => {
-        const link = [...document.querySelectorAll(selector)].find(
-          (a) => a.textContent.trim() === label,
-        )
-        if (link === undefined) return false
-        link.click()
-        return true
-      },
-      scope,
-      wanted,
-    )
+    const wanted = step.nav ?? step.link ?? step.tab ?? step.button
+    const scope =
+      step.nav !== undefined
+        ? 'nav a'
+        : step.link !== undefined
+          ? 'a'
+          : step.tab !== undefined
+            ? '[role="tab"]'
+            : 'button'
+    const click = (label) =>
+      page.evaluate(
+        (selector, text) => {
+          const link = [...document.querySelectorAll(selector)].find(
+            (a) => a.textContent.trim() === text,
+          )
+          if (link === undefined) return false
+          link.click()
+          return true
+        },
+        scope,
+        label,
+      )
+    // The tab bar's five labels are short and the sidebar's are long, so a `nav` step
+    // written against the phone ("Work", "More") finds nothing at desktop width. Retrying
+    // with the other form is what lets one `SURFACES` table be walked at both viewports,
+    // which is what gate 5's second leg needs; the phone labels stay exactly as written.
+    const aliases = { Work: 'Workspaces', More: 'Settings' }
+    const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
     await new Promise((resolve) => setTimeout(resolve, 400))
   }
@@ -1046,8 +1344,14 @@ async function main() {
             body: '',
           })
         }
-        const handler = ROUTES[url.pathname]
+        const handler = routeFor(url.pathname)
         if (handler === undefined) return respond(404, { code: 'not_found', message: 'no' })
+        // The checkout screen's `offline` state is "the request never arrived", and the
+        // only way to produce it is to make the request fail at the network layer. A 500
+        // would render `waiting` with an error notice, which is a different screen.
+        if (CHECKOUT.offline && url.pathname === `/billing/payments/${CHECKOUT.id}`) {
+          return request.abort('failed')
+        }
         return respond(200, handler())
       })
 
@@ -1063,6 +1367,46 @@ async function main() {
 
       for (const surface of SURFACES) {
         await openSurface(page, surface)
+        // **The resting state, not a hover.** Every step above ends in a click, so the
+        // pointer is left sitting on the control that was clicked — and after a navigation
+        // that coordinate is very often over a *different* control on the screen just
+        // reached. Measuring there reads `:hover` styles, which is not the state a reader
+        // arrives in, and it reported a false contrast failure on the pricing page's
+        // "Choose Pro" (white on `color-mix(in oklab, …)`, which `parseColor` cannot read,
+        // so the walk fell through to the card behind it). Moving the pointer to the corner
+        // makes every measurement the one a reader sees before touching anything.
+        await page.mouse.move(1, 1)
+        await new Promise((resolve) => setTimeout(resolve, 150))
+
+        // **The surface rendered the screen it names.** The aggregate guard at the bottom of
+        // this function only catches a walk that measured *nothing*; a surface whose fixture
+        // 404s still renders a shell with a notice, which has text pairs and targets — so it
+        // passes the aggregate while measuring the wrong screen. `expect` is a string the
+        // screen must show, and its absence is a failure rather than a smaller number.
+        if (surface.expect !== undefined) {
+          // A **wait**, not a sample: the offline state arrives when the poll's request is
+          // aborted, which is one round trip after the navigation, so a single read races it
+          // and reports a screen that had simply not settled. Ten seconds is generous for a
+          // fixture answered in-process, and a timeout here is a real failure.
+          let text = ''
+          try {
+            await page.waitForFunction(
+              (wanted) => document.body.innerText.includes(wanted),
+              { timeout: 10000 },
+              surface.expect,
+            )
+          } catch {
+            // Fall through to the read below, which reports what was on the page instead.
+          }
+          text = await page.evaluate(() => document.body.innerText)
+          if (!text.includes(surface.expect)) {
+            problems.push(
+              `${surface.name}/${theme}/x${String(scale)} did not render its screen: ${JSON.stringify(surface.expect)} is absent from the page`,
+            )
+            continue
+          }
+        }
+
         const measured = await page.evaluate(measureInPage, {
           minTarget: MIN_TARGET,
           minText: MIN_TEXT,
@@ -1105,6 +1449,23 @@ async function main() {
           problems.push(
             `${key} the page scrolls sideways: ${String(measured.pageOverflow.scrollWidth)} > ${String(measured.pageOverflow.clientWidth)}`,
           )
+        }
+
+        // Gate 5(d), measured in the browser: the state is never colour alone. Each
+        // checkout state names itself in a chip word and a title, and both have to be in
+        // the rendered text — a status carried only by a pill's tone is the likeliest
+        // defect on a screen whose whole subject is whether money moved. Asserted on
+        // `body.innerText`, which is what a reader (and a screen reader) actually gets.
+        if (surface.words !== undefined) {
+          const text = await page.evaluate(() => document.body.innerText)
+          const missing = surface.words.filter((word) => !text.includes(word))
+          if (missing.length > 0) {
+            problems.push(
+              `${key} the state is not in words: missing ${JSON.stringify(missing)} from the rendered text`,
+            )
+          } else {
+            console.log(`  ${key} states itself in words: ${JSON.stringify(surface.words)}`)
+          }
         }
       }
 

@@ -318,3 +318,33 @@ smoke-server-phase12:
 
 smoke-phase12:
     BASE=http://localhost:8099 bash scripts/smoke-phase12.sh
+
+# --- Phase 13 smoke: the QRIS money path, against the stub gateway ---
+#
+# **The gateway is a stub, and this is the honest consequence of B1.** The real gateway has
+# no identity, no docs, no response shapes and no fee rates, so nothing here can exercise a
+# live one: `scripts/stub-qris.py` speaks the internal contract
+# `crates/server/src/integrations/payment/mapping.rs` defines, and the run prints which
+# gateway it used in its first line. Pointing `QRIS_BASE_URL` somewhere other than loopback
+# switches the run to "sandbox" mode, where it signs callbacks and reads back the invoice the
+# server stored but cannot mint one at a gateway it does not control.
+#
+# The three `QRIS_*` values are dummy strings, and the signature scheme is named explicitly so
+# the run's signing matches the server's verification regardless of a developer's `.env`: a
+# mismatch there would look like a forged callback rather than a configuration difference.
+#
+# It reads the database back (the payment row, the subscription, the ledger and the audit
+# rows), so it needs `DATABASE_URL`, which it reads out of `.env` itself, and it prunes
+# `signup_attempts` for 127.0.0.1 at the start because A154's window is 24h.
+smoke-qris:
+    python3 scripts/stub-qris.py --port 8200 --api-key smoke-qris-key \
+      --log var/stub-phase13-requests.jsonl
+
+smoke-server-phase13:
+    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_API_KEY=smoke-qris-key \
+      QRIS_CALLBACK_TOKEN=smoke-callback-token QRIS_SIGNATURE_SCHEME=hmac_sha256_hex \
+      LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase13:
+    BASE=http://localhost:8099 bash scripts/smoke-phase13.sh
