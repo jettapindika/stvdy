@@ -474,10 +474,14 @@ jobs:
             echo "the release exists: uploading into it"
             gh release upload "$tag" dist/release/* --clobber
           else
+            # `--target "$GITHUB_SHA"` and not the default: without it `gh release create`
+            # tags the repository's default-branch HEAD *at creation time*, which is not
+            # necessarily the commit these artifacts were built from — a tag that names one
+            # commit while its files came from another is the one thing a release must not do.
             case "$VISIBILITY" in
-              public)     gh release create "$tag" --title "v$VERSION" --notes-file notes.md dist/release/* ;;
-              prerelease) gh release create "$tag" --title "v$VERSION" --prerelease --notes-file notes.md dist/release/* ;;
-              draft)      gh release create "$tag" --title "v$VERSION" --draft --notes-file notes.md dist/release/* ;;
+              public)     gh release create "$tag" --title "v$VERSION" --target "$GITHUB_SHA" --notes-file notes.md dist/release/* ;;
+              prerelease) gh release create "$tag" --title "v$VERSION" --target "$GITHUB_SHA" --prerelease --notes-file notes.md dist/release/* ;;
+              draft)      gh release create "$tag" --title "v$VERSION" --target "$GITHUB_SHA" --draft --notes-file notes.md dist/release/* ;;
               *) echo "::error::unknown visibility '$VISIBILITY'"; exit 1 ;;
             esac
           fi
