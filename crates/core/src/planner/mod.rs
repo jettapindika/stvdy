@@ -5,9 +5,10 @@
 //! input ⇒ byte-identical output (A266), which `tests/planner.rs` asserts rather than assumes
 //! and `tests/planner_purity.rs` enforces at the source level.
 //!
-//! Steps 1 and 2 — the horizon and the study windows — live in [`slots`]; demand, the review
-//! pass, allocation and the balancer arrive in the next tasks.
+//! Steps 1 and 2 live in [`slots`]; demand, the review pass and allocation (3–6) in
+//! [`allocate`]; the Power balancer (7) arrives in the next task.
 
+mod allocate;
 mod model;
 mod slots;
 
@@ -19,8 +20,6 @@ use chrono::{Duration, NaiveDate};
 use uuid::Uuid;
 
 /// The one entry point. The steps run in the contract's fixed order and no other.
-///
-/// Wired to the horizon and the free windows only: the blocks arrive with the allocator.
 pub fn propose(input: &PlannerInput) -> PlanProposal {
     let past = past_deadline_goals(input);
     let Some((start, end)) = slots::horizon(input) else {
@@ -35,22 +34,46 @@ pub fn propose(input: &PlannerInput) -> PlanProposal {
         };
     };
 
+    let mut all_slots: Vec<allocate::Slot> = Vec::new();
     let mut capacities: Vec<(NaiveDate, i64)> = Vec::new();
     let mut day = start;
     while day < end {
-        let (_chunks, capacity) = slots::free_slots(input, day);
+        let (chunks, capacity) = slots::free_slots(input, day);
+        for chunk in chunks {
+            let length = (chunk.ends_at - chunk.starts_at).num_minutes();
+            all_slots.push(allocate::Slot {
+                interval: chunk,
+                remaining_min: length,
+            });
+        }
         capacities.push((day, capacity));
         day += Duration::days(1);
     }
+    let total_capacity: i64 = capacities.iter().map(|(_, capacity)| *capacity).sum();
+
+    let mut blocks = allocate::reserve_reviews(input, &mut all_slots);
+    let (new_blocks, deficit, overloaded) =
+        allocate::allocate(input, &mut all_slots, total_capacity);
+    blocks.extend(new_blocks);
+
+    let day_load = compute_day_load(input, &capacities, &blocks);
+
+    // A266: a fixed serialization order, so two identical requests produce byte-identical
+    // JSON. Blocks by `(starts_at, goal_id, topic)`.
+    blocks.sort_by(|a, b| {
+        (a.starts_at, a.goal_id, &a.topic).cmp(&(b.starts_at, b.goal_id, &b.topic))
+    });
+
+    let mut warnings: Vec<PlanWarning> = overloaded;
+    for goal_id in past {
+        warnings.push(PlanWarning::PastDeadline { goal_id });
+    }
 
     PlanProposal {
-        blocks: Vec::new(),
-        day_load: compute_day_load(input, &capacities, &[]),
-        deficit_min: 0,
-        warnings: past
-            .into_iter()
-            .map(|goal_id| PlanWarning::PastDeadline { goal_id })
-            .collect(),
+        blocks,
+        day_load,
+        deficit_min: deficit,
+        warnings,
     }
 }
 
@@ -71,7 +94,11 @@ fn past_deadline_goals(input: &PlannerInput) -> Vec<Uuid> {
 /// `day_load` for every horizon day, by date ascending (A266). A block outside the horizon —
 /// a pinned block from before it, say — gets its own entry with zero capacity rather than
 /// being silently dropped from the load.
-fn compute_day_load(input: &PlannerInput, capacities: &[(NaiveDate, i64)], blocks: &[ProposedBlock]) -> Vec<DayLoad> {
+fn compute_day_load(
+    input: &PlannerInput,
+    capacities: &[(NaiveDate, i64)],
+    blocks: &[ProposedBlock],
+) -> Vec<DayLoad> {
     let mut planned: BTreeMap<NaiveDate, i64> = BTreeMap::new();
     for block in blocks {
         *planned

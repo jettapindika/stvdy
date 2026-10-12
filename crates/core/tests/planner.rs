@@ -357,3 +357,348 @@ fn block_and_break_lengths_are_exact() {
         "consecutive blocks are separated by exactly the break"
     );
 }
+
+fn minutes_for_topic(proposal: &PlanProposal, name: &str) -> i64 {
+    proposal
+        .blocks
+        .iter()
+        .filter(|block| block.topic == name)
+        .map(|block| (block.ends_at - block.starts_at).num_minutes())
+        .sum()
+}
+
+fn minutes_on(proposal: &PlanProposal, date: NaiveDate, tz: Tz) -> i64 {
+    proposal
+        .blocks
+        .iter()
+        .filter(|block| local(block.starts_at, tz).date_naive() == date)
+        .map(|block| (block.ends_at - block.starts_at).num_minutes())
+        .sum()
+}
+
+/// A weak topic gets strictly more minutes than a strong one with the same work left, and the
+/// ratio is the weighted one — not merely "more".
+///
+/// A test that only asserted "more" would pass on a formula that was monotone and wrong by a
+/// factor; the ratio `(1 + 1.5×0.6) / (1 + 1.5×0.05)` is what pins the formula itself.
+#[test]
+fn weak_topics_weigh_more_than_strong_ones() {
+    let tz = london();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(0, 10, 600),
+        vec![goal(
+            1,
+            utc(2026, 4, 1, 18, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![
+                topic("Lemah", 1000, Some(0.4)),
+                topic("Kuat", 1000, Some(0.95)),
+            ],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(10, 0, 0, 0, 1.5),
+    );
+    let proposal = propose(&input);
+    let weak = minutes_for_topic(&proposal, "Lemah");
+    let strong = minutes_for_topic(&proposal, "Kuat");
+    assert!(
+        weak > strong,
+        "the weak topic must get strictly more: {weak} vs {strong}"
+    );
+    let expected = (1.0 + 1.5 * 0.6) / (1.0 + 1.5 * 0.05);
+    let actual = weak as f64 / strong as f64;
+    assert!(
+        (actual - expected).abs() / expected < 0.01,
+        "ratio {actual} (weak {weak}, strong {strong}) is not within 1% of {expected}"
+    );
+}
+
+/// A258: a topic with no attempts weighs the same as a perfect one. Missing data is not
+/// evidence of weakness, and inventing a weakness out of it is the honesty rule this
+/// prevents.
+#[test]
+fn a_topic_with_no_attempts_weighs_the_same_as_a_perfect_one() {
+    let tz = london();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(0, 10, 600),
+        vec![goal(
+            1,
+            utc(2026, 4, 1, 18, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![
+                topic("Tanpa data", 1000, None),
+                topic("Sempurna", 1000, Some(1.0)),
+            ],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(10, 0, 0, 0, 1.5),
+    );
+    let proposal = propose(&input);
+    assert_eq!(
+        minutes_for_topic(&proposal, "Tanpa data"),
+        minutes_for_topic(&proposal, "Sempurna"),
+        "no attempts must weigh exactly as much as a perfect score"
+    );
+}
+
+/// The spread cap: one topic, 600 minutes of work, ten days available, so no single day gets
+/// more than `max(block_len_min, ceil(remaining / days_left))` and the work is spread instead
+/// of finished on day one.
+#[test]
+fn the_spread_cap_prevents_front_loading() {
+    let tz = london();
+    let start = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let exam = NaiveDate::from_ymd_opt(2026, 4, 10).unwrap();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 22, 240),
+        vec![goal(
+            1,
+            utc(2026, 4, 10, 12, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 600, None)],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 0, 0, 0.0),
+    );
+    let proposal = propose(&input);
+    let mut placed = 0i64;
+    for offset in 0..10 {
+        let day = start + chrono::Duration::days(offset);
+        let days_left = (exam - day).num_days().max(1);
+        let cap = ((600.0 / days_left as f64).ceil() as i64).max(50);
+        let on_day = minutes_on(&proposal, day, tz);
+        assert!(
+            on_day <= cap,
+            "{day} got {on_day} minutes, over the cap {cap}"
+        );
+        placed += on_day;
+    }
+    assert_eq!(placed, 600, "all the work is placed across the horizon");
+    assert!(
+        minutes_on(&proposal, start, tz) < 600,
+        "the work is not finished on day one"
+    );
+}
+
+/// The deadline buffer is left free of new material: no `NewMaterial` block starts inside
+/// `[target_date - deadline_buffer_min, target_date)`.
+///
+/// Asserted on the block kind, not on a gap, so a review block placed there does not make the
+/// test vacuous.
+#[test]
+fn the_deadline_buffer_is_left_free_of_new_material() {
+    let tz = london();
+    let target = utc(2026, 4, 5, 18, 0);
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 22, 240),
+        vec![goal(
+            1,
+            target,
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 2000, None)],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 120, 3, 0.0),
+    );
+    let proposal = propose(&input);
+    let buffer_start = target - chrono::Duration::minutes(120);
+    for block in &proposal.blocks {
+        if block.kind == stvdy_core::planner::BlockKind::NewMaterial {
+            assert!(
+                block.starts_at < buffer_start || block.starts_at >= target,
+                "new material starts inside the deadline buffer: {block:?}"
+            );
+        }
+    }
+}
+
+/// The review pass reserves one block on each of the last `revisit_days` local dates before
+/// the exam (contract step 4 / A269).
+#[test]
+fn the_review_pass_reserves_one_block_per_day_before_the_exam() {
+    let tz = london();
+    let exam = NaiveDate::from_ymd_opt(2026, 4, 10).unwrap();
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        tz,
+        settings(8, 22, 240),
+        vec![goal(
+            1,
+            utc(2026, 4, 10, 12, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 600, None)],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 0, 3, 0.0),
+    );
+    let proposal = propose(&input);
+    for back in 1..=3 {
+        let day = exam - chrono::Duration::days(back);
+        let reviews = proposal
+            .blocks
+            .iter()
+            .filter(|block| {
+                block.kind == stvdy_core::planner::BlockKind::Review
+                    && local(block.starts_at, tz).date_naive() == day
+            })
+            .count();
+        assert_eq!(reviews, 1, "exactly one review block on {day}");
+    }
+}
+
+/// Twenty hours of demand in a three-hour week: a best-effort plan is still emitted, the
+/// deficit is the shortfall, and `Overloaded` names the full days. "Never silently drop
+/// demand" is the contract's own sentence.
+#[test]
+fn deficit_is_reported_when_capacity_is_short() {
+    let input = input(
+        utc(2026, 4, 1, 0, 0),
+        london(),
+        settings(8, 9, 50),
+        vec![goal(
+            1,
+            utc(2026, 4, 7, 12, 0),
+            utc(2026, 4, 1, 0, 0),
+            vec![topic("Jaringan", 1200, None)],
+        )],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 0, 0, 0.0),
+    );
+    let proposal = propose(&input);
+    assert!(
+        !proposal.blocks.is_empty(),
+        "a best-effort plan is still emitted"
+    );
+    assert_eq!(
+        proposal.deficit_min,
+        1200 - 350,
+        "the deficit is demand minus capacity"
+    );
+    let overloaded = proposal
+        .warnings
+        .iter()
+        .find_map(|warning| match warning {
+            stvdy_core::planner::PlanWarning::Overloaded { days } => Some(days.clone()),
+            stvdy_core::planner::PlanWarning::PastDeadline { .. } => None,
+        })
+        .expect("a saturated week reports Overloaded");
+    assert_eq!(overloaded.len(), 7, "all seven days are full");
+}
+
+/// A deadline before `now` is a warning, not a panic, and it does not stop the other goal.
+#[test]
+fn a_deadline_before_now_is_a_warning_not_a_panic() {
+    let past = Uuid::from_u128(7);
+    let input = input(
+        utc(2026, 4, 10, 0, 0),
+        london(),
+        settings(8, 22, 240),
+        vec![
+            goal(
+                7,
+                utc(2026, 4, 1, 12, 0),
+                utc(2026, 4, 1, 0, 0),
+                vec![topic("Jaringan", 600, None)],
+            ),
+            goal(
+                8,
+                utc(2026, 4, 20, 12, 0),
+                utc(2026, 4, 10, 0, 0),
+                vec![topic("Algoritma", 600, None)],
+            ),
+        ],
+        0,
+        vec![],
+        vec![],
+        config(50, 10, 0, 0, 0.0),
+    );
+    let proposal = propose(&input);
+    assert!(
+        proposal.warnings.iter().any(|warning| matches!(
+            warning,
+            stvdy_core::planner::PlanWarning::PastDeadline { goal_id } if *goal_id == past
+        )),
+        "the past deadline is reported"
+    );
+    assert!(
+        proposal.blocks.iter().all(|block| block.goal_id != past),
+        "no blocks are planned for the past goal"
+    );
+    assert!(
+        proposal
+            .blocks
+            .iter()
+            .any(|block| block.goal_id == Uuid::from_u128(8)),
+        "the other goal is still planned"
+    );
+}
+
+/// The same input built two ways produces byte-identical JSON.
+///
+/// One path assembles the accuracy map from an unordered map and reads it out in insertion
+/// order; the other from an ordered map. A container whose iteration order reaches the output
+/// cannot pass this, because the two paths hand the planner the same topics in different
+/// sequences.
+#[test]
+fn the_same_input_produces_byte_identical_output() {
+    use std::collections::{BTreeMap, HashMap};
+
+    let mut unordered: HashMap<&str, Option<f64>> = HashMap::new();
+    unordered.insert("Algoritma", Some(0.4));
+    unordered.insert("Basis data", Some(0.95));
+    unordered.insert("Jaringan", None);
+    unordered.insert("Kriptografi", Some(0.7));
+    unordered.insert("Sistem operasi", Some(0.55));
+
+    let ordered: BTreeMap<&str, Option<f64>> = unordered.iter().map(|(k, v)| (*k, *v)).collect();
+
+    let build = |pairs: Vec<(&str, Option<f64>)>| {
+        input(
+            utc(2026, 4, 1, 0, 0),
+            london(),
+            settings(8, 22, 240),
+            vec![goal(
+                1,
+                utc(2026, 4, 20, 0, 0),
+                utc(2026, 4, 1, 0, 0),
+                pairs
+                    .into_iter()
+                    .map(|(name, accuracy)| topic(name, 400, accuracy))
+                    .collect(),
+            )],
+            30,
+            vec![],
+            vec![],
+            config(50, 10, 120, 3, 1.5),
+        )
+    };
+
+    let a = build(unordered.into_iter().collect());
+    let b = build(ordered.into_iter().collect());
+    let json_a = serde_json::to_vec(&propose(&a)).unwrap();
+    let json_b = serde_json::to_vec(&propose(&b)).unwrap();
+    assert_eq!(
+        json_a, json_b,
+        "the same logical input must serialize byte for byte"
+    );
+}

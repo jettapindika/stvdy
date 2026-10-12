@@ -19,6 +19,7 @@ fn the_planner_module_has_no_clock_and_no_hash_ordered_container() {
         ("mod.rs", include_str!("../src/planner/mod.rs")),
         ("model.rs", include_str!("../src/planner/model.rs")),
         ("slots.rs", include_str!("../src/planner/slots.rs")),
+        ("allocate.rs", include_str!("../src/planner/allocate.rs")),
     ] {
         for forbidden in [
             "Utc::now",
