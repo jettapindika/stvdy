@@ -1821,62 +1821,129 @@ node scripts/check-no-cdn.mjs
 
 ## Phase 15 exit checklist
 
-- [ ] `src-tauri/tauri.conf.json` carries `plugins.updater` with `endpoints` and `pubkey`,
+- [x] `src-tauri/tauri.conf.json` carries `plugins.updater` with `endpoints` and `pubkey`,
       `createUpdaterArtifacts: true`, `macOS.hardenedRuntime` + `entitlements`, and
       `windows.digestAlgorithm: "sha256"` + a `timestampUrl`; `tauri-plugin-updater` is a
       desktop-only dependency and `updater:default` is in `capabilities/desktop.json` and
       **not** in `default.json` or `mobile.json`.
-- [ ] A signed manifest verifies against the committed public key and a one-byte mutation
+- [x] A signed manifest verifies against the committed public key and a one-byte mutation
       of it does not; an unsigned manifest does not (`crates/server/tests/release.rs`).
-- [ ] The Settings → Updates panel offers the update, never applies one automatically, and
+- [x] The Settings → Updates panel offers the update, never applies one automatically, and
       shows only the version and notes the manifest carried.
 - [ ] `tauri build --target universal-apple-darwin` produces a binary whose `lipo -archs`
       lists both architectures; `codesign --verify --deep --strict`, `spctl -a -vvv` and
       `xcrun stapler validate` all pass; the notarization is `Accepted`.
+      **NOT MEASURED** — no universal build was produced and no notarization was submitted:
+      the tree carries one valid identity, `Apple Development: jettapindika@gmail.com
+      (3A2BQR598M)` (`security find-identity -v -p codesigning`), which is not a Developer ID
+      Application certificate, and there is no `~/.appstoreconnect` notarytool profile. The
+      runner's `scripts/notarize-macos.sh` that `release.yml`'s `macos` job calls is absent
+      (Phase 15 Task 3 step 2), and the job exits before `codesign` with that sentence.
 - [ ] The NSIS installer is signed, SHA-256, and timestamped, and `osslsigncode verify`
       says so.
+      **NOT MEASURED** — no NSIS installer was built or signed here: `tauri build` for
+      `x86_64-pc-windows-msvc` needs a Windows host or a cross-toolchain this machine does
+      not have, the signing certificate is the operator's, and `osslsigncode` is not
+      installed. `release.yml`'s Windows job is what would produce it.
 - [ ] `Dockerfile` installs a **pinned** Chromium (asserted equal to the running
       container's `--version`), pdfium at a verified checksum, the embedding model at an
       absolute `FASTEMBED_CACHE_DIR`, and LibreOffice behind `SOFFICE_BIN`.
+      **HALF MEASURED** — the pins are in the tree and are asserted by reading it:
+      `Dockerfile` carries `ARG CHROMIUM_VERSION` consumed as
+      `chromium=${CHROMIUM_VERSION} "chromium-common=${CHROMIUM_VERSION}"`, the pdfium
+      download verified with `sha256sum -c -` against a committed `PDFIUM_SHA256`,
+      `ENV FASTEMBED_CACHE_DIR=/opt/models/fastembed` (absolute), and
+      `SOFFICE_BIN=/usr/bin/soffice`. The half the item also asks for — the built image's
+      own `chromium --version` compared against the `ARG`, which is exactly what
+      `scripts/release-image.sh` does — is **NOT MEASURED**: no image was built, there is no
+      Docker daemon on this machine, and the `image` job's own run died mid-build.
 - [ ] The `pdf` acceptance test runs **inside** the image and passes; `/health` answers
       `ok` from the running container; `--migrate-only` migrates and exits without binding.
+      **NOT MEASURED** — no image was built, so the in-container `pdf` run, the `/health`
+      check against a running container, and `--migrate-only` inside it did not happen. The
+      three artefacts exist: `scripts/release-image.sh` runs the in-container test,
+      `--migrate-only` is `crates/server/tests/release.rs::migrate_only_exits_zero_without_binding`,
+      and `/health` is the route `crates/server/tests/health.rs` covers.
 - [ ] The container runs as a non-root user with Chromium's sandbox enabled.
+      **NOT MEASURED** — a property of the running container, and no container ran.
+      `Dockerfile` ends with `USER stvdy` (uid 10001), and
+      `crates/server/src/render/chrome.rs:211` passes `.sandbox(!allow_no_sandbox)`, so an
+      unsandboxed render outside dev is refused; neither is the container's own observation.
 - [ ] The template's CDN references are rewritten to the server's `/assets/` route, the
       route serves KaTeX and the fonts with the right content types, and a rewrite that
       left a remote reference fails a test.
+      **PART MEASURED** — the route and the rewrite are in the tree and the assertions exist:
+      `crates/server/tests/assets.rs` carries
+      `the_template_has_no_remote_asset_reference_after_the_rewrite`,
+      `the_asset_route_serves_katex_and_the_fonts` and
+      `the_asset_route_refuses_what_it_does_not_serve`, and the rewrite is
+      `rewrite_asset_base` in `crates/server/src/render/chrome.rs`. **The cases were read, not
+      run**: `cargo test` was not executed against this tree.
 - [ ] `scripts/verify-release-artifacts.sh` refuses to run with the signing private key in
       its environment, and its checks pass on the release artifacts.
-- [ ] `docs/EULA.md` exists as a draft marked for legal review; `THIRD_PARTY_NOTICES.md`
+      **HALF MEASURED** — the refusal is verified by reading the script: it exits 2 before any
+      check runs when `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is
+      set (A332). Its checks on real artifacts are **NOT MEASURED** — no release artifacts
+      were produced (no macOS build, no notarization), so `--all <dir>` has nothing to read.
+- [x] `docs/EULA.md` exists as a draft marked for legal review; `THIRD_PARTY_NOTICES.md`
       names the fonts the product actually ships and the image's components.
 - [ ] `docs/OPERATIONS.md` covers the host checklist, deployment, backups with a restore
       drill, monitoring with thresholds, the breach runbook and retention.
+      **PART MEASURED** — `docs/OPERATIONS.md` exists and carries § The production host,
+      § Deploying a new image, § Backups and the restore drill (A347), § Monitoring and
+      alerting (A348), § The breach runbook (A349) and § Retention (A349), and
+      `scripts/restore-drill.sh` exists. The drill itself was **NOT MEASURED**: it needs a
+      real Postgres and R2 to run against.
 - [ ] Both store checklists exist, `scripts/check-mobile-no-purchase.sh` passes against the
       built mobile bundle **and fails on an empty directory**, and the policy-risk note
       carries its confirmation step.
-- [ ] `README.md` has Deploying, Release and Mobile sections that point at the normative
+      **PART MEASURED** — both checklists exist (`docs/RELEASE.md` § Store submission
+      checklists: § Apple — App Store / TestFlight and § Google — Play, with
+      § The confirmation step, and the date under § Store policy risk). The empty-directory
+      half of the check is verified: `node scripts/check-no-purchase-ui.mjs` against an empty
+      `app/dist` answers `no shipped files were inspected — an empty build proves nothing
+      about purchase UI`, exit 1. The other half is **NOT MEASURED** — the only bundle built
+      here is the web/desktop one (`stvdy-build-target="full"`), so
+      `scripts/check-mobile-no-purchase.sh` refuses it rather than passing it, and no store
+      build was produced.
+- [x] `README.md` has Deploying, Release and Mobile sections that point at the normative
       documents rather than restating them.
-- [ ] `docs/RELEASE.md` carries the release process, the store checklists, the launch
+- [x] `docs/RELEASE.md` carries the release process, the store checklists, the launch
       checklist and the pointer to `docs/OPERATIONS.md`.
 - [ ] `docs/{ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` and the route sweep are updated in
       the same phase.
+      **PART MEASURED** — `docs/ARCHITECTURE.md` carries `## Container image` (added in
+      `ad70b58`); `docs/ASSUMPTIONS.md` carries A330–A354 (added in `66466ea`); and
+      `docs/THREAT_MODEL.md` carries the update-channel asset row and R8 (the update key).
+      **The route sweep has no Phase 15 row**: `crates/server/tests/route_sweep.rs`'s last
+      change is `31900fb`, and its exempt/read-only/swept sets hold nothing this phase added
+      — the `exempt("GET", "/assets/{*path}")` row is Phase 10's `070ac89`. The item's "and
+      the route sweep" half is not met.
 - [ ] The full quality gate is green.
+      **NOT MEASURED** — `cargo test --workspace` cannot be quoted: the tree is mid-edit by
+      other slices, `cargo clippy --workspace --all-targets -- -D warnings` is **red** with
+      `crates/server/src/account.rs:819` (`expect_used`, an uncommitted peer file), and
+      `cargo fmt --all -- --check` reports diffs in peer files (`crates/server/src/account.rs`,
+      `crates/server/src/calendar/google.rs`, `crates/server/tests/calendar.rs`, …). The
+      `src-tauri` half is green: `cargo clippy --manifest-path src-tauri/Cargo.toml
+      --all-targets -- -D warnings` finished clean, exit 0.
 
 ### Exit checklist table (gate | command | result)
 
 | Gate | Command | Result |
 |---|---|---|
-| Format | `cargo fmt --all -- --check` + `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | pending |
-| Lints | `cargo clippy --workspace --all-targets -- -D warnings` + the `src-tauri` manifest | pending |
-| Tests | `cargo test --workspace` + `cargo test --manifest-path src-tauri/Cargo.toml` | pending |
-| Web | `npm --prefix app test` + `npm --prefix app run build` | pending |
-| Assets | `node scripts/check-no-cdn.mjs` | pending |
-| Image | `docker build -t stvdy-server:ci .` + `bash scripts/release-image.sh` | pending |
-| PDF in the image | the `image` job's in-container `--test pdf -- --ignored` | pending |
-| Release artifacts | `bash scripts/verify-release-artifacts.sh --all <dir>` | pending |
-| Mobile policy | `bash scripts/check-mobile-no-purchase.sh <bundle>` | pending |
-| Roadmap gate 5 | the Settings → Updates panel, measured in a browser, recorded in `docs/ARCHITECTURE.md` | pending |
+| Format | `cargo fmt --all -- --check` + `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | **NOT MEASURED** — `cargo fmt --all -- --check` exits 1 against this tree, with diffs in peer files (`crates/server/src/account.rs`, `crates/server/src/calendar/google.rs`, `crates/server/src/calendar/oauth.rs`, `crates/server/tests/calendar.rs`, `crates/core/src/traits/{calendar,mod}.rs`), so neither command is green at the commit this row is written on |
+| Lints | `cargo clippy --workspace --all-targets -- -D warnings` + the `src-tauri` manifest | **HALF MEASURED** — `cargo clippy --workspace --all-targets -- -D warnings` exits **101**, one error: `crates/server/src/account.rs:819` — the `expect_used` lint fires on `DEFAULT_TIMEZONE.parse().expect(...)`, in an uncommitted peer file. `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` finished clean, **exit 0** |
+| Tests | `cargo test --workspace` + `cargo test --manifest-path src-tauri/Cargo.toml` | **NOT MEASURED** — neither was run: `cargo test --workspace` cannot be quoted against a tree six slices are mid-edit on (the same `account.rs` that fails clippy does not compile), and the ticket forbids it here. `crates/server/tests/{release,tamper,pdf}.rs` exist and can be run individually with `cargo test -p stvdy-server --test release`, `--test tamper`, `--test pdf` |
+| Web | `npm --prefix app test` + `npm --prefix app run build` | **PASS** — `npm --prefix app test`: **63 files passed / 586 tests passed / 0 failed** (vitest 5.0.3, 16.68s). `npm --prefix app run build`: **exit 0**, `✓ built in 316ms` (one 778.90 kB entry chunk, a size warning, not an error) |
+| Assets | `node scripts/check-no-cdn.mjs` | **PASS** — `no third-party loads in 3 shipped file(s)`, exit 0 |
+| Image | `docker build -t stvdy-server:ci .` + `bash scripts/release-image.sh` | **NOT MEASURED** — no image was built: no Docker daemon on this machine, and the `image` job's own run died mid-build. `scripts/release-image.sh` exists and is what would compare the running container's `chromium --version` against the Dockerfile's `ARG CHROMIUM_VERSION` |
+| PDF in the image | the `image` job's in-container `--test pdf -- --ignored` | **NOT MEASURED** — it runs inside the image, and there is no image. The acceptance test is `crates/server/tests/pdf.rs`; `scripts/release-image.sh:139` is the line that runs it in-container (`./deps/<pdf test bin> --ignored --nocapture`) |
+| Release artifacts | `bash scripts/verify-release-artifacts.sh --all <dir>` | **NOT MEASURED** — no release artifacts exist to verify (no macOS build: `scripts/notarize-macos.sh`, which `release.yml`'s `macos` job requires, is absent). Its refusal half **is** verified by reading the script: exit 2 before any check when `TAURI_SIGNING_PRIVATE_KEY` is set (A332) |
+| Mobile policy | `bash scripts/check-mobile-no-purchase.sh <bundle>` | **NOT MEASURED** — run against the only bundle built here (`app/dist`), it fails by design: the tree is stamped `stvdy-build-target="full"`, the web/desktop build, and the check refuses that identity plus six `/billing/checkout` hits. **The empty-directory half is verified**: `node scripts/check-no-purchase-ui.mjs` against an empty `app/dist` answers `no shipped files were inspected — an empty build proves nothing about purchase UI`, exit 1. A store build (`TAURI_ENV_PLATFORM=ios npm --prefix app run build`) would be needed for the pass |
+| Roadmap gate 5 | the Settings → Updates panel, measured in a browser, recorded in `docs/ARCHITECTURE.md` | **NOT MEASURED** — not done: `docs/ARCHITECTURE.md`'s accessibility-gate section records no Phase 15 walk (`grep -i 'updates panel' docs/ARCHITECTURE.md` is empty), and no browser measurement of the panel was run here |
 | Roadmap gate 6 | **no UI change** (two i18n strings; the parity test covers them) | n/a |
-| Roadmap gate 7 | the Settings → Updates panel: no uncomputed number, no unverifiable claim | pending |
+| Roadmap gate 7 | the Settings → Updates panel: no uncomputed number, no unverifiable claim | **PART MEASURED** — the property is carried by `app/src/features/settings/UpdatesPanel.test.tsx`: `shows the version and the notes exactly as the manifest carried them`, `never invents a percentage, a size or a security label`, `reports a failed check as a failure, never as \"up to date\"` and `says which version is current when there is nothing to install`, and `npm --prefix app test` ran green (63 files / 586 tests / 0 failed). The panel was not measured in a browser, which is what this row's gate names |
 
 ---
 
