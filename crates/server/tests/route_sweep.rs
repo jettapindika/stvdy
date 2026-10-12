@@ -39,6 +39,11 @@ enum Class {
     /// A read of the user's own rows, or an action that spends nothing. Never gated: the
     /// spec requires over-limit data to stay viewable and exportable.
     ReadOnly,
+    /// A route whose work is per mutation rather than per request: the batch itself is
+    /// always admitted, and the refusal is a per-mutation result. `/sync/push` is the only
+    /// one, because all six pushable entities are free (R1) and a `Message` or a `Source`
+    /// in the batch is refused individually rather than failing the request.
+    SweptPerMutation,
     /// No authenticated user at all: a health check, a credentials route, an OAuth
     /// redirect, or an HMAC-signed object download. The admin routes are here too: they
     /// take `AdminUser`, whose refusal is a 404 (A7), so there is no entitlement decision
@@ -379,8 +384,21 @@ fn exempt_rows() -> Vec<Row> {
 fn table() -> Vec<Row> {
     let mut rows = read_only_rows();
     rows.extend(swept_rows());
+    rows.extend(per_mutation_rows());
     rows.extend(exempt_rows());
     rows
+}
+
+/// Routes whose decision is per mutation, not per request.
+fn per_mutation_rows() -> Vec<Row> {
+    vec![Row {
+        method: "POST",
+        path: "/sync/push",
+        class: Class::SweptPerMutation,
+        reason: "a batch is admitted for any plan; the refusal is per mutation, and all six pushable entities are free (R1)",
+        feature: "",
+        refusal: None,
+    }]
 }
 
 /// Every `(METHOD, path)` pair registered under `crates/server/src`.
@@ -762,6 +780,34 @@ async fn every_swept_route_refuses_an_exhausted_account(pool: PgPool) {
         );
     }
 
+    // A per-mutation route is admitted for the exhausted account, and the refusal is a
+    // result inside the batch rather than a status on the request: the task is free to
+    // push (R1) and the message is server-owned, so one applied and one refused.
+    for row in table()
+        .iter()
+        .filter(|row| row.class == Class::SweptPerMutation)
+    {
+        let (status, body) = fixture.call(&app, &token, row.method, row.path).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{} {} must admit the batch for any plan: {body}",
+            row.method,
+            row.path
+        );
+        let results = body["results"].as_array().expect("a results array");
+        assert_eq!(results.len(), 2, "{body}");
+        assert_eq!(
+            results[0]["status"], "applied",
+            "a free entity must still be applied: {body}"
+        );
+        assert_eq!(results[1]["status"], "rejected", "{body}");
+        assert_eq!(
+            results[1]["code"], "read_only_entity",
+            "a server-owned entity is refused per mutation: {body}"
+        );
+    }
+
     // The balance case the exhausted account cannot reach: its caps are full, so a counted
     // feature refuses before the price is considered. This is the same route with the caps
     // free and the balance spent, which is the other half of the chat row's table entry.
@@ -1109,11 +1155,51 @@ impl Fixture {
                 )
                 .await
             }
+            ("POST", "/sync/push") => {
+                let device_id: Uuid = sqlx::query_scalar(
+                    "select id from devices where user_id = $1 and revoked_at is null",
+                )
+                .bind(self.user_id)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap();
+                let client_ts = chrono::Utc::now().to_rfc3339();
+                json(
+                    app,
+                    "POST",
+                    "/sync/push",
+                    token,
+                    serde_json::json!({
+                        "device_id": device_id,
+                        "mutations": [
+                            {
+                                "mutation_id": Uuid::now_v7(),
+                                "entity": "task",
+                                "op": "upsert",
+                                "id": Uuid::now_v7(),
+                                "payload": {
+                                    "patch": { "title": "Tugas", "status": "todo", "priority": 2 },
+                                    "base": null
+                                },
+                                "client_ts": client_ts,
+                            },
+                            {
+                                "mutation_id": Uuid::now_v7(),
+                                "entity": "message",
+                                "op": "upsert",
+                                "id": Uuid::now_v7(),
+                                "payload": { "content": "hi" },
+                                "client_ts": client_ts,
+                            }
+                        ]
+                    }),
+                )
+                .await
+            }
             other => panic!("the sweep test has no request for {other:?}"),
         }
     }
 }
-
 /// A plan limit read anywhere but the entitlements layer is a second source of truth, and
 /// the way it appears is a handler reaching for the matrix "just this once".
 ///

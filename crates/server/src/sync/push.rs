@@ -12,10 +12,21 @@
 //! and a second copy of it in this module would be a second answer to "what does this
 //! plan allow".
 
+use std::time::Instant;
+
+use axum::Json;
+use axum::extract::State;
 use serde_json::Value;
 use stvdy_core::config::PlansFile;
 use stvdy_core::entitlements::{Feature, PlanFacts, UsageSnapshot, check_with};
-use stvdy_sync::proto::{Entity, ErrorCode, Mutation, MutationResult};
+use stvdy_sync::proto::{Entity, ErrorCode, Mutation, MutationResult, PushRequest, PushResponse};
+
+use crate::auth::extract::AuthUser;
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
+
+use super::log::{self, Replay};
+use super::{apply, touch_last_sync};
 
 /// The fields the server derives, **per entity**.
 ///
@@ -167,6 +178,185 @@ pub fn decide(
         }
     }
     Ok(())
+}
+
+/// `POST /sync/push`: one transaction for the whole batch, one savepoint per mutation.
+pub async fn push(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(body): Json<PushRequest>,
+) -> AppResult<Json<PushResponse>> {
+    let started = Instant::now();
+    let response = apply_batch(&state, &user, &body).await?;
+
+    tracing::info!(
+        user_id = %user.user_id,
+        device_id = %user.device_id,
+        mutations = body.mutations.len(),
+        applied = response
+            .results
+            .iter()
+            .filter(|result| matches!(result, MutationResult::Applied { .. }))
+            .count(),
+        latency_ms = started.elapsed().as_millis() as u64,
+        "sync push"
+    );
+
+    Ok(Json(response))
+}
+
+/// The batch, in the order the contract fixes:
+///
+///   1. `select pg_advisory_xact_lock(hashtext($1::text))` — the roadmap's lock-order
+///      rule. The per-user lock also lives inside the AFTER trigger, so a batch that
+///      wrote rows first would acquire it *after* its row locks and two devices could
+///      deadlock (40P01). Taking it first makes the order uniform everywhere.
+///   2. `select set_config('app.device_id', $1, true)` — so `origin_device_id` is
+///      populated without a device column on every table.
+///   3. Per mutation: the replay lookup, [`decide`], the apply under a SAVEPOINT, and the
+///      `mutation_log` insert. A failed apply rolls back to its savepoint and the batch
+///      continues (A170).
+///
+/// `touch_last_sync` runs once, after the loop, in the same transaction (A180).
+pub async fn apply_batch(
+    state: &AppState,
+    user: &AuthUser,
+    body: &PushRequest,
+) -> AppResult<PushResponse> {
+    // A171: `origin_device_id` is only worth recording if the claim is checkable, so a
+    // body free to name another device is refused before anything is written.
+    if body.device_id != user.device_id {
+        return Err(AppError::Forbidden);
+    }
+
+    let mut tx = state.pool.begin().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("beginning the push transaction: {error}"))
+    })?;
+
+    // 1. The lock first, before a single row is touched.
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(user.user_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the push lock: {error}")))?;
+
+    // 2. The device, so the triggers can attribute the change.
+    sqlx::query("select set_config('app.device_id', $1, true)")
+        .bind(user.device_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("setting the device: {error}")))?;
+
+    // The calling device's own read-only flag, read in the same transaction as the
+    // decision so the two describe one instant (A149). A missing row reads false: the
+    // extractor already proved the device is live.
+    let device_read_only: bool =
+        sqlx::query_scalar("select read_only from devices where id = $1 and user_id = $2")
+            .bind(user.device_id)
+            .bind(user.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the device: {error}")))?
+            .unwrap_or(false);
+
+    let facts = crate::entitlements::facts(state, user);
+    let snapshot = crate::entitlements::snapshot_in(&mut tx, state, user).await?;
+
+    let mut results = Vec::with_capacity(body.mutations.len());
+    for mutation in &body.mutations {
+        // 3a. A replay returns the stored result and applies nothing.
+        match log::replay(&mut tx, user.user_id, mutation.mutation_id).await? {
+            Replay::Stored(result) => {
+                results.push(result);
+                continue;
+            }
+            // A172: the id is global, so a collision with another account is
+            // representable — and returning that account's result would be a
+            // cross-tenant read.
+            Replay::ForeignUser => {
+                results.push(MutationResult::Rejected {
+                    code: ErrorCode::Conflict.as_str().to_string(),
+                    message: "this mutation id belongs to another account".to_string(),
+                });
+                continue;
+            }
+            Replay::Fresh => {}
+        }
+
+        // 3b. Phase 7's decision, not a copy of it (A150).
+        if let Err(result) = decide(
+            &state.config.plans,
+            &facts,
+            &snapshot,
+            device_read_only,
+            mutation,
+        ) {
+            results.push(result);
+            continue;
+        }
+
+        // 3c. The apply, under a savepoint so an apply failure rolls back this mutation
+        // alone rather than the batch (A170).
+        sqlx::query("savepoint mutation")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("opening a savepoint: {error}")))?;
+        match apply::apply_one(&mut tx, user.user_id, mutation).await {
+            Ok(outcome) => {
+                sqlx::query("release savepoint mutation")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|error| {
+                        AppError::Internal(anyhow::anyhow!("releasing a savepoint: {error}"))
+                    })?;
+                let result = outcome.into_result();
+                log::record(
+                    &mut tx,
+                    user.user_id,
+                    user.device_id,
+                    mutation.mutation_id,
+                    &result,
+                )
+                .await?;
+                results.push(result);
+            }
+            Err(error) => {
+                sqlx::query("rollback to savepoint mutation")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|rollback| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "rolling back a mutation: {rollback} (after {error})"
+                        ))
+                    })?;
+                sqlx::query("release savepoint mutation")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|release| {
+                        AppError::Internal(anyhow::anyhow!("releasing a savepoint: {release}"))
+                    })?;
+                tracing::warn!(
+                    user_id = %user.user_id,
+                    mutation_id = %mutation.mutation_id,
+                    %error,
+                    "a mutation could not be applied"
+                );
+                results.push(MutationResult::Rejected {
+                    code: ErrorCode::Internal.as_str().to_string(),
+                    message: "the mutation could not be applied".to_string(),
+                });
+            }
+        }
+    }
+
+    touch_last_sync(&mut tx, user.device_id)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("recording the last sync: {error}")))?;
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing the push transaction: {error}"))
+    })?;
+
+    Ok(PushResponse { results })
 }
 
 /// Whether a payload carries one of the entity's server-derived fields.

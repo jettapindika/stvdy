@@ -4,22 +4,24 @@
 //! and this module adds only the transport around it: the advisory lock, the
 //! idempotency log, the apply, and the results.
 
+pub mod apply;
 pub mod log;
 pub mod pull;
 pub mod push;
 
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    // One `.route(...)` per task that lands it: `post("/sync/push", …)` in Task 4 and
-    // `get("/sync/stream", …)` in Task 6 join this call, so the module never declares a
-    // handler that does not exist yet.
-    Router::new().route("/sync/pull", get(pull::pull))
+    // One `.route(...)` per task that lands it: `get("/sync/stream", …)` in Task 6 joins
+    // this call, so the module never declares a handler that does not exist yet.
+    Router::new()
+        .route("/sync/pull", get(pull::pull))
+        .route("/sync/push", post(push::push))
 }
 
 /// Records that this device just talked to the server.
