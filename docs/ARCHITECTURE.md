@@ -1439,3 +1439,119 @@ create a state the planner then has to honour. The grid is a **table** — one r
 — rather than absolutely-positioned divs, and a block is a `<button>` whose arrow keys move it
 by 15 minutes, because a pointer-only drag is a control a keyboard user cannot reach and a
 jsdom test cannot drive.
+
+## Agent, reminders, dashboard (Phase 12)
+
+The assistant can act on the student's own data without ever acting on its own. Three layers, and
+the seams are the point.
+
+### The read/write split is a type, and the gate is the only decision point
+
+`crates/core/src/agent/{tools,gate}.rs` is **pure**: no database, no clock, no network, no model.
+`ToolName` is a closed enum of the spec's ten tools and `kind()` is a `matches!` on it, so a new
+tool cannot be added without answering "does this execute?" (A270). `gate()` returns
+`GateDecision::{Execute, Propose, Refuse}` and `Refusal` has six variants checked in a documented
+order (A271).
+
+**A WRITE tool can only ever reach `Propose`.** The gate has no arm that executes one, which is
+what makes the injection defence structural rather than a promise about the model: a poisoned
+document can make the model *say* anything and cannot make the app write a row. The card the
+student sees is therefore always rendering a **proposal**, which is why the wording is "Suggested
+…" until confirmed and why `honesty.nothingAddedYet` is on it.
+
+`crates/server/src/chat/agent.rs` is the only thing that acts: it runs a READ tool against the
+same queries the REST routes use, and turns a WRITE tool into one `pending_actions` row plus one
+SSE `action` event. The chat route holds no tool logic. The `action` event rides the **existing**
+chat stream rather than a second one (roadmap § 4 fixes the six names: `token`, `citations`,
+`action`, `usage`, `done`, `error`) — a proposal belongs to the turn that produced it, and a
+second connection would have to be told which turn it was for.
+
+The tool list sent to the provider is the **plan's** tool list and nothing else (A272): a free
+account is offered the four reads and none of the six writes, so a model cannot propose an action
+the server will refuse. That is what makes `Refusal::NotOnPlan` a hallucination guard rather than
+an everyday path.
+
+### Confirm is the one place a proposal becomes a row
+
+`crates/server/src/actions/execute.rs` calls **the same service functions the REST routes call**
+(A276), and a grep test forbids a second implementation, so a confirmed task is the row
+`POST /tasks` would have written — same validation, same `change_log` entry. The claim is a
+single-winner guarded `update` **inside the execution's own transaction** (A275), so a second tap
+on either device writes nothing and answers `409`; the executor running inside that transaction is
+what makes a `confirmed` row impossible to be a row that did nothing. Expiry is lazy on read
+(A274) and re-checked inside the claim, so the list is the convenience and the claim is the
+enforcement.
+
+`pending_actions` is a `+sync` table whose resolution columns travel, which is what makes the
+exit gate's "confirm on device B" a read fact: the card confirmed on device A reads "Confirmed" on
+device B rather than vanishing. The entity stays out of `is_client_writable()`, so a client cannot
+push a resolution — confirm and reject are dedicated endpoints (A283).
+
+### The reminder key, and the three dedupe layers
+
+`crates/core/src/reminders.rs` is **pure**: given a clock, the student's settings and the subjects,
+it produces the planned reminders, their keys, their quiet-hours deferrals and their skips. `now`
+is an argument and never a call, and nothing is keyed by iteration order — the plan's *order* is
+part of the contract, because two phones and the server's sweep must derive the same plan from the
+same inputs.
+
+The key is `(user, kind, subject, local date)` and **never the computed instant** (A284). That is
+the whole reminder-correctness story and the plausible implementation is wrong: two phones with the
+same synced `tasks` row compute the same due time to the second, and the moment quiet hours move a
+delivery or a device computes 19:00 against another's 19:01, a fire-time key produces two rows.
+The deferral moves `fire_at` and leaves the key alone, which is exactly the point.
+
+Cross-device dedupe is three layers (A285): the unique `dedupe_key`, `on conflict do nothing` on
+register (answering `{applied, reminder_id}` so a retry after a lost response can tell whether its
+write landed), and an atomic claim plus `unique (reminder_id, channel, device_id)` on delivery.
+Push goes to **one** device — the caller's most recently active — and the push payload carries
+`reminder_id`, which is the fallback when a device has no token.
+
+Quiet hours wrap midnight (A202), so `(22, 7)` is 22:00→07:00 and the naive
+`start <= hour && hour < end` is false for every hour it is supposed to cover. A local wall-clock
+fire time is resolved through `chrono-tz` and never a fixed offset: a local hour that does not
+exist on a spring-forward day is skipped with a reason, and an ambiguous one on a fall-back day
+takes the earlier offset. Past `STALE_AFTER_MIN` from its subject a deferred reminder becomes
+`skipped` with a reason and **stays visible**, because a reminder that silently never arrives is
+what the student reports as "reminders are broken".
+
+Two job kinds, because the roadmap § 8 list is fixed and has exactly these (A287): `send_reminder`
+derives and claims, and `send_push` delivers one reminder over every enabled channel, returning a
+transient failure only when **every** channel failed so one bad channel cannot re-send the ones
+that worked. `devices.last_seen_at` finally has a writer — Phase 8's pull transaction, the only
+place a device proves it is alive — which is the input A285's "most recently active" rule reads.
+
+### The client schedules locally, under the same key
+
+`app/src/features/reminders/localSchedule.ts` is pure and takes `now` as a parameter, the same
+discipline `crates/core/src/planner/` follows: a clock read inside is the one change no
+behavioural test has to notice, and it is what makes a quiet-hours boundary and a DST day testable
+at all. It builds the **same** key format from the same three facts, so a client and the server
+cannot disagree about which reminder they are talking about.
+
+`useLocalNotifications` gates itself to `ios`/`android` on `Platform.kind()`, and the gate is not
+an optimisation: web and desktop cannot schedule and deliver **immediately**, so an ungated mount
+is a burst of notifications on every page load. The desktop shell's own native notification is the
+shell's (A5, A32). The `seen` list in `Platform.localState` is A285's fallback half, unioned with
+the keys `GET /reminders` reports for this device — a client that scheduled what the server also
+pushes is the double-notification the cross-device dedupe exists to prevent.
+
+### The dashboard reports only what traces to a row
+
+`GET /dashboard` returns time per course (from `study_sessions` joined through `workspaces`),
+review activity (from `flashcard_reviews`), the totals and the due-card count; `GET /dashboard/topics`
+returns per-topic mastery and the weak-topic list and is gated by `Feature::AdvancedAnalytics`.
+Every figure is a count or a sum over rows the student owns, and there is **no composite score, no
+predicted grade, no "retention"** (A289). A topic with no attempts is **absent**, never shown as
+0%.
+
+The client **renders** the server's `weak_threshold` and does not apply it: a client-side threshold
+would be a second definition of "weak", and the two would disagree the first time the server's was
+tuned, so the card would show topics the server does not consider weak. The weak-topic card names
+the planner as the remedy **in prose** and hands nothing over — a handover would need a goal to
+attach the block to and there is no goal picker yet, so a call would have to invent one.
+`plan_route` is served for Phase 11's goal picker; it is a planner dependency, not a dashboard one.
+
+Every chart carries a **text equivalent**: each figure has a sentence beside it stating the same
+fact in words, so the screen is readable without the bars and works with a screen reader and at
+200% text scale at once.
