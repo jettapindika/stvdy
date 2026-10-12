@@ -11,6 +11,8 @@ import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
+import { SettingsScreen } from './features/settings/SettingsScreen'
+import { TasksScreen } from './features/tasks/TasksScreen'
 import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
 import { ReportScreen } from './features/reports/ReportScreen'
 import { QuizScreen } from './features/quiz/QuizScreen'
@@ -88,11 +90,11 @@ export const router = createBrowserRouter([
           },
           {
             path: 'tasks',
-            element: <NotBuiltRoute titleKey="nav.tasks" whatKey="routes.tasks.what" />,
+            element: <TasksScreen />,
           },
           {
             path: 'settings',
-            element: <NotBuiltRoute titleKey="nav.settings" whatKey="routes.settings.what" />,
+            element: <SettingsScreen />,
           },
           {
             path: 'billing',

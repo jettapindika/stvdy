@@ -1,5 +1,8 @@
+import { useQuery } from '@tanstack/react-query'
+
 import { api } from '../client'
 import { platform } from '@/platform'
+import { hasLocalCache } from './synced'
 
 /**
  * Study sessions, and the two ways a device records one.
@@ -40,6 +43,16 @@ export interface SessionRow {
   duration_min: number
   created_at?: string | null
   updated_at?: string
+  /** Present only on a cached row: the pull ships tombstones. */
+  deleted_at?: string | null
+}
+
+export const sessionKeys = {
+  window: (from: string, to: string) => ['sessions', from, to] as const,
+}
+
+export const activityKeys = {
+  window: (from: string, to: string) => ['activity', from, to] as const,
 }
 
 /** One session to record. `id` is minted when the timer *starts* (A206). */
@@ -81,4 +94,78 @@ export async function logSession(input: SessionInput): Promise<void> {
   }
 
   await platform.sync.write('study_session', input.id, payload)
+}
+
+/** The three instants a streak is made of, as `GET /activity` returns them. */
+export interface ActivityResponse {
+  reviews: string[]
+  attempts: string[]
+  sessions: string[]
+}
+
+/**
+ * The sessions in a window, and the three instants a streak is made of.
+ *
+ * Both exist because the Today view needs them and neither is derivable from the
+ * other: minutes need durations, and the streak needs the *days* on which a
+ * review, an attempt or a session happened. `GET /activity` returns exactly those
+ * three arrays and nothing else, in one round trip, because the *rule* that turns
+ * them into a streak is the client's — the Today view has to work offline, and a
+ * server route cannot (A205).
+ *
+ * The window is required by both routes (`from` is a 400 without it), and it is
+ * the caller's: this module sends what it is given rather than guessing a horizon
+ * the server would then have to agree with.
+ */
+export function useSessions(from: string, to: string) {
+  return useQuery({
+    queryKey: sessionKeys.window(from, to),
+    queryFn: async (): Promise<SessionRow[]> => {
+      if (hasLocalCache()) {
+        const rows = await platform.sync.read<SessionRow>('study_session')
+        return rows.filter((row) => row.deleted_at == null)
+      }
+      const body = await api.get<{ sessions: SessionRow[] }>(
+        `/sessions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      )
+      return body.sessions
+    },
+  })
+}
+
+/**
+ * The three instants, from the cache when there is one and from `GET /activity`
+ * otherwise.
+ *
+ * The cached path reads the three entities the streak is made of rather than
+ * asking for a precomputed number, and that is deliberate: a server that returned
+ * "5" would be a second implementation of the streak rule, and the two would
+ * disagree the first time one was edited. What crosses the boundary is the
+ * evidence; the count is derived in `day.ts`.
+ */
+export function useActivity(from: string, to: string) {
+  return useQuery({
+    queryKey: activityKeys.window(from, to),
+    queryFn: async (): Promise<ActivityResponse> => {
+      if (hasLocalCache()) {
+        const [reviews, attempts, sessions] = await Promise.all([
+          platform.sync.read<{ reviewed_at: string; deleted_at?: string | null }>(
+            'flashcard_review',
+          ),
+          platform.sync.read<{ answered_at: string; deleted_at?: string | null }>('quiz_attempt'),
+          platform.sync.read<{ started_at: string; deleted_at?: string | null }>('study_session'),
+        ])
+        const live = <T extends { deleted_at?: string | null }>(rows: T[]) =>
+          rows.filter((row) => row.deleted_at == null)
+        return {
+          reviews: live(reviews).map((row) => row.reviewed_at),
+          attempts: live(attempts).map((row) => row.answered_at),
+          sessions: live(sessions).map((row) => row.started_at),
+        }
+      }
+      return await api.get<ActivityResponse>(
+        `/activity?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      )
+    },
+  })
 }

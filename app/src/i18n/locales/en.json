@@ -77,12 +77,6 @@
     "calendar": {
       "what": "a week and month view of classes, deadlines, and the study blocks the planner proposes, plus Google Calendar and ICS connections"
     },
-    "tasks": {
-      "what": "tasks and subtasks across your workspaces, with quick capture and an assistant that proposes breakdowns you confirm before they save"
-    },
-    "settings": {
-      "what": "timezone and study hours, daily limits, reminder channels, connected calendars, and your signed-in devices"
-    },
     "notFound": {
       "title": "Not found",
       "what": "nothing: this address does not match a screen"
@@ -254,12 +248,15 @@
     "studyBlocks": {
       "title": "Study blocks",
       "emptyTitle": "No study blocks scheduled",
-      "emptyReason": "Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class."
+      "emptyReason": "Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class.",
+      "planner": "Study blocks are proposed by the planner, which arrives in a later phase. Nothing here is invented in the meantime."
     },
     "dueCards": {
       "title": "Due flashcards",
       "emptyTitle": "No cards due",
-      "emptyReason": "Review cards appear here when their interval elapses. Generate a deck from a source and Stvdy schedules the reviews."
+      "emptyReason": "Review cards appear here when their interval elapses. Generate a deck from a source and Stvdy schedules the reviews.",
+      "loading": "Checking your cards",
+      "review": "Review {{count}} cards"
     },
     "tasks": {
       "emptyTitle": "Nothing due",
@@ -280,7 +277,49 @@
       "staleReason": "This timer has been running for more than four hours, so it is not counted automatically. Save the minutes you actually studied, or discard it.",
       "minutesLabel": "Minutes studied",
       "save": "Save session",
-      "discard": "Discard"
+      "discard": "Discard",
+      "title": "Focus timer"
+    },
+    "timeline": {
+      "title": "Today",
+      "at": "at {{when}}"
+    },
+    "overdue": {
+      "title": "Overdue",
+      "due": "was due {{when}}"
+    },
+    "setup": {
+      "title": "Getting started",
+      "workspaces": "{{count}} workspaces",
+      "sources": "{{count}} sources",
+      "decks": "{{count}} decks",
+      "hint": "Add your course material and Stvdy builds the study tools from it.",
+      "start": "Add your first workspace"
+    },
+    "continue": {
+      "title": "Continue where you left off",
+      "open": "Open {{name}}",
+      "lastTouched": "Last changed {{when}}"
+    },
+    "activity": {
+      "title": "Your study",
+      "minutes": "{{count}} minutes logged today",
+      "streak": "{{count}} day streak"
+    },
+    "capture": {
+      "title": "Quick capture",
+      "label": "What do you have to do?",
+      "placeholder": "selesaikan tugas kripto hari Jumat",
+      "run": "Draft a task",
+      "runWithCost": "Draft a task ({{count}} credits)",
+      "noun": "a captured task",
+      "draft": "task",
+      "fieldTitle": "Title",
+      "fieldEstimate": "Estimate in minutes",
+      "due": "Due {{when}}",
+      "estimate": "About {{count}} minutes",
+      "warning": "The assistant could not use one field: {{detail}}",
+      "lockedReason": "Type one line and get a task draft you confirm before anything is saved."
     }
   },
   "workspaces": {
@@ -759,10 +798,6 @@
     "composer": {
       "title": "Composer honesty",
       "description": "The line under every chat composer, and the grounding toggle above it. Both are part of the composer rather than a tooltip: a warning nobody has to open is one most people never read."
-    },
-    "sync": {
-      "title": "Sync status",
-      "description": "The control the shell shows in both form factors: a row at the foot of the sidebar, and a chip in the tab bar's band on a phone. The state is a word plus a tone, so it reads correctly in monochrome, and the tones are the chips above. It is a link to the Devices screen, which is why Devices needs no sixth nav item."
     }
   },
   "planner": {
@@ -907,6 +942,101 @@
       "done": "Local data was deleted and resynced.",
       "failed": "The local data could not be reset.",
       "noneLocal": "This build keeps no local copy of your data, so there is nothing to reset."
+    }
+  },
+  "tasks": {
+    "subtitle": "Everything you have to do, across your workspaces, with subtasks you confirm before they save.",
+    "noun": "tasks",
+    "loading": "Loading your tasks",
+    "done": "Done: {{title}}",
+    "markDone": "Mark done",
+    "reopen": "Reopen",
+    "subtaskProgress": "{{done}} of {{total}} subtasks done",
+    "new": {
+      "title": "New task",
+      "titleLabel": "What do you have to do?",
+      "dueLabel": "Due date",
+      "submit": "Add task"
+    },
+    "list": {
+      "title": "Your tasks"
+    },
+    "empty": {
+      "title": "No tasks yet",
+      "reason": "Tasks you add here, capture in one line, or accept from a breakdown land on this list."
+    },
+    "breakdown": {
+      "title": "Break it down",
+      "action": "Break down",
+      "what": "subtasks",
+      "minutes": "Minutes",
+      "total": "{{count}} minutes across the subtasks you keep",
+      "accept": "Add these subtasks",
+      "warning": "The assistant could not use one item: {{detail}}",
+      "run": "Suggest subtasks",
+      "runWithCost": "Suggest subtasks ({{count}} credits)",
+      "lockedReason": "The assistant proposes subtasks with estimates, and you decide what to keep."
+    }
+  },
+  "settings": {
+    "subtitle": "Study hours, notifications, language and your devices.",
+    "noun": "settings",
+    "loading": "Loading your settings",
+    "study": {
+      "title": "Study preferences",
+      "timezone": "Timezone",
+      "timezoneHint": "Every date and day boundary in the app is read in this zone.",
+      "startHour": "Study hours start",
+      "endHour": "Study hours end",
+      "maxMinutes": "Daily study limit (minutes)",
+      "blockLength": "Focus block (minutes)",
+      "breakLength": "Break (minutes)"
+    },
+    "notifications": {
+      "title": "Notifications",
+      "channels": "How Stvdy reaches you",
+      "locked": "Available on {{plan}}",
+      "quiet": "Quiet hours",
+      "quietHint": "No notifications inside this window.",
+      "quietFrom": "From",
+      "quietTo": "To",
+      "quietSameDay": "Quiet from {{from}}:00 to {{to}}:00.",
+      "quietNextDay": "Quiet from {{from}}:00 to {{to}}:00 the next day.",
+      "quietNone": "No quiet hours set."
+    },
+    "channel": {
+      "web": "In the app",
+      "push": "Push notifications",
+      "email": "Email",
+      "telegram": "Telegram",
+      "discord": "Discord"
+    },
+    "language": {
+      "title": "Language",
+      "label": "Interface and generated text"
+    },
+    "appearance": {
+      "title": "Appearance",
+      "label": "Theme",
+      "system": "Match my device",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "devices": {
+      "title": "Devices and sync",
+      "hint": "See every device signed in to this account, and revoke one.",
+      "open": "Open devices and sync",
+      "resetHint": "Resetting deletes everything cached on this device, including changes you have not synced yet, and downloads it again.",
+      "reset": "Reset local data and resync"
+    },
+    "later": {
+      "title": "Not built yet",
+      "calendar": "Calendar connections",
+      "calendarPhase": "Google Calendar and ICS arrive in Phase 10.",
+      "data": "Data export and deletion",
+      "dataPhase": "Exporting and deleting your account arrive in Phase 15.",
+      "byok": "Bring your own model key",
+      "byokPhase": "BYOK arrives in Phase 13."
     }
   }
 }

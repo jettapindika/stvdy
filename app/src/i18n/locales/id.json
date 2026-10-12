@@ -76,12 +76,6 @@
     "calendar": {
       "what": "tampilan minggu dan bulan untuk kelas, tenggat, dan blok belajar yang diusulkan jadwal, plus koneksi Google Calendar dan ICS"
     },
-    "tasks": {
-      "what": "tugas dan subtugas di semua ruang belajarmu, dengan penambahan cepat dan asisten yang mengusulkan rincian yang kamu konfirmasi sebelum disimpan"
-    },
-    "settings": {
-      "what": "zona waktu dan jam belajar, batas harian, saluran pengingat, kalender yang terhubung, dan perangkat yang kamu pakai masuk"
-    },
     "notFound": {
       "title": "Tidak ditemukan",
       "what": "tidak ada: alamat ini tidak cocok dengan layar mana pun"
@@ -252,12 +246,15 @@
     "studyBlocks": {
       "title": "Blok belajar",
       "emptyTitle": "Belum ada blok belajar terjadwal",
-      "emptyReason": "Blok muncul setelah kamu menetapkan tanggal ujian dan menambahkan materi yang harus dikuasai. Penjadwal bekerja mundur dari ujian, menyesuaikan sesi dengan jam belajarmu, dan tidak pernah menabrak jadwal kuliah."
+      "emptyReason": "Blok muncul setelah kamu menetapkan tanggal ujian dan menambahkan materi yang harus dikuasai. Penjadwal bekerja mundur dari ujian, menyesuaikan sesi dengan jam belajarmu, dan tidak pernah menabrak jadwal kuliah.",
+      "planner": "Blok belajar diusulkan oleh penjadwal, yang datang di fase berikutnya. Tidak ada yang dikarang sementara ini."
     },
     "dueCards": {
       "title": "Flashcard jatuh tempo",
       "emptyTitle": "Tidak ada kartu jatuh tempo",
-      "emptyReason": "Kartu ulangan muncul di sini saat intervalnya habis. Buat dek dari sebuah sumber dan Stvdy yang mengatur jadwal ulangannya."
+      "emptyReason": "Kartu ulangan muncul di sini saat intervalnya habis. Buat dek dari sebuah sumber dan Stvdy yang mengatur jadwal ulangannya.",
+      "loading": "Memeriksa kartumu",
+      "review": "Ulangi {{count}} kartu"
     },
     "tasks": {
       "emptyTitle": "Tidak ada yang jatuh tempo",
@@ -277,7 +274,49 @@
       "staleReason": "Timer ini sudah berjalan lebih dari empat jam, jadi tidak dicatat otomatis. Simpan menit yang benar-benar kamu pakai untuk belajar, atau buang.",
       "minutesLabel": "Menit belajar",
       "save": "Simpan sesi",
-      "discard": "Buang"
+      "discard": "Buang",
+      "title": "Timer fokus"
+    },
+    "timeline": {
+      "title": "Hari ini",
+      "at": "pukul {{when}}"
+    },
+    "overdue": {
+      "title": "Terlambat",
+      "due": "jatuh tempo {{when}}"
+    },
+    "setup": {
+      "title": "Mulai dari sini",
+      "workspaces": "{{count}} ruang belajar",
+      "sources": "{{count}} sumber",
+      "decks": "{{count}} dek",
+      "hint": "Tambahkan materi kuliahmu dan Stvdy menyusun alat belajarnya dari materi itu.",
+      "start": "Tambah ruang belajar pertama"
+    },
+    "continue": {
+      "title": "Lanjutkan yang tadi",
+      "open": "Buka {{name}}",
+      "lastTouched": "Terakhir diubah {{when}}"
+    },
+    "activity": {
+      "title": "Belajarmu",
+      "minutes": "{{count}} menit tercatat hari ini",
+      "streak": "{{count}} hari berturut-turut"
+    },
+    "capture": {
+      "title": "Catatan cepat",
+      "label": "Apa yang harus kamu kerjakan?",
+      "placeholder": "selesaikan tugas kripto hari Jumat",
+      "run": "Buat draf tugas",
+      "runWithCost": "Buat draf tugas ({{count}} kredit)",
+      "noun": "tugas hasil catatan cepat",
+      "draft": "tugas",
+      "fieldTitle": "Judul",
+      "fieldEstimate": "Perkiraan menit",
+      "due": "Jatuh tempo {{when}}",
+      "estimate": "Sekitar {{count}} menit",
+      "warning": "Asisten tidak bisa memakai satu kolom: {{detail}}",
+      "lockedReason": "Tulis satu baris dan dapatkan draf tugas yang kamu konfirmasi sebelum apa pun disimpan."
     }
   },
   "workspaces": {
@@ -748,10 +787,6 @@
     "composer": {
       "title": "Kejujuran composer",
       "description": "Baris di bawah setiap composer chat, dan tombol dasar di atasnya. Keduanya bagian dari composer, bukan tooltip: peringatan yang tidak wajib dibuka adalah peringatan yang jarang dibaca."
-    },
-    "sync": {
-      "title": "Status sinkron",
-      "description": "Kontrol yang ditampilkan shell di kedua bentuk: satu baris di kaki bilah samping, dan chip di pita bilah tab pada ponsel. Statusnya berupa kata ditambah warna, jadi tetap terbaca tanpa warna, dan warnanya adalah chip di atas. Kontrol ini tautan ke layar Perangkat, karena itu Perangkat tidak perlu jadi item navigasi keenam."
     }
   },
   "planner": {
@@ -893,6 +928,101 @@
       "done": "Data lokal sudah dihapus dan disinkronkan ulang.",
       "failed": "Data lokal tidak bisa dihapus.",
       "noneLocal": "Versi ini tidak menyimpan salinan lokal datamu, jadi tidak ada yang perlu dihapus."
+    }
+  },
+  "tasks": {
+    "subtitle": "Semua yang harus kamu kerjakan, di seluruh ruang belajarmu, dengan sub-tugas yang kamu konfirmasi sebelum disimpan.",
+    "noun": "tugas",
+    "loading": "Memuat tugasmu",
+    "done": "Selesai: {{title}}",
+    "markDone": "Tandai selesai",
+    "reopen": "Buka lagi",
+    "subtaskProgress": "{{done}} dari {{total}} sub-tugas selesai",
+    "new": {
+      "title": "Tugas baru",
+      "titleLabel": "Apa yang harus kamu kerjakan?",
+      "dueLabel": "Tanggal jatuh tempo",
+      "submit": "Tambah tugas"
+    },
+    "list": {
+      "title": "Tugasmu"
+    },
+    "empty": {
+      "title": "Belum ada tugas",
+      "reason": "Tugas yang kamu tambahkan di sini, catat dalam satu baris, atau terima dari pemecahan akan muncul di daftar ini."
+    },
+    "breakdown": {
+      "title": "Pecah jadi bagian kecil",
+      "action": "Pecah",
+      "what": "sub-tugas",
+      "minutes": "Menit",
+      "total": "{{count}} menit untuk sub-tugas yang kamu simpan",
+      "accept": "Tambahkan sub-tugas ini",
+      "warning": "Asisten tidak bisa memakai satu bagian: {{detail}}",
+      "run": "Usulkan sub-tugas",
+      "runWithCost": "Usulkan sub-tugas ({{count}} kredit)",
+      "lockedReason": "Asisten mengusulkan sub-tugas beserta perkiraannya, dan kamu yang memutuskan mana yang disimpan."
+    }
+  },
+  "settings": {
+    "subtitle": "Jam belajar, notifikasi, bahasa, dan perangkatmu.",
+    "noun": "pengaturan",
+    "loading": "Memuat pengaturanmu",
+    "study": {
+      "title": "Preferensi belajar",
+      "timezone": "Zona waktu",
+      "timezoneHint": "Setiap tanggal dan batas hari di aplikasi ini dibaca dalam zona ini.",
+      "startHour": "Jam belajar mulai",
+      "endHour": "Jam belajar berakhir",
+      "maxMinutes": "Batas belajar harian (menit)",
+      "blockLength": "Blok fokus (menit)",
+      "breakLength": "Istirahat (menit)"
+    },
+    "notifications": {
+      "title": "Notifikasi",
+      "channels": "Cara Stvdy menghubungimu",
+      "locked": "Tersedia di {{plan}}",
+      "quiet": "Jam tenang",
+      "quietHint": "Tidak ada notifikasi di dalam rentang ini.",
+      "quietFrom": "Dari",
+      "quietTo": "Sampai",
+      "quietSameDay": "Tenang dari {{from}}:00 sampai {{to}}:00.",
+      "quietNextDay": "Tenang dari {{from}}:00 sampai {{to}}:00 keesokan harinya.",
+      "quietNone": "Belum ada jam tenang."
+    },
+    "channel": {
+      "web": "Di aplikasi",
+      "push": "Notifikasi push",
+      "email": "Email",
+      "telegram": "Telegram",
+      "discord": "Discord"
+    },
+    "language": {
+      "title": "Bahasa",
+      "label": "Tampilan dan teks yang dihasilkan"
+    },
+    "appearance": {
+      "title": "Tampilan",
+      "label": "Tema",
+      "system": "Ikuti perangkatku",
+      "light": "Terang",
+      "dark": "Gelap"
+    },
+    "devices": {
+      "title": "Perangkat dan sinkronisasi",
+      "hint": "Lihat setiap perangkat yang masuk ke akun ini, dan cabut aksesnya.",
+      "open": "Buka perangkat dan sinkronisasi",
+      "resetHint": "Reset menghapus semua yang tersimpan di perangkat ini, termasuk perubahan yang belum tersinkron, lalu mengunduhnya lagi.",
+      "reset": "Reset data lokal dan sinkronkan ulang"
+    },
+    "later": {
+      "title": "Belum dibuat",
+      "calendar": "Sambungan kalender",
+      "calendarPhase": "Google Calendar dan ICS datang di Fase 10.",
+      "data": "Ekspor dan penghapusan data",
+      "dataPhase": "Ekspor dan penghapusan akun datang di Fase 15.",
+      "byok": "Pakai kunci model sendiri",
+      "byokPhase": "BYOK datang di Fase 13."
     }
   }
 }

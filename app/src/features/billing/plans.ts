@@ -28,6 +28,24 @@ export interface PlanFacts {
   name: string | null
   /** The export formats the plan includes. Empty for an unknown plan. */
   exportFormats: string[]
+  /**
+   * The reminder channels the plan grants, in the file's order.
+   *
+   * Read here rather than from `GET /usage` because two different questions are
+   * being asked of the same fact: the *screen* asks the server what this account
+   * may choose (that is the enforcement), and the *locked message* asks the
+   * matrix which plan to name as having it. The second is a fact about the file,
+   * and a screen that derived it from the account's own plan could only ever say
+   * "not yours".
+   */
+  reminderChannels: string[]
+  /**
+   * The plan's boolean grants, keyed as the matrix spells them (`quick_capture`,
+   * `task_ai_breakdown`, …). A key the plan block does not state is absent rather
+   * than `false`, because "the file does not say" and "the file says no" are
+   * different answers and only one of them is a fact about this plan.
+   */
+  grants: Record<string, boolean>
 }
 
 export interface ReportCredits {
@@ -86,7 +104,7 @@ export function parsePlans(toml: string): ParsedPlans {
       const planId = /^plans\.([a-z_]+)$/.exec(header)?.[1]
       current = null
       if (planId !== undefined) {
-        current = { name: null, exportFormats: [] }
+        current = { name: null, exportFormats: [], reminderChannels: [], grants: {} }
         plans[planId] = current
       }
       inCredits = header === 'credits'
@@ -122,7 +140,24 @@ export function parsePlans(toml: string): ParsedPlans {
       current.exportFormats = [...body.matchAll(/"([^"]*)"/g)].flatMap((match) =>
         match[1] === undefined ? [] : [match[1]],
       )
+      continue
     }
+
+    if (key === 'reminder_channels') {
+      const body = /^\[(.*)\]$/.exec(value)?.[1]
+      if (body === undefined) continue
+      current.reminderChannels = [...body.matchAll(/"([^"]*)"/g)].flatMap((match) =>
+        match[1] === undefined ? [] : [match[1]],
+      )
+      continue
+    }
+
+    // Every other boolean in the block is a grant. They are recorded generically
+    // rather than by name so a feature the matrix gains does not need a line here
+    // — and so a locked message can name the plan that has one, which is the fact
+    // `planForFeature` reads.
+    const flag = /^(true|false)$/.exec(value)?.[1]
+    if (flag !== undefined) current.grants[key] = flag === 'true'
   }
 
   return { plans, credits, taskCredits }
@@ -158,21 +193,60 @@ export const TASK_CREDITS: TaskCredits = PARSED.taskCredits
 export const PLANS: Record<string, PlanFacts> = PARSED.plans
 
 /**
- * The plan an export format first appears on, named the way `LockedFeature`
- * spells it.
+ * The cheapest plan that satisfies `has`, named the way `LockedFeature` spells
+ * it, or null when no plan does.
+ *
+ * The plans are read in the order the file declares them, which is cheapest
+ * first — the same order the pricing table is written in. Deriving this from the
+ * matrix rather than writing it down is what stops a locked message from naming a
+ * plan the file does not grant the feature on, which is the one thing a locked
+ * message must never do.
+ *
+ * Null means "no plan has it", and the caller must then offer no upgrade: a
+ * feature nothing grants has nothing to upgrade to, and naming a plan anyway would
+ * be a promise the matrix does not make.
+ */
+function firstPlan(has: (facts: PlanFacts) => boolean): 'Pro' | 'Power' | null {
+  for (const facts of Object.values(PLANS)) {
+    if (!has(facts)) continue
+    if (facts.name === 'Pro' || facts.name === 'Power') return facts.name
+  }
+  return null
+}
+
+/**
+ * The plan an export format first appears on.
  *
  * Derived from the matrix rather than written down, so adding a format to a plan
- * in `config/plans.toml` cannot leave a locked message naming the wrong plan. The
- * plans are read in the order the file declares them, which is cheapest first —
- * the same order the pricing table is written in.
+ * in `config/plans.toml` cannot leave a locked message naming the wrong plan.
  *
  * Null when no plan includes the format, in which case there is nothing to
  * upgrade to and the caller must not offer one.
  */
 export function planForFormat(format: string): 'Pro' | 'Power' | null {
-  for (const facts of Object.values(PLANS)) {
-    if (!facts.exportFormats.includes(format)) continue
-    if (facts.name === 'Pro' || facts.name === 'Power') return facts.name
-  }
-  return null
+  return firstPlan((facts) => facts.exportFormats.includes(format))
+}
+
+/**
+ * The plan a reminder channel first appears on.
+ *
+ * The same shape as `planForFormat`, over `reminder_channels` instead of
+ * `export_formats`: the settings screen shows a channel the account's plan does
+ * not grant as a locked row naming the plan that does, and that name has to come
+ * from the file rather than from a screen's memory of the pricing table.
+ */
+export function planForReminderChannel(channel: string): 'Pro' | 'Power' | null {
+  return firstPlan((facts) => facts.reminderChannels.includes(channel))
+}
+
+/**
+ * The plan a boolean grant first appears on (`quick_capture`,
+ * `task_ai_breakdown`, …).
+ *
+ * A key a plan block does not state is not a grant, so a plan that omits it is
+ * skipped rather than treated as granting it — the same deny-by-default direction
+ * the server's `plans.get(plan)` reads in.
+ */
+export function planForFeature(feature: string): 'Pro' | 'Power' | null {
+  return firstPlan((facts) => facts.grants[feature] === true)
 }

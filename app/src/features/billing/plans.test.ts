@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { PLANS, REPORT_CREDITS, TASK_CREDITS, parsePlans, planForFormat } from './plans'
+import {
+  PLANS,
+  REPORT_CREDITS,
+  TASK_CREDITS,
+  parsePlans,
+  planForFeature,
+  planForFormat,
+  planForReminderChannel,
+} from './plans'
 
 /**
  * The client half of two rules that are enforced on the server.
@@ -118,5 +126,35 @@ describe('the plan matrix reader', () => {
     // a plan that grants it, a `1` — on the button.
     const parsed = parsePlans('[plans.pro]\ntask_breakdown = true\nquick_capture = true\n')
     expect(parsed.taskCredits.breakdown).toBeNull()
+  })
+
+  it('names the plan that first grants a feature, from the matrix', () => {
+    // The locked quick-capture card says "Available on Pro", and the name has to
+    // come from the file: a screen that remembered the pricing table would keep
+    // naming Pro after a retune moved the grant to Power.
+    expect(planForFeature('quick_capture')).toBe('Pro')
+    expect(planForFeature('task_ai_breakdown')).toBe('Pro')
+    // A feature no plan grants has nothing to upgrade to, and the caller must not
+    // offer one.
+    expect(planForFeature('telepathy')).toBeNull()
+  })
+
+  it('names the plan that first grants a reminder channel', () => {
+    // Free has web and push; email arrives on Pro, telegram and discord on Power.
+    expect(planForReminderChannel('email')).toBe('Pro')
+    expect(planForReminderChannel('telegram')).toBe('Power')
+    expect(planForReminderChannel('web')).toBe('Pro')
+  })
+
+  it('treats an unstated grant as absent rather than false', () => {
+    // "The file does not say" and "the file says no" are different answers, and
+    // only one of them is a fact about the plan. A plan block that omits the key
+    // is skipped by the lookup rather than treated as granting it.
+    const parsed = parsePlans(
+      '[plans.free]\nname = "Free"\n[plans.pro]\nname = "Pro"\nquick_capture = true\n',
+    )
+    expect(parsed.plans.free?.grants['quick_capture']).toBeUndefined()
+    expect(parsed.plans.pro?.grants['quick_capture']).toBe(true)
+    expect(parsed.plans.pro?.reminderChannels).toEqual([])
   })
 })

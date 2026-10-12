@@ -103,8 +103,16 @@ function fakeSync(overrides?: Partial<SyncApi>): { api: SyncApi; fake: FakeSync 
     async status() {
       return report
     },
-    async read<T>() {
-      return null as T | null
+    async read<T>(entity: string, id?: string): Promise<T[] | T | null> {
+      // Both shapes answer the same way the shell does: an enumeration of a
+      // device that has nothing cached is an **empty list**, and a single row it
+      // never saw is `null`. Returning `null` for the list shape would be a
+      // TypeError at the first `.filter()` in a consumer, which is a failure in
+      // the test double rather than in the screen under test.
+      void entity
+      if (id !== undefined) return null
+      const nothingCached: T[] = []
+      return nothingCached
     },
     async write(entity, id, payload) {
       fake.writes.push({ entity, id, payload })
