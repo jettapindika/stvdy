@@ -1250,10 +1250,183 @@ CRUD `/goals`, `POST /goals/:id/plan`, `POST /plans/accept`, `POST /plan/replan`
 
 ## Calendar (Phase 10)
 
-`GET /calendar/google/connect`, `GET /calendar/google/callback`,
-`POST /calendar/ics`, `DELETE /calendar/connections/:id`,
-`POST /calendar/sync`, `POST /calendar/ics-token/regenerate`,
-`GET /cal/:token.ics` (public, token-authenticated).
+Auth, except the feed. Two directions of the same idea: the app's own events go out as an
+ICS feed a student subscribes to, and other people's calendars come in as read-only rows.
+
+**The plan split is the thing to get right.** The matrix's `ICS feed + import` row is on
+**every** plan — free has the feed, the token, the ICS URL field and the import — while the
+**Google connection is pro-only** (`google_calendar = false` on free, `google_accounts_max`
+0/1/unlimited). So the only refusal in this section is on the Google routes and on
+`POST /calendar/sync`; a `LockedFeature` around the feed or the ICS import would refuse a
+feature free actually has.
+
+### The feed
+
+- `GET /cal/<token>.ics` → 200 `text/calendar; charset=utf-8`. **No bearer token**: the path
+  segment is the credential (A242). The router template is `/cal/{token}` and the handler
+  requires the `.ics` suffix, because `matchit` 0.8 rejects a static suffix after a route
+  parameter at insert time — a panic in `router()`, not a 404 — so `/cal/<token>` without the
+  suffix is a 404 rather than a second address for the same resource. An unknown token is
+  also 404, from an index hit or a miss, never a 500.
+- `Content-Type: text/calendar; charset=utf-8`, `Cache-Control: no-store`, and
+  `X-Robots-Tag: noindex` (A241/A242). `no-store` because the feed is a cache the *client*
+  owns and a stale copy served to a revoked token is the leak rotation exists to close;
+  `noindex` because a subscription URL is exactly the thing a crawler finds through a shared
+  link, a referrer or a chat preview.
+- **What it carries** (A241): `source = 'app'`, not tombstoned, `kind in (class, exam,
+  study_block, deadline)`, plus one synthetic all-day `deadline` per task with a `due_at` —
+  the spec's "tasks with due dates, study blocks, and exams". `kind = 'external'` and every
+  `source != 'app'` row are **excluded**: echoing them would show every Google event twice in
+  the student's own client, under a different `UID`, with no way to tell the two apart.
+- Each `VEVENT`'s `UID` is `<events.id>@stvdy.app` and its `SEQUENCE` is derived from
+  `(created_at, updated_at)`, with `DTSTAMP` and `LAST-MODIFIED` from `updated_at` (A230). Two
+  renders of an unchanged row are byte-identical, and an edit strictly raises `SEQUENCE`. A
+  client that caches on `UID` and finds no `SEQUENCE` has no signal an event changed, so an
+  edited title would be invisible forever, per client. *Stated limitation:* two edits inside
+  one second produce the same `SEQUENCE`, because both are second-granular.
+- A **deadline is an all-day `VEVENT`** (`DTSTART;VALUE=DATE:` and `DTEND;VALUE=DATE:` at the
+  local date and the next local date) in the student's IANA zone from `users.timezone` through
+  `chrono-tz`, never UTC (A248). Every other kind is a timed event with `DTSTART`/`DTEND` in
+  UTC. A zero-length timed event is rejected or drawn as a point by most clients, and "due
+  Friday" is what a date-only event means.
+- Ordered by `starts_at` then `id`, so two renders of an unchanged set are byte-identical.
+- **Rate-limited in the credential bucket** (30/min/IP) and `Exempt` in the route sweep,
+  which is `Class::Exempt`'s own definition ("no authenticated user at all"). The route logs
+  the resolved `user_id` and the byte length and **never the token** (A243) — a secret in a
+  `tracing` field is a secret in every log aggregator the deployment has.
+
+### The feed token
+
+- `GET /calendar/ics-token` → 200 `{ "ics_feed_token": "..." | null }`. Not one of the spec's
+  seven routes and required anyway: A242 says the token is "readable again by the settings
+  screen", and a screen that could only obtain the link by *rotating* it would break every
+  subscribed device each time the student opened settings. `null` means none has been
+  generated, and is rendered as that rather than minting one on read. `ReadOnly` in the sweep.
+- `POST /calendar/ics-token/regenerate` → 200 `{ "ics_feed_token": "..." }`. 32 fresh random
+  bytes, URL-safe base64 with no padding. Rotation is revoke-and-replace in one statement, so
+  the old value is overwritten and a client holding the previous URL 404s on its next poll.
+  That is the whole remedy A242 promises, and it is why the token is a column rather than a
+  signed value: a signed feed URL could not be revoked without rotating a server-wide key.
+- The token is stored in **plaintext** in `users.ics_feed_token`, and that is a threat-model
+  row rather than a silent choice (A242, `docs/THREAT_MODEL.md` § 2 and R7). A hash — the rule
+  for refresh tokens and login tickets (A53) — cannot be shown again.
+
+### The ICS import
+
+- `POST /calendar/ics` body `{ "url" }` → 201 `{ "connection": "...ConnectionView" }`. The URL
+  is validated **before the row is written**: 400 `validation` with a readable reason when it
+  is not `http`/`https` or carries credentials, decided without DNS (A246). The fetch path
+  guards again (A233) — the two do different jobs. This one is for the user ("that is not a URL
+  we can fetch" beats a connection that silently never syncs); the fetch-time guard is the
+  protection, because DNS can change between the two.
+- 409 `conflict` when the same URL is already connected to this account. More than one ICS
+  connection is allowed — a student can have two faculties — but two rows for one feed would
+  import every class twice with no way to tell which row to delete.
+- **The first import is a job**, so the reply is the connection and not the events: the
+  enqueue is `sync_calendar` with the windowed dedupe key (A238).
+- The fetch is a **second function on the shared SSRF guard**, not a second guard
+  (`integrations::fetch::fetch_guarded_text`): `parse_target` + `resolve_public` + the same
+  pinned-address client and the same redirect re-check, **skipping readability** (A233).
+  `ChainFetcher` is not the entry point for a feed: `extract_readable` is right for a web page
+  and destroys an ICS body. A consequence, stated: a route test cannot point the real fetcher
+  at a local stub — the guard is precisely what refuses `127.0.0.1` — so the importer takes a
+  fetcher seam, the route tests inject a fake, and the refusal is proven in
+  `crates/server/tests/ssrf.rs` against `fetch_guarded_text` itself.
+- **Conditional GET** (A239): `ics_etag`/`ics_last_modified` hold the validators and the fetch
+  sends `If-None-Match`/`If-Modified-Since`. A `304` advances `last_synced_at` only. The
+  expensive half is not the download: an unconditional re-upsert touches every row, and
+  `events` is `+sync`, so every touched row writes a `change_log` entry and every device pulls
+  the whole calendar every poll.
+- **An occurrence, not a series, is a row** (A231). `events.external_id` holds the occurrence
+  key — Google's opaque event id verbatim, and for ICS `"<UID>|<recurrence-id in UTC>"`, with
+  `"<UID>"` alone for a non-recurring one — and the existing partial unique index on
+  `(connection_id, external_id)` is the upsert key, so a re-poll is idempotent.
+- **Expansion is bounded twice** (A232): `MAX_OCCURRENCES = 500` and `HORIZON_DAYS = 180`. The
+  set asks for **one more than it keeps** and reports `truncated` when more were available,
+  because `rrule`'s `collect_with_error` ends with `was_limited || limit == list.len()` — so
+  asking for exactly the cap reports a rule with exactly that many occurrences as truncated,
+  which is a connection that looks broken while it is fine. A truncated expansion writes
+  `calendar_connections.error = 'recurrence_truncated'` and **keeps every occurrence it
+  read**; the server reads the `Expansion.truncated` flag and never `occurrences.len()` (A247).
+- `GET /calendar/connections` → 200 `{ "connections": [...ConnectionView] }`. An addition
+  beyond the spec's route list (A249): the spec lists connect/callback/ics/delete/sync/
+  regenerate/feed and no list, so a connection made in one page load would be invisible in the
+  next and the settings screen could not show its status — the same reasoning as A81. **Never**
+  a token of any kind, and no `ics_url`.
+- `DELETE /calendar/connections/:id` → 204. The connection's events are **tombstoned in the
+  same transaction**: `events.connection_id` is `references calendar_connections on delete set
+  null`, so deleting the connection alone would leave orphan `source = 'ics'` rows that no sync
+  will ever touch again and that a client cannot edit or delete either (they are read-only by
+  A198) — a timetable the student cannot remove. A tombstone rather than a hard delete,
+  because `events` is `+sync`: a row removed outright leaves every device showing the event
+  forever, with no change-log entry to correct it. `ReadOnly` in the sweep, because an ICS
+  connection is available on free and deleting one is the remedy a refusal names.
+
+`ConnectionView` (A249):
+
+```json
+{ "id": "uuid", "provider": "ics", "account_email": null, "status": "connected",
+  "error": null, "last_synced_at": "2026-10-12T03:00:00Z", "study_calendar_id": null }
+```
+
+`error` is the connection's own stored reason, rendered beside the connection rather than
+swallowed: the screen must not claim a connection is healthy while it holds an error. It is
+cleared by the next clean pass.
+
+### The sync and the consent flow
+
+- `POST /calendar/sync` → **202** `{ "queued": n }`. `n` counts the rows actually inserted, so
+  a second press inside the same minute answers `0`. The dedupe key is
+  `'sync_calendar:<connection_id>:manual:<floor(now/60)>'`, which bounds a user's own retry
+  loop without a second rate limiter; the periodic pass uses the 900-second window instead
+  (A238). Running the sync inline would hold a request open across several Google round trips.
+  `Swept` in the sweep: `GoogleCalendar`, 403 `plan_required` on free.
+- A **`410 Gone` is never surfaced as an HTTP status to the client**, because the client is not
+  the one holding the token. Google answers it inside the sync; the server clears `sync_token`
+  so the **next** pass is a full listing, and records the mode in
+  `calendar_connections.last_sync_was_full` (A236). "An incremental sync that silently stops
+  being incremental" is the phase's third named risk and it is invisible — every poll succeeds,
+  the events stop changing, nothing errors — so the mode is a value a test asserts rather than
+  an assumption.
+- `GET /calendar/google/connect` → 200 `{ "url" }`. **Not implemented in this build**: the
+  route is absent from the router (`crates/server/src/calendar/mod.rs` registers the feed
+  token, the import, the connection list, the delete and the sync), so a request is a 404.
+  When it lands it requires `Feature::GoogleAccount` through the entitlement engine (A245) —
+  the counted arm over `google_accounts_max`, not a second read of the plan — and answers 404
+  when `GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI` are unset, so a half-configured
+  client never produces a redirect that fails confusingly at Google. The SPA opens the URL with
+  `platform.openExternal` — the **system browser, never an embedded webview** — because a page
+  this app draws around someone else's login form is exactly what the spec forbids.
+- `GET /calendar/google/callback` → 302 to
+  `stvdy://oauth/calendar?status=connected|denied|error&reason=...`. **Not implemented in this
+  build**, for the same reason. When it lands it is `Exempt` in the sweep (a browser redirect
+  carries no bearer token). **No token of any kind travels in the deep link** (A235/A48): the
+  refresh token is written server-side at the callback and a deep link lands in browser
+  history, referrer logs and the OS URL handler. The SPA's `DeepLinkHandler` is written for it
+  already and only refreshes the connections query on `status=connected` and reports the reason
+  on `denied`/`error`.
+- **The consent is a two-scope pair, chosen so the conflict policy is structural** (A234):
+  `https://www.googleapis.com/auth/calendar.app.created` **plus**
+  `https://www.googleapis.com/auth/calendar.events.readonly`, with `access_type=offline`,
+  `prompt=consent` and PKCE (`S256`). `calendar.app.created` can create and manage only
+  calendars this app made — which is "our study blocks go to a dedicated 'Study Plan'
+  calendar" (A237) — and `calendar.events.readonly` can read everything else and change
+  nothing. So "Google wins for events we didn't create" is enforced by the token rather than by
+  remembering a rule, and a bug in our merge logic cannot rewrite a user's own event. Login is
+  a **different** OAuth client with different scopes and a different redirect URI; sharing one
+  would mean the login screen asking for calendar write access. The encrypted `state` carries a
+  `purpose` (`Login` | `Calendar`), which is what keeps a login state from being replayed as a
+  calendar state — the two flows share a codec, not a trust domain (A235).
+
+### Read-only, on both write paths
+
+A row the sync wrote is read-only to a client on both paths (A240). The rule lives in the
+routes and the push validator, **never in a trigger**: the ICS importer and the Google sync
+write `source`, `external_id`, `etag` and `connection_id` through plain SQL, so a trigger that
+refused the write would refuse the sync's own write, and the only way to keep the two apart
+would be a session variable — a second mechanism for a distinction the two paths already make
+structurally. `crates/server/tests/calendar.rs` asserts the non-obvious half: a row the sync
+wrote is refused by `PATCH`, and the sync can still write it.
 
 ## Actions (Phase 12)
 
