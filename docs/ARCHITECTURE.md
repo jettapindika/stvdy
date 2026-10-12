@@ -382,7 +382,7 @@ the per-phase detail follows it.
 | 1 | Sign in, sign up, verify email, workspace list, workspace detail | PASS — the detail below |
 | 5, 7, 10, 12, 13 | Their own screens, in their own plans | PASS, each with its own defect found and fixed |
 | 9 | Today, tasks, the timer, quick capture | PASS — four screens at both viewports, recorded in its own plan. Its notes say `DONE_WITH_CONCERNS — three defects found and not fixed`, and **all three were fixed afterwards** (`QuickCapture`'s Escape handling, its due line through `formatInZone`, and the 200%-text width), so the row and the note disagree and the row is the current one |
-| 11 | Planner, goals, syllabus | **PARTIAL** — (b) contrast measured, (a)/(c)/(d) asserted structurally in the components' tests, **(e) 200% text NOT MEASURED**: no harness fixture for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`. The one accessibility gap the project still has |
+| 11 | Planner, syllabus import, review | **PASS, measured 2026-10-12** — this was the project's last open leg and it is closed. Three surfaces added (`planner`, `syllabus`, `syllabus-review`): **132 targets, 340 text pairs, 0 under 44px, 0 below requirement, 0 clipped, 0 overlapped, page 390/390** at both scales and both themes, 144 Tab stops with 0 unreached and 0 without a ring. **Two real defects found:** the review screen's root lacked `w-full`, so at 200% text the page was **680px wide in a 390px viewport**; and its `Keep this` checkbox was **61.3×22** because the input and its label were siblings rather than the input being inside the label. It also found that the screens were **unreachable** — the only `/syllabus` link was inside the planner's empty-goals state, and neither nav has a planner item |
 | 14 | The whole shell, at both viewports, through `scripts/measure-mobile.mjs` | PASS — 20 surfaces when it ran; the walk holds **24** now, 96 combinations per leg |
 | **0** | The shell chrome — the tab bar, the sidebar, the skip link, the sync control | **PASS, measured 2026-10-12** through the walk the later phases built: all 24 surfaces are walked *through* the shell, so its chrome is measured on every combination. Tab bar items **78×44** at phone width, sidebar items **215×40** (above the spec's 32px desktop floor); the skip link is the first Tab stop at 16.19:1 |
 | **4** | The study screen (`/study/:deckId`) | **PASS, measured 2026-10-12** — the gap this table was written to name, now closed. Four surfaces added to the shared walk; one defect found and fixed |
@@ -410,16 +410,16 @@ empty state (`study.nothingDue`) and its three error states are not walked — t
 own fixtures and add no control the four surfaces do not cover. The swipe gesture is a touch
 path the harness cannot drive at all, so it stays a component-test property.
 
-**Every phase now has a recorded result, and one of them is partial — which is the honest
-version of "has this been done".** Phases 0 and 4 were the two with no measurement at all,
-and both are closed above (0's shell chrome through the walk, 4's study screen through four
-new surfaces). **Phase 11's is PARTIAL and stays that way**: its contrast leg was measured
-and its (a)/(c)/(d) legs are asserted structurally in the components' own tests, but **leg
-(e), 200% text with zero clipping, is NOT MEASURED** — the walk's `ROUTES` table has no
-fixture for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`,
-so pointing it at those screens measures the 404 notice. Its own plan records the split at
-Task 15 Step 7 and in exit-checklist row 16, with the revisit trigger named. **Closing it is
-five fixtures and a run**, and it is the one accessibility gap the project still has.
+**Every phase has now measured this gate, and none of them is partial.** Phases 0, 4 and 11
+were the three with something outstanding, and all three are closed in the table above —
+0's shell chrome through the walk that renders every surface inside it, 4's study screen
+through four new surfaces, and 11's planner and syllabus screens through three more. **The
+last one is worth reading as a lesson rather than a checkbox:** its leg (e) had been
+unmeasured for as long as it had because the walk *could not reach* the screens — the only
+`/syllabus` link in the app was inside the planner's empty-goals state, so a student with
+any goal could not open the import at all, and neither nav has a planner item. The gap in
+the gate was a gap in the product, and measuring it found two more real defects (a page
+680px wide in a 390px viewport, and a 61.3×22 checkbox against the 44px floor).
 
 The one layer no headless browser reaches is native — the mobile and desktop shells
 themselves — and `docs/RELEASE.md`'s store checklists type that `user`.
