@@ -1675,7 +1675,7 @@ exist, which is why it is written here.
 | 20 | Route sweep (every new route classified) | `cargo test -p stvdy-server --test route_sweep` | **4 passed / 0 failed** (slice B's run). |
 | 21 | Schema deviations | `cargo test -p stvdy-server --test schema` | see the Execution notes. |
 | 22 | Threat model §5 rows (Phase 7's suite, extended) | `cargo test -p stvdy-server --test tamper` | **17 passed / 0 failed**, including `every_section_5_fails_row_has_a_case`. **Unchanged, deliberately:** the three webhook attempts went into a §5 *subsection* that points at §9 with named tests, rather than three rows — the row scanner reads every `| … | **Fails.** … |` line until the next `## ` heading, so a table anywhere inside §5 would have been counted as rows and the suite would have gone red for everyone. It stays at 13 rows. A309 records the reasoning. |
-| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at both viewports, in both themes, at 100% and 200%.** Phone (390×844, DPR 3): 76 combinations, 1028 targets, 2988 pairs, lowest contrast 4.97:1, 0 under 44px, the six checkout states all verified in words. Desktop (1365×900, DPR 2): 80 combinations, 1580 targets, 4292 pairs, **0 below requirement**, **0 overlaps**, **0 painted past the edge**, **0 page-width overflows**. Seven defects found — three on the phone leg, four on the desktop — all reported with elements and numbers. See the Execution notes, including the harness defect the desktop leg exposed (`MIN_TARGET` is not viewport-keyed). |
+| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at both viewports, in both themes, at 100% and 200%.** Phone (390×844, DPR 3): 76 combinations, 1028 targets, 2988 pairs, lowest contrast 4.97:1, 0 under 44px, the six checkout states all verified in words. Desktop (1365×900, DPR 2): 80 combinations, 1580 targets, 4292 pairs, **0 below requirement**, **0 overlaps**, **0 painted past the edge**, **0 page-width overflows**. Seven defects found — three on the phone leg, four on the desktop — all reported with elements and numbers. The two harness defects the desktop leg exposed (the label mismatch and `MIN_TARGET` not being viewport-keyed) are both fixed; see the Execution notes. |
 | 24 | Gate 6 — Indonesian, invoice and reminder copy | `cargo test -p stvdy-server --test billing_jakarta` | **4 passed / 0 failed / 0 ignored**, including the two planted-failure controls. See the Execution notes for the quoted output. |
 | 25 | Gate 7 — honesty | the statements in Task 13 Step 8 | **Satisfied by assertion**, each named in the Execution notes with the test that carries it. No new honesty surface was added by Task 13. |
 
@@ -1803,19 +1803,25 @@ OUTPUT=gate5-desktop.json node scripts/measure-mobile.mjs` → **80 combinations
 themes × 100%/200%), 1580 targets, 4292 text pairs with 0 below requirement, lowest contrast
 4.97:1, 0 overlaps, 0 elements painted past the edge, 0 page-width overflows.**
 
-**The desktop leg exposed a harness defect that this slice fixed, and a second one it did not.**
+**The desktop leg exposed two harness defects, and both are fixed.**
+
 The walk used to die on `FAIL: no nav a labelled "Work"` at any desktop width, because the
-`SURFACES` steps name the **phone tab bar's** labels while the desktop sidebar reads different
-ones (`nav.work` is "Work" in the tab bar and "Workspaces" in the sidebar, `nav.more` is "More"
-and "Settings"); a fallback alias for those two labels is what made the run possible. The one
-still open is `MIN_TARGET`: **224 targets read as undersized at desktop width, 212 of them at 100%
-text, and 200 of those are `a.nav-item` at 215×40** — the desktop sidebar's own links, which
-`styles.css` sets to `min-height: 2.5rem` by design. The repo's own `.btn` comment states the
-resolving rule ("44px minimum touch target, which also clears the spec's 32px desktop floor"), and
-R-03 and WCAG 2.5.8 are about pointer targets — so the honest instrument is 44px below the `md`
-breakpoint and the spec's 32px floor above it. **The measurement is not weakened to make this
-pass**: the 44px number stands, the finding is recorded as a harness defect, and the count of
-genuinely undersized targets is 12 (`button.cite` at 36×15 in the chat surfaces, another slice's).
+`SURFACES` steps name the **phone tab bar's** labels while the desktop sidebar reads different ones
+(`nav.work` is "Work" in the tab bar and "Workspaces" in the sidebar, `nav.more` is "More" and
+"Settings"); a fallback alias for those two labels is what made the run possible, and it is in
+`bc7eed8`.
+
+The second was `MIN_TARGET`: **224 targets read as undersized at desktop width, 212 of them at
+100% text, and 200 of those are `a.nav-item` at 215×40** — the desktop sidebar's own links, which
+`styles.css` sets to `min-height: 2.5rem` by design, and the repo's own `.btn` comment states the
+resolving rule ("44px minimum touch target, which also clears the spec's 32px desktop floor").
+R-03 and WCAG 2.5.8 are about pointer targets, so the honest instrument is 44px below the `md`
+breakpoint and 32px above it. **Fixed in `c206729`** (`TOUCH_TARGET` 44 / `DESKTOP_TARGET` 32,
+keyed on the 767px boundary `useFormFactor` and the CSS already share, rather than a third notion
+of "is this a phone"), and the keying relaxed nothing on the viewport the rule is about: **the phone
+leg is unchanged at 0 undersized** and the desktop count drops from **224 to 24** (12 at 100%
+text, all `button`). The genuinely undersized set is the 12 the first desktop run named
+(`button.cite` at 36×15 in the chat surfaces, another slice's).
 
 **Four more defects, all on the desktop leg, all at 200% text and all in this phase's own
 pricing screen** — `pricing/dark/x200` and `pricing/light/x200` each report two:
