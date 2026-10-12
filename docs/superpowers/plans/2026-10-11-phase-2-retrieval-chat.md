@@ -215,7 +215,7 @@ extends it to every module.
   the total is short, insert the ledger row (monthly first, then purchased) and
   the `usage_events` row. `record_usage` adds the provider cost, token counts and
   `prompt_version` to the same row.
-- [x] **Step 4: `daily_chat_count`** from `usage_events` for the user's local day,
+- [ ] **Step 4: `daily_chat_count`** from `usage_events` for the user's local day,
   compared against `plans.get(plan).chat_msgs_per_day` through the Phase 1 shim.
 - [x] **Step 5: Tests** for credits: two concurrent spends of the whole balance
   result in one success and one 402 (the advisory lock is the point); a monthly
@@ -524,6 +524,10 @@ region is asserted structurally, the announcement itself is not observed);
 | The UI half: an Indonesian question typed into the real screen | **PASS**, with a corrected measurement. Account created through the UI and verified from the `var/mail` link; workspace "Jaringan Komputer"; the Indonesian fixture ingested to `ready` (1 chunk); the question typed into the chat panel. Exactly **one** citation chip rendered, labelled "Open source: Topologi Jaringan, page unknown", and clicking it opened a panel with the fixture chunk text. "page unknown" is honest: pasted text has no pages |
 | The streamed text, sampled **while the stream is open** | **PASS, and this row replaces a false one.** The first browser run sampled `log.textContent` *after* `done`, so it recorded the persisted copy and reported a pass the streaming path did not earn: the token loop yielded every token verbatim, so `[9]` was on screen from the token that carried it until the refetch replaced the live turn. The server now holds back a partial marker and drops an unknown one before emitting, and the smoke run asserts it on the token events: `'Mitochondria produce ATP through oxidative phosphorylation [1], and also .'`, with `[9]` absent and the sent label present |
 | The pre-stream error path, against the real server | **PASS.** With the stub provider down, the 502 arrived as a JSON body *before* the stream opened and the screen rendered it as "Service unavailable" with an "Ask again" retry and no assistant turn. A distinct case from a mid-stream `error`, where the user's turn is stored |
+
+**Boxes left unticked, and why.**
+
+  - Task 5 Step 4, "`daily_chat_count` from `usage_events` for the user's local day, compared against `plans.get(plan).chat_msgs_per_day` through the Phase 1 shim" -- the daily cap itself is real and enforced (`crates/server/src/credits.rs` reads `chat_msgs_per_day`, and `GET /usage` reports it with its used count from `crates/server/src/usage.rs`), but the function this box names does not exist at HEAD: Phase 7 replaced the Phase 1 shim with the entitlement snapshot (`UsageSnapshot::chat_msgs_today`), which this plan's own Self-Review already assigns to Phase 7 ("the counters are Phase 7"), so the named artefact cannot be confirmed.
 
 ## Self-Review
 
