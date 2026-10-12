@@ -353,9 +353,20 @@ async fn an_upgrade_switches_immediately_and_charges_the_prorated_difference(poo
          higher plan, not a second period"
     );
 
-    // The entitlement decision sees power now, which is the point of the switch.
+    // The entitlement decision sees power now, which is the point of the switch: the plan the
+    // student *feels* is `users.plan_id` gated by the subscription's status (A146), not the
+    // subscription row on its own. **This assertion is the one that catches a switch that
+    // updated `subscriptions.plan_id` and forgot `users.plan_id`** — the student would pay for
+    // Power and keep Pro's limits for the whole period.
     let who = caller(&harness, user_id, "macos").await;
-    assert_eq!(who.effective_plan(), PlanId::Power);
+    assert_eq!(
+        who.effective_plan(),
+        PlanId::Power,
+        "the upgrade must reach the entitlement decision, not just the subscription row: \
+         users.plan_id = {:?}, subscription status = {:?}",
+        who.plan_id,
+        who.subscription_status
+    );
 }
 
 /// A downgrade is recorded, not applied: the plan changes at the period end and the paid
@@ -563,7 +574,10 @@ async fn two_credit_packs_are_two_grants_each_naming_its_payment(pool: PgPool) {
     assert_eq!(bucket(&harness, user_id, "purchased").await, 600);
 
     let rows: Vec<(Uuid, i64)> = sqlx::query_as(
-        "select ref_id, delta from credit_ledger
+        // `delta` is `int` (INT4) and sqlx decodes by SQL type, so the cast is required for
+        // an `i64` field: without it this is a decode error rather than a widening, which is
+        // the same class of bug as `payments.amount_idr` in `PaymentView`.
+        "select ref_id, delta::bigint as delta from credit_ledger
           where user_id = $1 and reason = 'credit_pack'
           order by delta",
     )
