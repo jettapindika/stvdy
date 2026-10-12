@@ -282,7 +282,19 @@ jobs:
           xcrun stapler validate "$app"
           xcrun stapler validate "$dmg"
 
-          archs="$(lipo -archs "$app/Contents/MacOS/Stvdy")"
+          # The executable is named after the **cargo binary**, not the product name:
+          # `CFBundleExecutable` is `stvdy-shell` in the `.app` this build produces, so a
+          # hard-coded `Contents/MacOS/Stvdy` does not exist and `lipo` fails on a perfectly
+          # good bundle (measured on the unsigned build of the same tree, 2026-10-12, by
+          # mounting its dmg and reading `CFBundleExecutable`). It is read from the plist
+          # rather than discovered by `find`, because the plist is what LaunchServices reads
+          # and there is exactly one right answer.
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          echo "CFBundleExecutable: $executable"
+          binary="$app/Contents/MacOS/$executable"
+          test -f "$binary" || { echo "::error::no executable at $binary"; ls -l "$app/Contents/MacOS"; exit 1; }
+
+          archs="$(lipo -archs "$binary")"
           echo "archs: $archs"
           case "$archs" in *x86_64*) ;; *) echo "not universal: $archs"; exit 1 ;; esac
           case "$archs" in *arm64*) ;; *) echo "not universal: $archs"; exit 1 ;; esac

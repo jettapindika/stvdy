@@ -30,7 +30,7 @@ worse than one that fails:
 codesign --verify --deep --strict --verbose=2 "$APP"            # the signature verifies
 spctl -a -vvv -t install "$APP"                                 # Gatekeeper accepts it
 xcrun stapler validate "$DMG"                                   # the ticket is stapled
-lipo -archs "$APP/Contents/MacOS/Stvdy" | grep -q 'x86_64 arm64'  # it is universal
+lipo -archs "$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
 ```
 
 Each one fails for a different reason and none of the four implies another: a valid
