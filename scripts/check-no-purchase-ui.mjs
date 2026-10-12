@@ -29,6 +29,16 @@
  * could read, the checkout route or endpoint, and a call to a purchase
  * function. A regression that adds any of them fails here.
  *
+ * **Which bytes this inspects is a load-bearing fact, not an implementation
+ * detail.** `src-tauri/tauri.conf.json` sets `frontendDist: "../app/dist"`, and
+ * there is no per-platform `bundle.iOS`/`bundle.android` override, so
+ * `app/dist` is *literally the bundle the iOS and Android shells load* — this is
+ * not "the web build standing in for the mobile one". The output names the
+ * directory it read for exactly that reason: a route path the phone can never
+ * render and a route path the phone *does* register are indistinguishable by
+ * regex, so the question "which artifact is this?" has to be answerable from the
+ * check's own output rather than from an argument about build targets.
+ *
  * The second half of the check is not about bytes at all: `config/billing_policy.toml`
  * must say `false` for all three purchase switches on `ios` and `android`. That
  * file is the switch `LockedFeature` reads, so a bundle with no affordance and a
@@ -208,6 +218,6 @@ if (isCli()) {
     process.exit(1)
   }
 
-  console.log(`no purchase UI in ${Object.keys(files).length} shipped file(s)`)
+  console.log(`no purchase UI in ${Object.keys(files).length} shipped file(s) under ${relative(root, dist)}`)
   console.log(`billing_policy.toml denies purchase UI, prices and locked-message CTAs on ${MOBILE.join(' and ')}`)
 }
