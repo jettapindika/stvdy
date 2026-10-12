@@ -604,7 +604,17 @@
      own box small, so it passes only an audit that measures something other than
      the target, and two citations in adjacent lines would then overlap their
      invisible hit areas. The cost here is honest and visible: the line holding a
-     citation is taller than the lines around it. */
+     citation is taller than the lines around it.
+
+     **At desktop width the small box is kept, and that is a decision rather than an
+     oversight**: a citation is a mark *inside* a sentence, and WCAG 2.2 SC 2.5.8's own
+     exception list covers a target "in a sentence or block of text". The criterion's
+     8px-gap clause cannot be met by something set between two words, and at 100% the
+     chip's height *is* the line-height of the prose around it (15.2 against 15.225).
+     So `scripts/measure-mobile.mjs` exempts it at the 32px desktop floor and does
+     **not** exempt it at the 44px touch floor -- measured 36.4x15.2 at 1365px, which
+     the desktop leg would otherwise report forever. Recorded in A323 as well, so the
+     reason survives a search from either end. */
   @media (max-width: 767px) {
     a.cite,
     button.cite {
