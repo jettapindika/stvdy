@@ -43,6 +43,8 @@ cd /Users/mac/Documents/Coding/project/Stvdy/src-tauri && cargo clean -p stvdy-s
 
 **The order that costs only time:** stop every slice, then the clean, then one `cargo test --workspace`. A `cargo clean` while slices are building fails every live invocation on the `target/` lock, which reads as a code failure rather than a disk one. Two more things outside the repo are yours to judge: `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB, not this project's — the embedder uses `FASTEMBED_CACHE_DIR`).
 
+**And a coupling that cost a gate run here, worth knowing before it costs another.** `just check-shell` runs the shell's doctests, and `tauri::generate_context!()` is a **proc macro that panics at compile time** when `frontendDist` (`../app/dist`) is absent. The justfile already documents the dependency (`check-shell: check-web`, with the reason written out), so a fresh checkout is fine — but if something deletes `app/dist` *between* the two recipes, the gate dies with `error: proc macro panicked … The frontendDist configuration is set to "../app/dist" but this path doesn't exist`, which reads like a broken build script rather than a missing directory. It happened here while a second slice was working in the same tree, and it is not a code defect: `npm --prefix app run build` and a re-run of `just check-shell` → **exit 0**. The general shape is the one this file keeps recording — **two agents in one working tree will trip each other's preconditions**, and the artifact directory is shared state.
+
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 
 These need **you**, not code, and they block a public launch rather than a phase:
@@ -52,6 +54,25 @@ These need **you**, not code, and they block a public launch rather than a phase
 | B1 | QRIS gateway identity + API docs, and a PJP to settle through | Phase 13 can implement against an env-driven internal contract (`QRIS_BASE_URL`, `QRIS_API_KEY`, `QRIS_CALLBACK_TOKEN`, `QRIS_SIGNATURE_SCHEME`), but no revenue is possible without the real gateway, and perorangan onboarding (KTP + NPWP + a bank account matching the business name) is lead-time work that must run in parallel with development |
 | B2 | Tax/PPN treatment and store privacy-label text | Legal, not technical. Invoices must be correct and the UU PDP privacy notice must be true |
 | B3 | SMTP host/user/password and a From address | Every AI action is gated on a verified email, so with the dev file sink no real account can be onboarded. The provider swap is config-only once the credentials exist |
+
+## Staging on the Batam trial host, and the one thing that needs you
+
+The A45 host (`168.110.202.106`) now runs the real stack — Postgres + pgvector, the server image,
+the SPA, with SearXNG beside it on the same compose project — and `docs/OPERATIONS.md` § Staging is
+the procedure. Two facts about it:
+
+- **The Oracle VCN security list still admits only port 22, and that is yours to change.** The
+  host's own layer now admits 80 and 8080 (persisted in `/etc/iptables/rules.v4`, with
+  `iptables-persistent` installed and enabled, and `ufw` agreeing), but the VCN is a console
+  setting rather than a machine one and there are no OCI credentials on this laptop or on the host.
+  Until an ingress rule for TCP 80 and TCP 8080 exists, the stack answers only over an SSH tunnel
+  (`ssh -L 8080:localhost:8080 -L 8081:localhost:80 ubuntu@168.110.202.106`). **The symptom is the
+  one A45 predicted and it is worth recognising**: everything is listening, `curl` works on the
+  host, and the port is still closed from outside.
+- **TLS, R2, billing and Google are deliberately absent** there, and the table in
+  `docs/OPERATIONS.md` § Staging says why for each. None of it is a gap in the production
+  checklist: the host is a one-month trial, so nothing a third party was told about may point at it
+  (A45).
 
 ## Credentials needed as the later phases land
 
