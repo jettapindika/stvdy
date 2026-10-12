@@ -1038,7 +1038,7 @@ measured on a phone viewport — including the ≥44px target check, at its most
 - Consumes: the running dev server (`npm --prefix app run dev`), `CHROME_PATH`.
 - Produces: a pass/fail report per check.
 
-- [ ] **Step 1: Write the failing test — the boundaries are exact**
+- [x] **Step 1: Write the failing test — the boundaries are exact**
 
 ```ts
 it('switches shell at 768 and 1024, matching the CSS md/lg', () => {
@@ -1049,13 +1049,13 @@ it('switches shell at 768 and 1024, matching the CSS md/lg', () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `npm --prefix app test -- useFormFactor` → the hook is not exported in a testable form
 (it is; this passes — if so, the *new* case is the Shell render at 390px, which fails
 until the phone shell is asserted).
 
-- [ ] **Step 3: Implement `measure-mobile.mjs`**
+- [x] **Step 3: Implement `measure-mobile.mjs`**
 
 `puppeteer-core` with `executablePath` from `CHROME_PATH` or the same probe list as
 `crates/server/src/render/chrome.rs` (A323). It launches Chrome at 390×844 (device scale
@@ -1069,7 +1069,7 @@ until the phone shell is asserted).
    scrolls its container or overlaps its neighbour;
 4. prints one line per check and exits non-zero on any failure.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 ```
 npm --prefix app run dev &            # or `npm --prefix app run preview`
@@ -1080,7 +1080,7 @@ CHROME_PATH=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
 **Prerequisite: a Chrome binary.** With none present the script fails loudly, like the
 PDF acceptance test, rather than skipping.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git commit -am "Phase 14 Task 10: adaptive shell + phone-viewport measurement (gate 5)"
