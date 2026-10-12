@@ -611,11 +611,14 @@ async fn a_tombstone_beats_a_concurrent_edit_in_both_arrival_orders(pool: PgPool
         "the tombstone must win in either arrival order"
     );
 
-    // The explicit restore the contract names: `deleted_at = null` brings the row back, and
-    // it travels to every device as an upsert.
+    // The explicit restore the contract names: a patch carrying `deleted_at = null` brings
+    // the row back, and it travels to every device as an upsert. It carries the fields the
+    // user is restoring — the SPA re-creates the row it is bringing back, and a patch that
+    // named only `deleted_at` would be a create with no title (A176's `base: null`), which
+    // the task validator refuses for good reason.
     a.enqueue(task_upsert(
         tombstone_first,
-        json!({ "deleted_at": null }),
+        json!({ "title": "Dipulihkan", "deleted_at": null }),
         None,
     ));
     assert_eq!(a.pass().await, SyncState::Synced);
