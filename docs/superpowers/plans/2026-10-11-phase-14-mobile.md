@@ -361,12 +361,17 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     re-measures at 200% text scale for clipping/overlap. jsdom cannot do this, which the
     repo's own `a11y.ts` says.
     **Its coverage is part of the gate, and it is stated rather than left implicit**
-    (Phase 14's Task B). `scripts/measure-mobile.mjs` walks **13 surfaces**
+    (Phase 14's Task B). `scripts/measure-mobile.mjs` walks **24 surfaces**
     at 390×844, both themes, 100% and 200% text: `today`, `workspaces`, `calendar`,
     `tasks`, `settings`, `plan`, `workspace-sources`, `workspace-chat`,
-    `workspace-studio-flashcards`, `workspace-studio-quiz`, `workspace-studio-report`,
-    `dashboard` and `workspace-chat-proposal`. **Not measured, with the reason:**
-    `/devices`, `/study/:deckId`, `/quiz/:quizId` and `/reports|cheatsheets/:id` are
+    `workspace-studio-flashcards`, `study`, `study-revealed`, `study-source`,
+    `study-graded-by-key`, `workspace-studio-quiz`, `workspace-studio-report`,
+    `dashboard`, `workspace-chat-proposal` and the six checkout states plus `pricing`.
+    **The four `study` surfaces are Phase 4's, added while closing that phase's unticked
+    gate-5 box** — the card unrevealed, revealed, with the source passage open, and graded
+    by the `3` key — so `/study/:deckId` is no longer in the unmeasured list below.
+    **Not measured, with the reason:**
+    `/devices`, `/quiz/:quizId` and `/reports|cheatsheets/:id` are
     reachable by tap and one entry away, but were outside Task B's named minimum;
     `/planner`, `/syllabus` and `/syllabus/:draftId` are **not reachable from the tab
     bar at all** (the only in-app link to `/planner` is inside a syllabus draft), so
@@ -378,7 +383,10 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     verifiable on this machine (no Android SDK, no signing identity, no device).
     The walk is **phone-width by default** — `VIEWPORT_WIDTH`/`VIEWPORT_HEIGHT`/
     `VIEWPORT_DPR`/`SCALES`/`OUTPUT` override it so gate 5's desktop leg uses this
-    harness rather than a second copy of it.
+    harness rather than a second copy of it, and `ONLY_SURFACES` restricts it to a named
+    subset for working on one screen. **A filtered run is not a gate result**, and the
+    verdict line says so: it names how many of the 24 surfaces it covered and appends
+    `NOT a full gate run`.
     **Which of gate 5's five criteria this command measures, and which it does not**
     (the reason to name the legs at all): **(b) contrast**, **(c) interactive targets
     >=44px at phone width** and **(e) 200% text scale without clipping or overlap** are
@@ -395,18 +403,25 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     deliberately: the only way to test (d) on a surface whose state is not in the fixture
     is to infer "state from colour alone" from a computed-colour difference between
     siblings, which is a heuristic that produces findings nobody can act on — worse than
-    recording it as unmeasured. And **(a) is measured for these 20 surfaces and no
-    others**: the study screen (`/study/:deckId`) is not walked, so its keyboard reach
-    has no committed check. The auth routes are not walked either, though Phase 1's own
-    private walk covered them and recorded the result; `var/gate5-keyboard.json` is the
-    other private one, three report screens, **(a)-only** and not reproducible from any
-    committed command — this leg supersedes it for the surfaces above. The unticked
-    accessibility boxes in Phases 0 and 4 can therefore be closed for (b), (c) and (e),
-    and for (a) only on the surfaces this walk reaches; Phase 1 is not one of them — its
-    gate is recorded in full in `docs/ARCHITECTURE.md` and includes **two interaction
-    checks this leg does not reproduce**: the destructive confirm moving focus to the
-    confirming button, and cancel restoring focus to the trigger. Both need a component
-    driven, not a surface walked, so they stay per-phase checks.
+    recording it as unmeasured. **(d) has since gained a second surface family: the study
+    screen's revealed state** declares its four grade labels as `words` in `SURFACES`, so
+    the walk asserts `Again`/`Hard`/`Good`/`Easy` are in the rendered text rather than
+    inferred from a tone; the same screen's revealed and in-flight states are pinned in
+    `app/src/features/study/StudyScreen.test.tsx` (the answer arrives as content, and a grade
+    in flight is `disabled` — a state the accessibility tree carries — rather than only the
+    `opacity: 0.45` its class also applies). And **(a) is measured for these 24 surfaces and
+    no others**: the study screen (`/study/:deckId`) is now walked — in its unrevealed,
+    revealed, source-open and graded-by-key states — so the sentence that used to say its
+    keyboard reach had no committed check no longer holds. The auth routes are not walked
+    either, though Phase 1's own private walk covered them and recorded the result;
+    `var/gate5-keyboard.json` is the other private one, three report screens, **(a)-only**
+    and not reproducible from any committed command — this leg supersedes it for the
+    surfaces above. The unticked accessibility boxes in Phases 0 and 4 can therefore be
+    closed for (b), (c) and (e), and for (a) only on the surfaces this walk reaches; Phase 1
+    is not one of them — its gate is recorded in full in `docs/ARCHITECTURE.md` and includes
+    **two interaction checks this leg does not reproduce**: the destructive confirm moving
+    focus to the confirming button, and cancel restoring focus to the trigger. Both need a
+    component driven, not a surface walked, so they stay per-phase checks.
     **The desktop leg did not actually work until `bc7eed8`, and the failure was
     silent until someone ran it:** a `nav` step names the phone tab bar's label, and
     the tab bar is `md:hidden` with "Work"/"More" while the desktop sidebar is

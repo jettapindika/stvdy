@@ -3690,7 +3690,7 @@ git commit -m "docs(phase 4): the API, the derived-schedule property, and both g
       duplicate review id applies once.
 - [x] The study screen reviews a deck by keyboard and by swipe, and says what it
       costs before charging.
-- [ ] Roadmap gate 5 (accessibility) performed and recorded. — **NOT MEASURED.** No Phase 4 accessibility measurement exists in any document, and this plan has no Execution notes section for one to live in. **Two phases never measured their gate 5 — 0 and 4** — and the study screen is the more consequential of the two: it is the screen a student uses most, and it has never been checked for keyboard reach, contrast, the 44px floor or 200% text. (I briefly reported Phase 1 as a third; it was not. `docs/ARCHITECTURE.md` § Accessibility gate carries Phase 1's full result, five requirements with their outcomes.) The harness reaches the signed-in shell (`node scripts/measure-mobile.mjs`), so the study screen is reachable — it simply has no surface entry.
+- [x] Roadmap gate 5 (accessibility) performed and recorded. — **PASS, measured 2026-10-12, the first time this phase's gate has been performed.** Four surfaces of the study screen were added to the shared walk (`scripts/measure-mobile.mjs`: `study`, `study-revealed`, `study-source`, `study-graded-by-key`) and measured in real headless Chromium at **both legs** — 390×844 and 1365×900, dark and light, 100% and 200% text. **One defect found and fixed**, and it is the same class Phase 7's gate found on its upgrade link: the header's "Back to the workspace" was a bare `.link`, so it painted its line box at **151.3×21** against the 44px phone floor and **302.5×41** at 200% text, where a text link grows by its line height rather than to the floor. Fixed with `inline-flex min-h-11 items-center` — the shape eight other text links in the app already use — and re-measured at **151.3×44** (100%) and **302.5×88** (200%), phone and desktop. Regression test: `StudyScreen.test.tsx`'s "is a 44px phone target, not a text-height one", **proven to fail without the fix** (it asserts the three utilities, because jsdom has no layout engine to measure a box). **The numbers:** study surfaces, phone — 16 combinations, **160 targets, 0 under 44px**; **304 text pairs, 0 below requirement**, lowest **6.29:1**; 0 clipped, 0 overlapped, page 390/390 at both scales; desktop — **176 targets, 0 under 32px**; 336 pairs, 0 below, lowest **6.29:1**; 0 clipped, 0 overlapped, page 1365/1365. The whole walk, which is what makes these comparable with every other phase: phone **96 combinations, 1232 targets, 3380 text pairs, lowest 4.97:1**; desktop **1748 targets, 4704 pairs**. **Gate 5(a), keyboard**, is measured rather than read: **176 Tab stops at phone and 192 at desktop over the study surfaces, 0 unreached, 0 without a focus ring, 0 trapping**, and the `1`–`4` grade shortcut is *driven* — `study-graded-by-key` presses `3` and asserts the queue advanced to `Card 2 of 2`, so a handler that was never registered fails the surface rather than passing it. **Gate 5(d)**, which this plan also asks for and which no committed check measured for any phase before this: the revealed state declares `Again`/`Hard`/`Good`/`Easy` as `words` in the harness, so the four grade labels are asserted in the rendered text rather than inferred from a tone, and `StudyScreen.test.tsx` pins the in-flight state as `disabled` — a state the accessibility tree carries — rather than as the `opacity: 0.45` the class also applies. **The grade buttons**, named by (c) as the smallest controls on the screen, measure **84.4–90.8×44** at 100% and 166.8–179.6×88 at 200%. **What is still not measured, stated rather than implied:** the *empty* state (`study.nothingDue`, reached only when the queue drains) and the error states (`ApiErrorNotice` for a failed deck, due queue or review) are not walked — they need their own fixtures and neither carries a control the four surfaces above do not already cover; and the swipe gesture, which the plan names alongside the keyboard, is a touch path this harness cannot drive, so it is asserted only in the component tests. See `## Execution notes (Phase 4, as built)` below for the run's own limits.
 
 - [x] Roadmap gate 6 (Indonesian) performed and recorded. — **PASS, and the evidence exists even though the plan never recorded it.** `crates/server/tests/flashcards.rs`'s `a_deck_generates_cards_linked_to_their_chunk` runs the whole path on an **Indonesian** source: the card's front is `Apa fungsi three-way handshake?`, the card links to a real chunk of that source (`chunk_id` non-null), and the prompt that produced it is asserted to carry `the same language as the source material`. The retrieval half of gate 6 is `crates/server/tests/indonesian.rs` (4 passed / 0 failed, including the `simple` tsvector config and the query-prefix convention). Recorded here rather than left blank because the gate was in fact performed — by a test whose name does not say so.
 
@@ -3699,17 +3699,80 @@ git commit -m "docs(phase 4): the API, the derived-schedule property, and both g
 
 ---
 
-## Box audit (this phase has no execution notes)
+## Execution notes (Phase 4, as built)
 
-Phase 4 is the one plan of the five whose file carries no `## Execution notes (Phase 4, as
-built)` section, so its boxes were ticked against the artefacts at HEAD and the commits that
+This section did not exist when the phase shipped, which is the reason its gate 5 went
+unmeasured for as long as it did: the gate was written into the plan as a step, ticked, and
+never performed, and with no notes section there was nowhere for the absence to show up. The
+rest of this file's boxes were ticked against the artefacts at HEAD and the commits that
 landed them (`b7345c7`, `ab73ec0`, `0f47a04`, `c16e8f3`, `6574ee6`) rather than against a
-written account. Two boxes stay unticked, and the other two are now resolved:
+written account. One box stays unticked and one was resolved:
 
   - Exit checklist, "`flashcards_per_month` is enforced ... via `limits::enforce_batch`" -- the enforcement itself is real (`crates/server/src/entitlements.rs`, asserted by `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`), but the function this box names does not exist at HEAD: Phase 7's `entitlements::check` superseded it by design (A85, A146), so the named artefact cannot be confirmed.
-  - Exit checklist, "Roadmap gate 5 (accessibility) performed and recorded" -- no record: no document in the tree states this phase's accessibility measurement, and the phase's own file has no notes section to carry one.
+  - Exit checklist, "Roadmap gate 5 (accessibility) performed and recorded" -- **resolved 2026-10-12, and it was a real gap.** Nothing in the doc set carried a Phase 4 accessibility measurement, and the study screen is the one a student uses most. The gate is now performed and recorded in the box above, with one defect found and fixed.
   - Exit checklist, "Roadmap gate 6 (Indonesian) performed and recorded" -- **resolved 2026-10-12: the gate WAS performed, by a test whose name does not say so.** `crates/server/tests/flashcards.rs::a_deck_generates_cards_linked_to_their_chunk` runs the whole path on an Indonesian source, asserts the card links to a real chunk of it, and asserts the prompt carries `the same language as the source material`; the retrieval half is `crates/server/tests/indonesian.rs` (4/0). The box is now ticked above with that evidence, and the reason it was blank for so long is the lesson: a gate recorded only in a test's behaviour, never in the plan, reads as unperformed.
   - Exit checklist, "The full quality gate is green" -- **resolved 2026-10-12**, and it is now ticked above with the command and the counts. It was genuinely unrecorded: this phase has no Execution notes section, so its gate had nowhere to be written down even though the suites existed.
+
+### Roadmap gate 5, the study screen: PASS, and what the pass cost
+
+The measurement is a new set of surfaces in `scripts/measure-mobile.mjs` rather than a private
+probe, because the harness had no entry for `/study/:deckId` at all — the screen was reachable
+by tap and one entry away, which is exactly the case the walk's own comment says a URL-keyed
+surface would have hidden. Four surfaces, because the screen's states carry different controls:
+the card unrevealed, revealed, with the source passage open, and graded by the `3` key.
+
+**The defect.** `StudyScreen.tsx`'s header link was `className="link self-start text-sm
+sm:self-auto"` — a bare `.link`, which sets no height, so the anchor painted its line box:
+**151.3×21** at 390px, **302.5×41** at 200% text, against the 44px phone floor. It is the same
+defect and the same remedy as Phase 7's upgrade link (93×19 → 70×44), which means the *pattern*
+was the problem rather than the instance: `.link` is a body-copy class, and this file used it for
+a standalone control. The class now carries that distinction in `app/src/styles.css`, so the next
+screen that reaches for it has the reason beside the definition.
+
+**The regression test asserts classes, not pixels, and that is a limit rather than a choice.**
+jsdom has no layout engine, so `getBoundingClientRect()` there is zeros — the same limit
+`LockedFeature.test.tsx` records for its own 44px case. The test therefore asserts `min-h-11`,
+`inline-flex` and `items-center`, all three load-bearing (`min-h-11` alone on an inline element
+still paints the line box; `inline-flex items-center` alone has no height to centre in), and the
+number comes from the gate. **Falsified before committing:** reverting the class made the test
+fail, and only that test.
+
+**Gate 5(d) is measured here, and it had never been measured by a check for any phase.** The
+harness already had a `words` mechanism (used by the six checkout states); `study-revealed`
+declares the four grade labels, so the assertion is on `body.innerText` rather than on a
+computed colour. The component test covers the half a rendered-text check cannot: the answer
+arrives as *content* (the back text and the grade row appear), and a grade in flight is
+`disabled` — a state the accessibility tree carries, not the `opacity: 0.45` its class also
+applies. The full reasoning for why (d) is not derivable in general lives in the Phase 14 plan's
+A323 note; this is the one surface family where the state is declared in words, so it is measured
+rather than inferred.
+
+**Gate 5(a)'s second half is now driven.** The Tab walk proves reach and the focus ring; it
+cannot prove a shortcut *acts*. `study-graded-by-key` presses `3` after revealing and asserts the
+screen advanced to `Card 2 of 2`. **Falsified:** changing the key to `9` — which no handler
+answers — made the surface fail with `"Card 2 of 2" is absent from the page`. That run also
+surfaced an instrument defect, fixed here: when every surface fails its own `expect` guard the
+result set is empty and the aggregate guard fired first with "the walk did not reach a rendered
+screen", which is true but names the wrong cause. The collected problems now print before that
+guard.
+
+**Not measured, stated rather than implied.** The empty state (`study.nothingDue`, reached only
+when the queue drains) and the three error states (`ApiErrorNotice` for a failed deck, due queue
+or review) are not walked: they need their own fixtures, and neither adds a control the four
+surfaces do not already cover — the retry buttons are `btn btn-secondary`, measured on every
+other surface. The swipe gesture is a touch path this harness cannot drive at all, so it stays
+covered by the component tests and not by this gate. And the whole-walk totals quoted in the box
+above include every other phase's surfaces, which is deliberate: a number measured on a filtered
+run is not comparable with the phases before it, so `ONLY_SURFACES` prints `NOT a full gate run`
+on its verdict line.
+
+**The run's own limits.** Both legs were run to completion on 2026-10-12 against the dev server
+(`http://localhost:5173`) with the harness's fixtures; the reports are `var/gate4-full-phone.json`
+and `var/gate4-full-desktop.json`. The workspace quality gate was **not** re-run by this pass —
+it was green the same day (`cargo test --workspace --no-fail-fast` exit 0, `npm --prefix app test`
+604 tests), and this pass changed one class string, one test file, one tsconfig lib entry and the
+harness. What it did run: `npx tsc --noEmit` clean, `vitest run src/features/study/` 8 passed, and
+the two Chromium legs above.
 
 
 ---

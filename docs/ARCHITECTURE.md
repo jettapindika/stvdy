@@ -372,6 +372,46 @@ roadmap's "or a framework change, which requires asking" anticipates.
 
 ### Accessibility gate (roadmap gate 5)
 
+**This section is the running record, because the gate is per-phase and the answer to
+"has it been done" has to be readable in one place.** Every phase with UI changes
+performs it; most record their own result in their own plan. The table is the index, and
+the per-phase detail follows it.
+
+| Phase | Surfaces | Result |
+|---|---|---|
+| 1 | Sign in, sign up, verify email, workspace list, workspace detail | PASS — the detail below |
+| 5, 7, 10, 12, 13 | Their own screens, in their own plans | PASS, each with its own defect found and fixed |
+| 14 | The whole shell, at both viewports, through `scripts/measure-mobile.mjs` | PASS — 20 surfaces when it ran; the walk holds **24** now, 96 combinations per leg |
+| **0** | The shell chrome | **Never measured by this phase.** Its own box is still unticked; the tab bar and the sidebar are covered by Phases 14 and 12, which walk them |
+| **4** | The study screen (`/study/:deckId`) | **PASS, measured 2026-10-12** — the gap this table was written to name, now closed. Four surfaces added to the shared walk; one defect found and fixed |
+
+**Phase 4's result, the screen a student uses most.** Four surfaces — the card
+unrevealed, revealed, with the source passage open, and graded by the `3` key — at
+390×844 and 1365×900, dark and light, 100% and 200% text. Phone: **160 targets, 0 under
+44px; 304 text pairs, 0 below requirement, lowest 6.29:1**; 0 clipped, 0 overlapped, page
+390/390. Desktop: **176 targets, 0 under 32px; 336 pairs, 0 below, lowest 6.29:1**.
+Keyboard: **176 Tab stops at phone, 192 at desktop, 0 unreached, 0 without a focus ring, 0
+trapping**. The grade buttons, the smallest controls on the screen, measure **84.4–90.8×44**
+at 100% and 166.8–179.6×88 at 200%.
+
+The one defect was the same class Phase 7's gate found on its upgrade link, which is what
+makes it worth recording as a pattern rather than an instance: `.link` is a body-copy class
+and `StudyScreen.tsx` used it for a standalone control, so the anchor painted its line box —
+**151.3×21** at 390px and **302.5×41** at 200% text, against the 44px floor. A text link
+grows by its line height at 200%, not to the floor. Fixed with `inline-flex min-h-11
+items-center`, re-measured at **151.3×44** and **302.5×88**; the distinction is now written
+beside `.link` in `app/src/styles.css` so the next screen that reaches for it has the reason
+at hand.
+
+**What this gate still does not reach, and it is stated rather than implied.** Phase 4's
+empty state (`study.nothingDue`) and its three error states are not walked — they need their
+own fixtures and add no control the four surfaces do not cover. The swipe gesture is a touch
+path the harness cannot drive at all, so it stays a component-test property. And Phase 0's
+shell box is still open: the shell's chrome is measured by the phases that walk through it,
+but nothing has measured the Phase 0 build itself.
+
+#### Phase 1's result, in full
+
 The SPA's screens for this phase (sign in, sign up, verify email, workspace list,
 workspace detail with the upload and the source list) were checked against the
 five requirements, in a real headless Chromium against the built bundle:

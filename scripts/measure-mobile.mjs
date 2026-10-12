@@ -89,6 +89,18 @@ const VIEWPORT = {
 }
 const SCALES = (process.env.SCALES ?? '100,200').split(',').map((value) => Number(value))
 
+/**
+ * A comma-separated subset of `SURFACES`, for working on one screen.
+ *
+ * The full walk is every surface x 2 themes x 2 scales with a Tab walk each, which is
+ * minutes per iteration — and the surfaces are independent, so measuring one while
+ * fixing it changes nothing about what the others would report. **A run with this set
+ * is not a gate result**: the verdict line prints which surfaces it covered, so a
+ * filtered run cannot be quoted as one. (No surface count here on purpose: the last
+ * hard-coded one in this file went stale twice.)
+ */
+const ONLY = process.env.ONLY_SURFACES
+
 /** Where Chromium is looked for, the same list `render/chrome.rs` uses. */
 const CHROME_CANDIDATES = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
@@ -359,6 +371,54 @@ const DECK = {
   created_at: '2026-10-11T08:00:00Z',
 }
 
+/**
+ * The study screen's two reads, and the cards behind them.
+ *
+ * Two cards rather than one, because the progress line is the surface's only
+ * *status* and `Card 1 of 2` is the shape that shows it; and the first card
+ * carries a `chunk_id`, because the revealed state's "Show source" button exists
+ * only for a card that links to one. A card without a chunk would measure a
+ * screen whose densest state is unreachable.
+ *
+ * `due_at` is in the past of the `now` the due fixture answers with, because
+ * `dueCards` filters on it: a card due in the future is dropped from the queue
+ * and the surface would measure the empty state instead of the card.
+ */
+const CARDS = [
+  {
+    id: 'c1',
+    deck_id: 'd1',
+    front: 'Apa yang dimaksud dengan kunci publik?',
+    back: 'Kunci yang boleh diketahui siapa saja dan dipakai untuk memverifikasi tanda tangan.',
+    chunk_id: 'k1',
+    ease: 2.5,
+    interval_days: 0,
+    due_at: '2026-10-10T09:00:00Z',
+  },
+  {
+    id: 'c2',
+    deck_id: 'd1',
+    front: 'Apa fungsi tanda tangan digital?',
+    back: 'Menjamin keaslian dan integritas pesan, bukan kerahasiaannya.',
+    chunk_id: null,
+    ease: 2.5,
+    interval_days: 0,
+    due_at: '2026-10-10T09:00:00Z',
+  },
+]
+
+/** The passage `c1` came from, for the revealed state's source panel. */
+const CHUNK = {
+  id: 'k1',
+  source_id: 's1',
+  page: 42,
+  idx: 7,
+  content:
+    'Kunci publik adalah pasangan kunci yang boleh disebarkan. Kunci privat yang sesuai ' +
+    'tetap dirahasiakan pemiliknya, dan hanya tanda tangan yang dibuat dengan kunci ' +
+    'privat itu yang dapat diverifikasi memakai kunci publiknya.',
+}
+
 /** One ready quiz, for the same reason as the deck. */
 const QUIZ = {
   id: 'q1',
@@ -617,6 +677,20 @@ const CHECKOUT_STEPS = [
 ]
 
 /**
+ * The way a phone reaches the study screen: the workspace, its Studio panel, and the
+ * deck row's own "Study" link.
+ *
+ * Named once because four surfaces walk it — the card's unrevealed, revealed, source-open
+ * and graded-by-key states — and a path copied four times is four places for it to drift.
+ */
+const STUDY_STEPS = [
+  { nav: 'Work' },
+  { link: WORKSPACE.name },
+  { tab: 'Studio' },
+  { link: 'Study' },
+]
+
+/**
  * The phone surfaces this walks, by the taps a phone takes to reach them.
  *
  * The tab bar's five labels are the five destinations, and `/billing` is reached
@@ -651,6 +725,42 @@ const SURFACES = [
   {
     name: 'workspace-studio-flashcards',
     steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Studio' }],
+  },
+  // --- Phase 4: the study screen, which had never been measured ---------------------
+  //
+  // Reached the way a phone reaches it — the deck row's own link — because the screen's
+  // whole subject is one card and its four grades, and a walk by URL would have passed
+  // while the link that opens it was unreachable.
+  //
+  // **Four surfaces, because the screen has four states that carry different controls.**
+  // The unrevealed state has one action; the revealed state has the four grade buttons
+  // (the smallest targets on the screen, and the ones gate 5(c) names); the source state
+  // adds the passage panel, which is the only place a nested note and a page label meet
+  // the card; and the graded-by-key state is the only way to measure that a shortcut
+  // *acts* rather than merely exists. One surface can only measure the state it lands in,
+  // and the grade row does not exist until the answer is revealed.
+  { name: 'study', expect: 'Card 1 of 2', steps: STUDY_STEPS },
+  {
+    name: 'study-revealed',
+    expect: 'Kunci yang boleh diketahui siapa saja',
+    words: ['Again', 'Hard', 'Good', 'Easy'],
+    steps: [...STUDY_STEPS, { button: 'Show answer' }],
+  },
+  {
+    name: 'study-source',
+    expect: 'Hide source',
+    steps: [...STUDY_STEPS, { button: 'Show answer' }, { button: 'Show source' }],
+  },
+  // Gate 5(a)'s second half, which no surface above can measure: **`1`-`4` grade
+  // without touching the mouse**. Pressing `3` has to *do* something observable, and
+  // the observable thing is the advance — the queue moves to card 2 of 2. Asserting
+  // only that a key press did not throw would pass on a screen whose handler was
+  // never registered, which is the failure this check exists to catch.
+  {
+    name: 'study-graded-by-key',
+    expect: 'Card 2 of 2',
+    keys: [{ press: '3' }],
+    steps: [...STUDY_STEPS, { button: 'Show answer' }],
   },
   {
     name: 'workspace-studio-quiz',
@@ -810,6 +920,21 @@ const ROUTES = {
   '/workspaces/w1/decks': () => ({
     decks: [DECK],
     cost: { per_batch: 4, batch_size: 10, max_cards: 30 },
+  }),
+  // The study screen's three reads: the deck (its title and, for the header, the
+  // workspace the "Back to the workspace" link points at), the due queue (which
+  // carries the server's `now`, the instant the client filters and orders with),
+  // and the passage a revealed card's source panel shows. Without the last one the
+  // panel 404s and the walk measures an error notice where the passage belongs.
+  '/decks/d1': () => ({ deck: DECK, cards: CARDS }),
+  '/decks/d1/due': () => ({ cards: CARDS, now: '2026-10-12T02:00:00Z' }),
+  '/chunks/k1': () => CHUNK,
+  // The review the number keys post. Without it the mutation 404s, `StudyScreen`
+  // keeps the card and shows its retry notice, and a surface that presses `3` would
+  // measure a failed review rather than the advance a grade produces.
+  '/flashcards/c1/review': () => ({
+    applied: true,
+    card: { id: 'c1', ease: 2.5, interval_days: 1, due_at: '2026-10-13T02:00:00Z' },
   }),
   '/workspaces/w1/quizzes': () => ({
     quizzes: [QUIZ],
@@ -1550,6 +1675,11 @@ async function signIn(page) {
  * for the surface about to be walked. The checkout screen's state is derived from
  * the payment row, so reaching `paid`/`expired`/`review`/`failed`/`offline` means
  * answering the next poll differently — one surface can only measure one of them.
+ *
+ * `keys` is the one thing the Tab walk cannot check: a shortcut that has to *act*
+ * rather than merely be reachable. The keys are pressed after the steps and the
+ * surface's `expect` is asserted after them, so a key with no handler leaves the
+ * screen where the steps left it and the surface fails.
  */
 async function openSurface(page, surface) {
   // A fixture switch, not a tap: it changes what the *next* request is answered with, so
@@ -1585,6 +1715,16 @@ async function openSurface(page, surface) {
     const aliases = { Work: 'Workspaces', More: 'Settings' }
     const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+
+  // A key press that has to *do* something, which the Tab walk cannot express: it
+  // measures reach and the focus ring, not that a shortcut acts. `surface.expect` is
+  // asserted after this, so the observable effect is the surface's own expectation
+  // moving — a key press with no handler leaves the screen as the steps left it and
+  // the check fails rather than reporting a pass.
+  for (const key of surface.keys ?? []) {
+    await page.keyboard.press(key.press)
     await new Promise((resolve) => setTimeout(resolve, 400))
   }
 }
@@ -1820,6 +1960,17 @@ async function main() {
   const results = []
   const problems = []
 
+  // The surfaces this run walks: all of them, or the subset named by `ONLY_SURFACES`.
+  // A name that matches nothing is a failure rather than an empty walk, because
+  // `ONLY_SURFACES=stduy` would otherwise report a clean run over zero screens.
+  const surfaces =
+    ONLY === undefined
+      ? SURFACES
+      : SURFACES.filter((surface) => ONLY.split(',').includes(surface.name))
+  if (surfaces.length === 0) {
+    fail(`ONLY_SURFACES=${ONLY} matched no surface`)
+  }
+
   for (const theme of ['dark', 'light']) {
     for (const scale of SCALES) {
       const page = await browser.newPage()
@@ -1879,7 +2030,7 @@ async function main() {
       }, (16 * scale) / 100)
       await new Promise((resolve) => setTimeout(resolve, 300))
 
-      for (const surface of SURFACES) {
+      for (const surface of surfaces) {
         await openSurface(page, surface)
         // **The resting state, not a hover.** Every step above ends in a click, so the
         // pointer is left sitting on the control that was clicked — and after a navigation
@@ -2004,9 +2155,19 @@ async function main() {
   // The measurement must have measured something. A walk that found no target and
   // no text pair has proved nothing, and reporting "0 failures" from it would be
   // the same defect the purchase-UI check guards against.
+  //
+  // **The collected problems are printed first**, because a run where every surface
+  // failed its own `expect` guard reaches this line with an empty result set — so the
+  // guard's "did not reach a rendered screen" is true but names the wrong cause, and
+  // the four lines that say which surface rendered what are exactly what the reader
+  // needs. A red run whose message points at the wrong thing costs more than the red.
   const totalTargets = results.reduce((sum, entry) => sum + entry.targets.length, 0)
   const totalPairs = results.reduce((sum, entry) => sum + entry.contrasts.length, 0)
   if (totalTargets === 0 || totalPairs === 0) {
+    if (problems.length > 0) {
+      console.error(`\n${String(problems.length)} problem(s) before the walk stopped measuring:`)
+      for (const problem of problems) console.error(`  ${problem}`)
+    }
     fail(
       `measured ${String(totalTargets)} targets and ${String(totalPairs)} text pairs — the walk did not reach a rendered screen`,
     )
@@ -2056,9 +2217,16 @@ async function main() {
   // question a red run leaves a reader with, and the previous version answered it
   // only when the answer was yes.
   const leg = MIN_TARGET === DESKTOP_TARGET ? 'desktop' : 'phone'
+  // A filtered run is not a gate result, and the one line that says PASS has to say so:
+  // "gate 5 PASS" from a walk of one surface is exactly the shape of coverage without
+  // the substance this script's other guards exist to prevent.
+  const coverage =
+    ONLY === undefined
+      ? `all ${String(surfaces.length)} surfaces`
+      : `${String(surfaces.length)} of ${String(SURFACES.length)} surfaces (ONLY_SURFACES=${ONLY}) — NOT a full gate run`
   const verdict = (result) =>
     `gate 5 on a ${leg} viewport: ${result} (${String(VIEWPORT.width)}x${String(VIEWPORT.height)}, ${String(SCALES.length)} scale(s), both themes; ` +
-    `keyboard: ${String(totalStops)} Tab stops, ${String(totalUnreached)} unreached, ${String(totalExcused)} excused, ` +
+    `${coverage}; keyboard: ${String(totalStops)} Tab stops, ${String(totalUnreached)} unreached, ${String(totalExcused)} excused, ` +
     `${String(totalRingless)} without a ring, ${String(totalTraps)} trapping)`
 
   if (problems.length > 0) {
