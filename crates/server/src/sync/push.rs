@@ -476,6 +476,7 @@ mod tests {
             quizzes_this_month: 0,
             reports_this_month: 0,
             syllabus_imports: 0,
+            google_accounts: 0,
         }
     }
 
