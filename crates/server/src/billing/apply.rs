@@ -32,6 +32,7 @@ use stvdy_core::traits::payment::{WebhookEvent, WebhookKind};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::jobs::handlers::renewal;
 use crate::state::AppState;
 
 /// What applying a paid payment did.
@@ -513,8 +514,12 @@ async fn review(conn: &mut PgConnection, payment_id: Uuid, reason: String) -> Ap
 /// A mail failure is logged and **never** fails the payment: the plan is already live, and
 /// turning a mail hiccup into a rollback would un-sell a paid period.
 async fn notify_paid(state: &AppState, payment: &PaymentRow, applied: &Applied) {
-    let Ok(Some(email)) = sqlx::query_scalar::<_, Option<String>>(
-        "select email from users where id = $1 and deleted_at is null",
+    // The address and the account's zone in **one** read: `users.timezone` is the zone the
+    // product keeps (A203 — the settings row deliberately carries no second copy of it), and
+    // it is the column the reminder and planner maths read too. A row that is gone, or an
+    // account with no address, is the only reason this query comes back empty.
+    let Ok(Some(row)) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "select email, timezone from users where id = $1 and deleted_at is null",
     )
     .bind(payment.user_id)
     .fetch_optional(&state.pool)
@@ -522,23 +527,38 @@ async fn notify_paid(state: &AppState, payment: &PaymentRow, applied: &Applied) 
     else {
         return;
     };
+    let (email, timezone) = row;
     let Some(email) = email else {
         return;
     };
 
     let (subject, body) = match applied {
-        Applied::Activated { plan, period_end } | Applied::Extended { plan, period_end } => (
-            format!("Your Stvdy {} plan is active", plan.as_str()),
-            format!(
-                "Your payment of {} IDR went through.\n\n\
-                 Your {} plan is active until {}.\n\n\
-                 Every device on your account has it already — there is nothing to \
-                 install and no code to enter.",
-                payment.amount_idr,
-                plan.as_str(),
-                period_end.to_rfc3339()
-            ),
-        ),
+        Applied::Activated { plan, period_end } | Applied::Extended { plan, period_end } => {
+            // The plan's display name, from the **one** place the capitalisation rule lives
+            // (`renewal::plan_name`): a second copy here is the drift this codebase keeps
+            // catching, and `plan.as_str()` alone puts the machine's `pro` in front of a
+            // student where the app says `Pro`.
+            let name = renewal::plan_name(plan.as_str());
+            // The student's own calendar day, through `chrono-tz` (A6) — the same reading
+            // the plan screen prints, and the same shape `renewal::copy` uses for its date.
+            // `period_end` is an absolute instant; rendering it as UTC names the day
+            // *before* the one the student's own clock shows, which is the defect this
+            // receipt had.
+            let until = period_end
+                .with_timezone(&receipt_zone(timezone.as_deref()))
+                .format("%-d %B %Y")
+                .to_string();
+            (
+                format!("Your Stvdy {name} plan is active"),
+                format!(
+                    "Your payment of {} IDR went through.\n\n\
+                     Your {name} plan is active until {until}.\n\n\
+                     Every device on your account has it already — there is nothing to \
+                     install and no code to enter.",
+                    payment.amount_idr
+                ),
+            )
+        }
         Applied::Credits { granted } => (
             "Your Stvdy credits are ready".to_string(),
             format!(
@@ -566,6 +586,19 @@ async fn notify_paid(state: &AppState, payment: &PaymentRow, applied: &Applied) 
             "sending the payment receipt failed"
         );
     }
+}
+
+/// The zone a receipt's date is rendered in, through `chrono-tz` and never a fixed offset
+/// (A6).
+///
+/// The value comes from `users.timezone`, which is the account's zone (A203) and the column
+/// the reminder and planner maths read. An absent or unparseable value falls back to the
+/// product's default zone rather than to UTC — the same choice `calendar::sync` makes and for
+/// the same reason: rendering a Jakarta student's period end in UTC names the day *before* the
+/// one their own calendar shows, which is exactly the defect this read exists to prevent.
+fn receipt_zone(raw: Option<&str>) -> chrono_tz::Tz {
+    raw.and_then(|raw| raw.parse::<chrono_tz::Tz>().ok())
+        .unwrap_or(chrono_tz::Asia::Jakarta)
 }
 
 /// The stored spelling of an event kind (`payments.provider_status`).

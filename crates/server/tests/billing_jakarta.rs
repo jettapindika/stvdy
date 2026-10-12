@@ -542,6 +542,180 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     );
 }
 
+/// The money path in one step: the checkout, then the signed `paid` webhook the gateway
+/// would send, returning the amount paid and the period end the subscription was given.
+///
+/// The two receipt cases below are about the **mail**, and the checkout half is
+/// `the_money_copy_is_correct_in_indonesia`'s; sharing the steps keeps each case about the
+/// one thing it is named for rather than re-proving the webhook.
+async fn paid_in_indonesia(harness: &TestState, app: &Router, token: &str) -> (i64, DateTime<Utc>) {
+    let clock = jakarta_morning();
+
+    let (status, payment) = json(
+        app,
+        "POST",
+        "/billing/checkout",
+        token,
+        serde_json::json!({ "plan_id": "pro", "billing_period": "monthly" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{payment}");
+
+    let order_id = payment["order_id"].as_str().unwrap().to_string();
+    let amount = payment["amount_idr"].as_i64().unwrap();
+    let body = serde_json::json!({
+        "event_id": "jakarta-receipt-1",
+        "kind": "paid",
+        "order_id": order_id,
+        "amount_idr": amount,
+        "currency": "IDR",
+        "paid_at": clock.to_rfc3339(),
+        "provider_payment_id": "gw-jakarta-receipt-1",
+    })
+    .to_string();
+    let headers = harness.gateway.sign(body.as_bytes());
+
+    let mut request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/webhooks/qris")
+        .header("content-type", "application/json");
+    for (name, value) in headers.iter() {
+        request = request.header(name, value);
+    }
+    let response = tower::ServiceExt::oneshot(
+        app.clone(),
+        request.body(axum::body::Body::from(body)).unwrap(),
+    )
+    .await
+    .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let outcome: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+    assert_eq!(outcome["status"], "activated", "{outcome}");
+
+    let period_end: DateTime<Utc> = sqlx::query_scalar(
+        "select current_period_end from subscriptions
+          where user_id = (select id from users where email = 'jakarta-payer@example.test')
+            and status = 'active'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    (amount, period_end)
+}
+
+/// The payment receipt the `RecordingMailer` captured.
+///
+/// Found by subject rather than by position: the signup verification mail is in the same
+/// queue, so "the last message" would be asserting about the fixture. The prefix is the
+/// receipt's own subject stem, which is the same in both arms of the match that produces it.
+fn receipt(harness: &TestState) -> stvdy_core::traits::mailer::Email {
+    harness
+        .mailer
+        .sent()
+        .into_iter()
+        .find(|message| message.subject.starts_with("Your Stvdy"))
+        .expect("a payment receipt was mailed")
+}
+
+/// **The receipt, in the student's own zone and their own plan name.**
+///
+/// `billing::apply::notify_paid` mails the period-end sentence, and it used to render
+/// `period_end.to_rfc3339()`: a raw UTC instant, so a Jakarta student was told their plan ran
+/// until `2026-09-30T23:00:00+00:00` while the plan screen said 1 October — the day *before*,
+/// which is precisely the class this file exists to catch and the receipt was the one place
+/// it was not caught. The same sentence named the machine's `pro` where the app says `Pro`.
+///
+/// The instant is the suite's own sharp pair: paid `2026-08-31T23:00Z`, the period ends
+/// `2026-09-30T23:00Z`, which is **1 October** in Jakarta and **30 September** in UTC. A
+/// different day in the two zones is what makes this a test rather than a coincidence, and
+/// both readings are asserted before the mail is, so the assertion cannot drift into
+/// agreeing with a UTC rendering by accident.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_receipt_names_the_students_own_day_and_plan(pool: PgPool) {
+    let (harness, app, token) = account(pool).await;
+    let (amount, period_end) = paid_in_indonesia(&harness, &app, &token).await;
+    let mail = receipt(&harness);
+
+    assert_eq!(
+        local_day(period_end),
+        "2026-10-01",
+        "the period ends on the student's own 1 October"
+    );
+    assert_eq!(
+        period_end.format("%Y-%m-%d").to_string(),
+        "2026-09-30",
+        "and on 30 September in UTC — the reading a UTC-rendered receipt reports"
+    );
+
+    assert_eq!(mail.subject, "Your Stvdy Pro plan is active");
+    assert!(
+        mail.text
+            .contains("Your Pro plan is active until 1 October 2026."),
+        "the receipt names the student's own day, not the UTC one: {}",
+        mail.text
+    );
+    assert!(
+        !mail.text.contains("2026-09-30") && !mail.text.contains("T23:00:00"),
+        "and carries no raw instant: {}",
+        mail.text
+    );
+    assert!(
+        !mail.text.contains(" pro "),
+        "nor the machine's plan name where the app says `Pro`: {}",
+        mail.text
+    );
+    assert!(
+        mail.text
+            .contains(&format!("Your payment of {amount} IDR went through.")),
+        "the amount is still the payment's own number: {}",
+        mail.text
+    );
+
+    println!("receipt subject: {}", mail.subject);
+    println!("receipt body:\n{}", mail.text);
+}
+
+/// **The fallback.** `users.timezone` is `not null default 'Asia/Jakarta'`
+/// (`0003_users.sql`), so an absent zone is not reachable through the app — but a column that
+/// is empty or unparseable must still produce a date rather than an instant, a panic, or a
+/// silent UTC day. The receipt falls back to the product's default zone, the same choice
+/// `calendar::sync` makes and for the same reason: rendering a Jakarta student's period end in
+/// UTC names the day before.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_receipt_falls_back_to_the_default_zone(pool: PgPool) {
+    let (harness, app, token) = account(pool).await;
+    sqlx::query("update users set timezone = '' where email = 'jakarta-payer@example.test'")
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let (_, period_end) = paid_in_indonesia(&harness, &app, &token).await;
+    let mail = receipt(&harness);
+
+    assert_eq!(
+        local_day(period_end),
+        "2026-10-01",
+        "the period still ends on the default zone's 1 October"
+    );
+    assert!(
+        mail.text.contains("until 1 October 2026."),
+        "an account with no usable zone still gets a date, in the default zone: {}",
+        mail.text
+    );
+    assert!(
+        !mail.text.contains("T23:00:00") && !mail.text.contains("2026-09-30"),
+        "and not an instant: {}",
+        mail.text
+    );
+
+    println!("receipt body with no stored zone:\n{}", mail.text);
+}
+
 /// **The zone rule, proved where it bites.** `chrono_tz` and a fixed offset agree in
 /// Jakarta and disagree in every DST zone, so an assertion made only in Jakarta cannot tell
 /// them apart.

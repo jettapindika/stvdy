@@ -367,7 +367,11 @@ fn copy(
 }
 
 /// The plan's display name, capitalised, for a sentence a student reads.
-fn plan_name(plan: &str) -> String {
+///
+/// `pub(crate)` because the payment receipt (`billing::apply::notify_paid`) says the same
+/// thing about the same plan: two copies of a capitalisation rule is the drift this codebase
+/// keeps catching, and the receipt is the second place a student reads a plan's name.
+pub(crate) fn plan_name(plan: &str) -> String {
     let mut chars = plan.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
