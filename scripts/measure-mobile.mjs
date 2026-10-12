@@ -138,19 +138,41 @@ function daysFromAnchor(days, time = '09:00:00') {
 }
 
 /**
- * The anchor's own week, `weekdayOffset` days from its Monday, at a fixed time of day.
+ * The anchor's own week **in the student's zone**, `weekdayOffset` days from its
+ * Monday, at a fixed time of day.
  *
  * Used for the calendar's one event. A plain "now + 2 days" is not enough: on a
  * Saturday that lands in the *next* week and the event leaves the visible window, so
- * the surface measures the empty grid. Anchoring to the week's own Wednesday keeps it
- * inside the Monday-based week `localWeek` renders, with a day of margin on each side
- * for the harness's zone and the student's (Asia/Jakarta) disagreeing near midnight.
+ * the surface measures the empty grid.
+ *
+ * **And it has to be the student's week, not UTC's.** `localWeek(now, zone)` — what
+ * the calendar actually renders — computes its Monday from `localDateKey(now, zone)`,
+ * and the harness's account is `Asia/Jakarta` (+7). An earlier version of this helper
+ * used `getUTCDay()`, which is a *different* week for the seven hours each Monday
+ * where local has rolled over and UTC has not: the event landed on the previous
+ * week's Wednesday, `localWeek` did not render that week, and the surface measured
+ * the empty grid — with no `expect` to notice. That is the silent state-flip the
+ * anchoring exists to prevent, so the frame here is the zone the screen uses.
+ *
+ * The emitted time is `09:00Z` deliberately: mid-day UTC is mid-afternoon in Jakarta,
+ * so the instant's local date is the date this helper intends in any zone within ±9
+ * hours of UTC.
  */
 function thisWeek(weekdayOffset, time = '09:00:00') {
-  const date = new Date(ANCHOR)
-  // `getUTCDay()` is 0=Sunday; shift so Monday is 0.
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7) + weekdayOffset)
-  return `${date.toISOString().slice(0, 10)}T${time}Z`
+  const zone = USER.timezone
+  // The student's calendar date, as YYYY-MM-DD — the same key `localDateKey` builds.
+  const localDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(ANCHOR)
+  // The weekday of that *calendar date*, read back through UTC so no zone shifts it.
+  // `getUTCDay()` is 0=Sunday; the Monday-first index is `(day + 6) % 7`.
+  const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
+  const monday = new Date(`${localDate}T00:00:00Z`)
+  monday.setUTCDate(monday.getUTCDate() - ((weekday + 6) % 7) + weekdayOffset)
+  return `${monday.toISOString().slice(0, 10)}T${time}Z`
 }
 
 /** Where Chromium is looked for, the same list `render/chrome.rs` uses. */
@@ -767,10 +789,22 @@ const STUDY_STEPS = [
  * so a phone is the only viewport that renders it at all.
  */
 const SURFACES = [
-  { name: 'today', steps: [{ nav: 'Today' }] },
+  // **These three carry `expect` because their content is anchored to the run's clock.**
+  // Without it a wrong anchor is undetectable: the surface renders a *different state* —
+  // an empty week, an empty list — the walk reports fewer targets with zero problems, and
+  // the run still passes. Each string can only appear in the intended state.
+  //
+  // `calendar`'s is the calendar's own count, which is the strongest of the three: it
+  // proves the event landed inside the week `localWeek` renders, not merely that some
+  // text is on the page.
+  { name: 'today', expect: 'Due flashcards', steps: [{ nav: 'Today' }] },
   { name: 'workspaces', steps: [{ nav: 'Work' }] },
-  { name: 'calendar', steps: [{ nav: 'Calendar' }] },
-  { name: 'tasks', steps: [{ nav: 'Tasks' }] },
+  { name: 'calendar', expect: '1 event in this view', steps: [{ nav: 'Calendar' }] },
+  {
+    name: 'tasks',
+    expect: 'Selesaikan tugas kriptografi untuk kuliah hari Jumat',
+    steps: [{ nav: 'Tasks' }],
+  },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
   {
