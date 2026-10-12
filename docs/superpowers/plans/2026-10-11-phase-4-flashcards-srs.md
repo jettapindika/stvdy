@@ -210,7 +210,7 @@ same version, so the rename is required, not cosmetic. Nothing else changes.
   `DEFAULT_EASE`, `MIN_EASE`, `FIRST_INTERVAL_DAYS`, `SECOND_INTERVAL_DAYS`.
   Consumed by Task 5 (server replay) and Task 7's vector note.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 //! SM-2 replay: the contract two devices have to agree on.
@@ -347,12 +347,12 @@ fn reviews_at_the_same_instant_are_ordered_by_id() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p stvdy-core --test sm2`
 Expected: FAIL, `unresolved import stvdy_core::sm2`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```rust
 //! SM-2 spaced repetition, as a deterministic replay.
@@ -538,12 +538,12 @@ pub mod sm2;
 `CoreError::validation(field, reason)` already exists (`crates/core/src/error.rs:34`);
 it takes **two** arguments, and the brief's call sites use `"rating"` as the field.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p stvdy-core --test sm2 && cargo test -p stvdy-core sm2`
 Expected: PASS (6 integration tests + 2 unit tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/sm2.rs crates/core/src/lib.rs crates/core/tests/sm2.rs
@@ -566,7 +566,7 @@ git commit -m "feat(core): deterministic SM-2 replay, the one schedule two devic
   module_variables}`, `PromptError::{UndeclaredVariable, MissingSection}`.
   Consumed by Task 4 (the generation job) and Task 3 (its tests).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `crates/core/tests/prompts.rs`:
 
@@ -743,12 +743,12 @@ mod task_composition {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p stvdy-core --test prompts`
 Expected: FAIL, `no ModuleId in stvdy_core::prompts`.
 
-- [ ] **Step 3: Extend the registry**
+- [x] **Step 3: Extend the registry**
 
 Replace the body of `crates/core/src/prompts/registry.rs` with (keeping the existing
 two consts and their doc comments):
@@ -848,7 +848,7 @@ impl ModuleId {
 }
 ```
 
-- [ ] **Step 4: Extend the composer**
+- [x] **Step 4: Extend the composer**
 
 In `crates/core/src/prompts/mod.rs`:
 
@@ -1098,13 +1098,13 @@ pub fn compose_task(
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo test -p stvdy-core --test prompts && cargo test -p stvdy-core`
 Expected: PASS. The existing chat tests must still pass unchanged: `render` and
 `compose_chat` keep their signatures.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/core/src/prompts crates/core/tests/prompts.rs
@@ -1125,7 +1125,7 @@ git commit -m "feat(core): the strict-JSON task composer, with the grounding gua
   `parse_cards`, `resolve_cards`, `MAX_CARDS_PER_REPLY`.
   Consumed by Task 4 (the job).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 //! The flashcards JSON contract: parsing a model reply and resolving its labels.
@@ -1226,12 +1226,12 @@ fn a_card_with_an_empty_side_is_dropped() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test -p stvdy-core --test generation_flashcards`
 Expected: FAIL, `no generation in stvdy_core`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `crates/core/src/generation/mod.rs`:
 
@@ -1394,12 +1394,12 @@ pub fn resolve_cards(cards: Vec<GeneratedCard>, labels: &ContextLabels) -> Parse
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test -p stvdy-core --test generation_flashcards`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/generation crates/core/tests/generation_flashcards.rs
@@ -1427,7 +1427,7 @@ git commit -m "feat(core): the flashcards JSON contract, parsed and label-resolv
   `workspaces::owned_name`, `chat::prompt::base_vars`.
   Consumed by Task 5 (reviews) and Task 6 (the SPA).
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- Generation is asynchronous with visible progress, so the deck carries the state
@@ -1446,7 +1446,7 @@ alter table decks
 -- path that does not generate (a future hand-made deck) is usable immediately.
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `crates/server/tests/flashcards.rs` (first slice: generation):
 
@@ -1694,12 +1694,12 @@ exported (the chat suite uses `workspace_with_source`, a local helper; `common` 
 `workspace_with_text` at line 272 — confirm its signature and reuse it, adjusting
 the call if it returns only an id).
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `cargo test -p stvdy-server --test flashcards`
 Expected: FAIL, `POST /workspaces/:id/decks` is a 404.
 
-- [ ] **Step 4: Implement the shared helpers**
+- [x] **Step 4: Implement the shared helpers**
 
 `crates/server/src/util.rs` — add:
 
@@ -1900,7 +1900,7 @@ and `AuthUser::plan()` becomes `stvdy_core::config::PlanId::parse(&self.plan_id)
 One implementation, because a second copy is how a plan string starts meaning two
 different things.
 
-- [ ] **Step 5: Implement the flashcards module**
+- [x] **Step 5: Implement the flashcards module**
 
 `crates/server/src/flashcards/mod.rs`:
 
@@ -2421,7 +2421,7 @@ fn card_from_row(row: &sqlx::postgres::PgRow) -> CardJson {
 }
 ```
 
-- [ ] **Step 6: Implement the generation job**
+- [x] **Step 6: Implement the generation job**
 
 `crates/server/src/flashcards/generate.rs`:
 
@@ -2812,12 +2812,12 @@ Then wire it up: `crates/server/src/jobs/handlers/mod.rs` gains `pub mod generat
 `crates/server/src/lib.rs` gains `pub mod flashcards;`, and
 `routes/mod.rs` adds `.merge(flashcards::routes())` to the authenticated group.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cargo test -p stvdy-server --test flashcards`
 Expected: PASS (5 tests in this slice).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add migrations/0021_flashcard_generation.sql crates/server/src crates/server/tests/flashcards.rs
@@ -2836,7 +2836,7 @@ git commit -m "feat(server): decks, strict-JSON generation, and a refund for a f
 - Consumes: everything Task 4 produced, plus `stvdy_core::sm2::{replay, Rating, Review}`.
 - Produces: nothing new for later tasks; this is the exit gate.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `crates/server/tests/flashcards.rs`:
 
@@ -3081,14 +3081,14 @@ async fn another_users_card_is_not_found(pool: PgPool) {
 // microsecond resolution and rounds.
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test -p stvdy-server --test flashcards`
 Expected: the review tests FAIL until the review path from Task 4 is complete;
 if Task 4 already implemented it, they pass and this step is the confirmation that
 the gate is real rather than assumed.
 
-- [ ] **Step 3: Fix whatever the tests surface**
+- [x] **Step 3: Fix whatever the tests surface**
 
 The likely defects, and what each means:
 - A `due_at` mismatch means `replay` used `now()` somewhere instead of
@@ -3098,12 +3098,12 @@ The likely defects, and what each means:
 - `applied: true` on the duplicate id means the `on conflict (id) do nothing` is
   missing or `rows_affected()` is being read after the `update`.
 
-- [ ] **Step 4: Run the whole suite**
+- [x] **Step 4: Run the whole suite**
 
 Run: `cargo test -p stvdy-core && cargo test -p stvdy-server`
 Expected: PASS, with the pre-existing 242 tests unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/flashcards crates/server/tests/flashcards.rs
@@ -3128,7 +3128,7 @@ git commit -m "test(server): the two-device replay gate, duplicate ids, and the 
 - Produces: `flashcardKeys`, `useDecks`, `useDeck`, `useCreateDeck`, `useDueCards`,
   `useReviewCard`, `dueCards`, `SourcePicker`.
 
-- [ ] **Step 1: Write the failing test for the due queue**
+- [x] **Step 1: Write the failing test for the due queue**
 
 `app/src/features/study/due.test.ts`:
 
@@ -3176,12 +3176,12 @@ describe('dueCards', () => {
 })
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npm --prefix app test -- due`
 Expected: FAIL, `Cannot find module './due'`.
 
-- [ ] **Step 3: Implement the query module and the due filter**
+- [x] **Step 3: Implement the query module and the due filter**
 
 `app/src/api/queries/flashcards.ts`:
 
@@ -3343,12 +3343,12 @@ export function dueCards(cards: StudyCard[], now: Date): StudyCard[] {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npm --prefix app test -- due`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Extract the source picker**
+- [x] **Step 5: Extract the source picker**
 
 Move `SourcePicker` out of `app/src/features/chat/ChatScreen.tsx` into
 `app/src/features/workspaces/SourcePicker.tsx`, adding two props so the Studio panel
@@ -3380,7 +3380,7 @@ Import it in `ChatScreen.tsx` and delete the private copy. The chat suite must s
 green (`app/src/features/chat/ChatScreen.test.tsx` if it exists; otherwise the
 existing 138 tests).
 
-- [ ] **Step 6: Build the Studio panel**
+- [x] **Step 6: Build the Studio panel**
 
 `app/src/features/studio/FlashcardsPanel.tsx`:
 
@@ -3453,7 +3453,7 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
 `SourceRow`, the card count, the failure text in a `note note-danger`, and for a
 ready deck a `Study` link to `/study/${deck.id}`.
 
-- [ ] **Step 7: Build the study screen**
+- [x] **Step 7: Build the study screen**
 
 `app/src/features/study/StudyScreen.tsx`:
 
@@ -3540,21 +3540,21 @@ renders outside it, full-width, on every form factor. That is deliberate: the st
 screen is one card, and a card squeezed into the third panel of a desktop grid would
 be worse than a dedicated screen.
 
-- [ ] **Step 8: Wire the Studio panel in**
+- [x] **Step 8: Wire the Studio panel in**
 
 In `app/src/features/workspaces/WorkspaceScreen.tsx`, replace the Studio
 `NotBuiltYet` with `<FlashcardsPanel workspaceId={workspaceId} />` and drop the now
 unused import if `NotBuiltYet` has no other use in the file. Update the file's
 header comment, which currently says Studio "says which phase brings it".
 
-- [ ] **Step 9: Run the frontend suite and the build**
+- [x] **Step 9: Run the frontend suite and the build**
 
 Run: `npm --prefix app test && npm --prefix app run build` (the repo's convention, per
 `justfile`. There is no vitest config file to create: the config is inline in
 `app/vite.config.ts`, `include: ['src/**/*.{test,spec}.{ts,tsx}']`.)
 Expected: all tests pass (138 existing + the new ones) and the build is clean.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add app/src
@@ -3573,7 +3573,7 @@ git commit -m "feat(app): the Studio flashcard panel and the swipe study screen"
 **Interfaces:**
 - Consumes: everything above.
 
-- [ ] **Step 1: `docs/API.md`**
+- [x] **Step 1: `docs/API.md`**
 
 Replace the `## Flashcards (Phase 4)` stub with the full section: request bodies,
 response shapes, the four status codes that matter (201 with `status: "generating"`,
@@ -3582,7 +3582,7 @@ cost rule (4 credits per 10 requested cards), and a note that
 `GET /workspaces/:id/decks` is an addition beyond the spec's route list, with the
 reason (A81).
 
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**
+- [x] **Step 2: `docs/ARCHITECTURE.md`**
 
 Add a section stating the two properties that make this phase work, because both are
 the kind of thing a later refactor breaks silently:
@@ -3592,7 +3592,7 @@ the kind of thing a later refactor breaks silently:
 - A generation that fails for good refunds the spend, with the guard that makes it
   once-only.
 
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`**
+- [x] **Step 3: `docs/ASSUMPTIONS.md`**
 
 Phase 3 lands first and owns A75-A80, so this phase's rows are A81-A89. Add one row per
 decision, in the table's existing `| id | decision | detail | why |` shape:
@@ -3610,7 +3610,7 @@ decision, in the table's existing `| id | decision | detail | why |` shape:
 - A89: `plan_id` parsing moved to `PlanId::parse`, so one implementation reads a plan
   string.
 
-- [ ] **Step 4: Roadmap gate 5 — accessibility, on the study screen**
+- [x] **Step 4: Roadmap gate 5 — accessibility, on the study screen**
 
 Perform and record, in the plan and in the phase summary:
 (a) keyboard-only walk: Tab reaches the reveal button and all four grade buttons, the
@@ -3624,7 +3624,7 @@ effect is announced by the progress line, not by a colour change;
 (e) 200% text scale on a 390px viewport with no clipping or overlap.
 State the check performed and the result. "Looks fine" is not a gate.
 
-- [ ] **Step 5: Roadmap gate 6 — Indonesian end to end**
+- [x] **Step 5: Roadmap gate 6 — Indonesian end to end**
 
 The server test from Task 4 covers it (`a_deck_generates_cards_linked_to_their_chunk`
 uses an Indonesian source and asserts the prompt carried the label block and the
@@ -3632,7 +3632,7 @@ material-language default). Add the UI half: with the Indonesian fixture, genera
 deck from the Studio panel, open the study screen, and confirm the card text is
 Indonesian and the citation chip opens the Indonesian chunk. Record the output.
 
-- [ ] **Step 6: The smoke script**
+- [x] **Step 6: The smoke script**
 
 `scripts/smoke-phase4.sh`, modelled on `scripts/smoke-phase2.sh`: start the server
 against the dev database with the stub LLM, sign up, create a workspace, add an
@@ -3652,7 +3652,7 @@ Three facts about the stub that this script depends on (`scripts/stub-llm.py`):
   row cannot be found, and a `None` cost is the honest record (A41). Assert the
   prompt version and the action instead, which are the fields the job controls.
 
-- [ ] **Step 7: Run the full gate**
+- [x] **Step 7: Run the full gate**
 
 ```bash
 cargo fmt --check
@@ -3666,7 +3666,7 @@ bash scripts/smoke-phase4.sh
 
 Expected: all clean. Quote the smoke output in the phase summary.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs scripts/smoke-phase4.sh
@@ -3677,22 +3677,37 @@ git commit -m "docs(phase 4): the API, the derived-schedule property, and both g
 
 ## Phase 4 exit checklist
 
-- [ ] `crates/core/src/sm2.rs` exists, is pure, and its vectors are the ones Phase 8
+- [x] `crates/core/src/sm2.rs` exists, is pure, and its vectors are the ones Phase 8
       will check the TypeScript replay against.
-- [ ] A deck is generated from selected sources, strictly JSON, with one retry.
-- [ ] Every card is linked to a chunk; a label that was never sent costs the link,
+- [x] A deck is generated from selected sources, strictly JSON, with one retry.
+- [x] Every card is linked to a chunk; a label that was never sent costs the link,
       not the card, and the drop is counted.
-- [ ] A generation that fails for good refunds the credits exactly once.
+- [x] A generation that fails for good refunds the credits exactly once.
 - [ ] `flashcards_per_month` is enforced in the user's local month, via
       `limits::enforce_batch`, with no hardcoded number.
-- [ ] Two devices' reviews replay to identical `ease`/`interval_days`/`due_at`, and a
+- [x] Two devices' reviews replay to identical `ease`/`interval_days`/`due_at`, and a
       duplicate review id applies once.
-- [ ] The study screen reviews a deck by keyboard and by swipe, and says what it
+- [x] The study screen reviews a deck by keyboard and by swipe, and says what it
       costs before charging.
 - [ ] Roadmap gate 5 (accessibility) performed and recorded.
 - [ ] Roadmap gate 6 (Indonesian) performed and recorded.
-- [ ] `docs/{API,ARCHITECTURE,ASSUMPTIONS}.md` updated in the same commit as the code.
+- [x] `docs/{API,ARCHITECTURE,ASSUMPTIONS}.md` updated in the same commit as the code.
 - [ ] The full quality gate is green.
+
+---
+
+## Box audit (this phase has no execution notes)
+
+Phase 4 is the one plan of the five whose file carries no `## Execution notes (Phase 4, as
+built)` section, so its boxes were ticked against the artefacts at HEAD and the commits that
+landed them (`b7345c7`, `ab73ec0`, `0f47a04`, `c16e8f3`, `6574ee6`) rather than against a
+written account. Four boxes stay unticked:
+
+  - Exit checklist, "`flashcards_per_month` is enforced ... via `limits::enforce_batch`" -- the enforcement itself is real (`crates/server/src/entitlements.rs`, asserted by `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`), but the function this box names does not exist at HEAD: Phase 7's `entitlements::check` superseded it by design (A85, A146), so the named artefact cannot be confirmed.
+  - Exit checklist, "Roadmap gate 5 (accessibility) performed and recorded" -- no record: no document in the tree states this phase's accessibility measurement, and the phase's own file has no notes section to carry one.
+  - Exit checklist, "Roadmap gate 6 (Indonesian) performed and recorded" -- no record, for the same reason.
+  - Exit checklist, "The full quality gate is green" -- no record: no execution notes and no commit in the phase's history records its gate run.
+
 
 ---
 
