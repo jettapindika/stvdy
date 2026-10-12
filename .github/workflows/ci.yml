@@ -228,8 +228,14 @@ jobs:
       - run: npm ci --prefix app
       - run: npm --prefix app run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      # `--workspace`, and it is load-bearing: `src-tauri/plugins/mobile` is a member of
+      # this workspace (a path dependency of a workspace root is a member), so without the
+      # flag clippy and test select the `stvdy-shell` package alone — and the plugin's Rust
+      # half, including the background scheduler and the FCM seam, ships unlinted with a
+      # test suite that reads as coverage and provides none. `fmt --all` already reached it,
+      # which is how the gap went unnoticed: one of the three commands was correct.
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
 
   web:
     name: web build
