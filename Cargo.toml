@@ -76,6 +76,10 @@ hex = "0.4.3"
 base64 = "0.23.1"
 rand = "0.10.3"
 secrecy = "0.10.3"
+# Lock poisoning has no remedy for the two in-process caches this workspace keeps — the
+# Google client's access token and the test doubles' scripts — so the lock that cannot
+# produce a poisoning error is the one used.
+parking_lot = "0.12.5"
 async-trait = "0.1.92"
 # The chat SSE stream is written as an `async_stream::stream!` block: the
 # alternative is a hand-written `Stream` impl whose poll function has to keep the

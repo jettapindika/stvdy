@@ -5206,6 +5206,7 @@ dependencies = [
  "minisign",
  "minisign-verify",
  "oauth2",
+ "parking_lot",
  "pdf-extract",
  "pdfium-render",
  "pgvector",

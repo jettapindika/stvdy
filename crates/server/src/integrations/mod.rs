@@ -66,6 +66,15 @@ pub struct Providers {
     /// provider. `PushRouter::default()` is the honest empty configuration and is what a
     /// deployment with no push credentials gets.
     pub push: Arc<push::PushRouter>,
+    /// The Google Calendar client (Task 7).
+    ///
+    /// `None` when `GOOGLE_CALENDAR_CLIENT_ID` is unset — a supported deployment with no
+    /// calendar integration, like [`renderer`](Self::renderer) and [`llm`](Self::llm). It is
+    /// **not** a mock in production: a client that answered without a token would import
+    /// events that do not exist, which is worse than an integration the deployment does not
+    /// have. The consent flow's two routes answer 404 in that state, so no connection can be
+    /// made at all.
+    pub calendar: Option<Arc<dyn stvdy_core::traits::calendar::CalendarApi>>,
 }
 
 impl Providers {
@@ -183,6 +192,23 @@ impl Providers {
             }
         };
 
+        // The calendar client, built at boot like every other provider so a client that cannot
+        // be constructed is a startup failure rather than a connect-time surprise. `None` when
+        // the calendar OAuth client is unconfigured, which the consent flow answers 404 for.
+        let calendar: Option<Arc<dyn stvdy_core::traits::calendar::CalendarApi>> = match &cfg
+            .google_calendar
+        {
+            Some(google) => Some(Arc::new(crate::calendar::google::GoogleCalendarApi::new(
+                google,
+            )?)),
+            None => {
+                tracing::warn!(
+                    "GOOGLE_CALENDAR_CLIENT_ID is unset; the Google Calendar integration is unavailable"
+                );
+                None
+            }
+        };
+
         Ok(Self {
             storage,
             embedder,
@@ -201,6 +227,7 @@ impl Providers {
             ics_fetch: Arc::new(crate::calendar::ics_in::GuardedFetch),
             payment: payment(cfg)?,
             push: Arc::new(push::PushRouter::from_config(&cfg.push)),
+            calendar,
         })
     }
 }

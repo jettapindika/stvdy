@@ -50,9 +50,19 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
                 .map_err(|error| Failure::transient(format!("the ICS import failed: {error}")))?;
             Ok(())
         }
-        // Google lands in Task 7 (`sync_google`). Until then no such connection can exist:
-        // `POST /calendar/ics` is the only creator in this build. Permanent rather than
-        // transient, because no retry invents a provider client.
+        // `sync_google` answers every non-retryable condition itself — a `410` re-lists fully
+        // and succeeds, a refused grant revokes the connection and succeeds, a provider answer
+        // this build cannot use is recorded and succeeds — so the only error that reaches here
+        // is one a retry is worth, which is why it is transient rather than permanent.
+        "google" => {
+            crate::calendar::sync::sync_google(state, &connection)
+                .await
+                .map_err(|error| Failure::transient(format!("the Google sync failed: {error}")))?;
+            Ok(())
+        }
+        // No such provider exists in this build. Permanent rather than transient, because no
+        // retry invents a provider client — and the arm is not a refusal of `google`, which
+        // the arm above answers.
         other => Err(Failure::permanent(format!(
             "no sync implementation for the {other} provider"
         ))),

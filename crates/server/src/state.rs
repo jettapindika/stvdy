@@ -76,6 +76,21 @@ pub struct AppState {
     /// `GET /settings`'s `channels_available` reports `push` as unavailable rather than
     /// letting a delivery fail at 03:00.
     pub push: Arc<crate::integrations::push::PushRouter>,
+    /// The Google Calendar client, or `None` when no calendar client is configured.
+    ///
+    /// `None` is a supported state and not a degraded one, the same pattern as
+    /// [`payment`](Self::payment), [`push`](Self::push) and
+    /// [`renderer`](Self::renderer): with no client the consent flow answers 404
+    /// (`GET /calendar/google/connect` and its callback both), so no Google connection can be
+    /// made and nothing else in the product changes. [`AppState::calendar`] answers the honest
+    /// error for a caller that needs one, rather than making every caller unwrap a provider and
+    /// decide for itself what an absent one means.
+    ///
+    /// It is a trait object because the sync is driven by a fake in tests — the same seam
+    /// [`ics_fetch`](Self::ics_fetch) exists for, and for the same reason: the real client's
+    /// behaviour cannot be asserted without a Google credential, so the fake is the only way
+    /// the pass's decisions are testable at all.
+    pub calendar: Option<Arc<dyn stvdy_core::traits::calendar::CalendarApi>>,
     pub jobs: Queue,
 }
 
@@ -108,6 +123,24 @@ impl AppState {
         self.config.qris.as_ref().ok_or_else(|| {
             crate::error::AppError::Provider(
                 "no payment gateway is configured on this deployment".to_string(),
+            )
+        })
+    }
+
+    /// The Google Calendar client, or the honest error.
+    ///
+    /// One accessor for both callers (the connect flow's find-or-create and the sync pass), so
+    /// a deployment with no client cannot answer one way in one and another way in the other.
+    /// The error is `provider_error`, not `not_found`: nothing is missing from the request —
+    /// the *deployment* has no calendar client — and an operator reading the log must be able
+    /// to tell the two apart. The sync records it on the connection rather than failing the
+    /// pass, because no retry invents a client.
+    pub fn calendar(
+        &self,
+    ) -> crate::error::AppResult<&Arc<dyn stvdy_core::traits::calendar::CalendarApi>> {
+        self.calendar.as_ref().ok_or_else(|| {
+            crate::error::AppError::Provider(
+                "no Google Calendar client is configured on this deployment".to_string(),
             )
         })
     }

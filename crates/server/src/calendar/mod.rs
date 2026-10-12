@@ -7,6 +7,7 @@
 //! rate-limit bucket, because it is an unauthenticated database lookup keyed by a secret
 //! (A243).
 
+pub mod google;
 pub mod ics_in;
 pub mod ics_out;
 pub mod oauth;

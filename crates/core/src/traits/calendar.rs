@@ -141,5 +141,6 @@ pub trait CalendarApi: Send + Sync {
     ///
     /// On the trait rather than inside the implementation because a fake needs to answer it
     /// without a network, and because the refresh token is the one secret this phase holds.
-    async fn refresh_access_token(&self, refresh_token: &str) -> Result<AccessToken, CalendarError>;
+    async fn refresh_access_token(&self, refresh_token: &str)
+    -> Result<AccessToken, CalendarError>;
 }

@@ -6,6 +6,7 @@
 //! The traits are defined once, in core, so parallel phases cannot drift into
 //! two slightly different `Embedder`s.
 
+pub mod calendar;
 pub mod clock;
 pub mod embedder;
 pub mod llm;
@@ -16,6 +17,7 @@ pub mod search;
 pub mod storage;
 pub mod testing;
 
+pub use calendar::{AccessToken, CalendarApi, CalendarError, CalendarMeta, EventPage, RemoteEvent};
 pub use clock::Clock;
 pub use embedder::{EmbedError, Embedder};
 pub use llm::{

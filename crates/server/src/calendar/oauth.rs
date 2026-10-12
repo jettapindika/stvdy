@@ -18,11 +18,13 @@
 //! **The live half.** The OAuth client does not exist yet, so no exchange against Google has
 //! ever run here. Everything that does not need Google is implemented and tested: the consent
 //! URL's parameters, the state round trip, the refusals, and the shape of the deep link. The
-//! one step that needs the provider — finding or creating the dedicated "Study Plan" calendar
-//! (A237) — is named in [`callback`]'s documentation as the first sync's job, because the
-//! `CalendarApi` seam it needs is Task 7's (`crates/server/src/calendar/google.rs`) and does
-//! not exist in this build.
+//! step that needs the provider — finding or creating the dedicated "Study Plan" calendar
+//! (A237) — is [`ensure_study_calendar`], which reaches Google through the `CalendarApi` seam
+//! in `crates/server/src/calendar/google.rs`, and which is therefore asserted against a fake
+//! client rather than against Google.
 
+use aes_gcm::Nonce;
+use aes_gcm::aead::Aead;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
@@ -152,12 +154,11 @@ pub struct CallbackQuery {
 ///    device could have taken the last account slot;
 /// 4. the deep link carries a status and a reason, never a token.
 ///
-/// **The "Study Plan" calendar (A237) is the first sync's job in this build**, not this
-/// callback's: finding or creating it is a `CalendarApi` call, and that seam is Task 7's
-/// (`crates/server/src/calendar/google.rs`). The row is therefore written with
-/// `study_calendar_id = null`, which the sync fills in on its first pass. A `null` there is
-/// honest — "not resolved yet" — where a fabricated id would send study blocks to a calendar
-/// that does not exist.
+/// **The "Study Plan" calendar (A237) is found or created here**, by
+/// [`ensure_study_calendar`], once the grant is stored — and a failure to resolve it is
+/// **recorded on the connection rather than raised**: the token is already written, the
+/// student's own Google events still import, and a 500 would tell a student whose grant was
+/// stored that nothing happened. The connection's `error` carries the reason (A247).
 ///
 /// **A replayed `state` is refused by Google, not by us.** The state is stateless (that is
 /// what makes it work on more than one instance), so it carries no single-use marker; the
@@ -240,10 +241,160 @@ pub async fn callback(
     }
 
     let encrypted = crate::auth::oauth_state::encrypt_secret(&state, refresh_token)?;
-    store_connection(&state, user_id, &encrypted).await?;
+    let connection_id = store_connection(&state, user_id, &encrypted).await?;
+
+    // A237: the "Study Plan" calendar is found or created **once**, while the student is
+    // watching, so a connect that cannot have one says so now rather than silently dropping the
+    // first study block later. It cannot fail the connect: the grant is stored above, and the
+    // sync lists `primary` when there is no study calendar, so the cost of a failure here is
+    // the mirror destination rather than the connection. A database failure while *recording*
+    // that reason is logged rather than raised for the same reason — the student's grant is
+    // live, and an error page would say otherwise.
+    if let Err(error) = ensure_study_calendar(&state, connection_id).await {
+        tracing::warn!(%user_id, %error, "the Study Plan calendar could not be recorded");
+    }
 
     tracing::info!(%user_id, "Google Calendar connected");
     deep_link("connected", None)
+}
+
+/// The name of the calendar the mirrored study blocks live in (A237).
+///
+/// Exactly this string, and matched exactly: "Study Plan (2)" is a calendar somebody else made,
+/// and adopting it would write our study blocks into one the student believes is theirs alone.
+pub const STUDY_CALENDAR_SUMMARY: &str = "Study Plan";
+
+/// Finds the connection's "Study Plan" calendar, creating it when there is none, and stores its
+/// id (A237).
+///
+/// **A failure here is not a failed connect.** The grant is already stored, so the connection
+/// works: the student's own Google events import either way, because the sync lists `primary`
+/// when there is no study calendar. What a failure costs is the mirror destination, so the
+/// reason is recorded in `calendar_connections.error` — which the screen shows beside the
+/// connection (A247, gate 7) — and the connection stays `connected`. That is the whole reason
+/// this is a separate function from [`store_connection`]: the two have different failure
+/// meanings, and a caller that ran them as one would have to choose between a lost grant and a
+/// 500.
+///
+/// Public because it is the unit the tests drive: reaching it through the callback would need a
+/// real authorization-code exchange with Google, and what is being asserted is this step's own
+/// decision — find, create, or record.
+pub async fn ensure_study_calendar(state: &AppState, connection_id: Uuid) -> AppResult<()> {
+    let Some(api) = state.calendar.as_ref() else {
+        return record_connect_error(
+            state,
+            connection_id,
+            "no Google Calendar client is configured on this deployment",
+        )
+        .await;
+    };
+
+    let found = match api.list_calendars().await {
+        Ok(calendars) => calendars
+            .into_iter()
+            .find(|calendar| calendar.summary == STUDY_CALENDAR_SUMMARY),
+        Err(error) => {
+            return record_connect_error(
+                state,
+                connection_id,
+                &format!("the calendar list could not be read: {error}"),
+            )
+            .await;
+        }
+    };
+
+    let calendar = match found {
+        Some(calendar) => calendar,
+        None => match api.create_calendar(STUDY_CALENDAR_SUMMARY).await {
+            Ok(calendar) => calendar,
+            Err(error) => {
+                return record_connect_error(
+                    state,
+                    connection_id,
+                    &format!("the Study Plan calendar could not be created: {error}"),
+                )
+                .await;
+            }
+        },
+    };
+
+    // An id-less answer cannot be stored: `study_calendar_id` is what every later pass lists,
+    // and `''` would be a calendar id that is not one.
+    if calendar.id.is_empty() {
+        return record_connect_error(state, connection_id, "the Study Plan calendar has no id")
+            .await;
+    }
+
+    sqlx::query(
+        "update calendar_connections
+            set study_calendar_id = $2,
+                error = null,
+                updated_at = $3
+          where id = $1",
+    )
+    .bind(connection_id)
+    .bind(&calendar.id)
+    .bind(state.clock.now())
+    .execute(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("storing the study calendar: {error}")))?;
+
+    tracing::info!(%connection_id, calendar_id = %calendar.id, "the Study Plan calendar is ready");
+    Ok(())
+}
+
+/// Records a connect-time reason on the connection and leaves it `connected`.
+///
+/// Not [`crate::calendar::sync::record_failure`]: that one marks the connection `error` and
+/// drops the ICS validators, and neither is true here — the grant is live and the sync still
+/// imports. What is missing is the mirror destination, and A247's "the reason is shown beside
+/// the connection" is the whole remedy. The next clean sync clears it, which is what keeps the
+/// field honest rather than sticky.
+async fn record_connect_error(
+    state: &AppState,
+    connection_id: Uuid,
+    reason: &str,
+) -> AppResult<()> {
+    sqlx::query("update calendar_connections set error = $2, updated_at = $3 where id = $1")
+        .bind(connection_id)
+        .bind(reason)
+        .bind(state.clock.now())
+        .execute(&state.pool)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("recording a connect error: {error}"))
+        })?;
+
+    tracing::warn!(%connection_id, %reason, "the Study Plan calendar could not be resolved");
+    Ok(())
+}
+
+/// The plaintext of a stored grant.
+///
+/// The inverse of [`crate::auth::oauth_state::encrypt_secret`], and deliberately its mirror:
+/// the format is `nonce || ciphertext` with the key from `ENCRYPTION_KEY_HEX`, and the only
+/// reader that matters is the sync. A row that does not decrypt is a row this build cannot use
+/// — a rotated key, or a truncated write — so the error is a reason to record rather than to
+/// retry.
+pub fn decrypt_refresh_token(state: &AppState, encrypted: &[u8]) -> AppResult<String> {
+    let unusable = |reason: &str| AppError::Internal(anyhow::anyhow!("{reason}"));
+
+    // 12 bytes of nonce plus at least a tag: anything shorter cannot be a ciphertext.
+    if encrypted.len() < 13 {
+        return Err(unusable(
+            "a stored calendar grant is too short to be a ciphertext",
+        ));
+    }
+    let (nonce_bytes, ciphertext) = encrypted.split_at(12);
+    let nonce: [u8; 12] = nonce_bytes
+        .try_into()
+        .map_err(|_| unusable("a stored calendar grant has no nonce"))?;
+
+    let plaintext = crate::auth::oauth_state::cipher(state)?
+        .decrypt(&Nonce::from(nonce), ciphertext)
+        .map_err(|_| unusable("a stored calendar grant did not decrypt"))?;
+
+    String::from_utf8(plaintext).map_err(|_| unusable("a stored calendar grant is not text"))
 }
 
 /// A redirect to the app's deep link, with the reason percent-encoded.
@@ -290,11 +441,14 @@ fn deep_link(status: &str, reason: Option<&str>) -> AppResult<axum::response::Re
 /// `account_email` stays `null`. The two scopes this flow asks for carry no email claim, and
 /// inventing one from the login session would be a fact this row cannot support — the column
 /// is nullable and the panel renders it as absent.
+///
+/// Returns the row's id, because the caller's next step — [`ensure_study_calendar`] — writes
+/// `study_calendar_id` onto it.
 async fn store_connection(
     state: &AppState,
     user_id: Uuid,
     refresh_token_enc: &[u8],
-) -> AppResult<()> {
+) -> AppResult<Uuid> {
     let existing: Option<Uuid> = sqlx::query_scalar(
         "select id from calendar_connections
           where user_id = $1 and provider = 'google'
@@ -309,7 +463,7 @@ async fn store_connection(
     })?;
 
     let now = state.clock.now();
-    match existing {
+    let id = match existing {
         Some(id) => {
             sqlx::query(
                 "update calendar_connections
@@ -327,24 +481,27 @@ async fn store_connection(
             .map_err(|error| {
                 AppError::Internal(anyhow::anyhow!("refreshing the Google connection: {error}"))
             })?;
+            id
         }
         None => {
-            sqlx::query(
+            let id: Uuid = sqlx::query_scalar(
                 "insert into calendar_connections
                     (user_id, provider, refresh_token_enc, status, updated_at)
-                 values ($1, 'google', $2, 'connected', $3)",
+                 values ($1, 'google', $2, 'connected', $3)
+                 returning id",
             )
             .bind(user_id)
             .bind(refresh_token_enc)
             .bind(now)
-            .execute(&state.pool)
+            .fetch_one(&state.pool)
             .await
             .map_err(|error| {
                 AppError::Internal(anyhow::anyhow!("writing the Google connection: {error}"))
             })?;
+            id
         }
-    }
-    Ok(())
+    };
+    Ok(id)
 }
 
 /// Exchanges the authorization code, with the state's own PKCE verifier.
