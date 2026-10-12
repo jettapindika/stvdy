@@ -233,11 +233,15 @@ async fn a_manual_grant_writes_one_admin_ledger_row(pool: PgPool) {
     assert_eq!(granted, 50, "the balance moved once, not twice");
 }
 
-/// **The scaffolding is honest about what it cannot compute yet.** Provider cost splits
-/// free from paid (join `usage_events` → `users.plan_id`), with BYOK in its own column
-/// (A156). Revenue and conversion are `null` until Phase 13 writes `payments` rows —
-/// a `0` there would be an invented number, and A46's tripwires are read off this report
-/// (roadmap gate 7(a)).
+/// The provider-cost split, per month and per plan, with BYOK in its own column (A156).
+///
+/// Phase 7 landed this as a scaffold: it split free from paid by joining `users.plan_id`, and
+/// left revenue and conversion `null` because there was no `payments` row to compute them
+/// from. **Phase 13 completes it** — revenue and conversion are real numbers now, and the
+/// split reads `usage_events.plan_id` with a `coalesce` fallback (A303), so a student who
+/// converts does not re-attribute their earlier spend. The properties this test has always
+/// asserted are the ones that survive: free is separate from paid, BYOK is separate from both,
+/// and the ceiling is attached by the route through `credits::ceiling_usd` (A148).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_compute(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -267,17 +271,20 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
     .await
     .unwrap();
 
-    // One free call, one paid call, and one BYOK call on the paid account.
-    for (user_id, cost, byok) in [
-        (free_id, 0.25_f64, false),
-        (paid_id, 1.50_f64, false),
-        (paid_id, 0.10_f64, true),
+    // One free call, one paid call, and one BYOK call on the paid account. The plan of record
+    // is written on the row, which is what makes the split independent of a later conversion.
+    for (user_id, plan, cost, byok) in [
+        (free_id, "free", 0.25_f64, false),
+        (paid_id, "pro", 1.50_f64, false),
+        (paid_id, "pro", 0.10_f64, true),
     ] {
         sqlx::query(
-            "insert into usage_events (user_id, action, credits, provider_cost_usd, byok)
-             values ($1, 'chat_message', 1, $2, $3)",
+            "insert into usage_events
+                (user_id, action, credits, plan_id, provider_cost_usd, byok)
+             values ($1, 'chat_message', 1, $2, $3, $4)",
         )
         .bind(user_id)
+        .bind(plan)
         .bind(cost)
         .bind(byok)
         .execute(&harness.state.pool)
@@ -287,58 +294,57 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
 
     let from = Utc::now() - Duration::days(1);
     let to = Utc::now() + Duration::days(1);
-    let report = stvdy_server::admin::margin_report(&harness.state.pool, from, to)
+    let report = stvdy_server::admin::margin_report(&harness.state.pool, from, to, 17889)
         .await
         .unwrap();
 
     let close = |left: f64, right: f64| (left - right).abs() < 1e-9;
-    assert!(
-        close(report.provider_cost.free_usd, 0.25),
-        "{:?}",
-        report.provider_cost
-    );
-    assert!(
-        close(report.provider_cost.paid_usd, 1.50),
-        "{:?}",
-        report.provider_cost
-    );
-    assert!(
-        close(report.provider_cost.byok_usd, 0.10),
-        "BYOK is its own column (A156): {:?}",
-        report.provider_cost
-    );
-
-    // Per plan, the same split, and BYOK is not inside either tier's figure.
-    let free_row = report
+    let month = report
+        .months
+        .iter()
+        .find(|month| !month.per_plan.is_empty())
+        .expect("a month with rows");
+    let free_row = month
         .per_plan
         .iter()
         .find(|row| row.plan_id == "free")
         .expect("the free plan's row");
     assert!(close(free_row.provider_cost_usd, 0.25), "{free_row:?}");
-    let paid_row = report
+    let paid_row = month
         .per_plan
         .iter()
         .find(|row| row.plan_id == "pro")
         .expect("the paid plan's row");
     assert!(close(paid_row.provider_cost_usd, 1.50), "{paid_row:?}");
-    assert!(close(paid_row.byok_cost_usd, 0.10), "{paid_row:?}");
-
-    // What cannot be computed yet is `null`, never `0`.
-    assert!(report.revenue.is_none(), "no `payments` rows exist yet");
     assert!(
-        report.conversion.is_none(),
-        "a conversion of 0 would be an invented number (gate 7(a))"
+        close(paid_row.byok_cost_usd, 0.10),
+        "BYOK is its own column (A156): {paid_row:?}"
     );
 
-    // The bound beside the spend: without it an admin cannot tell whether an account is
-    // at 40% or 95% of its ceiling, which is the number the report exists for. It comes
-    // from the config through `credits::ceiling_usd`, so it is the same figure the spend
-    // path compares against.
+    // The FX rate is printed as the input it is, so a reader can check the gross-margin
+    // arithmetic against the rate it used (A304).
+    assert_eq!(report.idr_per_usd, 17889);
+
+    // What cannot be computed yet is `null`, never `0`: no grants this month means no
+    // utilization, and no accounts to convert means no conversion ratio.
+    assert!(
+        month.free_utilization.is_none(),
+        "no free grants means no utilization, not 0%: {month:?}"
+    );
+    assert!(
+        month.conversion_of_free.is_none(),
+        "a conversion of 0 would be an invented number (gate 7(a)): {month:?}"
+    );
+
+    // The bound beside the spend: without it an admin cannot tell whether an account is at
+    // 40% or 95% of its ceiling, which is the number the report exists for. It comes from the
+    // config through `credits::ceiling_usd`, so it is the same figure the spend path compares
+    // against.
     //
-    // `margin_report` takes only the pool (Phase 13 consumes that signature by name), so
-    // it holds no config and leaves the ceiling `None` rather than inventing a figure —
-    // the route, the only caller that has the state, attaches it. The wire assertion
-    // below is therefore where the value is checked.
+    // `margin_report` takes the pool and the rate, not the config (Phase 13 consumes that
+    // signature by name), so it leaves the ceiling `None` rather than inventing a figure — the
+    // route, the only caller that has the state, attaches it. The wire assertion below is
+    // therefore where the value is checked.
     let ceiling = stvdy_server::credits::ceiling_usd(&harness.state, PlanId::Free);
     assert!(ceiling > 0.0, "the free plan has a configured ceiling");
     assert!(
@@ -360,12 +366,17 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["revenue"].is_null(), "{body}");
-    assert!(body["conversion"].is_null(), "{body}");
-    assert!(body["provider_cost"]["free_usd"].is_number(), "{body}");
-    // The ceiling reaches the wire, so an admin reads a percentage rather than a bare
-    // dollar figure.
-    let rows = body["per_plan"].as_array().expect("per_plan is an array");
+    assert_eq!(body["idr_per_usd"], 17889, "{body}");
+    assert!(
+        body["tripwires"]["free_utilization_over_30"].is_null(),
+        "{body}"
+    );
+    let rows = body["months"]
+        .as_array()
+        .expect("months is an array")
+        .iter()
+        .flat_map(|month| month["per_plan"].as_array().expect("per_plan"))
+        .collect::<Vec<_>>();
     let wire_free = rows
         .iter()
         .find(|row| row["plan_id"] == "free")
