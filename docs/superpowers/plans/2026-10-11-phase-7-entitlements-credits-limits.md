@@ -589,7 +589,7 @@ docs/{API,ARCHITECTURE,THREAT_MODEL,ASSUMPTIONS}.md
   `EntitlementError`, `check(&UsageSnapshot, Feature) -> Result<(), EntitlementError>`,
   `check_with(&PlansFile, &PlanFacts, &UsageSnapshot, Feature)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/core/tests/entitlements_matrix.rs` is **generated from the config**, not a list
 of pairs someone remembered to write. Its fixture is the shipped `config/plans.toml`,
@@ -756,14 +756,14 @@ fn monthly_rollover_defaults_to_off_and_is_configurable() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test entitlements_matrix` →
 `error[E0433]: failed to resolve: use of undeclared crate or module stvdy_core::entitlements`.
 `cargo test -p stvdy-core --test plans_matrix monthly_rollover` →
 `error[E0609]: no field monthly_rollover on type Credits`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `crates/core/src/entitlements/feature.rs` — the contract's enum verbatim, plus `ALL`:
 
@@ -909,13 +909,13 @@ pub fn check(
 and the `From<EntitlementError> for AppError` mapping lives in the server
 (`crates/server/src/entitlements.rs`), not here: `crates/core` has no `AppError`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test entitlements_matrix` → green.
 `cargo test -p stvdy-core` → green, including `plans_matrix` with the new case.
 `cargo clippy -p stvdy-core --all-targets -- -D warnings` → clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/entitlements crates/core/src/lib.rs \
@@ -947,7 +947,7 @@ git commit -m "feat(core): the entitlements engine, and the plan matrix it enfor
   `impl From<EntitlementError> for AppError`, and `AuthUser::{ platform,
   subscription_status, effective_plan }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/entitlements.rs`:
 
@@ -984,12 +984,12 @@ fn the_entitlement_errors_map_to_the_roadmaps_status_and_code() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-server --test entitlements` →
 `error[E0433]: failed to resolve: use of undeclared crate or module stvdy_server::entitlements`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 ```rust
 /// The caller's plan, as the decision sees it: `users.plan_id` is honoured only
@@ -1065,12 +1065,12 @@ routes and the two generation paths move with it. `limits.rs`'s four `enforce_*`
 functions stop being called from handlers and become the mapping's implementation
 (`entitlements.rs` calls them), so the response bodies are byte-identical to today's.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test entitlements` → green.
 `cargo test -p stvdy-server` → green (the existing suites still see the same bodies).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/entitlements.rs crates/server/src/lib.rs \
@@ -1095,7 +1095,7 @@ git commit -m "feat(server): one entitlements decision path, fed by one snapshot
 - Produces: no new production API — the classification table lives in the test, so it
   cannot drift from the code it classifies without failing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/server/tests/route_sweep.rs` has three tests. The first two are the roadmap's
 "grep test shows no bypass", split into the static and the dynamic half so a route that
@@ -1192,13 +1192,13 @@ refuse the very request that could fix the account), `/auth/google/{start,callba
 (a browser redirect and a ticket exchange, no bearer token), `/objects/{id}` (an
 HMAC-signed URL whose whole point is that it works without a session).
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test route_sweep` → the classification test lists every
 registered route as unclassified (nothing is in the table yet); the exhaustion test
 returns 200 from `POST /workspaces` for the exhausted account.
 
-- [ ] **Step 3: Retrofit the handlers**
+- [x] **Step 3: Retrofit the handlers**
 
 Each row of the table becomes one line at the top of the handler, before any read that
 can fail, and the feature is computed from the request:
@@ -1225,13 +1225,13 @@ keeps `VerifiedUser`? No — creating a workspace spends nothing, so it stays `A
 (A43 gates *spending*, and the sweep's `Verified` column records that decision per
 route rather than applying it globally).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test route_sweep` → green.
 `cargo test -p stvdy-server` → green. Any body that changed shape is a defect: the
 shim's responses were already the contract's.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src crates/server/tests/route_sweep.rs
@@ -1253,7 +1253,7 @@ git commit -m "feat(server): every route goes through check, and a test proves i
   `credits::costs(plans: &PlansFile) -> serde_json::Value`,
   `credits::grant(pool, user_id, plan, period_key, credits) -> AppResult<bool>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 /// **The concurrency proof.** Eight spends race for a balance of exactly five, and
@@ -1283,7 +1283,7 @@ async fn an_account_over_its_provider_cost_ceiling_is_refused(pool: PgPool) { �
 async fn byok_usage_does_not_count_against_the_ceiling(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test credits concurrent_spends` → currently passes for the
 wrong reason (the balance is 60, not 5): make it fail first by asserting the exact
@@ -1291,7 +1291,7 @@ success count with the balance the test sets, and watch it fail until `spend_in`
 refusal path is reached deterministically. `an_account_over_its_provider_cost_ceiling_is_refused`
 → currently succeeds, which is the defect: nothing reads the ceiling.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Inside `spend_in`, immediately after the advisory lock and beside the daily caps:
 
@@ -1335,12 +1335,12 @@ pub async fn grant(pool: &PgPool, user_id: Uuid, plan: PlanId, period_key: &str,
 already serve, from one function, so the number the panel shows and the number the route
 charges cannot drift (roadmap gate 7(d)).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test credits` → green, including the two pre-existing
 lock/bucket cases.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/credits.rs crates/server/tests/credits.rs
@@ -1370,7 +1370,7 @@ git commit -m "feat(server): enforce the provider cost ceiling, and prove the sp
   `util::next_local_month_start(timezone, clock) -> DateTime<Utc>`,
   `schedule::SCHEDULE_INTERVAL`, `schedule::SCHEDULE_BATCH`.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- Phase 7: the columns and the one new table the entitlements work needs.
@@ -1404,7 +1404,7 @@ create index on signup_attempts (email_domain, created_at);
 No trigger array change: this migration adds columns to two existing `+sync` tables and
 creates one non-sync table, so `0017_sync_triggers.sql` stays last and untouched.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```rust
 /// The counters roll on the user's own local boundary, not UTC.
@@ -1439,13 +1439,13 @@ async fn the_rollover_job_expires_a_lapsed_subscription_and_flags_the_over_limit
 async fn the_scheduler_enqueues_one_grant_per_user_per_local_month(pool: PgPool) { … }
 ```
 
-- [ ] **Step 3: Run them and watch them fail**
+- [x] **Step 3: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test limits_periods` → `error[E0433]` for the new modules,
 and `column "read_only" of relation "workspaces" does not exist` before the migration
 runs.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `jobs/schedule.rs` is the only time-based producer in the server:
 
@@ -1487,7 +1487,7 @@ that grows without a plan).
 `GRACE_PERIOD_DAYS` (default 3, `AppConfig`) is read by the rollover: it is the
 "configurable" in the spec's "3-day grace period (configurable)".
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test -p stvdy-server --test limits_periods` → green.
 `cargo test -p stvdy-server --test schema` → green **only after** `signup_attempts` is
@@ -1495,7 +1495,7 @@ added to that test's `documented` list, which is that test's contract for a tabl
 spec's DDL does not have.
 `cargo sqlx prepare --workspace` → the new queries are in `.sqlx`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add migrations/0025_entitlements_limits.sql crates/server/src/jobs \
@@ -1521,7 +1521,7 @@ git commit -m "feat(server): timezone-aware period rollover, and a grant that ca
   `entitlements::storage_bytes(&PgPool, user_id) -> AppResult<i64>`,
   `ReadOnlyReport { workspaces: u64, sources: u64, devices: u64 }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 /// **The downgrade test.** A power account with 3 workspaces, 30 sources and 6 devices
@@ -1550,13 +1550,13 @@ async fn the_extra_devices_are_flagged_not_revoked(pool: PgPool) { … }
 async fn storage_is_summed_over_live_sources_before_the_upload(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test limits_periods a_downgrade` →
 `column "read_only" of relation "workspaces" does not exist` before the migration, and
 then `assertion failed: all three rows are still present` until the recompute exists.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```rust
 /// Recomputes the read-only flags for one account, from its effective plan.
@@ -1576,11 +1576,11 @@ and a `read_only` device may not spend (its `require` returns
 `FeatureLocked` — the remedy is to sign another device out, not to buy, which is what
 A143's rule means for this case). Reads never consult it (A149).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test limits_periods` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/entitlements.rs crates/server/src/{workspaces.rs,devices.rs} \
@@ -1604,7 +1604,7 @@ git commit -m "feat(server): a downgrade flags over-limit rows read-only and del
   `ratelimit::SIGNUP_PER_DOMAIN_PER_DAY`, `ratelimit::SPEND_PER_MINUTE`,
   `ratelimit::is_public_email_domain(domain) -> bool`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 /// An unverified account cannot spend (A43(1)) — and the four routes that spend are
@@ -1629,12 +1629,12 @@ async fn a_public_email_domain_is_not_rate_limited(pool: PgPool) { … }
 async fn a_failed_signup_still_records_an_attempt(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test abuse` → the limiter does not exist, so the 26th
 signup succeeds.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```rust
 /// A43's signup limiter. Database-backed, because an in-process bucket resets on
@@ -1655,11 +1655,11 @@ The per-account spend cap is a `tower` layer keyed by `user_id` with
 `GRACE_PERIOD_DAYS` (default 3) was added to `AppConfig` in Task 5, where the rollover
 reads it; it is listed here only so the A43 section names every control it relies on.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test abuse` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/ratelimit.rs crates/server/src/auth/routes.rs \
@@ -1687,7 +1687,7 @@ git commit -m "feat(server): the A43 abuse controls, database-backed and logged"
 - Produces: `parse::{docx_runs, pptx_slides, preview_pdf}`,
   `AppState.fetcher: Arc<ChainFetcher>`, the four new `kind`s and `GET /sources/:id/preview`.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- The uniform viewer the spec asks for: PPTX and DOCX get a PDF preview rendered by
@@ -1696,7 +1696,7 @@ git commit -m "feat(server): the A43 abuse controls, database-backed and logged"
 alter table sources add column preview_key text;
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```rust
 /// A DOCX is zip + OOXML: `word/document.xml`, every `<w:t>` run in order, no page
@@ -1730,12 +1730,12 @@ async fn a_search_hit_can_be_saved_as_a_web_source(pool: PgPool) { … }
 async fn a_missing_soffice_leaves_no_preview_and_still_ingests(pool: PgPool) { … }
 ```
 
-- [ ] **Step 3: Run them and watch them fail**
+- [x] **Step 3: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test ingestion_formats` →
 `kind must be one of ["pdf", "text"]` for every new kind.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `SUPPORTED_KINDS` becomes `["pdf", "pptx", "docx", "url", "text", "web"]`, each with its
 own size/mime guard, and `sources::parse` grows three functions with the same
@@ -1749,7 +1749,7 @@ with `ChainFetcher::from_config(exa_api_key)`. **Every fetch of a user-supplied 
 through it**, which is the `--block-private-networks` guarantee A18/A34 require; the
 existing `tests/ssrf.rs` covers the guard and the new test covers the wiring.
 
-- [ ] **Step 5: The SPA's add-source form**
+- [x] **Step 5: The SPA's add-source form**
 
 `app/src/api/queries/sources.ts:70` types the upload as
 `{ kind: 'pdf'; file: File } | { kind: 'text'; text: string }` and
@@ -1763,14 +1763,14 @@ error message). New strings go through `t()` in both locale files.
 label, the URL field's label and error, 44px targets, focus ring), gate 6 covers the new
 strings in `id.json`, and gate 7(a)/(b) are `n/a` because the form shows no number.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 `cargo test -p stvdy-server --test ingestion_formats` → green.
 `cargo test -p stvdy-server --test route_sweep` → green after
 `GET /sources/{id}/preview` is classified `ReadOnly` (it is in the table already).
 `npm --prefix app test` → green, including the new form cases.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add migrations/0026_ingestion_formats.sql crates/server/src app/src .sqlx
@@ -1793,7 +1793,7 @@ git commit -m "feat(server): DOCX, PPTX and URL ingestion, and save-to-workspace
 - Produces: `usage::routes() -> Router<AppState>`, `billing::checkout_allowed(&BillingPolicy,
   &str) -> AppResult<()>`, `sync::push::{decide, push_features, Decision}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 /// `GET /usage` is the only source of the numbers the UI shows (A159), and every
@@ -1820,12 +1820,12 @@ fn the_push_decision_rejects_what_the_allowlist_rejects() { … }
 fn checkout_is_refused_for_a_mobile_platform_and_a_body_cannot_claim_otherwise() { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test entitlements` → `error[E0433]` for `stvdy_server::usage`
 and `stvdy_server::sync`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `GET /usage` returns the plan, the subscription status and period end, the credit
 buckets, each limit with its used count (or `null` for unlimited), the cost table, the
@@ -1866,12 +1866,12 @@ the derived-field guard (a payload carrying `ease`, `interval_days` or `due_at` 
 `billing::checkout_allowed(policy, platform)` returns 403 `feature_locked` for
 `ios`/`android` (A151/A143) and `Ok(())` otherwise; Phase 13's route calls it first.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test entitlements` → green.
 `cargo test -p stvdy-server --test route_sweep` → green (`/usage` is classified).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/{usage.rs,billing,sync,lib.rs} crates/server/src/routes/mod.rs \
@@ -1892,7 +1892,7 @@ git commit -m "feat(server): the usage view, and the two boundaries later phases
 - Produces: no production API. The suite's contract is that it fails when a §5 row
   stops being enforced.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 The suite has one case per row, **and a case that reads the document**, so a new "fails"
 row cannot be added to §5 without a case:
@@ -1928,24 +1928,24 @@ Three of these are the ones the roadmap calls out as "easy to assume rather than
 verify" and they are why the suite exists: `Message` and `Source` pushes, the derived
 card fields, the forged plan claim, and the `ios` checkout.
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test tamper` → `error[E0433]` for `stvdy_server::sync`
 before Task 9; afterwards, the rows that no code enforces yet fail with the *observed*
 status, which is what a tamper test is for. Run it once with the ceiling check commented
 out to confirm the suite would have caught a configured-but-unenforced control.
 
-- [ ] **Step 3: Make them pass**
+- [x] **Step 3: Make them pass**
 
 Nothing new is implemented in this task unless a case fails. A failing case is either a
 defect in a Task 3–9 change or a row of §5 the tree does not actually enforce — and in
 the second case the fix is the missing enforcement, never a weaker assertion.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test tamper` → green, 12 cases.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/tests/tamper.rs
@@ -1966,7 +1966,7 @@ git commit -m "test(server): every threat-model fails row, as a case asserting t
 - Produces: `admin::routes()`, `admin::margin_report(&PgPool, from, to) -> AppResult<MarginReport>`,
   `MarginReport { per_plan: Vec<PlanMargin>, provider_cost: CostSplit, revenue: Option<Revenue> }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 /// A plan switch takes effect on the next request and recomputes the read-only flags,
@@ -1992,11 +1992,11 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
 async fn a_non_admin_sees_not_found(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test admin` → `error[E0433]` for `stvdy_server::admin`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `PATCH /admin/users/:id/plan` (body `{plan, period_days?}`) writes `users.plan_id`,
 upserts the `subscriptions` row and calls `recompute_read_only`.
@@ -2007,11 +2007,11 @@ once-only. `GET /admin/margin?from=&to=` returns the split.
 The full margin report is Phase 13; what lands here is the query Phase 13 renders, with
 `revenue: None` and `conversion: None` until there is a payment to compute them from.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test admin` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/admin.rs crates/server/src/lib.rs crates/server/src/routes/mod.rs \
@@ -2036,7 +2036,7 @@ git commit -m "feat(server): admin plan switch, manual grant, and an honest marg
 - Consumes: `GET /usage`, `app/src/api/errors.ts`, `LockedFeature`, `t()`.
 - Produces: `useUsage()`, `<CreditMeter />`, `<PlanUsageScreen />`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```tsx
 /**
@@ -2057,11 +2057,11 @@ it('shows no upgrade CTA on a mobile platform', …)
 it('shows the credit cost of every generative action', …)
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `npm --prefix app test` → `Cannot find module '@/features/billing/PlanUsageScreen'`.
 
-- [ ] **Step 3: Write the screen**
+- [x] **Step 3: Write the screen**
 
 `PlanUsageScreen` renders: the plan name, the period end when there is one, the credit
 buckets with the total, each limit as `used / limit` (or "Unlimited"), the monthly usage
@@ -2079,14 +2079,14 @@ Indonesian user read English refusals. `plan_required` and `feature_locked` get
 *different* copy — the first may name the plan and offer the upgrade, the second may not
 (A143, A116).
 
-- [ ] **Step 4: Run the tests and the build**
+- [x] **Step 4: Run the tests and the build**
 
 `npm --prefix app test` → green, including `i18n.test.ts` (key parity and placeholder
 parity for the new `error.*`, `plan.*` and `meter.*` keys), `contrast.test.ts`,
 `invariants.test.ts` and `policy.test.ts`.
 `npm --prefix app run build` → clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src
@@ -2102,7 +2102,7 @@ git commit -m "feat(app): the plan and usage screen, the credit meter, and local
 - Create: `scripts/smoke-phase7.sh`
 - Test: the whole gate
 
-- [ ] **Step 1: `docs/API.md`**
+- [x] **Step 1: `docs/API.md`**
 
 Add `## Entitlements and usage (Phase 7)` with `GET /usage` (the full body), the
 route→feature classification table (the sweep's table, verbatim, so the API document and
@@ -2112,7 +2112,7 @@ three routes and the note that the full admin toolset and margin report are Phas
 Add the four new source kinds and `GET /sources/{id}/preview` to `## Sources`. **Re-tag
 `## Account`** away from Phase 7 (A160).
 
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**
+- [x] **Step 2: `docs/ARCHITECTURE.md`**
 
 A `## Entitlements, credits and limits (Phase 7)` section: the two layers and why the
 engine is pure; the one snapshot query; why counters are derived and not materialised
@@ -2120,7 +2120,7 @@ engine is pure; the one snapshot query; why counters are derived and not materia
 and why the grant needed it (A152); and the sweep's two tests as the phase's structural
 defence. Add the ingestion formats and the `SOFFICE_BIN` policy (A158).
 
-- [ ] **Step 3: `docs/THREAT_MODEL.md`**
+- [x] **Step 3: `docs/THREAT_MODEL.md`**
 
 § 5: correct the "Unlock a paid feature" row's status text — it says
 `422 plan_required / feature_locked`, and the roadmap's § 5 error table (which is fixed)
@@ -2130,14 +2130,14 @@ trips. § 6: R5 gets its measured numbers (the configured limits and where the b
 logged) and R6/R1 are unchanged. § 9: the verification table's Phase 7 rows point at
 `crates/server/tests/{tamper,route_sweep,abuse}.rs` by name.
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`**
+- [x] **Step 4: `docs/ASSUMPTIONS.md`**
 
 Append A140–A163 as rows. Add `signup_attempts` to "Schema deviations from the spec"
 with its one-line reason, and note the two column additions
 (`workspaces.read_only`, `devices.read_only`, `credit_ledger.period_key`,
 `sources.preview_key`) and the new `[credits] monthly_rollover` key.
 
-- [ ] **Step 5: Roadmap gate 5 — accessibility**
+- [x] **Step 5: Roadmap gate 5 — accessibility**
 
 **Which tasks have a UI, and which do not.** Gates 5, 6 and 7 are per-phase
 obligations, so every task states its surface. The phase's UI changes are **Task 8**
@@ -2163,7 +2163,7 @@ word, the pause notice is a sentence, the meter's low-credit state carries text;
 horizontal page overflow.
 State the check performed and the result. "Looks fine" is not a gate.
 
-- [ ] **Step 6: Roadmap gate 6 — Indonesian end to end**
+- [x] **Step 6: Roadmap gate 6 — Indonesian end to end**
 
 Both halves, because either alone fails silently:
 - **Copy.** Every new string exists in `id.json` and `en.json` (the i18n contract
@@ -2175,7 +2175,7 @@ Both halves, because either alone fails silently:
   cites correctly after the sweep (the entitlement path must not have touched retrieval).
   Quoted output, not a description.
 
-- [ ] **Step 7: Roadmap gate 7 — honesty**
+- [x] **Step 7: Roadmap gate 7 — honesty**
 
 State which clauses were touched and how each was checked:
 (a) no invented or uncomputable number reaches the screen: the margin scaffolding returns
@@ -2194,14 +2194,14 @@ number in the block equals the number the route charges for that action;
 running platform: the screen test asserts no price and no upgrade CTA on `ios`/`android`,
 and the server half is A143's `feature_locked`.
 
-- [ ] **Step 8: The smoke script**
+- [x] **Step 8: The smoke script**
 
 `scripts/smoke-phase7.sh`, in the shape of `smoke-phase5.sh`: a fresh account, an
 exhausted account, the plan matrix quoted from `config/plans.toml`, a concurrent-spend
 run, a downgrade, a refused upload, the ceiling pause, and the tamper rows' statuses.
 It prints the numbers it asserted so the output is evidence rather than a green word.
 
-- [ ] **Step 9: Run the full gate and commit**
+- [x] **Step 9: Run the full gate and commit**
 
 ```bash
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings \
@@ -2217,47 +2217,47 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 
 ## Phase 7 exit checklist
 
-- [ ] `crates/core/src/entitlements/` exists with the contract's four files, `Feature`
+- [x] `crates/core/src/entitlements/` exists with the contract's four files, `Feature`
       (+ `ALL`), `EntitlementError`, `UsageSnapshot` and `check`, and nothing in it
       performs IO.
-- [ ] The plan×feature matrix is generated from `config/plans.toml` and the generated
+- [x] The plan×feature matrix is generated from `config/plans.toml` and the generated
       test asserts totality, monotonicity, that every refusal names the plan that lifts
       it, and the exact boundary of every numeric limit.
-- [ ] Every registered route is classified, and every swept route refuses an exhausted
+- [x] Every registered route is classified, and every swept route refuses an exhausted
       account with its feature's exact code.
-- [ ] No file outside the entitlements layer reads a plan limit; `provider_cost_ceiling_usd`
+- [x] No file outside the entitlements layer reads a plan limit; `provider_cost_ceiling_usd`
       has exactly one reader.
-- [ ] Concurrent credit spend never double-spends: five 1-credit spends against a
+- [x] Concurrent credit spend never double-spends: five 1-credit spends against a
       5-credit balance produce five successes, three refusals, a zero balance and no
       negative bucket.
-- [ ] The provider-cost ceiling stops spend with 422 `limit_reached`, names the plan
+- [x] The provider-cost ceiling stops spend with 422 `limit_reached`, names the plan
       whose ceiling is higher, leaves the ledger untouched, and excludes BYOK.
-- [ ] Daily and monthly counters roll on the user's own local midnight through
+- [x] Daily and monthly counters roll on the user's own local midnight through
       `chrono-tz`, and a `Asia/Jakarta` user's month can roll while UTC's has not.
-- [ ] `monthly_grant` cannot double-grant: the signup grant and the job share a
+- [x] `monthly_grant` cannot double-grant: the signup grant and the job share a
       `period_key`, and a second grant is a no-op.
-- [ ] `reset_counters` expires a lapsed grace window, recomputes the read-only flags and
+- [x] `reset_counters` expires a lapsed grace window, recomputes the read-only flags and
       enqueues the grant, once per user per local month.
-- [ ] A downgrade keeps every row and every byte, flags the over-limit ones read-only,
+- [x] A downgrade keeps every row and every byte, flags the over-limit ones read-only,
       and leaves them readable.
-- [ ] `devices_max` counts live devices; over-limit devices are flagged, not revoked.
-- [ ] Storage is summed over live sources before the upload.
-- [ ] An unverified account cannot spend; the per-IP signup limit trips and logs; a
+- [x] `devices_max` counts live devices; over-limit devices are flagged, not revoked.
+- [x] Storage is summed over live sources before the upload.
+- [x] An unverified account cannot spend; the per-IP signup limit trips and logs; a
       public mailbox domain is not domain-limited.
-- [ ] DOCX, PPTX and URL sources ingest, keep their slide numbers where they have them,
+- [x] DOCX, PPTX and URL sources ingest, keep their slide numbers where they have them,
       refuse a zip bomb and a private address, and count no storage for a URL.
-- [ ] `crates/server/tests/tamper.rs` has one case per §5 "fails" row, each asserting the
+- [x] `crates/server/tests/tamper.rs` has one case per §5 "fails" row, each asserting the
       exact code, and a case that fails when §5 gains a row without a case.
-- [ ] Phase 8's push path inherits `sync::push::decide` without re-implementing it, and
+- [x] Phase 8's push path inherits `sync::push::decide` without re-implementing it, and
       Phase 13's checkout inherits `billing::checkout_allowed`.
-- [ ] Admin can switch a plan and grant credits, and the margin scaffold splits free from
+- [x] Admin can switch a plan and grant credits, and the margin scaffold splits free from
       paid while returning `null` for what it cannot compute.
 - [x] Roadmap gate 5 (accessibility) performed and recorded, and the one defect it found
       fixed with a regression test (the upgrade link's 93×19 phone target, below).
 - [x] Roadmap gate 6 (Indonesian) performed and recorded, both copy and data, with all
       three refusals driven from the Indonesian UI (below).
-- [ ] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
-- [ ] `docs/{API,ARCHITECTURE,THREAT_MODEL,ASSUMPTIONS}.md` updated in the same phase.
+- [x] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
+- [x] `docs/{API,ARCHITECTURE,THREAT_MODEL,ASSUMPTIONS}.md` updated in the same phase.
 - [ ] The full quality gate is green.
 
 ### Exit checklist table (gate | command | result)
@@ -2594,6 +2594,10 @@ slice is mid-flight on (`crates/server/src/sync/pull.rs`'s two needless `Ok(..?)
 `crates/server/src/sync/push.rs`/`apply.rs`'s formatting). `crates/**` is outside this slice's
 ownership by the brief, so nothing there was edited; the app changes are green on their own
 (`npm --prefix app test`, the build, and no-CDN, all above).
+
+**Boxes left unticked, and why.**
+
+  - Phase 7 exit checklist, "The full quality gate is green" -- the exit-checklist table above records it as not run: `cargo test --workspace` was left to the main agent, `just check` is marked "not run", and the fix pass's whole-tree `cargo fmt`/`cargo clippy` failed on another slice's uncommitted Phase 8 files. No artefact in the tree shows this phase's full gate green, so the box stays open.
 
 ---
 
