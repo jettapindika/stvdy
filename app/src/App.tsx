@@ -4,6 +4,7 @@ import { Navigate, Outlet } from 'react-router'
 import { Shell } from './components/layout/Shell'
 import { LoadingState } from './components/ui/States'
 import { useSession } from './features/auth/useSession'
+import { usePushRegistration } from './features/notifications/registerPush'
 import { useLocalNotifications } from './features/reminders/useLocalNotifications'
 
 /**
@@ -32,6 +33,10 @@ export function App() {
   // and no rows, and firing the reads anyway would be four 401s on the sign-in
   // screen.
   useLocalNotifications(signedIn)
+  // The push token, registered against this device's row once there is a session
+  // (A329). The hook is a no-op where the platform has no push capability — the web
+  // build and desktop — and it re-registers on every token the OS re-issues.
+  usePushRegistration(signedIn)
 
   if (session.status === 'loading') {
     return (

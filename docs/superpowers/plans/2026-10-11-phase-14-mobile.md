@@ -1307,22 +1307,77 @@ three routes, through a cold start, with the credential precedence preserved. A
 foreign host, a `userinfo` URL and an `http://` link are all refused;
 `IgnoreReason::NotOurHost` is new so the two refusals are distinguishable in a log.
 
-- [ ] **Step 5: Run it** — **not run: `app/**` is fenced.**
+- [x] **Step 5: Run it**
 
-`npm --prefix app test -- notifications` and `npm --prefix app run build` are the SPA
-half's, and the file list this step belongs to (`platform/types.ts`, `platform/mobile.ts`,
-`features/notifications/**`, `router.tsx`) is not this slice's. What the SPA half needs
-is written out in Step 6 below so the slice that holds `app/**` can implement it
-without re-deriving it.
+`npm --prefix app test` → **69 files, 630 tests, 0 failed**; `npx tsc --noEmit -p app`
+exits 0; `npm --prefix app run build` exits 0.
+
+**The SPA half is done in this slice** — the commit that adds
+`app/src/features/notifications/**`, the platform contract's `PushApi`, and the mobile
+adapter's one implementation of it. Five things the shell slice could not have known came
+out of building it, each a measurement rather than a preference:
+
+1. **`Platform.push` is optional, and that is the *third* convention only if you read
+   the file as having two.** It does not: `PlatformCapabilities.configureSync?` is
+   already optional for the one other capability that only the native adapters have, so
+   `push?: PushApi` is the same shape applied to the same kind of fact. What the file
+   *does* have two of is `undefined`-as-absence for a capability whose caller has a
+   remedy (`checkForUpdate`'s `{kind: 'unsupported'}` is a value, `sync.write`'s refusal
+   names the REST route) and a throw for one whose caller has none
+   (`webPlatform().secureStore.set`). Push is neither: a browser tab has no APNs/FCM
+   token to mint and no notification of its own to be tapped, so there is no value to
+   return and nothing for a caller to do — which is why the capability is *absent*
+   rather than degrading, and why the caller must say what it does instead.
+2. **The plugin's token event is `addPluginListener`, not `listen`.** The pinned
+   `tauri-plugin-notifications` emits `push-token` through the **mobile plugin channel**
+   (`register_listener` / `remove_listener`, `Channel`), not the webview event bus, so
+   `@tauri-apps/api/event`'s `listen` never sees it. `addPluginListener` from
+   `@tauri-apps/api/core` is the wrapper for that channel, and the event names are the
+   plugin's own (`push-token`, `notificationClicked`).
+3. **The cold-start tap buffer is the plugin's, not ours.** A tap that *launched* the
+   app is held by the plugin (`pendingNotificationClick`, both platforms) and replayed
+   the moment `set_click_listener_active` flips true — which makes that call the
+   notification half of the shell's `deep_link_current`. It is deliberately flipped back
+   to `false` on unsubscribe: the plugin only *buffers* while no listener claims the
+   event, so leaving it true would throw the next tap away instead of holding it for
+   whoever mounts next.
+4. **The second buffer — the session — is the SPA's.** The replayed tap arrives before
+   `useSession` has exchanged the stored refresh token, so `NotificationRouter` holds the
+   path in state and spends it when the session arrives. Measured, not assumed: with
+   `!signedIn` removed from that guard the two cold-start cases fail
+   (`expected '/tasks' to be '/'`).
+5. **A tap names a destination through the server's own `data` keys.** The push payload
+   is `reminders.rs`'s `{reminder_id, kind}`, so `notificationTarget` reads those two
+   names rather than inventing a second vocabulary; a payload naming nothing routes
+   nothing, which is a real case rather than a defensive one — the plugin emits the same
+   click event for a **local** notification, and that carries no payload at all.
+
+**Two assertions in the SPA tests were vacuous when first written and are not now.**
+`expect(element).toHaveTextContent('/')` is a *substring* check that every absolute path
+satisfies, so the cold-start cases passed against a router that navigated immediately;
+they compare `textContent` exactly. And the tap's re-render has to be flushed through
+`act` before the assertion, or the effect that spends the buffer has not run yet. Both
+were found by reverting the line each guards and watching it stay green.
+
+**Unverified:** no APNs/FCM registration (no Apple Developer account, no Firebase
+project), no tap-to-open cold or warm, no device. The `PUT` is exercised against a
+fabricated token in a test, and the plugin's own `register_listener` channel is exercised
+against a fake — neither is a device.
 
 - [x] **Step 6: Commit**
 
 ```
-git commit -am "Phase 14 Task 6: push token registration + deep-link/notification routing"
+git commit -- app/src/platform/types.ts app/src/platform/index.ts \
+  app/src/platform/mobile.ts app/src/platform/adapter.test.ts \
+  app/src/features/notifications/ app/src/router.tsx app/src/App.tsx \
+  app/src/test/harness.ts docs/superpowers/plans/2026-10-11-phase-14-mobile.md
 ```
 
-**The Rust half is done, and measured: `866a0d2`. The SPA half is not, and `app/**`
-is fenced — what it needs is written out below.**
+**Two commits, and neither is `git commit -am`** — for the reason Task 1's Step 6
+records: `-a` stages every tracked modification in the tree, and other slices' work is in
+it (`scripts/measure-mobile.mjs` was mid-edit while this landed). The Rust half is
+`866a0d2`; the SPA half is the commit that adds `app/src/features/notifications/`, with
+explicit paths and `git diff --cached --stat` read first.
 
 **Two schemes, one vocabulary.** `deeplink::classify` accepts
 `https://app.stvdy/<route>` as well as `stvdy://<route>` and reduces both to the same
@@ -1350,27 +1405,35 @@ well, so a token that could only be refused never becomes a round trip; a refusa
 carries the status and the server's body. `tests/push.rs` is **7 passed**, including a
 real PUT against a scratch HTTP server.
 
-**What the SPA half needs, precisely** (for whoever holds `app/**`):
-- `app/src/platform/types.ts` — a `PushApi` with `token(): Promise<{provider, token}>`
-  wrapping the shell's `push_token` command, `onToken(cb)` over the plugin's token
-  event, and `onNotification(cb)`.
-- `app/src/features/notifications/registerPush.ts` — `registerPush(deviceId)`: call
-  `platform.push.token()`, then `api.put('/devices/{deviceId}/push-token', body)`;
-  re-register on every token-refresh event (A329).
-- `app/src/features/notifications/NotificationRouter.tsx` — map a notification's
-  payload to a route (`workspace`/`task`/`reminder`) and navigate, buffering the tap
-  when the app was cold-started (the shell's `deep_link_current` is the cold-start
-  read for links; a notification tap needs the equivalent buffering).
-- The test the plan names: `registerPush.test.tsx` asserting the `PUT` body is
-  `{provider: 'apns', token: 'tok-1'}` and an adapter case that `platform.push.onToken`
-  forwards the shell's event.
+**What the SPA half holds now**, and the two places it departed from the request above:
+
+- `app/src/platform/types.ts` — `PushApi` (`token`, `onToken`, `onNotification`) plus
+  `PushToken` and `NotificationTap`, and `Platform.push?: PushApi` — **optional**, because
+  the capability is absent rather than degrading on the platforms that have no push
+  provider (see point 1 of Step 5).
+- `app/src/platform/mobile.ts` — the only implementation: `token()` over the shell's
+  `push_token` command, `onToken` over the plugin's `push-token` channel, and
+  `onNotification` over `notificationClicked`, activating the plugin's click listener so
+  a cold-start tap is replayed.
+- `app/src/features/notifications/registerPush.ts` — `registerPush(deviceId)` PUTs
+  `{provider, token}` to `/devices/{deviceId}/push-token`, `watchPushToken` re-registers
+  on every rotation, and `usePushRegistration(signedIn)` mounts both from `App`.
+- `app/src/features/notifications/NotificationRouter.tsx` — `notificationTarget` /
+  `notificationPath` (pure, over the server's `{reminder_id, kind}` and
+  `{workspace_id, task_id}` keys) and the buffered subscription. It is a **sibling** of
+  `DeepLinkHandler` in `router.tsx` and renders nothing: a tap moves the URL
+  (`useNavigate`) where a link renders a screen, so it is a side effect at the root
+  rather than a layout.
+- Tests: `registerPush.test.tsx` (10 — the PUT body `{provider: 'apns', token: 'tok-1'}`,
+  the rotation, the refusal, and the absent-capability path),
+  `NotificationRouter.test.tsx` (9 — the mapping table and the two cold-start cases), and
+  four cases in `app/src/platform/adapter.test.ts` including that `onToken` forwards the
+  plugin's event and that `push` is absent on web and desktop.
 
 **Unverified:** no APNs/FCM registration (no Apple Developer account, no Firebase
-project), no tap-to-open cold or warm, no device. The PUT is exercised against a
-scratch server with a fabricated token.
-
-```
-```
+project), no tap-to-open cold or warm, no device. The `PUT` is exercised against a
+fabricated token in a test — there is no scratch server on this path; the shell's own
+`tests/push.rs` is the one that PUTs to a real scratch HTTP server.
 
 ---
 

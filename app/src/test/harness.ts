@@ -3,7 +3,10 @@ import { vi } from 'vitest'
 import {
   installPlatform,
   type DeepLinkIntent,
+  type NotificationTap,
   type PlatformKind,
+  type PushApi,
+  type PushToken,
   type Runtime,
   type SecureStore,
   type SyncApi,
@@ -142,6 +145,76 @@ function fakeSync(overrides?: Partial<SyncApi>): { api: SyncApi; fake: FakeSync 
   return { api, fake }
 }
 
+/**
+ * A push capability a test can drive, installed the way a phone has one.
+ *
+ * Push is the one capability `Platform` declares as optional, so the fake has to be
+ * able to produce *both* states: `installFakePlatform` leaves `push` absent unless a
+ * test asks for it, which is what makes the absent-capability path assertable rather
+ * than assumed. When it is installed, `emitToken` is what the plugin's rotation event
+ * would do and `emitNotification` is a tap.
+ */
+export interface FakePush {
+  /** The token `token()` answers with, and how many times it was asked. */
+  token(): PushToken
+  readonly asks: number
+  /** Delivers a rotation to every `onToken` subscriber, as the plugin's event does. */
+  emitToken(token: string): void
+  /** Delivers a tap to every `onNotification` subscriber. */
+  emitNotification(tap: NotificationTap): void
+  /** How many subscribers are live, for asserting an unsubscribe actually ran. */
+  readonly tokenSubscribers: number
+  readonly notificationSubscribers: number
+}
+
+function fakePush(initial: PushToken): { api: PushApi; fake: FakePush } {
+  let current = initial
+  let asks = 0
+  const tokenHandlers = new Set<(token: string) => void>()
+  const notificationHandlers = new Set<(tap: NotificationTap) => void>()
+
+  const fake: FakePush = {
+    token: () => current,
+    get asks() {
+      return asks
+    },
+    emitToken(token) {
+      current = { ...current, token }
+      for (const handler of tokenHandlers) handler(token)
+    },
+    emitNotification(tap) {
+      for (const handler of notificationHandlers) handler(tap)
+    },
+    get tokenSubscribers() {
+      return tokenHandlers.size
+    },
+    get notificationSubscribers() {
+      return notificationHandlers.size
+    },
+  }
+
+  const api: PushApi = {
+    async token() {
+      asks += 1
+      return current
+    },
+    async onToken(handler) {
+      tokenHandlers.add(handler)
+      return () => {
+        tokenHandlers.delete(handler)
+      }
+    },
+    async onNotification(handler) {
+      notificationHandlers.add(handler)
+      return () => {
+        notificationHandlers.delete(handler)
+      }
+    },
+  }
+
+  return { api, fake }
+}
+
 export function installFakePlatform(
   kind: PlatformKind = 'web',
   options: {
@@ -160,8 +233,23 @@ export function installFakePlatform(
     }
     /** Overridden so a test can render the native-only paths (A14). */
     runtime?: Runtime
+    /**
+     * Installs a push capability, which is what a phone has and a browser does not.
+     *
+     * Absent by default, and that default is the assertion: `Platform.push` is
+     * optional precisely so the web build and desktop can be without it, and a fake
+     * that always installed one would make every test exercise a platform that does
+     * not exist while the absent path — the one that ships to every non-phone —
+     * went untested.
+     */
+    push?: PushToken
   } = {},
-): FakeSecureStore & { deepLinks: FakeDeepLinks; opened: string[]; sync: FakeSync } {
+): FakeSecureStore & {
+  deepLinks: FakeDeepLinks
+  opened: string[]
+  sync: FakeSync
+  push: FakePush | null
+} {
   const values = new Map<string, string>()
   const deleted: string[] = []
   // Every URL the app handed to the system browser, in order. Recorded rather
@@ -197,6 +285,7 @@ export function installFakePlatform(
   }
 
   const { api: syncApi, fake: sync } = fakeSync(options.sync)
+  const push = options.push === undefined ? null : fakePush(options.push)
 
   installPlatform(
     {
@@ -209,6 +298,7 @@ export function installFakePlatform(
       secureStore,
       sync: syncApi,
       ...(options.update ?? {}),
+      ...(push === null ? {} : { push: push.api }),
       async openExternal(url) {
         opened.push(url)
       },
@@ -237,7 +327,7 @@ export function installFakePlatform(
       },
     },
   )
-  return { values, deleted, deepLinks, opened, sync }
+  return { values, deleted, deepLinks, opened, sync, push: push?.fake ?? null }
 }
 
 /**

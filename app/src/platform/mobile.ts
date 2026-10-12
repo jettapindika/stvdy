@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { addPluginListener, invoke } from '@tauri-apps/api/core'
 import { impactFeedback, notificationFeedback } from '@tauri-apps/plugin-haptics'
 import {
   isPermissionGranted,
@@ -8,7 +8,7 @@ import {
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { desktopPlatform, type NativePlatform } from './desktop'
-import type { PlatformKind } from './types'
+import type { NotificationTap, PlatformKind, PushToken } from './types'
 
 /**
  * Tauri adapter for iOS and Android.
@@ -53,6 +53,68 @@ export function mobilePlatform(kind: PlatformKind): NativePlatform {
     },
 
     openExternal: (url) => openUrl(url),
+
+    /**
+     * Push, which is the one capability that exists here and nowhere else (A329).
+     *
+     * Three things about the shape, each of which is a decision rather than a
+     * transcription:
+     *
+     * 1. **`token()` is the shell's command, not the plugin's.** The shell is where
+     *    the provider is decided (`push::provider_for`), where the token is checked
+     *    non-blank before it can become a round trip, and where the token is kept out
+     *    of the log. Going to the plugin directly would be a second provider mapping
+     *    and a second validation.
+     * 2. **`onToken` is the plugin's event, because a rotation is the plugin's to
+     *    report.** APNs/FCM mint a new token and tell the plugin; the shell has no
+     *    event for it, and the SPA has no other way to hear it. The callback hands
+     *    over the token string only — the caller re-reads the pair through `token()`
+     *    so there is still exactly one provider mapping.
+     * 3. **`onNotification` drains the plugin's cold-start buffer.** A tap that
+     *    launched the app arrives before any listener exists, and the plugin holds it
+     *    (`pendingNotificationClick`) until something says it is listening. This is
+     *    the notification half of the shell's `deep_link_current`: without the
+     *    activation below, a tap that opened the app is the tap that does nothing.
+     */
+    push: {
+      async token() {
+        return await invoke<PushToken>('push_token')
+      },
+
+      async onToken(handler) {
+        // `addPluginListener` is the wrapper for the `register_listener` command the
+        // plugin implements natively on mobile; its event names are the plugin's
+        // own (`push-token`, `notificationClicked`), not ours.
+        const listener = await addPluginListener<{ token: string }>(
+          'notifications',
+          'push-token',
+          (payload) => handler(payload.token),
+        )
+        return () => {
+          void listener.unregister()
+        }
+      },
+
+      async onNotification(handler) {
+        const listener = await addPluginListener<NotificationTap>(
+          'notifications',
+          'notificationClicked',
+          handler,
+        )
+        // Activating *after* the listener is registered is the order that matters:
+        // the plugin replays a held tap the moment this flips true, so flipping it
+        // first would hand the tap to a channel nothing is reading.
+        await invoke('plugin:notifications|set_click_listener_active', { active: true })
+        return () => {
+          // Back to holding, not to dropping. The plugin only *buffers* a tap while
+          // no listener claims the event, so leaving this true after the last
+          // subscriber left would throw the next tap away instead of keeping it for
+          // whoever mounts next.
+          void invoke('plugin:notifications|set_click_listener_active', { active: false })
+          void listener.unregister()
+        }
+      },
+    },
 
     async haptic(hapticKind) {
       if (hapticKind === 'success') {

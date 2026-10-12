@@ -89,6 +89,87 @@ export interface NotificationsApi {
   schedule(title: string, body: string, at: Date): Promise<void>
 }
 
+/**
+ * This install's push token, as the shell reports it (A329).
+ *
+ * `provider` is derived by the **shell** from the platform — `"apns"` on iOS, `"fcm"`
+ * on Android — and not read from the token, because the server's `PUSH_PROVIDERS` is
+ * a closed set and a client that guessed it wrong would write a row that never
+ * delivers. It is a plain `string` here rather than a union for the same reason: the
+ * vocabulary is `push::provider_for`'s, and a second union in this file would be a
+ * second place for the two to disagree.
+ */
+export interface PushToken {
+  /** `"apns"` or `"fcm"`, as `push::provider_for` decided. */
+  provider: string
+  token: string
+}
+
+/**
+ * A notification the student tapped, as the plugin delivers it.
+ *
+ * `data` carries the push payload's data keys, which for a reminder are the
+ * `reminder_id` and `kind` the server sent. It is optional because the plugin emits
+ * the same click event for a **local** notification — one of
+ * `NotificationsApi.schedule`'s — and that has no payload at all, so the router has
+ * to handle a tap that says nothing about where it came from.
+ */
+export interface NotificationTap {
+  /** The plugin's own notification id, or `-1` when it had none. */
+  id: number
+  data?: Record<string, string> | null
+}
+
+/**
+ * Push registration, which only a phone has (A329).
+ *
+ * **Optional on `Platform`, and the only member that is.** Every other capability is
+ * declared on every adapter and degrades, because in each case there is a *something*
+ * the caller can do on that platform: the web build's `secureStore.set` throws and
+ * its `get` answers null, `sync.write` refuses by naming the REST route that works
+ * instead, `deepLinks.current` answers null, `checkForUpdate` answers `unsupported`.
+ * There is no such answer for push. A browser tab and a laptop have no APNs or FCM
+ * token to register and no notification of theirs to be tapped, so the honest shape
+ * is that the capability is not here, and a caller that reaches for it has to say
+ * what it does instead. `undefined` is that statement; a stub that resolved would be
+ * a registration that silently never happened.
+ *
+ * This is the shape `PlatformCapabilities.configureSync` already uses for the one
+ * other capability that only the native adapters have, and it is why the mobile
+ * adapter is the only one that carries this member.
+ */
+export interface PushApi {
+  /**
+   * This device's token, from the shell's `push_token` command.
+   *
+   * Rejects where the platform has no push provider. That cannot be reached through
+   * this member — it only exists where the shell compiled a provider — but the
+   * command keeps one shape on every platform, and its desktop answer is an error
+   * rather than a fabricated `"apns"` token for a Mac.
+   */
+  token(): Promise<PushToken>
+  /**
+   * Subscribes to the token the OS re-issued; resolves to an unsubscribe (A329).
+   *
+   * The callback carries the token string from the plugin's own `push-token` event,
+   * which is the only thing that hears a rotation. It deliberately does not carry a
+   * provider: that mapping is the shell's, and the caller re-reads the pair through
+   * `token()` — one mapping, one PUT.
+   */
+  onToken(handler: (token: string) => void): Promise<() => void>
+  /**
+   * Subscribes to a tap on a notification; resolves to an unsubscribe.
+   *
+   * A tap is the only surface a push is guaranteed to produce (A316): a silent push
+   * may be dropped, throttled or never delivered at all, but a tap is a launch or a
+   * foreground transition the app will see. Subscribing also asks the plugin to
+   * *replay* a tap that arrived before anything was listening — which is what makes
+   * a cold start route, and is the notification half of the shell's
+   * `deep_link_current`.
+   */
+  onNotification(handler: (tap: NotificationTap) => void): Promise<() => void>
+}
+
 export interface FilesApi {
   /** Opens a picker and returns local paths, or null when cancelled. */
   pick(options?: { multiple?: boolean; mimeTypes?: string[] }): Promise<string[] | null>
@@ -188,6 +269,12 @@ export interface Platform {
   runtime(): Runtime
   secureStore: SecureStore
   notifications: NotificationsApi
+  /**
+   * Push registration. **Absent on the web build and on desktop**, which have no
+   * push provider: see `PushApi` for why this member is the one that is optional
+   * rather than degrading.
+   */
+  push?: PushApi
   files: FilesApi
   deepLinks: DeepLinksApi
   openExternal(url: string): Promise<void>

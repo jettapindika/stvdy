@@ -4,6 +4,7 @@ import { createBrowserRouter, useParams } from 'react-router'
 import { App } from './App'
 import { NotBuiltYet } from './components/ui/States'
 import { DeepLinkHandler } from './features/auth/DeepLinkHandler'
+import { NotificationRouter } from './features/notifications/NotificationRouter'
 import { GoogleCallbackRoute } from './features/auth/GoogleCallbackScreen'
 import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
@@ -158,7 +159,18 @@ export const router = createBrowserRouter([
     // is handled in one place: a running instance, or the cold start the shell
     // launched. It renders the outlet unless an auth ticket is being spent, in
     // which case it renders the callback screen over the whole app.
-    element: <DeepLinkHandler />,
+    //
+    // `NotificationRouter` sits beside it rather than under it, and it is a sibling
+    // for a reason: a tap is a different channel with a different payload, and it
+    // *moves the URL* (`useNavigate`) where a deep link renders a screen. One
+    // subscription covers every route either way, because both are mounted at the
+    // root; the outlet below is the deep-link handler's.
+    element: (
+      <>
+        <DeepLinkHandler />
+        <NotificationRouter />
+      </>
+    ),
     children: [
       // The web build's Google callback lands here; the native shell delivers the
       // same ticket as a deep-link intent instead.
