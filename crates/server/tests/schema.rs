@@ -61,6 +61,10 @@ const NON_SYNC_TABLES: &[&str] = &[
     // client entity: a device that learned it would learn nothing it could act on
     // (A165/A184).
     "change_log_watermark",
+    // Phase 11. A syllabus draft is server-owned: the model produced it and the student
+    // confirms it, and only the confirmed items reach `events`, `tasks` and `goals`. No
+    // `Entity` variant exists for it, so it must carry no trigger (A251).
+    "syllabus_drafts",
 ];
 
 async fn insert_user(pool: &PgPool) -> Uuid {
@@ -330,6 +334,12 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // Not a `+sync` table: it is a server-side cursor fact with no client entity, and
         // a device that learned it would learn nothing it could act on.
         "change_log_watermark",
+        // Phase 11. The syllabus extraction draft: the model produced it, the student
+        // confirms it, and only the confirmed items become events, tasks and goals. Not a
+        // `+sync` table (A251) — there is no `Entity` variant for a draft, and the unique
+        // index on `source_id` is what makes a retried extraction overwrite rather than
+        // append.
+        "syllabus_drafts",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
