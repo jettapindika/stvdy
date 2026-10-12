@@ -114,6 +114,12 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .route("/health", get(health::health))
         .route("/auth/google/start", get(auth::routes::google_start))
         .route("/auth/google/callback", get(auth::routes::google_callback))
+        // The Calendar consent return (Task 6). Here rather than in `calendar::public_routes`
+        // for the same reason as the line above: it is a browser redirect, not an API call,
+        // and `calendar::public_routes` is the credential bucket the feed needs because the
+        // feed is a database lookup keyed by a secret. This route acts only on an encrypted
+        // `state` this server minted, so the peer is Google's redirect rather than a script.
+        .route("/calendar/google/callback", get(calendar::oauth::callback))
         // The gateway's callback. No bearer token: the gateway has no session, and the
         // signature over the raw body is its authorisation (A292/A309). It is in the
         // public group rather than the authenticated one because a route that

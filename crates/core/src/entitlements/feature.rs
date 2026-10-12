@@ -28,6 +28,14 @@ pub enum Feature {
     TaskBreakdown,
     QuickCapture,
     GoogleCalendar,
+    /// The Google *account* cap, counted rather than locked (A245).
+    ///
+    /// Distinct from [`Feature::GoogleCalendar`], and both are needed: the boolean says
+    /// whether a plan may connect Google at all, and this counts how many accounts one
+    /// plan allows. `google_accounts_max` was in the matrix and in the entitlement view
+    /// and enforced **nowhere** until this variant existed — a limit that is configured
+    /// but not enforced is worse than none, because it looks like a control.
+    GoogleAccount,
     SyllabusImport,
     PlanGeneration,
     AgentAction,
@@ -68,6 +76,7 @@ impl Feature {
         Feature::TaskBreakdown,
         Feature::QuickCapture,
         Feature::GoogleCalendar,
+        Feature::GoogleAccount,
         Feature::SyllabusImport,
         Feature::PlanGeneration,
         Feature::AgentAction,

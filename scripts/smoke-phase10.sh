@@ -12,12 +12,13 @@
 #
 # ## What this run does NOT exercise, and why
 #
-# **The Google half.** `GET /calendar/google/connect` and `/callback` are not in the
-# router at all (`crates/server/src/calendar/mod.rs` registers the feed token, the import,
-# the connection list, the delete and the sync), and the consent flow needs a real OAuth
-# client that does not exist in this repo. So there is nothing to connect against and no
-# `CALENDAR_FAKE` to point at: the Google half degrades to the ICS half, and the only
-# Google-shaped assertion this run can make is the *refusal* (scenario 6).
+# **A live Google exchange.** The consent routes landed with Task 6 and are asserted here for
+# their *refusals*: `GET /calendar/google/connect` on free is a 403 `plan_required`, and the
+# callback with an unknown state is a 303 to the app's deep link carrying `status=error` and
+# no token. What no run can exercise is a successful exchange, because the OAuth client does
+# not exist in this repo — so the callback's happy path is `crates/server/tests/calendar.rs`'s
+# only as far as the state handling goes, and the exchange itself is named there as the
+# assertion that needs the real client.
 #
 # **A successful ICS fetch.** The importer's guard is the same SSRF guard ingestion uses
 # (A233), and it refuses `127.0.0.1` by design — that is the control, not an obstacle. So
@@ -286,11 +287,36 @@ STATUS="$(ajson "$TMP/sync.json" POST /calendar/sync '{}')"
 printf 'POST /calendar/sync on free: 403 %s (min_plan=%s)\n' \
   "$(field '["code"]' < "$TMP/sync.json")" "$(field '["min_plan"]' < "$TMP/sync.json")"
 
-# The connect route is absent from the router in this build (Task 6 is unlanded and the
-# OAuth client does not exist), so a 404 here is the honest state rather than a bug. The
-# assertion records it, so the day the route lands this run notices.
+# The consent flow's first leg landed with Task 6, so this is now a real assertion rather
+# than a note: free has `google_calendar = false` **and** `google_accounts_max = 0`, and the
+# route checks the boolean first, so the refusal names the plan that has the feature rather
+# than reporting "0 of 0 accounts". A 404 here would mean the route is unregistered — which
+# is the state this scenario used to record, and the reason it asserts a code now.
 STATUS="$(ajson "$TMP/connect.json" GET /calendar/google/connect)"
-printf 'GET /calendar/google/connect: %s (404 = not implemented in this build, which is the documented state)\n' "$STATUS"
+[ "$STATUS" = "403" ] || fail "GET /calendar/google/connect on free answered $STATUS, expected 403 (404 = the route is unregistered)"
+[ "$(field '["code"]' < "$TMP/connect.json")" = "plan_required" ] \
+  || fail "the connect refusal is not plan_required: $(cat "$TMP/connect.json")"
+printf 'GET /calendar/google/connect on free: 403 %s (min_plan=%s)\n' \
+  "$(field '["code"]' < "$TMP/connect.json")" "$(field '["min_plan"]' < "$TMP/connect.json")"
+
+# The callback is public and answers a redirect in every case, including its refusals: the
+# browser is sitting on Google's redirect URI, and a JSON error page there is a dead end.
+# A state nobody minted is refused, and the deep link carries a status and a reason — never
+# a token (A235/A48). Nothing here needs the OAuth client, which is why it is asserted.
+CALLBACK="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
+  "$BASE/calendar/google/callback?code=abc&state=not-a-real-state")"
+printf 'GET /calendar/google/callback with an unknown state: %s\n' "$CALLBACK"
+case "$CALLBACK" in
+  "302 stvdy://oauth/calendar?"*) ;;
+  *) fail "the callback answered '$CALLBACK', expected a 302 to the app's deep link" ;;
+esac
+case "$CALLBACK" in
+  *status=error*) ;;
+  *) fail "the refusal did not carry a status the panel can render: $CALLBACK" ;;
+esac
+case "$CALLBACK" in
+  *refresh*|*access_token*|*token=*) fail "the deep link leaked a credential: $CALLBACK" ;;
+esac
 
 say "7. the database agrees"
 ROWS="$(db "select count(*) from calendar_connections where user_id = '$UID_' and provider = 'ics'")"

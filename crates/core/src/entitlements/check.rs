@@ -90,6 +90,11 @@ pub fn check_with(
             affordable(u, plans.credits.syllabus_import)
         }
         Feature::DeviceLogin => counted(f, Limit::Max(cfg.devices_max), u.devices, plan),
+        // The Google account cap (A245), counted against the live connections. `free`'s
+        // `google_accounts_max = 0` makes this refuse before `google_calendar` is even
+        // consulted, which is why the connect route checks the boolean first: the student
+        // should be told the feature is not in their plan, not that they have 0 of 0.
+        Feature::GoogleAccount => counted(f, cfg.google_accounts_max, u.google_accounts, plan),
         // Everything a plan either has or does not. `grants` is the one place that
         // mapping lives, so no arm here can be wired to the wrong plan field.
         Feature::ExportFormat(_)
@@ -150,7 +155,8 @@ pub(crate) fn grants(plans: &PlansFile, plan: PlanId, f: Feature) -> bool {
         | Feature::CreateQuiz { .. }
         | Feature::Report
         | Feature::SyllabusImport
-        | Feature::DeviceLogin => true,
+        | Feature::DeviceLogin
+        | Feature::GoogleAccount => true,
         // A feature a plan either has or does not.
         Feature::ExportFormat(format) => cfg.export_formats.contains(&format),
         Feature::TaskBreakdown => cfg.task_ai_breakdown,

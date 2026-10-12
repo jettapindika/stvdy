@@ -1510,23 +1510,32 @@ cleared by the next clean pass.
   being incremental" is the phase's third named risk and it is invisible — every poll succeeds,
   the events stop changing, nothing errors — so the mode is a value a test asserts rather than
   an assumption.
-- `GET /calendar/google/connect` → 200 `{ "url" }`. **Not implemented in this build**: the
-  route is absent from the router (`crates/server/src/calendar/mod.rs` registers the feed
-  token, the import, the connection list, the delete and the sync), so a request is a 404.
-  When it lands it requires `Feature::GoogleAccount` through the entitlement engine (A245) —
-  the counted arm over `google_accounts_max`, not a second read of the plan — and answers 404
-  when `GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI` are unset, so a half-configured
-  client never produces a redirect that fails confusingly at Google. The SPA opens the URL with
-  `platform.openExternal` — the **system browser, never an embedded webview** — because a page
-  this app draws around someone else's login form is exactly what the spec forbids.
-- `GET /calendar/google/callback` → 302 to
-  `stvdy://oauth/calendar?status=connected|denied|error&reason=...`. **Not implemented in this
-  build**, for the same reason. When it lands it is `Exempt` in the sweep (a browser redirect
-  carries no bearer token). **No token of any kind travels in the deep link** (A235/A48): the
-  refresh token is written server-side at the callback and a deep link lands in browser
-  history, referrer logs and the OS URL handler. The SPA's `DeepLinkHandler` is written for it
-  already and only refreshes the connections query on `status=connected` and reports the reason
-  on `denied`/`error`.
+- `GET /calendar/google/connect` → 200 `{ "url" }`, the Google consent URL for the SPA to
+  open with `platform.openExternal` — the **system browser, never an embedded webview**,
+  because a page this app draws around someone else's login form is exactly what the spec
+  forbids. It requires `Feature::GoogleCalendar` and then `Feature::GoogleAccount` through the
+  entitlement engine (A245) — the second is the counted arm over `google_accounts_max`, not a
+  second read of the plan — in that order, so a free account is told the feature is not in
+  their plan rather than "0 of 0 Google accounts". It answers **404** when
+  `GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI` are unset, so a half-configured client
+  never produces a redirect that fails confusingly at Google. `Swept` in the sweep: 403
+  `plan_required` on free.
+- `GET /calendar/google/callback` → **302** to
+  `stvdy://oauth/calendar?status=connected|denied|error&reason=...`, the same construction and
+  the same status as `GET /auth/google/callback`. **It redirects in every case, including its
+  refusals**: the browser is sitting on Google's redirect URI, and a JSON error page there is
+  a dead end the student cannot act on. `Exempt` in the sweep (a browser redirect carries no
+  bearer token). **No token of any kind travels in the deep link** (A235/A48): the refresh
+  token is written server-side at the callback and a deep link lands in browser history,
+  referrer logs and the OS URL handler. The SPA's `DeepLinkHandler` refreshes the connections
+  query on `status=connected` and reports the reason on `denied`/`error`. A `state` minted by
+  the *login* flow is refused here by the payload's `purpose` (A235), and a tampered or
+  expired one by the same `decrypt_state` the login callback uses.
+- **Task 6's live half is not exercised by any test in this build**, because the OAuth client
+  does not exist: the code exchange against Google, `access_type=offline` actually yielding a
+  refresh token, and the "Study Plan" calendar's find-or-create (A237 — the row is written
+  with `study_calendar_id = null` and the first sync fills it in, which is Task 7's
+  `CalendarApi`). The plan's Task 6 records these four items by name.
 - **The consent is a two-scope pair, chosen so the conflict policy is structural** (A234):
   `https://www.googleapis.com/auth/calendar.app.created` **plus**
   `https://www.googleapis.com/auth/calendar.events.readonly`, with `access_type=offline`,

@@ -65,11 +65,37 @@ pub fn config() -> AppConfig {
             ("GOOGLE_LOGIN_CLIENT_ID", ""),
             ("GOOGLE_LOGIN_CLIENT_SECRET", ""),
             ("GOOGLE_LOGIN_REDIRECT_URI", ""),
+            // The Calendar consent client, set here rather than left empty: with it unset
+            // `GET /calendar/google/connect` answers 404 and the route sweep would classify
+            // a route that refuses nothing. A test that wants the unconfigured case removes
+            // it explicitly with `TestState::without_google_calendar`, so the 404 path is
+            // still asserted — by a test that says so — rather than being the default that
+            // every other test silently depends on.
+            (
+                "GOOGLE_CALENDAR_CLIENT_ID",
+                "test-calendar-client.apps.googleusercontent.com",
+            ),
+            ("GOOGLE_CALENDAR_CLIENT_SECRET", "test-calendar-secret"),
+            (
+                "GOOGLE_CALENDAR_REDIRECT_URI",
+                "http://127.0.0.1:8099/calendar/google/callback",
+            ),
             // Search: pinned here rather than inherited, because `from_env_at`
             // falls back to the process environment for any key not in this list.
             // A developer whose `.env` pins `SEARCH_PROVIDER=tavily` with no key
             // would otherwise make every suite in this crate fail at boot with a
             // configuration error that has nothing to do with the test.
+            // Pinned like the search keys, and for a sharper reason: `state.config.llm` is
+            // the fallback endpoint `billing::byok::provider_for` uses for a key stored with
+            // no `base_url`. Inherited from the environment, a suite asserting "a key with no
+            // endpoint is refused" would instead send that key to a real provider and assert
+            // against a live 401 — a test that passes or fails by whose `.env` it runs on.
+            // An empty base URL filters to `None` in `config::llm_config`, so there is no
+            // configured endpoint and the refusal is reachable. `state.llm` is separate and
+            // is installed per-suite with `TestState::with_llm`.
+            ("LLM_BASE_URL", ""),
+            ("LLM_API_KEY", ""),
+            ("LLM_MODEL", ""),
             ("SEARCH_PROVIDER", "composite"),
             ("SEARXNG_URL", ""),
             ("EXA_API_KEY", ""),
@@ -516,6 +542,19 @@ impl TestState {
         self.state.payment = None;
         let mut config = (*self.state.config).clone();
         config.qris = None;
+        self.state.config = Arc::new(config);
+        self
+    }
+
+    /// The same state with no Google Calendar OAuth client.
+    ///
+    /// The mirror of [`without_gateway`], and the deployment a developer has until the
+    /// client exists: `GET /calendar/google/connect` and its callback answer 404 rather
+    /// than redirecting to a half-configured client. Asserting that 404 needs a state
+    /// *without* the client, which is why the default test config has one.
+    pub fn without_google_calendar(mut self) -> Self {
+        let mut config = (*self.state.config).clone();
+        config.google_calendar = None;
         self.state.config = Arc::new(config);
         self
     }

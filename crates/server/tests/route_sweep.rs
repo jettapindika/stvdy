@@ -551,6 +551,19 @@ fn swept_rows() -> Vec<Row> {
             403,
             "plan_required",
         ),
+        // Task 6's consent flow. Free has `google_calendar = false` **and**
+        // `google_accounts_max = 0`, and the route checks the boolean first (A245), so an
+        // exhausted free account meets `plan_required` rather than "0 of 0 accounts". The
+        // route answers 404 when the OAuth client is unset, which is why the test config
+        // carries one — `TestState::without_google_calendar` is the state that asserts the
+        // 404, and it is the only test that should see it.
+        swept(
+            "GET",
+            "/calendar/google/connect",
+            "GoogleCalendar, then GoogleAccount (A245)",
+            403,
+            "plan_required",
+        ),
         // The import is counted and priced: free allows one a month
         // (`syllabus_imports_total`), so an exhausted account meets the count's refusal
         // before the eight credits are considered.
@@ -618,6 +631,14 @@ fn exempt_rows() -> Vec<Row> {
             "token-authenticated: the path token is the credential and there is no bearer user, \
              like a signed object URL (A242). Registered as `{token}` because the router cannot \
              express the documented `.ics` suffix after a parameter; the handler requires it",
+        ),
+        exempt(
+            "GET",
+            "/calendar/google/callback",
+            "no user: a browser redirect from Google carries no bearer token, exactly like \
+             `/auth/google/callback` above. It acts only on an encrypted `state` this server \
+             minted, and its refusal is a redirect to the app rather than an error status, so \
+             there is no entitlement decision to sweep (Task 6/A235)",
         ),
         exempt(
             "POST",
@@ -1652,6 +1673,19 @@ impl Fixture {
                 // The refusal is on the plan, before any connection is read, so the body is
                 // irrelevant to the answer — which is the order a counted refusal must take.
                 json(&app, "POST", "/calendar/sync", token, serde_json::json!({})).await
+            }
+            // The consent flow's first leg. A plain authenticated GET: the refusal is the
+            // plan matrix's and it fires before anything is minted, so there is no body and
+            // no fixture id to thread through.
+            ("GET", "/calendar/google/connect") => {
+                json(
+                    app,
+                    "GET",
+                    "/calendar/google/connect",
+                    token,
+                    serde_json::Value::Null,
+                )
+                .await
             }
             ("POST", "/sync/push") => {
                 let device_id: Uuid = sqlx::query_scalar(

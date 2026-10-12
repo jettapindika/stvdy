@@ -60,6 +60,7 @@ fn fresh(plan: PlanId) -> UsageSnapshot {
         quizzes_this_month: 0,
         reports_this_month: 0,
         syllabus_imports: 0,
+        google_accounts: 0,
     }
 }
 
@@ -230,6 +231,18 @@ fn the_specs_documented_plan_values_are_what_the_matrix_enforces() {
     );
     assert!(check(&fresh(PlanId::Free), Feature::PlanGeneration).is_err());
     assert!(check(&fresh(PlanId::Pro), Feature::PlanGeneration).is_ok());
+    // The Google account cap, from `config/plans.toml`: free 0, pro 1, power unlimited.
+    // The plan's boolean and the counted cap are both asserted, because they are two
+    // answers to two different questions and `google_calendar = true` with a cap of 0
+    // would be a plan that offers a feature it cannot use.
+    assert!(check(&fresh(PlanId::Free), Feature::GoogleCalendar).is_err());
+    assert!(check(&fresh(PlanId::Free), Feature::GoogleAccount).is_err());
+    assert!(check(&fresh(PlanId::Pro), Feature::GoogleCalendar).is_ok());
+    assert!(check(&fresh(PlanId::Pro), Feature::GoogleAccount).is_ok());
+    let mut one_google = fresh(PlanId::Pro);
+    one_google.google_accounts = 1;
+    assert!(check(&one_google, Feature::GoogleAccount).is_err());
+    assert!(check(&fresh(PlanId::Power), Feature::GoogleAccount).is_ok());
     assert!(check(&fresh(PlanId::Free), Feature::AdvancedAnalytics).is_err());
     assert!(check(&fresh(PlanId::Power), Feature::AdvancedAnalytics).is_ok());
     assert!(check(&fresh(PlanId::Free), Feature::SyllabusImport).is_ok()); // 1 allowed
@@ -282,10 +295,16 @@ fn numeric_features(plans: &PlansFile, plan: PlanId) -> Vec<(Feature, Option<i64
         (Feature::CreateQuiz { n: 1 }, cfg.quizzes_per_month),
         (Feature::Report, cfg.reports_per_month),
         (Feature::SyllabusImport, cfg.syllabus_imports_total),
+        // A15/A245. `free` allows **zero**, which is why the filter below also drops a
+        // limit of zero: "one below the maximum" does not exist below zero, and the
+        // refusal at zero is what `every_refusal_on_a_lower_plan_names_the_plan_that_lifts_it`
+        // covers instead.
+        (Feature::GoogleAccount, cfg.google_accounts_max),
     ]
     .into_iter()
     .filter(|(_, limit)| !limit.is_unlimited())
     .map(|(feature, limit)| (feature, limit.max().map(i64::from)))
+    .filter(|(_, max)| *max != Some(0))
     .collect()
 }
 
@@ -303,6 +322,7 @@ fn set_used(u: &mut UsageSnapshot, feature: Feature, value: i64) {
         Feature::CreateQuiz { .. } => u.quizzes_this_month = value,
         Feature::Report => u.reports_this_month = value,
         Feature::SyllabusImport => u.syllabus_imports = value,
+        Feature::GoogleAccount => u.google_accounts = value,
         other => panic!("{other:?} is not a countable feature"),
     }
 }

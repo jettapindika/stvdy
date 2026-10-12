@@ -82,6 +82,12 @@ pub struct UsageSnapshot {
     pub quizzes_this_month: i64,
     pub reports_this_month: i64,
     pub syllabus_imports: i64,
+    /// The live Google connections, for [`Feature::GoogleAccount`]'s cap (A245).
+    ///
+    /// Counted from `calendar_connections` rows with a non-null `refresh_token_enc`, which
+    /// is what makes the cap mean "connected accounts" rather than "rows ever created": a
+    /// revoked or half-finished row is not an account the student is using.
+    pub google_accounts: i64,
 }
 
 /// The plan-dependent facts `check` needs that are not counters: the costs, and whether

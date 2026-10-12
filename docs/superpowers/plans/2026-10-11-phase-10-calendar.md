@@ -1288,7 +1288,7 @@ feat(server): ICS import through the same SSRF guard, with a conditional GET
 - Modify: `crates/server/src/config.rs`, `crates/server/src/routes/mod.rs`
 - Modify: `crates/server/tests/route_sweep.rs`, `crates/server/tests/calendar.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The consent URL asks for offline access, uses PKCE, and carries an encrypted state;
@@ -1332,14 +1332,21 @@ async fn the_consent_url_asks_for_offline_access_and_the_callback_never_returns_
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 cargo test -p stvdy-server --test calendar consent
 ```
 Expected: `404` for `/calendar/google/connect`.
 
-- [ ] **Step 3: Extract the shared OAuth state module**
+Landed as three cases in `crates/server/tests/calendar.rs` rather than the one sketched here,
+because the sketch asserts the *happy path* through a real exchange and the client does not
+exist: `the_consent_url_asks_for_offline_access_and_carries_an_encrypted_state`,
+`the_callback_refuses_a_state_that_is_not_its_own_and_never_returns_a_token` and
+`both_consent_routes_are_404_without_a_configured_client`. **What still needs the real
+client** is named at the end of this task.
+
+- [x] **Step 3: Extract the shared OAuth state module**
 
 Move `cipher`, `encrypt_state`, `decrypt_state`, `pkce_pair`, `random_token`, `hash` out of
 `auth/google.rs` into `crates/server/src/auth/oauth_state.rs`, generalising the payload to
@@ -1370,7 +1377,7 @@ pub fn hash(value: &str) -> String;
 `auth/google.rs` is edited to call these with `Purpose::Login`. Its tests keep passing
 unchanged; `decrypt_state` refusing a mismatched `purpose` gets its own test.
 
-- [ ] **Step 4: Write the consent flow**
+- [x] **Step 4: Write the consent flow**
 
 `crates/server/src/config.rs` gains, parsed exactly like `google_login`:
 
@@ -1400,7 +1407,19 @@ Register `connect` in `authenticated`, `callback` in `public_routes`; add the sw
 (`connect` is `Swept` with feature `GoogleAccount`, refusal `403 plan_required`; `callback`
 is `Exempt`).
 
-- [ ] **Step 5: Run the tests**
+**As landed, two deviations from the line above, both recorded rather than silent:**
+
+- `callback` is registered in `routes::router`'s unlimited public group beside
+  `GET /auth/google/callback`, **not** in `calendar::public_routes()`. That function is the
+  credential bucket, and it is the credential bucket because the *feed* is a database lookup
+  keyed by a secret. A callback acts only on an encrypted `state` this server minted, so
+  putting it there would spend the feed's brute-force budget on Google's redirects.
+- `connect`'s sweep feature column reads `"GoogleCalendar, then GoogleAccount (A245)"`: the
+  route checks the plan's boolean first and the counted cap second, so an exhausted free
+  account meets `plan_required`. `Feature::GoogleAccount` is the counted arm over
+  `google_accounts_max`, which was configured and enforced nowhere until this task (A245).
+
+- [x] **Step 5: Run the tests**
 
 ```
 cargo test -p stvdy-server --test calendar
@@ -1408,11 +1427,33 @@ cargo test -p stvdy-server --test auth
 cargo test -p stvdy-server --test route_sweep
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(server): the calendar consent flow, on the login flow's state cipher
 ```
+
+### Task 6's live half: what the real OAuth client is needed for
+
+The routes, the state/verifier handling and the callback are implemented and tested. The
+following assertions **cannot** be exercised without the user's Google client, and are named
+here rather than implied by a green suite:
+
+1. **The code exchange itself** (`exchange_code`). Everything up to it is asserted; the
+   `POST https://oauth2.googleapis.com/token` round trip is not. A wrong `redirect_uri`, a
+   client id that does not match the consent, or a `code_verifier` that does not match the
+   challenge would all surface here and nowhere else.
+2. **`access_type=offline` actually yielding a `refresh_token`.** The parameter is asserted;
+   that Google returns one is a property of the real client. The route's `error` branch for a
+   response with no token is the guard, and it is what a misconfigured consent would hit.
+3. **The "Study Plan" calendar's find-or-create (A237).** `study_calendar_id` is written
+   `null` by the callback, and the first sync fills it in — but `CalendarApi` and
+   `crates/server/src/calendar/google.rs` are Task 7's and do not exist in this build, so
+   nothing resolves it yet. This is the one piece of Task 6's plan text that is **not**
+   implemented, and it is recorded as not implemented rather than stubbed.
+4. **The end-to-end browser round trip** (consent screen → redirect → deep link reaching the
+   OS handler). The deep link's *shape* is asserted; its delivery is the shell's, and
+   `src-tauri/src/deeplink.rs` already classifies `stvdy://oauth/calendar`.
 
 ---
 

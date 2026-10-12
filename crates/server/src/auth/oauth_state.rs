@@ -144,6 +144,30 @@ pub fn decrypt_state(
     Ok(payload)
 }
 
+/// Encrypts a **stored secret** — the format `nonce || ciphertext`, the same one the `state`
+/// parameter uses.
+///
+/// Separate from [`encrypt_state`] because the two answer different questions: a `state` is a
+/// URL-safe string that travels through a browser, while this is `bytea` in a column that
+/// holds a credential at rest (a Google refresh token, a BYOK key). Both need the random
+/// 12-byte nonce, which is why the nonce handling lives in one module.
+///
+/// Returns bytes rather than a string: base64 in a `bytea` column would be an encoding that
+/// has to be undone by every reader, and the one reader that matters is a `decrypt`.
+pub fn encrypt_secret(state: &AppState, plaintext: &str) -> AppResult<Vec<u8>> {
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let ciphertext = cipher(state)?
+        .encrypt(&nonce, plaintext.as_bytes())
+        .map_err(|_| AppError::Internal(anyhow::anyhow!("encrypting a stored secret")))?;
+
+    let mut combined = nonce_bytes.to_vec();
+    combined.extend_from_slice(&ciphertext);
+    Ok(combined)
+}
+
 /// A PKCE verifier and its `S256` challenge (RFC 7636).
 pub fn pkce_pair() -> (String, String) {
     let mut bytes = [0u8; 32];

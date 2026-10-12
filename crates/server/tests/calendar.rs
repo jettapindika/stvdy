@@ -1042,3 +1042,424 @@ async fn device_id_of(harness: &TestState, email: &str) -> Uuid {
     .await
     .unwrap()
 }
+
+// ---------------------------------------------------------------------------------------
+// Gate 6: Indonesian end to end — the server data half
+// ---------------------------------------------------------------------------------------
+
+/// Gate 6's data half, end to end through the routes: an Indonesian event title survives the
+/// ICS import and the feed's escaping, a `TZID`-bearing `DTSTART` imports to the right wall
+/// clock, and a date-only deadline is the user's **local** day.
+///
+/// This is the composed case the plan's Step 7 names and the phase's verification table
+/// recorded as not measured. The unit halves exist — `crates/core/tests/calendar.rs` proves
+/// the placement rule and the folding — but neither is the composed measurement, and the two
+/// silent failures gate 6 exists for live exactly in the seam:
+///
+///  * a `TZID` resolved through the machine's zone or through a fixed offset: a Jakarta class
+///    seven hours out, which no English test notices;
+///  * a date-only deadline computed in UTC: a Friday deadline landing on Thursday.
+///
+/// The pair that catches a UTC implementation is asserted explicitly: the event is
+/// **06:00 Jakarta on the 16th**, which is `23:00Z` on the **15th**. A build that read the
+/// instant as UTC would store 06:00Z and render the deadline on the 15th, and every
+/// assertion below would still be self-consistent.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day(
+    pool: PgPool,
+) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+
+    // A class at 06:00 Jakarta on the 16th. In UTC that is **23:00 on the 15th** — the pair
+    // that catches a UTC implementation.
+    let feed = "BEGIN:VCALENDAR\r\n\
+                VERSION:2.0\r\n\
+                PRODID:-//faculty//EN\r\n\
+                BEGIN:VEVENT\r\n\
+                UID:uts-jaringan@faculty.example\r\n\
+                SUMMARY:UTS Jaringan Komputer; bab 3,4 dan 5\r\n\
+                DTSTART;TZID=Asia/Jakarta:20261016T060000\r\n\
+                DTEND;TZID=Asia/Jakarta:20261016T080000\r\n\
+                END:VEVENT\r\n\
+                END:VCALENDAR\r\n";
+    let fake = Arc::new(ScriptedIcsFetch::new(vec![Scripted::Body {
+        body: feed.to_string(),
+        etag: Some("\"g6\"".to_string()),
+        last_modified: None,
+    }]));
+    // The fetcher is installed **before** the router is built: `drain_jobs` reads it off the
+    // harness's state, so a fetcher swapped in after the job was enqueued would be a fetcher
+    // the worker never sees.
+    let harness = harness.with_ics_fetch(fake);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "gate6@example.test").await;
+
+    // The user's own zone, which is the default the schema ships.
+    let user_id = user_id_of(&harness, "gate6@example.test").await;
+    let zone: String = sqlx::query_scalar("select timezone from users where id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(zone, "Asia/Jakarta", "the spec's default zone");
+
+    let (status, created) = json(
+        &app,
+        "POST",
+        "/calendar/ics",
+        &token,
+        serde_json::json!({ "url": "https://faculty.example/gate6.ics" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    common::drain_jobs(&harness).await;
+
+    let (status, events) = json(
+        &app,
+        "GET",
+        "/events?from=2026-10-01T00:00:00Z&to=2026-10-31T00:00:00Z",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events}");
+    let rows = events["events"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "one imported class: {events}");
+
+    // (1) The wall clock, resolved through `chrono_tz`: 06:00+07:00 is 23:00Z **the day
+    // before**. Both halves are asserted, because the date is the part a fixed-offset
+    // implementation gets wrong.
+    assert_eq!(
+        rows[0]["starts_at"], "2026-10-15T23:00:00Z",
+        "06:00 in Jakarta on the 16th is 23:00Z on the 15th: {events}"
+    );
+    assert_eq!(rows[0]["ends_at"], "2026-10-16T01:00:00Z", "{events}");
+
+    // (2) The Indonesian title, stored unmangled. The comma and the semicolon are ICS TEXT
+    // metacharacters: an unescaped `SUMMARY` shifts every later field, and a folder that cuts
+    // mid-character produces a replacement character that no English test sees.
+    assert_eq!(
+        rows[0]["title"], "UTS Jaringan Komputer; bab 3,4 dan 5",
+        "the title must round-trip whole: {events}"
+    );
+
+    // (3) A date-only deadline on the user's own day. 2026-10-15T17:00Z is already the 16th
+    // in Jakarta, so a feed that rendered the UTC date would say "due the 15th" to a student
+    // whose Friday is the 16th.
+    insert_event(
+        &harness,
+        user_id,
+        "deadline",
+        "Kumpulkan laporan",
+        "2026-10-15T17:00:00Z",
+        "2026-10-15T17:00:00Z",
+        "app",
+    )
+    .await;
+
+    // And an app-owned event carrying the same Indonesian metacharacters, because the feed
+    // deliberately excludes `source != 'app'` (A241) — the imported class above is `ics`, so
+    // it is *not* in the feed, and an assertion that looked for it there would be asserting
+    // the exclusion backwards. This row is what puts the escaping on the wire.
+    insert_event(
+        &harness,
+        user_id,
+        "study_block",
+        "UTS Jaringan Komputer; bab 3,4 dan 5",
+        "2026-10-16T09:00:00Z",
+        "2026-10-16T10:00:00Z",
+        "app",
+    )
+    .await;
+
+    let (_, rotated) = json(
+        &app,
+        "POST",
+        "/calendar/ics-token/regenerate",
+        &token,
+        serde_json::json!({}),
+    )
+    .await;
+    let feed_token = rotated["ics_feed_token"].as_str().unwrap().to_string();
+    let (status, headers, body) = raw(&app, "GET", &format!("/cal/{feed_token}.ics"), "").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(headers["content-type"], "text/calendar; charset=utf-8");
+
+    // The deadline is date-only and on the **local** 16th, and its `DTEND` is the next local
+    // date because an all-day event's end is exclusive.
+    assert!(
+        body.contains("DTSTART;VALUE=DATE:20261016"),
+        "the deadline is the student's own day, not the UTC one: {body}"
+    );
+    assert!(
+        body.contains("DTEND;VALUE=DATE:20261017"),
+        "an all-day event's DTEND is exclusive: {body}"
+    );
+    // The escaping survives the whole round trip: the stored title reaches the wire with its
+    // two metacharacters escaped, so a strict client parses one `SUMMARY` and not three. A
+    // broken line is a shifted field, not a cosmetic difference.
+    assert!(
+        body.contains(r"SUMMARY:UTS Jaringan Komputer\; bab 3\,4 dan 5"),
+        "the title must be ICS-TEXT escaped on the wire: {body}"
+    );
+    // The imported class is `source = 'ics'`, so the feed excludes it (A241): echoing another
+    // calendar's event back would show the student their own timetable twice.
+    assert!(
+        !body.contains("UTS Jaringan Komputer; bab 3,4 dan 5\r\n"),
+        "an unescaped title would mean the escaping was skipped: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Task 6: the Google consent flow
+// ---------------------------------------------------------------------------------------
+// **What these cases can and cannot prove.** The OAuth client does not exist yet, so no
+// exchange against Google has ever run here. Everything that does not need Google is
+// asserted: the consent URL's parameters (including PKCE `S256` and `access_type=offline`),
+// the state round trip, the refusals, and the fact that the deep link carries a status and a
+// reason and never a token. What needs the real client is named in
+// `the_consent_url_asks_for_offline_access_and_the_callback_never_returns_a_token`: the
+// exchange itself, the "Study Plan" calendar's discovery (A237), and the first sync.
+
+/// The consent URL asks for offline access, uses PKCE, carries an **encrypted** state, and a
+/// free account is refused before any of it (A234/A235/A245).
+///
+/// The scope assertion is the load-bearing one: `calendar.app.created` plus
+/// `calendar.events.readonly` is what makes "Google wins for an event we did not create"
+/// structural rather than a rule in a merge function. A widened scope would silently move
+/// that guarantee, so it is asserted as an exact string rather than by `contains`.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_consent_url_asks_for_offline_access_and_carries_an_encrypted_state(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "consent@example.test").await;
+
+    // Free first, and the order matters: free has `google_calendar = false` **and**
+    // `google_accounts_max = 0`, and the route checks the boolean first so the student is
+    // told the feature is not in their plan rather than "0 of 0 accounts".
+    let (status, refused) = json(
+        &app,
+        "GET",
+        "/calendar/google/connect",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["code"], "plan_required", "{refused}");
+    assert_eq!(refused["min_plan"], "pro", "{refused}");
+
+    make_pro(&harness, "consent@example.test").await;
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/calendar/google/connect",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let url = url::Url::parse(body["url"].as_str().expect("a url")).expect("a URL");
+
+    // The consent's parameters. `access_type=offline` and `prompt=consent` together are what
+    // make Google return a refresh token on a *re*-connect; without `prompt`, a student who
+    // revoked the grant and reconnected would get no token and a dead connection.
+    let q: std::collections::HashMap<_, _> = url.query_pairs().collect();
+    assert_eq!(q["access_type"], "offline", "{url}");
+    assert_eq!(q["prompt"], "consent", "{url}");
+    assert_eq!(q["code_challenge_method"], "S256", "{url}");
+    assert_eq!(q["response_type"], "code", "{url}");
+    assert_eq!(
+        q["scope"],
+        "https://www.googleapis.com/auth/calendar.app.created \
+         https://www.googleapis.com/auth/calendar.events.readonly",
+        "{url}"
+    );
+    assert_eq!(
+        q["redirect_uri"], "http://127.0.0.1:8099/calendar/google/callback",
+        "{url}"
+    );
+
+    // The state is **opaque**: it carries the PKCE verifier, and a state that leaked it would
+    // hand the verifier to the browser, which is the party PKCE exists to distrust. So the
+    // assertion is that the verifier is not in the URL at all — the payload is ciphertext.
+    let state_param = q["state"].to_string();
+    assert!(!state_param.is_empty(), "{url}");
+    assert!(
+        !state_param.contains("verifier"),
+        "the state must be ciphertext, not a readable payload: {state_param}"
+    );
+    // And it round-trips through the shared codec as a *calendar* state, which is what makes
+    // the callback able to read the account back out of it.
+    let payload = stvdy_server::auth::oauth_state::decrypt_state(
+        &harness.state,
+        stvdy_server::auth::oauth_state::Purpose::Calendar,
+        &state_param,
+    )
+    .expect("the state this server minted must decrypt as a calendar state");
+    assert_eq!(
+        payload.user_id,
+        Some(user_id_of(&harness, "consent@example.test").await),
+        "the state must name the account the flow was started for"
+    );
+    assert!(
+        payload.verifier.len() >= 40,
+        "the state carries the PKCE verifier: {}",
+        payload.verifier.len()
+    );
+}
+
+/// The callback refuses a state that is not a calendar state this server minted, and it does
+/// so by **redirecting** to the app with a status and a reason — never with a token.
+///
+/// Three refusals, three different attacks: a state minted by the login flow (a replay across
+/// flows), an unknown or tampered state (a forgery), and a missing one. All three have to be
+/// a redirect rather than a JSON error: the browser is sitting on Google's redirect URI, and
+/// an error page there leaves the student with no way back to the app.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_callback_refuses_a_state_that_is_not_its_own_and_never_returns_a_token(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "callback@example.test").await;
+    make_pro(&harness, "callback@example.test").await;
+
+    // A **login** state, minted by the other flow through the same codec. This is the replay
+    // the shared cipher makes possible and the `purpose` field exists to refuse (A235).
+    let login_state = stvdy_server::auth::oauth_state::encrypt_state(
+        &harness.state,
+        &stvdy_server::auth::oauth_state::StatePayload {
+            purpose: stvdy_server::auth::oauth_state::Purpose::Login,
+            verifier: "v".to_string(),
+            nonce: "n".to_string(),
+            exp: stvdy_server::auth::oauth_state::state_expiry(),
+            user_id: None,
+            device_name: "laptop".to_string(),
+            device_platform: "macos".to_string(),
+            app_version: None,
+        },
+    )
+    .unwrap();
+
+    let cross_flow = format!("code=abc&state={login_state}");
+    let no_code = format!(
+        "state={}",
+        consent_state(&harness, "callback@example.test").await
+    );
+    let cases: [(&str, &str); 4] = [
+        // A state from the other flow: accepted by the login callback, refused here.
+        ("cross-flow", cross_flow.as_str()),
+        // A state nobody minted.
+        ("unknown", "code=abc&state=not-a-real-state"),
+        // No state at all.
+        ("missing", "code=abc"),
+        // A state with no code: the consent return without its grant.
+        ("no-code", no_code.as_str()),
+    ];
+
+    for (label, query) in cases {
+        let (status, headers, body) = raw(
+            &app,
+            "GET",
+            &format!("/calendar/google/callback?{query}"),
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::FOUND, "{label}: {body}");
+        let location = headers
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            location.starts_with("stvdy://oauth/calendar?"),
+            "{label}: the refusal must return the app to itself: {location}"
+        );
+        assert!(
+            location.contains("status=error") || location.contains("status=denied"),
+            "{label}: a refusal carries a status the panel can render: {location}"
+        );
+        // The property the whole route exists to keep: **no token of any kind** travels in
+        // the deep link. A deep link lands in browser history, referrer logs and the OS URL
+        // handler (A235/A48), so a refresh token here would be a credential in all three.
+        for leak in ["refresh", "access_token", "token=", "code="] {
+            assert!(
+                !location.contains(leak),
+                "{label}: the deep link must not carry {leak:?}: {location}"
+            );
+        }
+    }
+
+    // The student declining is `denied`, not an error: they made a choice, and the panel says
+    // so in different words with a different remedy.
+    let (status, headers, _) = raw(
+        &app,
+        "GET",
+        "/calendar/google/callback?error=access_denied",
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FOUND);
+    let location = headers
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(location.contains("status=denied"), "{location}");
+    assert!(location.contains("reason=access_denied"), "{location}");
+}
+
+/// A valid calendar state for an account, without going through the route.
+///
+/// Built here rather than by calling `connect` so a case can isolate the callback: the
+/// `no-code` refusal above is about the *callback*'s own validation, and a test that reached
+/// it through the consent route would be asserting two things at once.
+async fn consent_state(harness: &TestState, email: &str) -> String {
+    stvdy_server::auth::oauth_state::encrypt_state(
+        &harness.state,
+        &stvdy_server::auth::oauth_state::StatePayload {
+            purpose: stvdy_server::auth::oauth_state::Purpose::Calendar,
+            verifier: "v".to_string(),
+            nonce: "n".to_string(),
+            exp: stvdy_server::auth::oauth_state::state_expiry(),
+            user_id: Some(user_id_of(harness, email).await),
+            device_name: String::new(),
+            device_platform: String::new(),
+            app_version: None,
+        },
+    )
+    .unwrap()
+}
+
+/// With no OAuth client configured, both routes are a 404 — the same rule
+/// `auth::google::start` follows. A half-configured client must not produce a redirect that
+/// fails at Google with a message the student cannot act on, and the panel's button must not
+/// point at a route that pretends to work.
+#[sqlx::test(migrations = "../../migrations")]
+async fn both_consent_routes_are_404_without_a_configured_client(pool: PgPool) {
+    let harness = TestState::new(pool).without_google_calendar();
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "unconfigured@example.test").await;
+    make_pro(&harness, "unconfigured@example.test").await;
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/calendar/google/connect",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, _, _) = raw(
+        &app,
+        "GET",
+        "/calendar/google/callback?code=abc&state=x",
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

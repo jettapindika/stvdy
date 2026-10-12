@@ -57,6 +57,13 @@ pub struct AppConfig {
     /// silently does nothing is worse than an absent one.
     pub pdfium_lib_path: Option<PathBuf>,
     pub google_login: Option<GoogleLoginConfig>,
+    /// The Calendar consent flow's OAuth client (A235/A237). `None` means
+    /// `GET /calendar/google/connect` answers 404 rather than redirecting to a
+    /// half-configured client, the same rule `google_login` follows. It is a
+    /// **different** client from `google_login` on purpose: this one asks for
+    /// calendar scopes, and sharing a client would make the login screen ask for
+    /// calendar write access.
+    pub google_calendar: Option<GoogleCalendarConfig>,
     /// The push transports (A288). Empty when neither vendor is configured.
     pub push: PushConfig,
     /// The chat and generation model. `None` means no provider is configured.
@@ -330,6 +337,21 @@ pub struct GoogleLoginConfig {
     pub redirect_uri: String,
 }
 
+/// The Calendar integration's OAuth client (A235).
+///
+/// Separate from [`GoogleLoginConfig`] rather than reused: the two flows ask for
+/// different scopes and return to different redirect URIs, and one client for both
+/// would mean the sign-in screen requesting calendar write access. The scopes are
+/// constants in `calendar::oauth` rather than config, because they are a security
+/// argument (`calendar.app.created` + `calendar.events.readonly` is what makes "Google
+/// wins for an event we did not create" structural) and not a deployment choice.
+#[derive(Debug, Clone)]
+pub struct GoogleCalendarConfig {
+    pub client_id: String,
+    pub client_secret: SecretString,
+    pub redirect_uri: String,
+}
+
 /// APNs' provider-API credentials (A288).
 ///
 /// The key is a PKCS#8 EC private key, which is what Apple's `.p8` file holds. It is a
@@ -493,6 +515,7 @@ impl AppConfig {
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),
             google_login: google_login_config(&get)?,
+            google_calendar: google_calendar_config(&get)?,
             push: push_config(&get, &get_or)?,
             llm: llm_config(&get_or, &get),
             search: search_config(&get, &get_or)?,
@@ -713,6 +736,32 @@ fn google_login_config(
         .filter(|s| !s.is_empty())
         .context("GOOGLE_LOGIN_CLIENT_ID is set but GOOGLE_LOGIN_REDIRECT_URI is not")?;
     Ok(Some(GoogleLoginConfig {
+        client_id,
+        client_secret: SecretString::from(client_secret),
+        redirect_uri,
+    }))
+}
+
+/// The Calendar consent flow's client, parsed exactly like [`google_login_config`]:
+/// optional as a whole, and a half-configured client is a boot failure rather than a
+/// redirect that fails at Google.
+///
+/// Its own three variables (`GOOGLE_CALENDAR_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI`) rather
+/// than the login ones: the calendar client carries calendar scopes, and reusing the
+/// login client would make the sign-in screen ask for them.
+fn google_calendar_config(
+    get: &impl Fn(&str) -> Option<String>,
+) -> anyhow::Result<Option<GoogleCalendarConfig>> {
+    let Some(client_id) = get("GOOGLE_CALENDAR_CLIENT_ID").filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let client_secret = get("GOOGLE_CALENDAR_CLIENT_SECRET")
+        .filter(|s| !s.is_empty())
+        .context("GOOGLE_CALENDAR_CLIENT_ID is set but GOOGLE_CALENDAR_CLIENT_SECRET is not")?;
+    let redirect_uri = get("GOOGLE_CALENDAR_REDIRECT_URI")
+        .filter(|s| !s.is_empty())
+        .context("GOOGLE_CALENDAR_CLIENT_ID is set but GOOGLE_CALENDAR_REDIRECT_URI is not")?;
+    Ok(Some(GoogleCalendarConfig {
         client_id,
         client_secret: SecretString::from(client_secret),
         redirect_uri,

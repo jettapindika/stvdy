@@ -821,6 +821,7 @@ fn label(feature: Feature) -> &'static str {
         Feature::TaskBreakdown => "task breakdown",
         Feature::QuickCapture => "quick capture",
         Feature::GoogleCalendar => "Google Calendar",
+        Feature::GoogleAccount => "Google accounts",
         Feature::SyllabusImport => "a syllabus import",
         Feature::PlanGeneration => "automatic planning",
         Feature::AgentAction => "agent actions",
@@ -913,6 +914,12 @@ async fn counters(
                and status in ('draft', 'generating', 'ready')) as reports_this_month,
            (select count(*)::bigint from sources
              where user_id = $1 and deleted_at is null and kind = 'syllabus') as syllabus_imports,
+           -- The live Google connections (A245). `refresh_token_enc is not null` is the
+           -- difference between connected and a row that exists: a revoked grant keeps its
+           -- row, and counting it would refuse a re-connect the student is entitled to.
+           (select count(*)::bigint from calendar_connections
+             where user_id = $1 and provider = 'google'
+               and refresh_token_enc is not null) as google_accounts,
            -- The one fact about the calling *device* rather than the account: the spec
            -- flags a device over the plan's `devices_max` read-only instead of revoking it.
            -- The coalesce is *outside* the subselect: with no matching row the subselect is
@@ -946,6 +953,7 @@ async fn counters(
             quizzes_this_month: row.quizzes_this_month,
             reports_this_month: row.reports_this_month,
             syllabus_imports: row.syllabus_imports,
+            google_accounts: row.google_accounts,
         },
         device_read_only: row.device_read_only,
     })
@@ -978,6 +986,7 @@ struct SnapshotRow {
     quizzes_this_month: i64,
     reports_this_month: i64,
     syllabus_imports: i64,
+    google_accounts: i64,
     device_read_only: bool,
 }
 

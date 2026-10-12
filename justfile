@@ -219,10 +219,8 @@ smoke-phase8:
 # LLM and nothing here renders a document, so any of the phase 7-9 servers is a fine server
 # for it — the stub it points at is never reached.
 #
-# The Google half degrades to the ICS half, and the script's header says why: the consent
-# routes are not in the router (Task 6 is unlanded) and the OAuth client does not exist in
-# this repo, so there is nothing to connect against. The one Google-shaped assertion it can
-# make is the *refusal* on free.
+# The Google consent flow's refusals are asserted; a successful exchange is not, because the
+# OAuth client does not exist in this repo (Task 6's live half).
 #
 # It reads the database back (the connection row, the stored feed token), so it needs
 # `DATABASE_URL`, which it reads out of `.env` itself, and it prunes `signup_attempts` for
