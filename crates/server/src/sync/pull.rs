@@ -168,7 +168,7 @@ async fn load_initial(
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("reading an initial page: {error}")))?;
 
-    Ok(page_from_rows(rows, anchor, q.limit)?)
+    page_from_rows(rows, anchor, q.limit)
 }
 
 /// A page of the incremental walk: `seq > cursor`, ascending.
@@ -194,7 +194,7 @@ async fn load_incremental(
     // On an empty page the cursor stays where it was, so a client polling a quiet
     // account does not jump its cursor to an unrelated seq.
     let next_cursor = rows.last().map(|row| row.0).unwrap_or(after);
-    Ok(page_from_rows(rows, next_cursor, q.limit)?)
+    page_from_rows(rows, next_cursor, q.limit)
 }
 
 /// Turns the fetched rows into a page, using the extra row to decide `has_more`.
