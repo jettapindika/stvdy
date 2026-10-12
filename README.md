@@ -168,7 +168,7 @@ cannot hold this pgvector workload.
 supabase login
 supabase link --project-ref kugefzknygvjmgwanjkk   # prompts for the DB password
 cp .env.supabase.example .env.supabase             # paste the same password
-just migrate-supabase                              # 17 migrations
+just migrate-supabase                              # every migration in migrations/
 just server-supabase                               # API against Supabase
 ```
 
