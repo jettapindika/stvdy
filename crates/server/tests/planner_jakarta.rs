@@ -464,33 +464,55 @@ async fn the_planner_and_its_copy_are_correct_in_asia_jakarta(pool: PgPool) {
     let blocks = proposal["proposal"]["blocks"].as_array().expect("blocks");
     assert!(!blocks.is_empty(), "the gate needs a plan: {proposal}");
 
-    // The day buckets are **Jakarta's** days: every `day_load` date is the local date of the
-    // blocks that fall on it, which a UTC-bucketed plan cannot satisfy.
+    // The day buckets are **Jakarta's** days: every block's own local date is one of the days
+    // the planner reports, which a UTC-bucketed plan cannot satisfy for a block that crosses
+    // local midnight. `day_load` names every day of the horizon — a day with capacity and
+    // nothing planned is a real row, which is what the first run of this test caught in its own
+    // assertion rather than in the server.
     let day_load = proposal["proposal"]["day_load"]
         .as_array()
         .expect("day_load");
     assert!(!day_load.is_empty(), "a plan has a day load: {proposal}");
-    for day in day_load {
-        let date = day["date"].as_str().unwrap();
-        let on_that_day: i64 = blocks
-            .iter()
-            .filter(|block| {
-                block["starts_at"]
-                    .as_str()
-                    .unwrap()
-                    .parse::<DateTime<Utc>>()
-                    .unwrap()
-                    .with_timezone(&jakarta())
-                    .date_naive()
-                    .to_string()
-                    == date
-            })
-            .count() as i64;
+    let named: Vec<&str> = day_load
+        .iter()
+        .filter_map(|day| day["date"].as_str())
+        .collect();
+    let mut with_blocks = 0;
+    for day in &named {
+        if blocks.iter().any(|block| {
+            block["starts_at"]
+                .as_str()
+                .unwrap()
+                .parse::<DateTime<Utc>>()
+                .unwrap()
+                .with_timezone(&jakarta())
+                .date_naive()
+                .to_string()
+                == *day
+        }) {
+            with_blocks += 1;
+        }
+    }
+    for block in blocks {
+        let local_day = block["starts_at"]
+            .as_str()
+            .unwrap()
+            .parse::<DateTime<Utc>>()
+            .unwrap()
+            .with_timezone(&jakarta())
+            .date_naive()
+            .to_string();
         assert!(
-            on_that_day > 0,
-            "day_load names {date}, which holds no block in Jakarta's own days: {proposal}"
+            named.contains(&local_day.as_str()),
+            "the block at {} is on Jakarta's {local_day}, which day_load does not name: {proposal}",
+            block["starts_at"]
         );
     }
+    println!(
+        "day_load: {} day(s) in the horizon, {} of them holding a block",
+        named.len(),
+        with_blocks
+    );
 
     let accepted: Vec<serde_json::Value> = blocks
         .iter()
