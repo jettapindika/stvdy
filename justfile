@@ -288,6 +288,16 @@ check-web:
 # fresh checkout cannot lint or test the shell until the SPA has been built — the
 # dependency makes that explicit rather than relying on check-web happening to run
 # first.
+#
+# **And the dependency is on `dist` existing, not only on `check-web` having run.**
+# `scripts/smoke-phase14.sh` does `rm -rf app/dist` before its own store build, so
+# running that smoke script — or anything else that clears the directory — while
+# this recipe is in flight kills the shell's doctests with `frontendDist … but this
+# path doesn't exist`, an error that names the shell crate and reads as a broken
+# build script rather than a missing directory. It has happened. The remedy is
+# `npm --prefix app run build` and a re-run; the reason it is worth a paragraph is
+# that `dist/` is gitignored shared state, so nothing in the tree says whether it
+# should be there.
 check-shell: check-web
     cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
     cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings

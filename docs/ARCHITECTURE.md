@@ -381,6 +381,8 @@ the per-phase detail follows it.
 |---|---|---|
 | 1 | Sign in, sign up, verify email, workspace list, workspace detail | PASS — the detail below |
 | 5, 7, 10, 12, 13 | Their own screens, in their own plans | PASS, each with its own defect found and fixed |
+| 9 | Today, tasks, the timer, quick capture | PASS — four screens at both viewports, recorded in its own plan. Its notes say `DONE_WITH_CONCERNS — three defects found and not fixed`, and **all three were fixed afterwards** (`QuickCapture`'s Escape handling, its due line through `formatInZone`, and the 200%-text width), so the row and the note disagree and the row is the current one |
+| 11 | Planner, goals, syllabus | **PARTIAL** — (b) contrast measured, (a)/(c)/(d) asserted structurally in the components' tests, **(e) 200% text NOT MEASURED**: no harness fixture for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`. The one accessibility gap the project still has |
 | 14 | The whole shell, at both viewports, through `scripts/measure-mobile.mjs` | PASS — 20 surfaces when it ran; the walk holds **24** now, 96 combinations per leg |
 | **0** | The shell chrome — the tab bar, the sidebar, the skip link, the sync control | **PASS, measured 2026-10-12** through the walk the later phases built: all 24 surfaces are walked *through* the shell, so its chrome is measured on every combination. Tab bar items **78×44** at phone width, sidebar items **215×40** (above the spec's 32px desktop floor); the skip link is the first Tab stop at 16.19:1 |
 | **4** | The study screen (`/study/:deckId`) | **PASS, measured 2026-10-12** — the gap this table was written to name, now closed. Four surfaces added to the shared walk; one defect found and fixed |
@@ -406,13 +408,21 @@ at hand.
 **What this gate still does not reach, and it is stated rather than implied.** Phase 4's
 empty state (`study.nothingDue`) and its three error states are not walked — they need their
 own fixtures and add no control the four surfaces do not cover. The swipe gesture is a touch
-path the harness cannot drive at all, so it stays a component-test property. **Every phase's
-own box is now ticked:** Phase 0's shell chrome is measured through the walk (it is the frame
-every surface is rendered in, so its tab bar, sidebar, skip link and sync control are in the
-control set on all 96 combinations), and Phase 4's study screen is the section above. The one
-thing still outside the harness is the *native* layer — the mobile and desktop shells
-themselves — which no headless Chromium can reach and which `docs/RELEASE.md`'s store
-checklists type `user`.
+path the harness cannot drive at all, so it stays a component-test property.
+
+**Every phase now has a recorded result, and one of them is partial — which is the honest
+version of "has this been done".** Phases 0 and 4 were the two with no measurement at all,
+and both are closed above (0's shell chrome through the walk, 4's study screen through four
+new surfaces). **Phase 11's is PARTIAL and stays that way**: its contrast leg was measured
+and its (a)/(c)/(d) legs are asserted structurally in the components' own tests, but **leg
+(e), 200% text with zero clipping, is NOT MEASURED** — the walk's `ROUTES` table has no
+fixture for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`,
+so pointing it at those screens measures the 404 notice. Its own plan records the split at
+Task 15 Step 7 and in exit-checklist row 16, with the revisit trigger named. **Closing it is
+five fixtures and a run**, and it is the one accessibility gap the project still has.
+
+The one layer no headless browser reaches is native — the mobile and desktop shells
+themselves — and `docs/RELEASE.md`'s store checklists type that `user`.
 
 #### Phase 1's result, in full
 
@@ -1292,12 +1302,15 @@ runs also runs inside it (`scripts/release-image.sh`, CI's `image` job).
 | Chromium (Debian `chromium` + `chromium-common`) | `ARG CHROMIUM_VERSION` | `CHROME_PATH` | the renderer's output is the document a student prints, and `tests/pdf.rs` asserts a page count and a footer read back from the renderer — an unpinned browser makes that depend on when the image was built |
 | pdfium (`bblanchon/pdfium-binaries`) | `chromium/8086`, SHA-256 verified | `PDFIUM_LIB_PATH` | the one dependency that parses attacker-supplied files; an unpinned download from a release URL is a supply-chain hole (A341) |
 | `fastembed` model | `intfloat/multilingual-e5-base` | `FASTEMBED_CACHE_DIR` | 1.06 GB, and the config default is a *relative* path, which in a container means "relative to the working directory" (A342) |
-| LibreOffice (`-core`/`-writer`/`-impress`) | bookworm | `SOFFICE_BIN` | the PPTX/DOCX preview (A158); dormant until Phase 7's ingestion lands (A343) |
+| LibreOffice (`-core`/`-writer`/`-impress`) | trixie | `SOFFICE_BIN` | the PPTX/DOCX preview (A158); dormant until Phase 7's ingestion lands (A343) |
 | Print assets (KaTeX, Inter, JetBrains Mono) | KaTeX 0.19.0 | `ASSETS_DIR` | `rust-embed` compiles them into the binary; the runtime copy is for the operator (A339) |
 
-**Base image: `debian:bookworm-slim`.** Not distroless and not Alpine, because all three
-native dependencies are glibc builds and none of them exists on musl. The security cost of the
-larger base is accepted, and the mitigation is a pinned base digest plus a weekly rebuild.
+**Base image: `debian:trixie-slim`.** Not distroless and not Alpine, because all three
+native dependencies are glibc builds and none of them exists on musl. Trixie rather than
+bookworm is not a preference: `ort-sys`'s prebuilt ONNX Runtime needs glibc ≥ 2.38 and
+bookworm carries 2.36, and the crate ships one distribution per target, so the base image is
+the only thing that can move. The security cost of the larger base is accepted, and the
+mitigation is a pinned base digest plus a weekly rebuild.
 
 **The image carries the release `target/` directory.** That is what makes `cargo test --test
 pdf` runnable inside it, and it is the phase's stated risk's defence: the acceptance test is

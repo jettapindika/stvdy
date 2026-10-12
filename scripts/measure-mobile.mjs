@@ -101,6 +101,58 @@ const SCALES = (process.env.SCALES ?? '100,200').split(',').map((value) => Numbe
  */
 const ONLY = process.env.ONLY_SURFACES
 
+/**
+ * **The fixtures' date-bearing instants are anchored to now, not written down.**
+ *
+ * Several screens decide what to render by comparing a fixture's instant against the
+ * *device* clock — `TodayScreen` and `calendar.ts`'s `localWeek` put an event in the
+ * week containing now, `day.ts`'s `isOutstanding` reads `due_at`, and the pending
+ * action card states when its proposal expires. An absolute fixture therefore has an
+ * **expiry date**: it renders one state until that instant passes and a different one
+ * afterwards, with no test failing — `calendar` would show the event in a later week or
+ * not at all, and `today`'s buckets would move it from upcoming to overdue. The walk
+ * would keep reporting PASS while measuring a different screen.
+ *
+ * That is not hypothetical: the same class went red on this tree twice on 2026-10-12 —
+ * `CheckoutScreen.test.tsx` (a fixed `expires_at`) and `reminders.rs` (a fixed
+ * `fire_at` against the server's registration window). `paymentRow()` below is the
+ * in-file precedent for the remedy.
+ *
+ * `ANCHOR` is read once, at module load, so every fixture in one run agrees about what
+ * "now" is even if the run crosses midnight.
+ */
+const ANCHOR = new Date()
+
+/**
+ * An ISO instant `days` from the anchor, at a fixed UTC time of day.
+ *
+ * The time of day is pinned rather than inherited from the run's clock because the app
+ * renders these in the student's zone: a fixture whose instant drifted with the hour
+ * would put a Jakarta date on either side of a day boundary depending on when the gate
+ * ran.
+ */
+function daysFromAnchor(days, time = '09:00:00') {
+  const date = new Date(ANCHOR)
+  date.setUTCDate(date.getUTCDate() + days)
+  return `${date.toISOString().slice(0, 10)}T${time}Z`
+}
+
+/**
+ * The anchor's own week, `weekdayOffset` days from its Monday, at a fixed time of day.
+ *
+ * Used for the calendar's one event. A plain "now + 2 days" is not enough: on a
+ * Saturday that lands in the *next* week and the event leaves the visible window, so
+ * the surface measures the empty grid. Anchoring to the week's own Wednesday keeps it
+ * inside the Monday-based week `localWeek` renders, with a day of margin on each side
+ * for the harness's zone and the student's (Asia/Jakarta) disagreeing near midnight.
+ */
+function thisWeek(weekdayOffset, time = '09:00:00') {
+  const date = new Date(ANCHOR)
+  // `getUTCDay()` is 0=Sunday; shift so Monday is 0.
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7) + weekdayOffset)
+  return `${date.toISOString().slice(0, 10)}T${time}Z`
+}
+
 /** Where Chromium is looked for, the same list `render/chrome.rs` uses. */
 const CHROME_CANDIDATES = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // macOS
@@ -234,7 +286,10 @@ const TASK = {
   parent_id: null,
   title: 'Selesaikan tugas kriptografi untuk kuliah hari Jumat',
   notes: null,
-  due_at: '2026-10-16T16:59:00Z',
+  // Four days out: far enough that the Today view does not put it in today's buckets,
+  // near enough that the tasks row renders a date rather than "overdue". Anchored, so
+  // the state cannot flip when this instant passes (see `daysFromAnchor`).
+  due_at: daysFromAnchor(4, '16:59:00'),
   estimate_min: 60,
   priority: 2,
   status: 'todo',
@@ -255,8 +310,10 @@ const EVENT = {
   workspace_id: null,
   kind: 'study',
   title: 'Belajar kriptografi untuk ujian hari Jumat',
-  starts_at: '2026-10-14T09:00:00Z',
-  ends_at: '2026-10-14T10:00:00Z',
+  // The week's own Wednesday, so the block is inside the Monday-based week the
+  // calendar renders on any day the gate runs (see `thisWeek`).
+  starts_at: thisWeek(2, '09:00:00'),
+  ends_at: thisWeek(2, '10:00:00'),
   source: 'manual',
   task_id: null,
   created_at: '2026-10-11T08:00:00Z',
@@ -474,13 +531,15 @@ const PENDING_ACTIONS = [
     args: {
       title: 'Selesaikan laporan kriptografi untuk Jumat',
       notes: 'Sertakan analisis fungsi hash dan tanda tangan digital pada bab empat.',
-      due_at: '2026-10-16T16:59:00Z',
+      due_at: daysFromAnchor(4, '16:59:00'),
       estimate_min: 90,
       priority: 1,
     },
     status: 'pending',
     created_at: '2026-10-12T08:00:00Z',
-    expires_at: '2026-10-13T08:00:00Z',
+    // Tomorrow, so the card is live rather than expired, and anchored so that stays
+    // true on every later run.
+    expires_at: daysFromAnchor(1, '08:00:00'),
     resolved_at: null,
     resolved_by_device_id: null,
     result: null,
@@ -493,7 +552,7 @@ const PENDING_ACTIONS = [
     args: { title: 'Kartu Ulangan Kriptografi Kunci Publik', count: 10, source_ids: ['s1', 's2'] },
     status: 'pending',
     created_at: '2026-10-12T08:00:05Z',
-    expires_at: '2026-10-13T08:00:05Z',
+    expires_at: daysFromAnchor(1, '08:00:05'),
     resolved_at: null,
     resolved_by_device_id: null,
     result: null,
@@ -747,8 +806,13 @@ const SURFACES = [
     steps: [...STUDY_STEPS, { button: 'Show answer' }],
   },
   {
+    // `'page 42'` rather than the toggle's own label: `'Hide source'` proves only that the
+    // button's text flipped, while `SourcePassage` renders its retry notice instead of the
+    // passage when `useChunk` fails — so a 404 on `/chunks/k1` would satisfy a
+    // label-based guard and this surface would measure an error notice. The page label
+    // exists only when the chunk resolved.
     name: 'study-source',
-    expect: 'Hide source',
+    expect: 'page 42',
     steps: [...STUDY_STEPS, { button: 'Show answer' }, { button: 'Show source' }],
   },
   // Gate 5(a)'s second half, which no surface above can measure: **`1`-`4` grade
@@ -1969,6 +2033,15 @@ async function main() {
       : SURFACES.filter((surface) => ONLY.split(',').includes(surface.name))
   if (surfaces.length === 0) {
     fail(`ONLY_SURFACES=${ONLY} matched no surface`)
+  }
+  // A `keys` step's only observable effect is the surface's `expect` moving, so a surface
+  // with keys and no expectation presses a key and asserts nothing — the vacuity this
+  // script's other guards exist to prevent. Caught here, where the tables are validated,
+  // rather than by noticing an absent result later.
+  for (const surface of surfaces) {
+    if (surface.keys !== undefined && surface.expect === undefined) {
+      fail(`${surface.name} has a \`keys\` step but no \`expect\`, so the key press asserts nothing`)
+    }
   }
 
   for (const theme of ['dark', 'light']) {

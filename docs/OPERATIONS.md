@@ -318,7 +318,51 @@ source ahead of the dump (exit 1, naming the table and the delta), the same case
 `--tolerance 5` (exit 0), and `--source-url` equal to `--target-url` (exit 2, refused before
 anything was restored). The plain-SQL and gzipped formats were run too, both passing.
 
-**Replace this block with the production run, dated, before launch** (launch checklist row 14).
+**Re-run 2026-10-12 against the development database, which carries real data rather than one
+workspace.** The shape is identical and the numbers are the interesting part: the migration count
+has moved from 34 to **36**, and the row counts are non-trivial, so this run exercises the
+comparison rather than comparing sixteen zeroes. A drill whose only recorded output is a database
+with two rows in it has not exercised the row-count check at all.
+
+```
+$ pg_dump -Fc "$DATABASE_URL" > /tmp/drill-dumps/stvdy-20261012T1843.dump
+$ scripts/restore-drill.sh --dump /tmp/drill-dumps \
+    --target-url postgres://…/stvdy_drill --source-url postgres://…/stvdy
+
+=== restoring /tmp/drill-dumps/stvdy-20261012T1843.dump into stvdy_drill
+
+=== schema
+migrations: 36 installed, 0 pending, 0 missing (expected 36)
+
+=== row counts, the +sync tables
+table                    restored       source
+workspaces                    107          107
+sources                        96           96
+messages                      170          170
+decks                           1            1
+flashcards                     10           10
+flashcard_reviews               1            1
+quizzes                         4            4
+quiz_questions                  8            8
+quiz_attempts                  18           18
+reports                        12           12
+cheatsheets                     9            9
+tasks                          79           79
+goals                          27           27
+events                        258          258
+study_sessions                  6            6
+pending_actions                 6            6
+
+=== PASS
+restored stvdy-20261012T1843.dump (1088100 bytes) into stvdy_drill:
+  36 migrations installed, none pending or missing
+  812 rows across the 16 +sync tables
+```
+
+**Replace these blocks with the production run, dated, before launch** (launch checklist row 14).
+What the local runs establish is that the drill works and that it tracks the schema; what they
+cannot establish is anything about the production host, the R2 bucket, or the vendor's recovery
+window.
 
 ## Monitoring and alerting (A348)
 

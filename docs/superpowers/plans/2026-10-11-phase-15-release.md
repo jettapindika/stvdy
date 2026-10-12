@@ -1143,6 +1143,18 @@ clean.
 
 ## Task 6: `Dockerfile` — the pinned image
 
+> **The `Dockerfile` is already written and committed** (`55d90e1`, `ff495b2`), and the code
+> blocks below are the **draft's**, not the shipped file's. One value in them has since moved
+> and the difference matters: the draft's `ARG CHROMIUM_VERSION=141.0.7390.54-1~deb12u1` is
+> **not** what ships — the committed pin is **`154.0.8037.92-1~deb12u1`**, read from
+> bookworm-security. The draft's string is kept as written rather than corrected in place,
+> because a plan that silently rewrites its own history is how a stale value survives a
+> search; what a reader needs is the *shipped* value, which is asserted against the running
+> image by CI's `image` job. **A base-image change would move it again** — a peer's uncommitted
+> work moves the whole image to trixie, where the same upstream `154.0.8037.92` carries the
+> `~deb13u1` revision suffix rather than `~deb12u1`; a one-character difference in that suffix
+> is what makes an apt pin unresolvable, which is the reason this note names both.
+
 **Files:**
 - Create: `Dockerfile`, `.dockerignore`
 - Modify: `docs/ARCHITECTURE.md` (§ Container image), `docs/RELEASE.md`
@@ -2035,6 +2047,16 @@ node scripts/check-no-cdn.mjs
       exit 0. `just check-shell` exit 0 end to end. The earlier **NOT MEASURED** was true when
       written — three peer files were mid-edit and one failed `expect_used` — and every one of
       those was fixed by its owner.
+      **This claim expired on the day it was written, and that is the finding worth keeping.**
+      Re-run later on 2026-10-12, the same gate went **red** — not on a code defect but on two
+      fixtures with an **expiry date**: `crates/server/tests/reminders.rs` sent a fixed
+      `fire_at` of `2026-10-12T09:00:00Z` against an unpinned clock, so the suite passed until
+      09:05 UTC that morning and failed from then on against the server's own five-minute
+      registration window. A peer hit the identical class in `CheckoutScreen.test.tsx` (a fixed
+      `expires_at`), and `scripts/measure-mobile.mjs` carried four more (`TASK.due_at`,
+      `EVENT.starts_at` and the two `PENDING_ACTIONS[].expires_at`, all anchored now).
+      **So "the gate is green" was a statement about a moment, not about a tree** — which is
+      precisely what a green badge on a commit cannot tell you.
 
 ### Exit checklist table (gate | command | result)
 

@@ -393,27 +393,29 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     measured on every surface above, both themes, both scales; **(a) reach every control
     by keyboard alone with a visible focus ring** is measured by the **keyboard leg**
     added below, on the same control set the target check collects; **(d) no state
-    conveyed by colour alone** is measured on **the six checkout states only**, because
-    those are the surfaces that declare the words their state must show (`words` in
-    `SURFACES`) — every other surface's colour-alone behaviour, and any state that is not
-    a checkout state, is still unmeasured by any committed command, **and no phase has
-    ever measured (d) by a check at all**: the per-phase rows for it are readings
+    conveyed by colour alone** is measured on the surfaces that **declare the words their
+    state must show** (`words` in `SURFACES`) — the six checkout states, and the study
+    screen's revealed state, whose four grade labels are asserted in the rendered text
+    rather than inferred from a tone. On every *other* surface (d) is still unmeasured,
+    and it is left that way deliberately: the only way to test it there is to infer "state
+    from colour alone" from a computed-colour difference between siblings, which is a
+    heuristic that produces findings nobody can act on — worse than recording it as
+    unmeasured. The per-phase rows for it elsewhere are readings, not checks
     (`docs/ARCHITECTURE.md` § Accessibility gate records Phase 1's that way, from
-    `aria-invalid` + `aria-describedby` being present in the source). It is left that way
-    deliberately: the only way to test (d) on a surface whose state is not in the fixture
-    is to infer "state from colour alone" from a computed-colour difference between
-    siblings, which is a heuristic that produces findings nobody can act on — worse than
-    recording it as unmeasured. **(d) has since gained a second surface family: the study
-    screen's revealed state** declares its four grade labels as `words` in `SURFACES`, so
-    the walk asserts `Again`/`Hard`/`Good`/`Easy` are in the rendered text rather than
-    inferred from a tone; the same screen's revealed and in-flight states are pinned in
-    `app/src/features/study/StudyScreen.test.tsx` (the answer arrives as content, and a grade
-    in flight is `disabled` — a state the accessibility tree carries — rather than only the
-    `opacity: 0.45` its class also applies). And **(a) is measured for these 24 surfaces and
-    no others**: the study screen (`/study/:deckId`) is now walked — in its unrevealed,
-    revealed, source-open and graded-by-key states — so the sentence that used to say its
-    keyboard reach had no committed check no longer holds. The auth routes are not walked
-    either, though Phase 1's own private walk covered them and recorded the result;
+    `aria-invalid` + `aria-describedby` being present in the source).
+    **Two sentences here are superseded and are marked rather than deleted**, because each
+    was true when written and each was the shape a later phase had to correct: ~~(d) is
+    measured on **the six checkout states only**~~ and ~~no phase has ever measured (d) by
+    a check at all~~ — both were true until the study surfaces landed, and the study
+    screen's revealed and in-flight states are also pinned in
+    `app/src/features/study/StudyScreen.test.tsx` (the answer arrives as content, and a
+    grade in flight is `disabled` — a state the accessibility tree carries — rather than
+    only the `opacity: 0.45` its class also applies). And **(a) is measured for these 24
+    surfaces and no others**: the study screen (`/study/:deckId`) is now walked — in its
+    unrevealed, revealed, source-open and graded-by-key states — so the sentence that used
+    to say its keyboard reach had no committed check no longer holds. The auth routes are
+    not walked either, though Phase 1's own private walk covered them and recorded the
+    result;
     `var/gate5-keyboard.json` is the other private one, three report screens, **(a)-only**
     and not reproducible from any committed command — this leg supersedes it for the
     surfaces above. The unticked accessibility boxes in Phases 0 and 4 can therefore be
@@ -2020,7 +2022,7 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
 | 6 | **No purchase UI** | `node scripts/check-no-purchase-ui.mjs` | **PASS** — exit 0, `no purchase UI in 3 shipped file(s)`, stamp `store` |
 | 7 | Push token registers | device: log + `push_tokens` row | **NOT VERIFIED** — no Apple Developer account, no Firebase project, no device. The Rust half that mints and `PUT`s the token is tested (`tests/push.rs`, 7 passed, against a scratch HTTP server); the token in that test is fabricated |
 | 8 | Deep links round-trip | `tests/deep_link.rs` + a device for the OS hand-off | **PASS for classification** — 9 passed: `stvdy://` and `https://app.stvdy/…` classify to the same intent, cold start included. **NOT VERIFIED** for the OS handing the URL over: that needs a device and, for universal links, an AASA file served from `app.stvdy` |
-| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | **PASS at both legs**, exit 0 each. Phone (390×844): 80 combinations, 1072 targets, 3072 text pairs, lowest contrast 4.97:1, **0 clipped on every surface** — including the six checkout states, whose 22 findings at 200% text were fixed in `0670d35`. Desktop (1365×900): 40 combinations, 786 targets, 2182 pairs, 4.97:1, 0 clipped, 0 undersized after `2267d26` exempted the inline citation chip at the 32px floor. Both numbers re-measured 2026-10-12 |
+| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | **PASS at both legs**, exit 0 each. Phone (390×844): 80 combinations, 1072 targets, 3072 text pairs, lowest contrast 4.97:1, **0 clipped on every surface** — including the six checkout states, whose 22 findings at 200% text were fixed in `0670d35`. Desktop (1365×900): 40 combinations, 786 targets, 2182 pairs, 4.97:1, 0 clipped, 0 undersized after `2267d26` exempted the inline citation chip at the 32px floor. Both numbers re-measured 2026-10-12, and **superseded the same day by Phase 4's four `study` surfaces**: the walk now holds 24 surfaces, so a re-run reports **96 combinations, 1232 targets, 3380 pairs** at phone and **96 combinations, 1748 targets, 4704 pairs** at desktop, both with 0 clipped, 0 overlapped and 0 undersized. The surface count is the only reason the numbers moved — the pass condition and the command are unchanged — and a reader comparing this row with `docs/RELEASE.md`'s M10 should expect them to differ by exactly that. |
 | 10 | Gate 6 | Indonesian phone-shell test | **PASS** — 12 passed, output quoted in Task 11 Step 4 |
 | 11 | Gate 7 | mobile plan screen + composer hint | **PASS** — `MobilePlanScreen.test.tsx` asserts `Free`, `2 of 2`, the usage line and `controls(container) === []` with no `Rp` |
 | 12 | Docs | RELEASE/ARCHITECTURE/ASSUMPTIONS updated | **PRESENT**, with one gap: Task 7's two doc edits are **not made** because there is no device result to record (see Task 7's status note) |

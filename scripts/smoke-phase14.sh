@@ -45,6 +45,31 @@ cd "$ROOT"
 
 APP_URL="${APP_URL:-http://localhost:5173}"
 
+# **`app/dist` is restored to the web build on the way out, whatever happened.**
+#
+# Step 2 leaves a *store* bundle there, because that is the artifact the absence check has
+# to inspect — and `app/dist` is `frontendDist`, so anything that builds the desktop app
+# afterwards would package the phone bundle. That is not cosmetic: the store build defines
+# `__PURCHASE_UI__` false at build time (A322), so a desktop app built from it has **no
+# checkout screen at all** and a paying student cannot buy. The window between this script
+# finishing and someone noticing is exactly the window a release gets cut in.
+#
+# `check-shell` is the other consumer, and it fails loudly rather than silently (its
+# doctests panic with `frontendDist … but this path doesn't exist` if the directory is
+# missing mid-run), which is why the restore covers the store case and the trap covers an
+# early exit.
+restore_web_build() {
+  local status=$?
+  if [ -f "$ROOT/app/dist/index.html" ] &&
+    grep -oq 'stvdy-build-target" content="store"' "$ROOT/app/dist/index.html"; then
+    printf '\n=== restoring app/dist to the web build (step 2 left a store bundle)\n'
+    npm --prefix app run build >/dev/null 2>&1 ||
+      printf 'WARNING: could not rebuild app/dist as the web build; it still holds the store\nbundle, so a desktop build from here would ship no checkout screen\n' >&2
+  fi
+  return "$status"
+}
+trap restore_web_build EXIT
+
 say() { printf '\n=== %s\n' "$1"; }
 step() { printf '\n--- %s\n' "$1"; }
 
@@ -136,12 +161,12 @@ if [ "$FAILURES" -gt 0 ]; then
   printf '\n=== FAIL: %s step(s) failed\n' "$FAILURES" >&2
   if [ "$FAILURES" -eq 1 ]; then
     cat <<'NOTE'
-The one failure is step 3, and it is not a Phase 14 regression: the phone measurement
-reports 22 clipped elements, all at 200% text on Phase 13's five
-/billing/checkout/:paymentId states, which Phase 13's own gate-5 table already records as
-reported rather than fixed. Every other measured item passes — 0 undersized, 0 text pairs
-below requirement, 0 overlaps, 0 page-width overflows — and no Phase 14 surface is among
-the 22.
+The one failure is step 3, and it is not a Phase 14 regression. **This note used to name 22
+clipped elements at 200% text on Phase 13's five /billing/checkout/:paymentId states, and
+those were fixed after Phase 13's gate recorded them as reported rather than fixed** — a full
+re-measurement now reports 0 clipped and 0 overlapped on every surface at both scales, so a
+single failure here is something *new* rather than the old known one. Read the line the walk
+printed: it names the surface, the element and the numbers.
 NOTE
   fi
   exit "$FAILURES"

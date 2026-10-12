@@ -3610,7 +3610,17 @@ decision, in the table's existing `| id | decision | detail | why |` shape:
 - A89: `plan_id` parsing moved to `PlanId::parse`, so one implementation reads a plan
   string.
 
-- [x] **Step 4: Roadmap gate 5 — accessibility, on the study screen**
+- [x] **Step 4: Roadmap gate 5 — accessibility, on the study screen** — **the tick was bare until 2026-10-12; here is the measurement it claims, and it was not performed at the time this step was ticked.** Every clause below, with the number that answers it. The full record is `## Execution notes (Phase 4, as built)` at the end of this file and the exit checklist's gate-5 row; the short version:
+
+  | Clause | Result |
+  |---|---|
+  | **(a)** Tab reaches the reveal button and all four grades; the ring is visible; `1`–`4` grade without the mouse | **PASS, measured.** **176 Tab stops at phone, 192 at desktop** across the four study surfaces, **0 unreached, 0 without a focus ring, 0 trapping**. The shortcut is *driven*, not assumed: the `study-graded-by-key` surface presses `3` and asserts the queue advanced to `Card 2 of 2`, **falsified** by pressing `9` (no handler) which fails the surface |
+  | **(b)** Contrast in both themes, for the card, the answer and the four grades | **PASS.** **304 text pairs at phone, 336 at desktop, 0 below requirement**; lowest **6.29:1** on the study surfaces, against 4.5 required |
+  | **(c)** 44px at phone width for the four grade buttons | **PASS.** The grades measure **84.4–90.8×44** at 100% and 166.8–179.6×88 at 200%; **0 targets under 44px** on any study surface. (The reveal and the four grades are `btn`, which carries `min-height: 2.75rem`; the *link* in the header was the defect — see below) |
+  | **(d)** No state by colour alone | **PASS.** The revealed state declares `Again`/`Hard`/`Good`/`Easy` as `words` in the harness, so the assertion is on `body.innerText`; the in-flight state is `disabled` — a state the accessibility tree carries — pinned in `StudyScreen.test.tsx` |
+  | **(e)** 200% text on 390px with no clipping or overlap | **PASS.** **0 clipped, 0 overlapped, page 390/390** at both scales, both themes |
+
+  **The defect this gate found, and it was the only one:** the header's "Back to the workspace" was a bare `.link`, so it painted its line box at **151.3×21** (and **302.5×41** at 200% text) against the 44px floor. Fixed with `inline-flex min-h-11 items-center`, re-measured at **151.3×44** / **302.5×88**; the regression test is `StudyScreen.test.tsx`'s "is a 44px phone target, not a text-height one", proven to fail without the fix. **Not measured, stated rather than implied:** the empty state and the three error states are not walked (no control the four surfaces do not cover), and the swipe gesture is a touch path the harness cannot drive.
 
 Perform and record, in the plan and in the phase summary:
 (a) keyboard-only walk: Tab reaches the reveal button and all four grade buttons, the

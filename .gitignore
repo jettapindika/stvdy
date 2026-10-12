@@ -8,6 +8,10 @@
 # The store build (`VITE_PLATFORM=mobile`), which is the bundle the iOS and
 # Android shells load and the artifact `check-no-purchase-ui.mjs` inspects.
 /app/dist-mobile
+# The staging build's own output directory. Added when a third slice started
+# writing it: every other Vite output here is ignored with its reason, so leaving
+# this one tracked meant a `git add -A` could commit a whole bundle.
+/app/dist-local
 /app/coverage
 # Vitest's own cache, written when a reporter flag is passed (`--reporter=json`
 # creates `app/.vitest/json/output.json`). The rule above covers only the
