@@ -1,0 +1,10 @@
+[
+  {
+    "contains": "Turn the user's text into a task draft",
+    "answer": "{\"title\":\"Selesaikan tugas kripto\",\"notes\":\"Bab 4 dan latihannya\",\"due_at\":\"2026-10-16T23:59:00+07:00\",\"priority\":1,\"estimate_min\":90}"
+  },
+  {
+    "contains": "Break this task into concrete subtasks",
+    "answer": "{\"subtasks\":[{\"title\":\"Baca bab 4 tentang kriptografi\",\"estimate_min\":30},{\"title\":\"Kerjakan latihan soal\",\"estimate_min\":45},{\"title\":\"Tinjau jawaban yang salah\",\"estimate_min\":20}],\"total_estimate_min\":95}"
+  }
+]
