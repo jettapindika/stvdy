@@ -67,7 +67,7 @@
  * That half is platform-independent and runs whichever artifact is read.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -315,8 +315,20 @@ function isCli() {
  * `stvdy-build-target` stamp out of the artifact and fails on anything but
  * `store` (see `artifactOffenders`). So the argument only says *where* to look,
  * and the artifact says *what* it is.
+ *
+ * A relative argument resolves against the repository root rather than the
+ * process's working directory, because that is what the forms above mean and it
+ * is what a `package.json` script needs: `npm run` sets the working directory to
+ * the package, so a cwd-relative `app/dist-mobile` would resolve to
+ * `app/app/dist-mobile` from there. An absolute argument is taken as given —
+ * `resolve` returns it unchanged, which is what makes
+ * `node scripts/check-no-purchase-ui.mjs /tmp/some-artifact` work rather than
+ * silently resolving it to `<repo>/tmp/some-artifact` and inspecting nothing.
+ * That silent misjoin is the failure this whole check exists to prevent, so the
+ * resolution has to be right rather than conventional.
  */
-const dist = process.argv[2] === undefined ? join(root, 'app/dist') : join(root, process.argv[2])
+const dist =
+  process.argv[2] === undefined ? join(root, 'app/dist') : resolve(root, process.argv[2])
 
 if (isCli()) {
   let files
