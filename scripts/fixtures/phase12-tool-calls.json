@@ -1,0 +1,29 @@
+{
+  "tool_calls": [
+    {
+      "contains": "tambahkan tugas",
+      "text": "Siap, saya siapkan tugasnya untuk kamu konfirmasi.",
+      "calls": [
+        {
+          "id": "call-1",
+          "name": "create_task",
+          "arguments": {
+            "title": "Selesaikan laporan kriptografi untuk Jumat",
+            "due_at": "2026-10-16T16:59:00Z",
+            "priority": 1
+          }
+        }
+      ]
+    },
+    {
+      "text": "Ini satu lagi untuk kamu konfirmasi.",
+      "calls": [
+        {
+          "id": "call-2",
+          "name": "create_task",
+          "arguments": { "title": "Baca bab 4 kriptografi", "priority": 2 }
+        }
+      ]
+    }
+  ]
+}

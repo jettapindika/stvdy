@@ -293,3 +293,30 @@ test:
 # Regenerate the committed offline query cache after changing any query.
 prepare:
     cargo sqlx prepare --workspace
+
+# --- Phase 12 smoke: the agent's proposal, the confirm, and the reminder dedupe ---
+#
+# Same stub and server as Phase 2, but the stub must run in its **tool-call** mode: the turn
+# has to make the model emit `create_task`, or the run has nothing to confirm. That is what
+# `--tool-calls` is for, and it matches on the prompt rather than on the request's position so
+# a re-run — which is how a failure is debugged — answers correctly rather than shifted by one.
+#
+# It reads the database back (the task count before and after the proposal, the single
+# `reminders` row and its `fire_at`), so it needs `DATABASE_URL`, which it reads out of `.env`
+# itself, and it prunes `signup_attempts` for 127.0.0.1 at the start because A154's window is
+# 24h and every run adds to it.
+#
+# **The push half degrades rather than pretending.** APNs and FCM need credentials that do not
+# exist here, so `channels_available` omits `push` and the reminder is exercised over the
+# in-app and email channels only; the script prints which run it is instead of reporting a
+# green word for a channel that never fired (A288).
+smoke-llm-phase12:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-phase12-requests.jsonl \
+      --tool-calls scripts/fixtures/phase12-tool-calls.json
+
+smoke-server-phase12:
+    LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase12:
+    BASE=http://localhost:8099 bash scripts/smoke-phase12.sh

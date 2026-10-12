@@ -19,6 +19,15 @@ entry whose marker appears in the prompt is served; an entry without a marker is
 fallback. Matching on the prompt rather than on the request's position is what makes
 the file reusable: a positional list answers correctly once and every later run of the
 same script gets the answers shifted by one.
+
+A third mode, --tool-calls, is Phase 12's: the reply is a streamed *tool call* rather
+than prose, so the smoke run can drive the server's gate and the confirmation card
+through a real wire format. The file is a JSON object with a `tool_calls` array of
+`{"contains"?, "text", "calls": [{"id","name","arguments"}]}`, matched on the prompt
+the same way. **The tool schema the server sent is validated here**, because that is
+the mistake a trait-level double cannot see: a request whose `tools` array is missing
+or whose entries carry no `parameters` object is a 400, which turns a wire-format bug
+into a visible failure at the stub rather than a confusing refusal from the model.
 """
 
 import argparse
@@ -42,6 +51,8 @@ class Handler(BaseHTTPRequestHandler):
     # this to assert on the prompt the model actually received, which a
     # response-only check cannot see.
     log_path = None
+    # Phase 12's mode: a tool-call script instead of prose. `None` keeps the prose modes.
+    tool_calls = None
 
     def log_message(self, *args):  # noqa: ARG002
         """Quiet: the smoke script reports what matters, not the HTTP access log."""
@@ -72,6 +83,42 @@ class Handler(BaseHTTPRequestHandler):
                 return entry.get("answer", fallback)
         return fallback
 
+    def current_tool_call(self, prompt):
+        """The scripted tool call for this request, or None in the prose modes.
+
+        Matched on the prompt for the same reason `--answers-file` is: a positional
+        list answers correctly once, and a re-run — which is how a failure is debugged —
+        would get the calls shifted by one.
+        """
+        if Handler.tool_calls is None:
+            return None
+        fallback = None
+        for entry in Handler.tool_calls:
+            marker = entry.get("contains")
+            if marker is None:
+                fallback = entry
+            elif marker in prompt:
+                return entry
+        return fallback
+
+    def validate_tools(self, body):
+        """Refuses a request whose tool schema is malformed.
+
+        The one thing this mode exists for: a `tools` array that is absent when the
+        plan grants writes, or an entry with no `parameters` object, is a wire-format
+        mistake the trait-level double cannot see. Answering 400 makes it a visible
+        failure here rather than a refusal the model would have to phrase.
+        """
+        tools = body.get("tools")
+        if not tools:
+            return None
+        for tool in tools:
+            if not isinstance(tool, dict) or "name" not in tool:
+                return "a tool entry carries no name"
+            if not isinstance(tool.get("parameters"), dict):
+                return f"{tool['name']} carries no parameters object"
+        return None
+
     def do_POST(self):
         length = int(self.headers.get("content-length", "0"))
         raw = self.rfile.read(length)
@@ -93,6 +140,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         prompt = body.get("messages", [{}])[0].get("content", "")
+
+        if Handler.tool_calls is not None:
+            problem = self.validate_tools(body)
+            if problem is not None:
+                self.send_error(400, problem)
+                return
+
         answer = self.current_answer(prompt)
         Handler.served += 1
 
@@ -115,6 +169,47 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("cache-control", "no-cache")
         self.send_header("connection", "close")
         self.end_headers()
+
+        scripted = self.current_tool_call(prompt)
+        if scripted is not None:
+            # The prose first, then the calls, then the usage frame — which is the order a
+            # real provider streams them in, and the order the server's gate has to handle:
+            # a proposal arriving mid-answer must not interrupt the text.
+            for index, word in enumerate(scripted.get("text", "").split(" ")):
+                text = word if index == 0 else " " + word
+                frame = {"choices": [{"delta": {"content": text}}]}
+                self.wfile.write(f"data: {json.dumps(frame)}\n\n".encode())
+                self.wfile.flush()
+            for call in scripted.get("calls", []):
+                frame = {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": call["id"],
+                                        "type": "function",
+                                        "function": {
+                                            "name": call["name"],
+                                            "arguments": json.dumps(call["arguments"]),
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+                self.wfile.write(f"data: {json.dumps(frame)}\n\n".encode())
+                self.wfile.flush()
+            usage = {
+                "choices": [],
+                "usage": {"prompt_tokens": 812, "completion_tokens": 57, "cost": 0.00119},
+            }
+            self.wfile.write(f"data: {json.dumps(usage)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
 
         # Word by word, so the client has to concatenate rather than receive one
         # token: a server that buffered the whole answer would still pass a
@@ -151,6 +246,11 @@ def main():
         default="",
         help='a JSON array of {"contains": "...", "answer": "..."}; first match wins',
     )
+    parser.add_argument(
+        "--tool-calls",
+        default="",
+        help='a JSON file with {"tool_calls":[{"contains"?","text","calls":[…]}]}; streams tool calls',
+    )
     parser.add_argument("--broken", action="store_true")
     parser.add_argument("--log", default="", help="append every request body as JSONL")
     args = parser.parse_args()
@@ -161,6 +261,12 @@ def main():
             Handler.answers = json.load(handle)
         if not Handler.answers:
             parser.error("--answers-file must hold at least one answer")
+    if args.tool_calls:
+        with open(args.tool_calls, encoding="utf-8") as handle:
+            script = json.load(handle)
+        Handler.tool_calls = script.get("tool_calls") or []
+        if not Handler.tool_calls:
+            parser.error("--tool-calls must hold at least one entry")
     Handler.broken = args.broken
     Handler.log_path = args.log or None
 
