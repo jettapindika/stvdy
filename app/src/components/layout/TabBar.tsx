@@ -14,6 +14,14 @@ import { SyncStatus } from '@/features/sync/SyncStatus'
  * `min-height: 2.75rem` from the base rule gives the 44px touch target (R-03),
  * and `pb-safe-bottom` clears the home indicator.
  *
+ * **The band is `sticky bottom-0`, not `fixed`.** It is a flow sibling below
+ * `main` (the shell root is a column on a phone, `.shell-phone`), so it takes the
+ * height it needs and the content above it can never be painted over at the end of
+ * the scroll — which is what the Phase 8 gate found when this was `fixed` and the
+ * content reserved a hardcoded `3rem` for it. Both rows stay opaque, so content
+ * scrolling *under* the band during a scroll is still hidden rather than showing
+ * through.
+ *
  * The short labels differ from the sidebar's long ones, which is why they are
  * listed here rather than derived from it. They are resolved inside the component
  * because copy cannot live at module scope, where there is no language yet.
@@ -37,9 +45,9 @@ export function TabBar() {
   ]
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex flex-col md:hidden">
-      {/* Its own row, opaque like the bar below it, so the chip is not a pill
-          floating over the last line of content. */}
+    <div className="sticky bottom-0 z-40 flex flex-col md:hidden">
+      {/* Its own row, opaque like the bar below it, so a line of content scrolling
+          under the band is hidden rather than showing through the chip's row. */}
       <div className="flex justify-end bg-surface px-3 pt-2">
         <SyncStatus variant="chip" />
       </div>

@@ -532,15 +532,25 @@
     min-width: 0;
   }
 
-  /* Reserves room for the fixed tab bar. Computed from the bar's own height plus
-     the inset rather than a magic number, so the two cannot disagree when either
-     changes. */
-  .shell-main-phone {
-    /* The tab bar, plus the sync status chip's row above it. The chip is in the
-       tab bar's band but not among its five labels (A189): the labels keep the
-       widths they were measured at, and this reservation is what keeps the last
-       row of content clear of the band. */
-    padding-bottom: calc(2.75rem + 1px + 3rem + env(safe-area-inset-bottom, 0px));
+  /* The phone shell is a **column**: `main` takes the remaining space and the tab
+     bar's band is a flow sibling below it, so the band reserves its own height by
+     being in the flow rather than by a number in a `padding-bottom`.
+
+     It used to be a fixed overlay with `padding-bottom: calc(2.75rem + 1px + 3rem +
+     env(safe-area-inset-bottom, 0px))` on `main`, and the `3rem` was the defect the
+     Phase 8 accessibility gate found: it was meant to cover the sync chip's row,
+     whose real height is **73px at 100% text and 176px at 200%** (the chip wraps,
+     because `max-w-64` caps it at 256px in a 390px viewport). Measured at 390x844
+     with 200% text, the last line box of the Devices screen's reset sentence sat
+     **32.4px behind the opaque band** and `document.elementFromPoint` at that point
+     returned the chip. The band also grows with a longer string, so no constant
+     would have been right at every scale and every language. In flow there is no
+     arithmetic left to get wrong.
+
+     The safe-area inset is still honoured: it is the tab bar nav's own
+     `pb-safe-bottom`, so it is part of the band's measured height. */
+  .shell-phone {
+    flex-direction: column;
   }
 
   /* --- Identity: the citation mark ---------------------------------------- */

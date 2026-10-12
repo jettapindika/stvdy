@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import en from './locales/en.json'
 import id from './locales/id.json'
@@ -10,7 +10,7 @@ import { EXPANSION, stretch } from './pseudo'
 /**
  * The i18n contract.
  *
- * Four failures this catches, all of which are silent in a browser:
+ * Five failures this catches, all of which are silent in a browser:
  *
  *   1. a key used in a component that does not exist in `en.json` — the screen
  *      renders the key itself, e.g. `chat.composer.send`;
@@ -19,7 +19,10 @@ import { EXPANSION, stretch } from './pseudo'
  *   3. a key in the locale files that nothing uses — dead copy that a translator
  *      still has to maintain;
  *   4. a pseudo-locale string that is not actually longer, which would make the
- *      layout check meaningless.
+ *      layout check meaningless;
+ *   5. `<html lang>` disagreeing with the language the page is rendered in, which
+ *      is WCAG 2.2 SC 3.1.1 and makes a screen reader read Indonesian in an
+ *      English voice. This one was live until Phase 8's gate 6 measured it.
  */
 
 const appRoot = join(__dirname, '..', '..')
@@ -198,5 +201,72 @@ describe('locale files', () => {
       )
       expect(grown, `${key} should not be identical to its English text`).not.toBe(source)
     }
+  })
+})
+
+/**
+ * `<html lang>` is the language the page is in (SC 3.1.1).
+ *
+ * Both directions are asserted, and both fail against the shipped static
+ * `<html lang="en">`:
+ *
+ *   - the **initial resolution**: the module reads the OS/browser language when it is
+ *     imported, so the test re-imports it with `navigator.languages` stubbed and
+ *     asserts the attribute follows. With the static attribute this assertion sees
+ *     `'en'` (what `beforeEach` writes, standing in for `index.html`) while the app
+ *     renders Indonesian, which is exactly the defect.
+ *   - the **change**: a reader switching language in Settings must not leave the
+ *     attribute behind, which `languageChanged` covers.
+ *
+ * jsdom does not load `index.html`, so its `<html>` has no `lang` at all. Writing
+ * `'en'` in `beforeEach` is what stands in for the shipped markup, and it is why the
+ * initial-resolution case is not vacuous: the assertion is that the module *replaces*
+ * it, not that it happens to be right already.
+ */
+describe('the document declares the language it is in', () => {
+  beforeEach(() => {
+    document.documentElement.lang = 'en'
+    vi.resetModules()
+  })
+
+  /** The module as it initialises itself, with the OS/browser language stubbed. */
+  async function bootedWith(languages: string[]) {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages)
+    // A dynamic import is the only way to observe the *initial* resolution: the module
+    // reads the browser's language once, at import time, and `vi.resetModules()` is what
+    // makes that import run again. A static import would have booted once, before any
+    // stub existed, and the assertion below would then be about the harness rather than
+    // about the code. The specifier is a literal, so nothing is runtime-selected.
+    const module = await import('./index')
+    return module.default
+  }
+
+  it('sets the attribute from the resolved language before anything renders', async () => {
+    await bootedWith(['id-ID', 'id'])
+    expect(document.documentElement.lang).toBe('id')
+  })
+
+  it('sets it to en when the browser is English', async () => {
+    await bootedWith(['en-GB', 'en'])
+    expect(document.documentElement.lang).toBe('en')
+  })
+
+  it('sets it to en for a language the app does not ship, matching what it renders', async () => {
+    // `detectLanguage` falls back to English for e.g. `fr`, and the page then renders
+    // English — so `en` is the honest tag. A tag taken from the *browser* rather than
+    // from the resolution would say `fr` here.
+    await bootedWith(['fr-FR'])
+    expect(document.documentElement.lang).toBe('en')
+  })
+
+  it('follows a language change, so switching in Settings cannot leave it behind', async () => {
+    const i18n = await bootedWith(['en-US'])
+    expect(document.documentElement.lang).toBe('en')
+
+    await i18n.changeLanguage('id')
+    expect(document.documentElement.lang).toBe('id')
+
+    await i18n.changeLanguage('en')
+    expect(document.documentElement.lang).toBe('en')
   })
 })
