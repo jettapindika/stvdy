@@ -85,9 +85,8 @@ Every phase's exit gate is recorded in its own plan file, and each phase's worki
 `.superpowers/sdd/<plan>/progress.md` (git-ignored scratch, on disk only). **One exception worth
 knowing before you trust the table below:** Phase 4's plan has no `## Execution notes` section at
 all, so its gates were never recorded anywhere — its tests are covered by the workspace run, and
-its two roadmap gates (5 and 6) have no measurement in any document. Phase 0's accessibility box
-and Phase 4's are the same gap: two surfaces whose accessibility has never been measured, and the
-honest state is "unknown" rather than "fine".
+its two roadmap gates (5 and 6) have no measurement in any document. **Three phases never measured
+their accessibility gate** — 0, 1 and 4 — and that is its own finding, below.
 
 **The workspace quality gate — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D
 warnings`, `cargo test --workspace` — is green, and this is the first time in the project's
@@ -148,6 +147,7 @@ version:
   **The mechanism, and why the tree cannot express the fix as written.** The server does send a key — `renewal::PLAN_ENDING_KEY = "reminder.planEnding"` goes into the `send_push` payload beside the rendered sentence — and the intent is stated in the code: "so the SPA's feed renders the same reminder in either locale from one key rather than re-deriving the copy from the numbers". But `app/src/i18n/locales/en.json` has **no `reminder` block at all** (only `reminders.local.*`, which is the client-computed task/event copy), so that key resolves to itself, and the client's own guard is what hides it: `useLocalNotifications.ts:90`'s `feedKey` returns `null` when `subject_id` is `null`, and the renewal row's `subject_id` **is** `null` by construction (`renewal.rs:257`), so the row is skipped before any copy is looked up. **A renewal reminder therefore renders nowhere on the client, and the rendered English sentence the server built is what the student actually receives.**
 
   **Also worth knowing:** `user_settings.language` exists (`migrations/0028_tasks_events_settings.sql:30`, `check (language in ('en','id'))`) and is per-account, so the lookup the fix needs is already modelled. What is missing is a copy table in two languages and the read. **I have not implemented it**: it is a product decision as much as a task (is an English receipt acceptable? a receipt is a financial document, and the answer may differ from the answer for a verification email), and it is new scope rather than an unexecuted phase. Recorded here with the evidence so the decision is yours.
+- **Three phases never measured their accessibility gate, so three sets of screens have never been checked — and the honest state is "unknown", not "fine".** Phases 0, 1 and 4 all left the gate-5 box unticked and no measurement exists anywhere in the doc set: not for the shell, not for the auth screens (sign in, sign up, verify email, first-run), and not for the study screen. The phases that *did* measure it — 5, 7, 10, 12, 13, 14 — cover only the screens they added. This is not an oversight in one run: the harness walks the signed-in shell, and the auth routes sit outside it by design, so the instrument cannot reach them without a fixture that signs a user in from a cold start. **What that costs:** the study screen is the one a student uses most, and the auth screens are the ones every student meets first. Both are unmeasured for keyboard reach, contrast, the 44px floor and 200% text.
 - **Gate 5's desktop leg had never run, for any phase, and nobody could tell.** The shared walk's
   steps name the phone tab bar's labels (`nav.work` = "Work") while the desktop sidebar reads
   `nav.workspaces` = "Workspaces", so `VIEWPORT_WIDTH=1365` died on `FAIL: no nav a labelled
