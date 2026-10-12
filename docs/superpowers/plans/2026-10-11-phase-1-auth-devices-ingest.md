@@ -132,18 +132,18 @@ docs/API.md  docs/ARCHITECTURE.md  docs/ASSUMPTIONS.md   # updated in place
 **Files:** `crates/core/src/traits/{mod.rs,embedder.rs,storage.rs,clock.rs,mailer.rs,testing.rs}`,
 `crates/core/src/lib.rs`, `crates/core/Cargo.toml` (add `bytes`).
 
-- [ ] **Step 1: Write the traits** exactly as the roadmap § Cross-Cutting Contracts
+- [x] **Step 1: Write the traits** exactly as the roadmap § Cross-Cutting Contracts
   § 1 specifies for `Embedder`, `Storage`, `Clock`, plus `Mailer`
   (`async fn send(&self, msg: Email) -> Result<(), MailError>`, `Email { to,
   subject, text, html: Option<String> }`). `Mailer` is a server-side capability
   like the others, so its trait lives here even though the roadmap's file list
   omits it; the omission is a file-list gap, not a design statement.
-- [ ] **Step 2: Write the doubles** in `testing.rs`: `FixedClock`, `HashEmbedder`
+- [x] **Step 2: Write the doubles** in `testing.rs`: `FixedClock`, `HashEmbedder`
   (deterministic, `dim = 768`, same text ⇒ same vector, different text ⇒
   different vector, unit norm), `InMemoryStorage` (with a working presign that
   returns a deterministic opaque string), `RecordingMailer` (captures messages,
   no IO).
-- [ ] **Step 3: Test the invariants** in `crates/core/tests/traits.rs`:
+- [x] **Step 3: Test the invariants** in `crates/core/tests/traits.rs`:
   `HashEmbedder` is deterministic and dimension-correct; `InMemoryStorage` round
   trips put→get→presign_get→delete; `RecordingMailer` captures; `FixedClock`
   does not advance.
@@ -154,18 +154,18 @@ docs/API.md  docs/ARCHITECTURE.md  docs/ASSUMPTIONS.md   # updated in place
 
 **Files:** `crates/core/src/chunk.rs`, `crates/core/tests/chunk.rs`.
 
-- [ ] **Step 1: Pin the config.** `ChunkConfig { target_tokens: 480,
+- [x] **Step 1: Pin the config.** `ChunkConfig { target_tokens: 480,
   max_tokens: 512, overlap_tokens: 50 }` (A2: the model's `max_length` is 512).
   `chunk(text, cfg, count: &dyn Fn(&str) -> usize) -> Vec<String>` where `count`
   is injected so the server can pass the real tokenizer and tests pass a
   deterministic counter.
-- [ ] **Step 2: Sentence-safe packing.** Split on Unicode sentence boundaries
+- [x] **Step 2: Sentence-safe packing.** Split on Unicode sentence boundaries
   (`unicode_segmentation::UnicodeSegmentation::split_sentence_bounds`), pack
   sentences greedily until adding the next would exceed `target_tokens`, carry
   `overlap_tokens` of trailing context into the next chunk, and split a single
   over-long sentence on word boundaries so nothing exceeds `max_tokens`. Never
   emit an empty or whitespace-only chunk; never split mid-word.
-- [ ] **Step 3: Tests.** English fixture; an **Indonesian** fixture (the
+- [x] **Step 3: Tests.** English fixture; an **Indonesian** fixture (the
   roadmap's language gate depends on this chunker, and Indonesian has different
   sentence punctuation conventions); overlap present; no chunk exceeds
   `max_tokens`; concatenation covers every input sentence; empty input ⇒ no
@@ -178,22 +178,22 @@ docs/API.md  docs/ARCHITECTURE.md  docs/ASSUMPTIONS.md   # updated in place
 **Files:** `migrations/0018_email_verification.sql`, `docker-compose.yml`,
 `.env.example`, `justfile` (only if a recipe changes).
 
-- [ ] **Step 1: Write the migration.** `email_verification_tokens(id uuid pk
+- [x] **Step 1: Write the migration.** `email_verification_tokens(id uuid pk
   default gen_random_uuid(), user_id uuid not null references users on delete
   cascade, token_hash text not null unique, expires_at timestamptz not null,
   used_at timestamptz, created_at timestamptz default now())`, index on
   `(user_id, expires_at)`. Not `+sync`: a client must never see or replay a
   verification token.
-- [ ] **Step 2: Fix the compose storage service** to a pullable image (A15:
+- [x] **Step 2: Fix the compose storage service** to a pullable image (A15:
   `minio/minio` and `minio/mc` 404). Use `pgsty/silo` for the server, drop the
   `minio-init` sidecar (the server creates the bucket at boot, decision 4), and
   update the comment to name A15 and the reason.
-- [ ] **Step 3: Extend `.env.example`** with `STORAGE_BACKEND`, `STORAGE_LOCAL_DIR`,
+- [x] **Step 3: Extend `.env.example`** with `STORAGE_BACKEND`, `STORAGE_LOCAL_DIR`,
   `OBJECTS_PUBLIC_BASE_URL`, `PRESIGN_TTL_SECS`, `PDFIUM_LIB_PATH`,
   `MAIL_DIR`, `ACCESS_TOKEN_TTL_MIN`, `REFRESH_TOKEN_TTL_DAYS`,
   `VERIFY_TOKEN_TTL_HOURS`, `GOOGLE_LOGIN_{CLIENT_ID,CLIENT_SECRET,REDIRECT_URI}`,
   `FASTEMBED_CACHE_DIR`. Mirror into `.env` for the local run.
-- [ ] **Step 4: Apply and verify** `sqlx migrate run` on the local Postgres, then
+- [x] **Step 4: Apply and verify** `sqlx migrate run` on the local Postgres, then
   `\d email_verification_tokens`.
 
 **Acceptance:** migration applies on a fresh database; compose no longer
@@ -205,27 +205,27 @@ references a nonexistent image.
 `integrations/{mod.rs,storage.rs,embedder.rs,mailer.rs,clock.rs}`,
 `crates/server/Cargo.toml`.
 
-- [ ] **Step 1: Config.** Add typed sections to `AppConfig` (`storage`, `auth`,
+- [x] **Step 1: Config.** Add typed sections to `AppConfig` (`storage`, `auth`,
   `mailer`, `embedder`, `pdfium_lib_path`, `google`), all with the same
   `from_env_at` override mechanism so tests never mutate the process env
   (Phase 0 execution note 11). `Mailer` selection: `SMTP_URL` set ⇒ SMTP via
   `lettre`, else the dev sink writing `var/mail/<ts>-<to>.eml`.
-- [ ] **Step 2: Error mapping.** Extend `AppError::Entitlement` with
+- [x] **Step 2: Error mapping.** Extend `AppError::Entitlement` with
   `limit: Option<i64>`/`used: Option<i64>` and map `limit_reached` → **422**
   (roadmap § 5), keeping `insufficient_credits` → 402 and the rest → 403. Add
   `AppError::EmailNotVerified` → 403 `email_not_verified` for Phase 2 to use.
-- [ ] **Step 3: State.** `AppState { pool, config, storage: Arc<dyn Storage>,
+- [x] **Step 3: State.** `AppState { pool, config, storage: Arc<dyn Storage>,
   embedder: Arc<dyn Embedder>, mailer: Arc<dyn Mailer>, clock: Arc<dyn Clock>,
   jobs: jobs::Queue }`.
-- [ ] **Step 4: `integrations::storage`.** S3 (`aws-sdk-s3`, path-style for
+- [x] **Step 4: `integrations::storage`.** S3 (`aws-sdk-s3`, path-style for
   MinIO, presign GET/PUT with TTL) and local (`var/objects/<sha256[0..2]>/<key>`,
   `presign_get` → HMAC-signed URL verified by the file route). Boot asserts the
   bucket exists (S3: `create_bucket` if absent).
-- [ ] **Step 5: `integrations::embedder`.** fastembed `MultilingualE5Base` with
+- [x] **Step 5: `integrations::embedder`.** fastembed `MultilingualE5Base` with
   the A2 prefixes; dim assertion against `EMBEDDING_DIM` **and** the column
   dimension read from `information_schema.columns` (fail fast, A2).
-- [ ] **Step 6: `integrations::mailer`.** `lettre` SMTP impl + dev sink impl.
-- [ ] **Step 7: `integrations::clock`.** `SystemClock`.
+- [x] **Step 6: `integrations::mailer`.** `lettre` SMTP impl + dev sink impl.
+- [x] **Step 7: `integrations::clock`.** `SystemClock`.
 
 **Acceptance:** `cargo clippy -p stvdy-server --all-targets -- -D warnings` clean;
 a config test asserts the new fields load from overrides and that a prod boot
@@ -236,28 +236,28 @@ with a missing `PDFIUM_LIB_PATH` is still allowed (lazy, decision 5).
 **Files:** `crates/server/src/auth/*`, `crates/server/src/ratelimit.rs`,
 `crates/server/tests/auth.rs`.
 
-- [ ] **Step 1: `password.rs`.** argon2id, parameters from a single const, hash +
+- [x] **Step 1: `password.rs`.** argon2id, parameters from a single const, hash +
   verify; a verify against a *dummy* hash when the user does not exist, so login
   timing does not reveal account existence.
-- [ ] **Step 2: `tokens.rs`.** `issue_pair(pool, user_id, device_id) ->
+- [x] **Step 2: `tokens.rs`.** `issue_pair(pool, user_id, device_id) ->
   TokenPair { access, refresh, expires_at }`; `rotate(pool, refresh_plain, device_id)
   -> TokenPair`; `verify_access(token) -> AccessClaims`. Rotation revokes the
   presented row and inserts a new one in the same family; presenting a
   **revoked** row revokes every row in that family and returns
   `AppError::Unauthorized`. `logout` revokes one family, `logout-all` revokes
   every family for the user.
-- [ ] **Step 3: `email_verify.rs`.** Issue a token (32 random bytes, base64url,
+- [x] **Step 3: `email_verify.rs`.** Issue a token (32 random bytes, base64url,
   stored SHA-256), mail a link `{WEB_ORIGIN}/verify?token=…`, and consume it
   idempotently (`used_at` set once, `expires_at` enforced, single-use).
-- [ ] **Step 4: `extract.rs`.** `AuthUser` extractor (bearer → claims → user row,
+- [x] **Step 4: `extract.rs`.** `AuthUser` extractor (bearer → claims → user row,
   rejecting a revoked device), `VerifiedUser` (adds the `email_verified` check;
   used by Phase 2's spending routes).
-- [ ] **Step 5: `routes.rs`.** `POST /auth/signup` (email, password, device name/
+- [x] **Step 5: `routes.rs`.** `POST /auth/signup` (email, password, device name/
   platform; creates user + device + session; mails verification),
   `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`,
   `POST /auth/logout-all`, `POST /auth/verify-email`. All under a
   `tower_governor` per-IP bucket (decision 9).
-- [ ] **Step 6: `tests/auth.rs`.** signup → verification mail captured (dev sink)
+- [x] **Step 6: `tests/auth.rs`.** signup → verification mail captured (dev sink)
   → `verify-email` → `email_verified` true and `email_verified_at` set; login
   returns a pair; refresh rotates and the **old** refresh is rejected and kills
   the family (the reused token's *sibling* is also dead); logout-all kills every
@@ -273,13 +273,13 @@ appears in any log line (assert by grepping the test's captured logs).
 **Files:** `crates/server/src/devices.rs`, `crates/server/src/workspaces.rs`,
 `crates/server/tests/{devices.rs,workspaces.rs}`.
 
-- [ ] **Step 1: Devices.** `GET /devices` (name, platform, last_seen_at, this
+- [x] **Step 1: Devices.** `GET /devices` (name, platform, last_seen_at, this
   device flagged), `PATCH /devices/:id` (rename), `DELETE /devices/:id` (revoke:
   `revoked_at` + revoke its sessions), `PUT /devices/:id/push-token`
   (`push_tokens` upsert).
-- [ ] **Step 2: Workspaces.** CRUD scoped by `user_id`, tombstone delete
+- [x] **Step 2: Workspaces.** CRUD scoped by `user_id`, tombstone delete
   (`deleted_at`), `workspaces` limit from the plan config (decision 2).
-- [ ] **Step 3: Tests.** A revoked device's access token is 401 on the next
+- [x] **Step 3: Tests.** A revoked device's access token is 401 on the next
   request; renaming another user's device is 404 (never 403: do not leak
   existence); a workspace list never contains another user's row; the
   workspace limit trips at 2 on free with `limit_reached`.
@@ -291,37 +291,37 @@ appears in any log line (assert by grepping the test's captured logs).
 **Files:** `crates/server/src/sources/*`, `crates/server/src/chunks.rs`,
 `crates/server/src/jobs/{mod.rs,worker.rs,handlers/*}`, `crates/server/tests/sources.rs`.
 
-- [ ] **Step 1: Job queue + worker.** `jobs::Queue::enqueue(pool, kind, payload,
+- [x] **Step 1: Job queue + worker.** `jobs::Queue::enqueue(pool, kind, payload,
   dedupe_key?)` + `Notify`; worker claims with `for update skip locked`, marks
   `running`, runs the handler, `done` on success, `attempts += 1` + exponential
   `run_at` on failure (→ `failed` past the cap), and recovers `running` rows
   orphaned by a restart (boot sweep, since a crash mid-job would otherwise park
   the row forever).
-- [ ] **Step 2: `POST /workspaces/:id/sources`** (multipart: `kind`, `file` |
+- [x] **Step 2: `POST /workspaces/:id/sources`** (multipart: `kind`, `file` |
   `text`, `title?`). Validate: workspace ownership; kind ∈ {pdf, text};
   extension/mime for `pdf`; `max_file_mb`; `storage_mb` quota (`sum(file_size)`
   over live sources); `sources_total`; then `Storage::put` and insert the
   `sources` row (`status='pending'`), enqueue `ingest_source`.
-- [ ] **Step 3: `ingest_source` handler.** `status='processing'` → fetch bytes →
+- [x] **Step 3: `ingest_source` handler.** `status='processing'` → fetch bytes →
   extract text with page numbers (`parse.rs`: pdfium for PDF, identity for text)
   → `chunk()` with the real tokenizer count → batch `embed()` (32) → insert
   `chunks` rows, copying the vector from an existing row with the same
   `(embedder, content_hash)` **within the same user** (migration 0007's index is
   deliberately non-unique; the lookup is per-user) → `status='ready'`, or
   `status='failed'` with the readable `error`.
-- [ ] **Step 4: Reads.** `GET /workspaces/:id/sources`,
+- [x] **Step 4: Reads.** `GET /workspaces/:id/sources`,
   `GET /sources/:id/status` (status + `chunk_count` + `error`),
   `DELETE /sources/:id` (tombstone + storage delete + chunks cascade),
   `GET /sources/:id/file` (short-lived presigned URL),
   `GET /chunks/:id` (owner-scoped chunk text + page).
-- [ ] **Step 5: Tests.** text source → `ready` with N chunks and 768-dim
+- [x] **Step 5: Tests.** text source → `ready` with N chunks and 768-dim
   vectors; the same content uploaded twice reuses embeddings (assert by
   comparing the stored vector of the duplicate chunk to the original) and does
   not violate any constraint; a 2 MB file on a 20 MB-per-file free plan is 400;
   a file that pushes past `storage_mb` is 422; another user's source id is 404
   on every read; a corrupt PDF yields `failed` with a readable error and the job
   is not retried forever.
-- [ ] **Step 6: Smoke the real path** with `cargo run -p stvdy-server` against
+- [x] **Step 6: Smoke the real path** with `cargo run -p stvdy-server` against
   the local Postgres: signup → verify → create workspace → upload a real PDF →
   poll status to `ready` → `GET /chunks/:id`.
 
@@ -332,7 +332,7 @@ appears in any log line (assert by grepping the test's captured logs).
 **Files:** `crates/server/src/auth/google.rs`, `crates/server/tests/google.rs`,
 `docs/API.md`.
 
-- [ ] **Step 1: `GET /auth/google/start`** → 302 to Google with `state` (random,
+- [x] **Step 1: `GET /auth/google/start`** → 302 to Google with `state` (random,
   stored in a short-lived signed cookie or a `state` table row keyed by hash) and
   PKCE `S256`; `GET /auth/google/callback` verifies `state`, exchanges the code,
   verifies the `id_token` (issuer `https://accounts.google.com`, audience = our
@@ -343,7 +343,7 @@ appears in any log line (assert by grepping the test's captured logs).
   signed-in session or a confirmation step); a Google-only account cannot set a
   password before verifying its email; a token with an edited plan claim changes
   nothing downstream.
-- [ ] **Step 3: Issue the same pair** via `auth::tokens::issue_pair`, so
+- [x] **Step 3: Issue the same pair** via `auth::tokens::issue_pair`, so
   everything downstream (devices, refresh, logout) is unchanged.
 
 **Acceptance:** unit tests cover state mismatch, `email_verified: false`, wrong
@@ -355,20 +355,20 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 **Files:** `src-tauri/src/deeplink.rs`, `src-tauri/src/lib.rs`,
 `src-tauri/src/commands.rs`, `app/src/platform/*`.
 
-- [ ] **Step 1: Deep-link round trip (macOS).** Emit the URL to the frontend on
+- [x] **Step 1: Deep-link round trip (macOS).** Emit the URL to the frontend on
   both cold start and a running instance (`single-instance` re-emit is already
   registered), and expose `on_open_url` through the `platform` adapter so the
   SPA never touches a Tauri API directly (Phase 0's boundary test enforces this).
-- [ ] **Step 2: Token storage.** `secret_set/get/delete` already exist; add the
+- [x] **Step 2: Token storage.** `secret_set/get/delete` already exist; add the
   SPA-side `tokens.ts` that uses them on desktop and mobile. The web build keeps
   the access token in memory only and does **not** persist the refresh token
   (superseded by A56: a browser has no keychain, and `localStorage` would put a
   30-day credential where any XSS can read it, so a web reload requires a fresh
   sign-in). The consequence is recorded rather than left implicit.
-- [ ] **Step 3: Prove it.** Run the debug shell, open `stvdy://auth/callback?…`,
+- [x] **Step 3: Prove it.** Run the debug shell, open `stvdy://auth/callback?…`,
   observe the event and the stored secret; record the exact command and output in
   `docs/ARCHITECTURE.md` § Native prototypes.
-- [ ] **Step 4: iOS simulator build** (`tauri ios build`) if the toolchain is
+- [x] **Step 4: iOS simulator build** (`tauri ios build`) if the toolchain is
   present; record the result either way.
 
 ## Task 10: SPA. auth screens, workspaces, upload
@@ -376,32 +376,32 @@ credentials (B-blocker class, env-only) and is reported as such, not faked.
 **Files:** `app/src/api/*`, `app/src/features/auth/*`, `app/src/lib/tokens.ts`,
 `app/src/features/workspaces/*`, `app/src/router.tsx`.
 
-- [ ] **Step 1: API client.** `fetch` wrapper: bearer access token, automatic
+- [x] **Step 1: API client.** `fetch` wrapper: bearer access token, automatic
   single-flight refresh on 401 with one retry, typed error mapping to the
   documented `{code,message,min_plan?}` shape, and SSE-ready scaffolding (Phase 2).
-- [ ] **Step 2: Auth screens** (sign up, sign in, verify email, signed-in
+- [x] **Step 2: Auth screens** (sign up, sign in, verify email, signed-in
   session bootstrap) wired to the real endpoints; the verification link route
   reads `?token=`.
-- [ ] **Step 3: Workspaces + sources.** List/create/rename/delete, workspace
+- [x] **Step 3: Workspaces + sources.** List/create/rename/delete, workspace
   detail with the source list, a PDF/text upload with progress, and status
   polling until `ready`/`failed` with the readable error.
-- [ ] **Step 4: Accessibility gate** (roadmap gate 5): keyboard-only reach with a
+- [x] **Step 4: Accessibility gate** (roadmap gate 5): keyboard-only reach with a
   visible focus ring, contrast on the default dark **and** light themes, ≥44px
   targets at phone width, no state by colour alone, 200% text scale without
   clipping. State the check and the result in the phase summary.
 
 ## Task 11: Docs and the phase gate
 
-- [ ] **Step 1: `docs/API.md`**: the real Phase 1 request/response shapes for
+- [x] **Step 1: `docs/API.md`**: the real Phase 1 request/response shapes for
   auth, devices, workspaces, sources, chunks, Google login.
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**: § Native prototypes Phase 1 results
+- [x] **Step 2: `docs/ARCHITECTURE.md`**: § Native prototypes Phase 1 results
   (pass *and* fail), § Provider traits table rows that Phase 1 fills in.
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`**: record the Phase 1 decisions that are
+- [x] **Step 3: `docs/ASSUMPTIONS.md`**: record the Phase 1 decisions that are
   not already rows (local storage backend for dev, pdfium load policy, the
   Phase 1 limit-reading shim that Phase 7 replaces, `email_verification_tokens`).
 - [ ] **Step 4: `docs/SYNC.md`**: only if a protocol/conflict rule changed
   (Phase 1 should not change one; state that explicitly if so).
-- [ ] **Step 5: Run the gate.** `cargo fmt --all -- --check`;
+- [x] **Step 5: Run the gate.** `cargo fmt --all -- --check`;
   `cargo clippy --workspace --all-targets -- -D warnings`;
   `cargo test --workspace`; `npm --prefix app test`;
   `npm --prefix app run build`; `cargo fmt/clippy/test` for `src-tauri`;
@@ -658,3 +658,9 @@ prerequisite, not a code change.
 - [x] Accessibility gate result stated, not asserted (SPA report: keyboard-only
   walk with measured focus rings, 44px targets, contrast, 200% text scale).
 - [ ] Phase summary posted; wait for "continue".
+
+### Boxes left unticked, and why
+
+  - Task 8 Step 2, "Security rules as tests" -- the test file this task names, `crates/server/tests/google.rs`, does not exist at HEAD and no test asserts the three rules. The rules themselves are real in `crates/server/src/auth/google.rs` (`resolve_user` refuses the password-account takeover, `set_password` gates on `email_verified`), but the only tests in that module are `a_login_state_names_its_purpose_and_carries_no_account` and `the_issuer_list_accepts_both_google_spellings`, and `crates/server/src/auth/oauth_state.rs`'s tests cover the codec (round-trip, flow binding, tamper, expiry, nonce freshness). Only the third rule has a test, `crates/server/tests/tamper.rs::a_forged_plan_claim_in_the_token_changes_nothing`, so the named artefacts cannot be confirmed.
+  - Task 11 Step 4, "`docs/SYNC.md`" -- the step is conditional ("only if a protocol/conflict rule changed"), and Phase 1 changed none: `migrations/0018_email_verification.sql` is explicitly not a `+sync` table and the trigger count stayed at 34. No explicit statement was added, and `docs/SYNC.md` carries no Phase 1 content at all, so there is no artefact at HEAD to confirm.
+  - Task 11 Step 6, "Phase summary" -- the phase summary is a posted artefact rather than one in the tree: these execution notes refer to "the first Phase 1 summary" and the review of it, but the summary itself is not committed anywhere, and the phase's own exit checklist still records "Phase summary posted; wait for \"continue\"" as unticked.
