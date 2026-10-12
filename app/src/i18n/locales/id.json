@@ -1400,7 +1400,7 @@
     "reviewActivitySummary": "{{days}} hari ada ulangan, total {{reviews}} ulangan.",
     "noReviews": "Belum ada ulangan kartu di rentang ini.",
     "reviews": "{{count}} ulangan",
-    "mastery": "Penguasaan kuis per topik",
+    "mastery": "Penguasaan kuis",
     "masterySummary": "{{topics}} topik sudah dicoba.",
     "masteryLabel": "{{title}}: {{correct}} dari {{attempts}} benar, {{accuracy}} persen",
     "noMastery": "Belum ada percobaan kuis, jadi belum ada penguasaan yang bisa ditampilkan.",

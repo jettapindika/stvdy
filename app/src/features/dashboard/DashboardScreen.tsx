@@ -91,7 +91,7 @@ export function DashboardScreen() {
   const busiestDay = Math.max(1, ...reviews.map((day) => day.reviews))
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-8 px-5 py-8">
       <div className="flex flex-col gap-1">
         <PageHeader title={t('dashboard.title')} subtitle={t('dashboard.subtitle')} />
         {/* The window, in words: the figures below are counts over these local days,
@@ -120,14 +120,19 @@ export function DashboardScreen() {
       {totals !== undefined && (
         <Section title={t('dashboard.totals')}>
           <div className="card flex flex-col gap-3 p-4">
-            <dl className="grid grid-cols-2 gap-3">
+            {/* One column at phone width. A two-column grid whose cells are
+                `min-width: auto` cannot shrink below their label's min-content, so at
+                200% text "Minutes studied" and "Card reviews" forced the card — and
+                with it the whole page — wider than the viewport. Measured: the page
+                scrolled sideways at 390px in both themes before this. */}
+            <dl className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               {[
                 { key: 'minutes', value: totals.minutes_studied },
                 { key: 'reviews', value: totals.reviews },
                 { key: 'cardsDue', value: totals.cards_due },
                 { key: 'quizzes', value: totals.quizzes_taken },
               ].map((row) => (
-                <div key={row.key} className="flex flex-col gap-0.5">
+                <div key={row.key} className="flex min-w-0 flex-col gap-0.5">
                   <dt className="label">{t(`dashboard.total.${row.key}`)}</dt>
                   <dd className="text-base">{row.value}</dd>
                 </div>
@@ -161,17 +166,26 @@ export function DashboardScreen() {
                 </p>
                 <ul className="flex flex-col gap-2">
                   {courses.map((course) => (
-                    <li key={course.workspace_id} className="flex items-center gap-3">
-                      <span className="min-w-0 flex-1 truncate text-small">{course.title}</span>
-                      <Bar
-                        share={course.minutes / busiestCourse}
-                        label={t('dashboard.shareLabel', {
-                          title: course.title,
-                          percent: Math.round((course.minutes / busiestCourse) * 100),
-                        })}
-                      />
-                      <span className="meta shrink-0">
-                        {t('dashboard.minutes', { count: course.minutes })}
+                    /* A column at phone width, a row above `sm`. Three siblings
+                       sharing one line — a course name, a bar and a count — cannot fit
+                       at 390px with the text at 200%, and `truncate` on the name hid
+                       the half that did not: a course the student cannot read is worse
+                       than one that wraps. */
+                    <li key={course.workspace_id} className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                      <span className="min-w-0 break-words text-small sm:flex-1">
+                        {course.title}
+                      </span>
+                      <span className="flex min-w-0 items-center gap-3 sm:flex-1">
+                        <Bar
+                          share={course.minutes / busiestCourse}
+                          label={t('dashboard.shareLabel', {
+                            title: course.title,
+                            percent: Math.round((course.minutes / busiestCourse) * 100),
+                          })}
+                        />
+                        <span className="meta shrink-0">
+                          {t('dashboard.minutes', { count: course.minutes })}
+                        </span>
                       </span>
                     </li>
                   ))}
@@ -197,14 +211,16 @@ export function DashboardScreen() {
                 </p>
                 <ul className="flex flex-col gap-2">
                   {reviews.map((day) => (
-                    <li key={day.local_date} className="flex items-center gap-3">
-                      <span className="min-w-0 flex-1 text-small">{day.local_date}</span>
-                      <Bar
-                        share={day.reviews / busiestDay}
-                        label={t('dashboard.reviews', { count: day.reviews })}
-                      />
-                      <span className="meta shrink-0">
-                        {t('dashboard.reviews', { count: day.reviews })}
+                    <li key={day.local_date} className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                      <span className="min-w-0 text-small sm:flex-1">{day.local_date}</span>
+                      <span className="flex min-w-0 items-center gap-3 sm:flex-1">
+                        <Bar
+                          share={day.reviews / busiestDay}
+                          label={t('dashboard.reviews', { count: day.reviews })}
+                        />
+                        <span className="meta shrink-0">
+                          {t('dashboard.reviews', { count: day.reviews })}
+                        </span>
                       </span>
                     </li>
                   ))}
@@ -262,8 +278,8 @@ export function DashboardScreen() {
                   </p>
                   <ul className="flex flex-col gap-2">
                     {(topics.data?.quiz_mastery ?? []).map((topic) => (
-                      <li key={topic.source_id} className="flex flex-col gap-1">
-                        <span className="text-small break-words">{topic.title}</span>
+                      <li key={topic.source_id} className="flex min-w-0 flex-col gap-1">
+                        <span className="break-words text-small">{topic.title}</span>
                         <span className="meta">
                           {t('dashboard.masteryLabel', {
                             title: topic.title,
@@ -285,7 +301,7 @@ export function DashboardScreen() {
                 <p className="text-small text-muted">{t('dashboard.weakTopicsHint')}</p>
                 <ul className="flex flex-col gap-2">
                   {(topics.data?.weak_topics ?? []).map((topic) => (
-                    <li key={topic.source_id} className="flex flex-wrap items-center gap-2">
+                    <li key={topic.source_id} className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="min-w-0 flex-1 break-words text-small">{topic.title}</span>
                       <span className="meta">
                         {t('dashboard.masteryLabel', {

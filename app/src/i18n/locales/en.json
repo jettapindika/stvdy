@@ -1424,7 +1424,7 @@
     "reviewActivitySummary": "{{days}} days with reviews, {{reviews}} reviews in total.",
     "noReviews": "No card reviews in this window.",
     "reviews": "{{count}} reviews",
-    "mastery": "Quiz mastery per topic",
+    "mastery": "Quiz mastery",
     "masterySummary": "{{topics}} topics with attempts.",
     "masteryLabel": "{{title}}: {{correct}} of {{attempts}} correct, {{accuracy}} percent",
     "noMastery": "No quiz attempts yet, so there is no mastery to show.",
