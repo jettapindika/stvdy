@@ -5,7 +5,7 @@ import { CheckoutScreen } from './CheckoutScreen'
 import i18n from '@/i18n'
 import { setAccessToken } from '@/lib/tokens'
 import { PAYMENT, PRO_MONTHLY, serveBilling } from '@/test/billing'
-import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
+import { installFakePlatform, mockFetch } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
 import type { PaymentView } from '@/api/queries/billing'
 
@@ -127,11 +127,16 @@ describe('the checkout screen', () => {
     expect(screen.getByText(/No payment has been confirmed for this code/)).toBeInTheDocument()
     expired.container.remove()
 
+    // The assertions are scoped to the review render rather than to the document,
+    // which is what makes them about *this* state: the expired screen above is
+    // torn down, but a global query could still be satisfied by anything else the
+    // shell rendered, and the claim being made is that the review state itself
+    // offers no way to pay again.
     const review = renderCheckout({ ...PAYMENT, status: 'review' })
     expect(await screen.findByText('We are checking this payment')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Get a new code' })).toBeNull()
+    expect(within(review.container).queryByRole('button', { name: 'Get a new code' })).toBeNull()
     // The one instruction that matters on a mismatch: do not pay twice.
-    expect(screen.getByText(/Do not pay again/)).toBeInTheDocument()
+    expect(within(review.container).getByText(/Do not pay again/)).toBeInTheDocument()
   })
 
   it('says what "we have not heard from the gateway yet" means', async () => {
