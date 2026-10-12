@@ -51,6 +51,13 @@ const QUICK_CAPTURE_FILE: &str = include_str!("../../../prompts/quick_capture.v1
 /// subtask, so it pins the nested struct and the outer one in one place.
 const TASK_BREAKDOWN_FILE: &str = include_str!("../../../prompts/task_breakdown.v1.md");
 
+/// The syllabus-extraction module file. Its documented schema is the multi-line block the
+/// model is shown, so the check below takes everything after `Schema:` rather than one line.
+const SYLLABUS_FILE: &str = include_str!("../../../prompts/syllabus.v1.md");
+
+/// The effort-estimate module file, for the documented-schema check.
+const PLANNER_EFFORT_FILE: &str = include_str!("../../../prompts/planner_effort.v1.md");
+
 fn vars() -> ChatVars {
     ChatVars {
         assistant_name: "Stvdy".to_string(),
@@ -1458,4 +1465,64 @@ fn kinds_of(module: ModuleId, name: &str) -> Option<VarKind> {
         .iter()
         .find(|(declared, _)| *declared == name)
         .map(|(_, kind)| *kind)
+}
+
+/// The schema `syllabus.v1.md` shows the model must parse into the struct the server
+/// deserialises.
+///
+/// Unlike the other modules, this one's schema block is a **type sketch** — it writes
+/// `"string"` and `"HH:MM"` where an example would write a value — because a syllabus's
+/// shape is what the module has to pin and any concrete example would be one course's
+/// timetable. So what can be asserted here is what the sketch does pin: every field name the
+/// model is shown is a field the struct has (and, with `deny_unknown_fields` in force, not
+/// one more), and every item carries the `evidence` and `confidence` pair the review screen
+/// depends on. The rules themselves are `tests/generation_syllabus.rs`'s, where a concrete
+/// reply is what is under test.
+#[test]
+fn the_syllabus_documented_schema_parses_into_the_generation_contract() {
+    let schema = SYLLABUS_FILE
+        .split_once("Schema:")
+        .expect("syllabus.v1.md documents a Schema line")
+        .1
+        .trim();
+
+    let parsed: stvdy_core::generation::syllabus::SyllabusFile =
+        serde_json::from_str(schema).expect("the module's own schema must parse");
+
+    assert_eq!(parsed.meetings.len(), 1);
+    assert_eq!(parsed.deadlines.len(), 1);
+    assert_eq!(parsed.exams.len(), 1);
+    assert_eq!(parsed.notes.len(), 1);
+
+    // The two fields the review screen cannot work without, on every item the module
+    // documents: the quote it shows and the number that orders the list.
+    for evidence in [
+        &parsed.meetings[0].evidence,
+        &parsed.deadlines[0].evidence,
+        &parsed.exams[0].evidence,
+    ] {
+        assert!(!evidence.trim().is_empty(), "the schema shows evidence");
+    }
+}
+
+/// The schema `planner_effort.v1.md` shows the model must parse into the struct the server
+/// deserialises, and the example must reconcile against the topic list it was asked about.
+///
+/// The module states two rules the example has to obey: one entry per requested topic, and
+/// `total_estimate_min` equal to the sum of the estimates. A documented example that
+/// violated either would teach the model the violation.
+#[test]
+fn the_effort_documented_schema_parses_and_reconciles() {
+    let schema = PLANNER_EFFORT_FILE
+        .split_once("Schema:")
+        .expect("planner_effort.v1.md documents a Schema line")
+        .1
+        .trim();
+
+    let parsed = stvdy_core::generation::effort::parse_effort(schema)
+        .expect("the module's own example must parse");
+
+    let reconciled = stvdy_core::generation::effort::reconcile(&parsed, &["string".to_string()])
+        .expect("the module's own example must satisfy the module's own rules");
+    assert_eq!(reconciled, vec![("string".to_string(), 120)]);
 }

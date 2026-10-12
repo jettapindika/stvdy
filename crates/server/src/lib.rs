@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod auth;
 pub mod billing;
+pub mod calendar;
 pub mod chat;
 pub mod cheatsheets;
 pub mod chunks;

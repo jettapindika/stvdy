@@ -19,6 +19,7 @@ use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::auth;
+use crate::calendar;
 use crate::chat;
 use crate::cheatsheets;
 use crate::chunks;
@@ -101,12 +102,21 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         // Google's callback is a browser redirect, so it is a GET and it is not
         // rate limited by peer IP: the peer is Google's redirect, not the user.
         .route("/auth/google/exchange", post(auth::routes::google_exchange))
-        .layer(auth_limiter);
+        .layer(auth_limiter.clone());
 
     let public_routes = Router::new()
         .route("/health", get(health::health))
         .route("/auth/google/start", get(auth::routes::google_start))
         .route("/auth/google/callback", get(auth::routes::google_callback));
+
+    // The feed carries no bearer token, so it is not an authenticated route — but it *is*
+    // an unauthenticated database lookup keyed by a secret, which makes it a brute-force
+    // target, so it shares the credential bucket rather than the unlimited public group
+    // (A243). The same limiter instance, not a second one: two buckets for one client would
+    // double the attempts a script gets.
+    let limited_public_routes = Router::new()
+        .merge(calendar::public_routes())
+        .layer(auth_limiter);
 
     let authenticated = Router::new()
         .route("/auth/me", get(auth::routes::me))
@@ -131,6 +141,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(cheatsheets::routes())
         .merge(tasks::routes())
         .merge(events::routes())
+        .merge(calendar::routes())
         .merge(study::routes())
         .merge(settings::routes())
         .merge(usage::routes())
@@ -149,6 +160,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
 
     let router = Router::new()
         .merge(public_routes)
+        .merge(limited_public_routes)
         .merge(auth_routes)
         .merge(authenticated)
         .fallback(health::not_found)

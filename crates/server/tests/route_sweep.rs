@@ -229,6 +229,16 @@ fn read_only_rows() -> Vec<Row> {
         ro("POST", "/events", "creating an event spends nothing"),
         ro("PATCH", "/events/{id}", "editing an event spends nothing"),
         ro("DELETE", "/events/{id}", "deleting an event spends nothing"),
+        ro(
+            "GET",
+            "/calendar/ics-token",
+            "reads the caller's own feed token to render the settings screen's link; a read, so an over-limit account keeps it (A149/A242)",
+        ),
+        ro(
+            "POST",
+            "/calendar/ics-token/regenerate",
+            "rotating the feed token grants nothing and spends nothing",
+        ),
         ro("GET", "/sessions", "reads the caller's own sessions"),
         ro("POST", "/sessions", "a session is free (R1), like a review"),
         ro("GET", "/activity", "reads the caller's own activity"),
@@ -362,6 +372,13 @@ fn exempt_rows() -> Vec<Row> {
 
     vec![
         exempt("GET", "/health", "no user"),
+        exempt(
+            "GET",
+            "/cal/{token}",
+            "token-authenticated: the path token is the credential and there is no bearer user, \
+             like a signed object URL (A242). Registered as `{token}` because the router cannot \
+             express the documented `.ics` suffix after a parameter; the handler requires it",
+        ),
         exempt(
             "POST",
             "/auth/signup",

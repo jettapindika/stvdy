@@ -8,9 +8,11 @@
 pub mod breakdown;
 pub mod capture;
 pub mod cheatsheet;
+pub mod effort;
 pub mod flashcards;
 pub mod quiz;
 pub mod report;
+pub mod syllabus;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GenerationError {
