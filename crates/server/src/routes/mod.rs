@@ -29,6 +29,7 @@ use crate::quizzes;
 use crate::reports;
 use crate::sources;
 use crate::state::AppState;
+use crate::sync;
 use crate::workspaces;
 use crate::{admin, usage};
 
@@ -128,7 +129,10 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(admin::routes())
         .merge(sources::routes(sources::max_upload_bytes(
             &state.config.plans,
-        )));
+        )))
+        // The sync routes carry their own per-account cap (A185), so they are merged
+        // with the layer already applied rather than into the shared chain.
+        .merge(crate::ratelimit::sync_layer(sync::routes(), state.clone()));
 
     // A155's per-account spend cap, applied to the merged authenticated routes.
     // After the merge so it covers every spending route and no read: the guard

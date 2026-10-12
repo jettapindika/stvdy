@@ -133,6 +133,14 @@ pub const SIGNUP_PER_DOMAIN_PER_DAY: u32 = 100;
 /// Spend actions per minute per account (A155).
 pub const SPEND_PER_MINUTE: u32 = 10;
 
+/// Sync requests per minute per account (A185).
+///
+/// Deliberately far above a real device's rate — a pull per change plus a reconnect is
+/// a handful per minute — so a legitimate burst is never what trips it and a stream
+/// reconnect is not abuse. The limit exists because the spec requires sync to be rate
+/// limited, not because a device would ever reach it.
+pub const SYNC_PER_MINUTE: u32 = 600;
+
 /// Mailbox domains that are exempt from the per-domain signup rule (A154).
 ///
 /// A farm uses gmail too, so a limit here stops no farm while it does stop a
@@ -325,17 +333,29 @@ const SPEND_BUCKETS_MAX: usize = 4096;
 /// spend its whole allowance at the end of one window and again at the start of
 /// the next, which is exactly the burst this exists to bound.
 fn spend_allowed(user_id: Uuid) -> bool {
+    token_allowed(&SPEND_BUCKETS, SPEND_BUCKETS_MAX, user_id, SPEND_PER_MINUTE)
+}
+
+/// Takes one token from `user_id`'s bucket, refilling it by `per_minute` over a minute.
+///
+/// Shared by the spend cap and the sync cap so the two cannot disagree about what a
+/// rate limit is. A poisoned lock must not take the whole server down: the worst case
+/// is one account's bucket, and refusing every request until a restart would be worse.
+fn token_allowed(
+    buckets: &Mutex<HashMap<Uuid, SpendBucket>>,
+    max: usize,
+    user_id: Uuid,
+    per_minute: u32,
+) -> bool {
     let now = Instant::now();
-    let capacity = f64::from(SPEND_PER_MINUTE);
+    let capacity = f64::from(per_minute);
     let refill_per_second = capacity / 60.0;
 
-    // A poisoned lock must not take the whole server down: the worst case is one
-    // account's bucket, and refusing every spend until a restart would be worse.
-    let mut buckets = SPEND_BUCKETS
+    let mut buckets = buckets
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    if buckets.len() > SPEND_BUCKETS_MAX {
+    if buckets.len() > max {
         buckets.retain(|_, bucket| now.saturating_duration_since(bucket.last) < SPEND_BUCKET_IDLE);
     }
 
@@ -452,6 +472,54 @@ pub async fn spend_guard(State(state): State<AppState>, request: Request, next: 
 
     if !spend_allowed(user_id) {
         tracing::warn!(%user_id, limit = SPEND_PER_MINUTE, "per-account spend cap tripped");
+        return AppError::RateLimited.into_response();
+    }
+
+    next.run(request).await
+}
+
+/// The live sync buckets, keyed by account.
+///
+/// Same shape and same reasoning as [`SPEND_BUCKETS`] (A185): in-process, per instance,
+/// pruned by idleness.
+static SYNC_BUCKETS: LazyLock<Mutex<HashMap<Uuid, SpendBucket>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Above this many live buckets, idle ones are dropped.
+const SYNC_BUCKETS_MAX: usize = 4096;
+
+/// Whether this account may make another sync request now.
+fn sync_allowed(user_id: Uuid) -> bool {
+    token_allowed(&SYNC_BUCKETS, SYNC_BUCKETS_MAX, user_id, SYNC_PER_MINUTE)
+}
+
+/// Empties every sync bucket, for a test that drives many requests in a loop.
+pub fn reset_sync_buckets() {
+    SYNC_BUCKETS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
+/// The per-account sync cap (A185), applied to the sync router.
+///
+/// `route_layer`, not `layer`: the guard runs only for a matched sync route, so the
+/// fallback and every other route are untouched. It answers `429 rate_limited`, the same
+/// body the auth and spend limiters answer.
+pub fn sync_layer(router: axum::Router<AppState>, state: AppState) -> axum::Router<AppState> {
+    router.route_layer(axum::middleware::from_fn_with_state(state, sync_guard))
+}
+
+/// The sync cap's middleware.
+pub async fn sync_guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let Some(user_id) = bearer_user(&state, &request) else {
+        // No usable token: the handler's extractor answers 401. Counting it would let an
+        // unauthenticated caller fill a bucket that belongs to someone else.
+        return next.run(request).await;
+    };
+
+    if !sync_allowed(user_id) {
+        tracing::warn!(%user_id, limit = SYNC_PER_MINUTE, "per-account sync cap tripped");
         return AppError::RateLimited.into_response();
     }
 

@@ -206,6 +206,11 @@ fn read_only_rows() -> Vec<Row> {
             "/usage",
             "reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159)",
         ),
+        ro(
+            "GET",
+            "/sync/pull",
+            "reads the caller's own change log; a pull that needed a plan would break account sync on free",
+        ),
     ]
 }
 
