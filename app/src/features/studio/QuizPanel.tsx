@@ -212,7 +212,7 @@ function QuizRow({ quiz }: { quiz: Quiz }) {
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1 break-words font-medium">
+        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
           {quiz.title.length > 0 ? quiz.title : t('studio.quiz.untitled')}
         </span>
         <span className="meta">{t('studio.quiz.questions', { count: quiz.question_count })}</span>

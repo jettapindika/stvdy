@@ -614,6 +614,28 @@
     }
   }
 
+  /* **The desktop floor is deliberately not applied to the interactive citation,
+     and the measurement is why.** The spec's desktop rule is "≥ 32px with 8px
+     gaps", and `scripts/measure-mobile.mjs` at 1365x900 reports this chip as
+     undersized on every workspace surface: 36.4x15.2 at 100% text and 72.8x30.4 at
+     200%, on both themes. That is not a text-scale defect — it is the same finding
+     at both scales — and it is not fixed here for two reasons.
+
+     First, the chip is a target **inside a sentence**: it sits in the answer's own
+     paragraph, and its height is the line-height of the prose around it (measured
+     15.225px at 100% against the chip's 15.2px). WCAG 2.2 SC 2.5.8 exempts exactly
+     that — "the target is in a sentence or block of text" — and the desktop floor's
+     own "8px gaps" clause cannot be met by a mark that has to sit between two words.
+     Second, a `min-height` here would grow every line carrying a citation: at 100%
+     the pill would double the line box of that line, which is a visible cost to
+     reading for a case the rule exempts. Below 767px the same trade is made in the
+     opposite direction on purpose — touch has no hover and no precise pointer — and
+     that media query above is where it is made.
+
+     If the chip ever becomes a standalone control rather than an inline mark, this
+     is the comment to revisit: the exemption is about where the target sits, not
+     about what it does. */
+
   /* --- Identity: the web citation ----------------------------------------- */
 
   /* A result from outside the workspace carries a title, so this mark is a

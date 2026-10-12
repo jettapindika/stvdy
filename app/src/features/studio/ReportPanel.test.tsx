@@ -271,18 +271,25 @@ describe('the reports list', () => {
   })
 
   /**
-   * The row's title must claim the whole line on a phone, and this is the one
-   * place jsdom can see it.
+   * The row's title must claim the whole line when the panel is narrow, and this is
+   * the one place jsdom can see it.
    *
    * The three siblings on that row — a written count, a status chip and an "Open
    * report" button — are all effectively fixed-width, so a `flex-1` title has a
    * flex basis of `0` and is left whatever the three do not take. Measured in
    * Chromium at 390px before this fix: the report's own name rendered **16px wide
    * over 18 lines** (two characters per line), and 100px over 6 lines at 200% text
-   * scale. `w-full` pushes the other three onto the next line at phone width and
-   * `sm:flex-1` restores the single row on a desktop, where there is room for all
-   * four. Dropping either class brings the squeeze back, which is why both are
-   * asserted rather than the rendered text.
+   * scale. `w-full` pushes the other three onto the next line at narrow widths and
+   * `@md:flex-1` restores the single row when there is room for all four. Dropping
+   * either class brings the squeeze back, which is why both are asserted rather than
+   * the rendered text.
+   *
+   * **The breakpoint is a container one, not the viewport `sm:` this used to carry.**
+   * The width that decides the row is the *panel's*: at 1365px the workspace grid
+   * leaves this panel ~155px of content, so `sm:` fired on the desktop window and
+   * handed the title the same squeeze the phone measurement had just fixed. `@md`
+   * measures the panel content box (`@container` in `WorkspaceScreen`) and, being
+   * rem-based, doubles its threshold with the reader's text size.
    */
   it('gives the report title the whole row on a phone', async () => {
     serve([{ ...REPORT, title: 'Laporan Akhir Semester' }])
@@ -290,7 +297,7 @@ describe('the reports list', () => {
 
     const title = await screen.findByText('Laporan Akhir Semester')
     expect(title.className).toContain('w-full')
-    expect(title.className).toContain('sm:flex-1')
+    expect(title.className).toContain('@md:flex-1')
   })
 })
 

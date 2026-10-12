@@ -202,6 +202,125 @@ describe('the devices screen survives 200% text', () => {
   })
 })
 
+describe('the workspace panels survive 200% text', () => {
+  it('lets a word break inside the panel rather than out of it', () => {
+    // The desktop leg's largest cluster, and it is one rule in one place. At 200%
+    // text on a 1365px window each of the grid's three tracks resolves to ~221px and
+    // its content box to **106px**, while a word like `workspace's` at `text-xs`
+    // (24px at a 32px root) is ~130px of glyphs. Every paragraph, label and heading
+    // in every panel that carries such a word therefore had a run of glyphs wider
+    // than its box, and with `overflow: visible` it simply hung out of it: measured
+    // on both themes, `p.text-xs.text-muted "After the file is stored, this
+    // workspace"` was `scrollWidth` 144 against a `clientWidth` of 106, `"Costs 4
+    // credits per 10 cards…"` 123 against 107, `label.label "Questions"` 118 against
+    // 107, `h2.font-medium "Cheatsheet"` 223 against 107, and the report form 230
+    // against 155.
+    //
+    // `break-words` (`overflow-wrap: break-word`) is **not** enough for any of them,
+    // which is why the cluster is fixed with `anywhere` on the container rather than
+    // by adding `break-words` to each box: `break-word` only lowers a box's *content*
+    // width, not its **min-content** size, and min-content is what these boxes were
+    // failing on — the word hung out and nothing could reach it, because the panel
+    // scrolls vertically and the overflow is horizontal. `anywhere` is the value that
+    // affects min-content sizing, and it inherits, so one rule on the container
+    // reaches every descendant.
+    const file = read('features/workspaces/WorkspaceScreen.tsx')
+    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*)"\s*>\s*\{panel\.id/)
+    expect(container, 'the panel content container must exist').not.toBeNull()
+    expect(container).toContain('wrap-anywhere')
+    // The container, not each box: the rule is about the width the boxes are laid
+    // out in, and a second copy on every paragraph would be the same rule written
+    // several times and drifting apart.
+    expect(container).toContain('min-h-0')
+  })
+
+  it('gives every title row the same permission, not only the panel container', () => {
+    // The four title rows are the one place inside the panels where `break-words`
+    // was already present and still lost, and where the *row* also has to change. Each
+    // is a `<span>` with `min-w-0 flex-1` in a wrapping row whose other children are
+    // fixed-width (a count, a status chip, a link), so its width is the remainder the
+    // flex algorithm leaves it — and with the container's `anywhere` its min-content
+    // is **one character**, so nothing stops the squeeze. Measured in Chromium on the
+    // workspace fixture: the deck title rendered **24px wide and 308px tall at 100%
+    // text** — a line per word, with no overflow for the clip check to report — and
+    // 18px wide and 1452px tall at 200%, where it *is* reported (`scrollWidth` 28
+    // against a `clientWidth` of 18).
+    //
+    // The fix is `w-full … @md:w-auto @md:flex-1`, and the breakpoint is a
+    // **container** one because the width that decides the row is the panel's, not the
+    // window's: at 1365px a three-column grid leaves ~157px of panel content while a
+    // 390px phone leaves ~350px, so the viewport `sm:` these rows used to carry fired
+    // on the desktop window and handed the title back the squeeze. `@md` is 28rem *of
+    // container* and rem-based, so its threshold doubles with the reader's text size.
+    const titles = [
+      read('features/workspaces/WorkspaceScreen.tsx'),
+      read('features/studio/FlashcardsPanel.tsx'),
+      read('features/studio/QuizPanel.tsx'),
+      read('features/studio/ReportPanel.tsx'),
+    ].flatMap((source) =>
+      [...source.matchAll(/className="([^"]*min-w-0[^"]*font-medium[^"]*)"/g)].map(
+        (match) => match[1],
+      ),
+    )
+    expect(titles.length, 'the four title spans must exist').toBe(4)
+    for (const title of titles) {
+      expect(title).toContain('wrap-anywhere')
+      expect(title).not.toContain('break-words')
+      expect(title).toContain('w-full')
+      expect(title).toContain('@md:w-auto')
+      expect(title).toContain('@md:flex-1')
+    }
+    // The container the `@md:` in those rows is measured against has to exist, or the
+    // variant falls back to the viewport and the desktop window gets the squeeze back.
+    const file = read('features/workspaces/WorkspaceScreen.tsx')
+    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*)"\s*>\s*\{panel\.id/)
+    expect(container, 'the panel content container must exist').not.toBeNull()
+    expect(container).toContain('@container')
+    // The source picker's row is the same shape without `font-medium`, and it is the
+    // one the report form's own `scrollWidth` 230 against 155 came from.
+    const picker = read('features/workspaces/SourcePicker.tsx')
+    const row = classOf(picker, /className="([^"]*shrink-0[^"]*)"\s*>/)
+    expect(row, 'the source picker row must exist').not.toBeNull()
+    expect(row).toContain('shrink-0')
+    expect(picker).toContain('min-w-0 flex-1 wrap-anywhere')
+  })
+})
+
+describe('the citation chip is an inline target, and the desktop floor does not apply', () => {
+  it('records the decision where the rule lives, and applies no desktop min-height', () => {
+    // The desktop walk reports `button.cite "p.12"` as undersized on every workspace
+    // surface: **72.8x30.4 at 200% text and 36.4x15.2 at 100%**, both themes. That it
+    // is the same finding at both scales is the first clue it is not a text-scale
+    // defect; the second is that its height at 100% is the line-height of the prose it
+    // sits in (measured 15.2px against a 15.225px line-height), because it is a target
+    // **inside the answer's own sentence**.
+    //
+    // WCAG 2.2 SC 2.5.8 exempts exactly that — "the target is in a sentence or its
+    // size is otherwise constrained by the line-height of non-target text" — and the
+    // desktop floor's own "≥ 32px with **8px gaps**" clause cannot be met by a mark
+    // that has to sit between two words. A `min-height` here would double the line box
+    // of every line carrying a citation at 100%, a visible cost to reading for a case
+    // the rule exempts. Below 767px the same trade is made the other way on purpose,
+    // because touch has no hover and no precise pointer — and that is where the only
+    // `min-height` on the interactive chip lives.
+    //
+    // So the finding is: the rule is right and the chip is exempt. Pinned here because
+    // the alternative — silently leaving twelve reported findings with no verdict —
+    // is how a documented exemption turns back into a defect somebody re-fixes.
+    const css = read('styles.css')
+    const start = css.indexOf('.cite {')
+    const phone = css.indexOf('@media (max-width: 767px)', start)
+    expect(start, 'the .cite rule must exist').toBeGreaterThan(-1)
+    expect(phone, 'the phone treatment must follow it').toBeGreaterThan(start)
+    // No `min-height` on the desktop rule: the chip's height is its line-height.
+    expect(css.slice(start, phone)).not.toContain('min-height')
+    // The phone rule does carry one, which is the deliberate half of the decision.
+    expect(css.slice(phone, phone + 260)).toContain('min-height: 2.75rem')
+    // And the reason is written where the next reader meets the rule, not only here.
+    expect(css).toContain('SC 2.5.8')
+  })
+})
+
 describe('the checks detect the pattern they exist for', () => {
   // A rule that cannot fail is worse than no rule: each of these proves the scan sees
   // the pre-fix form and does not fire on the safe values or on a comment quoting the
@@ -246,5 +365,16 @@ describe('the checks detect the pattern they exist for', () => {
     expect(remMinimums('<label className="flex min-w-40 flex-1 flex-col gap-1">')).toEqual([
       'min-w-40',
     ])
+    // The panel content container, before it carried the wrapping rule: `overflow-y-auto`
+    // and no `wrap-anywhere`, which is the form the 106px-wide boxes were measured in.
+    expect('min-h-0 flex-1 overflow-y-auto').not.toContain('wrap-anywhere')
+    expect('min-h-0 flex-1 overflow-y-auto').not.toContain('@container')
+    // A title row, before it was given its own line in a narrow panel — the form in
+    // which the deck title measured 24px wide and 308px tall at 100% text.
+    expect('min-w-0 flex-1 break-words font-medium').not.toContain('w-full')
+    expect('min-w-0 flex-1 wrap-anywhere font-medium').not.toContain('@md:flex-1')
+    // And the viewport `sm:` these rows used to carry, which is the form that fired on
+    // the desktop window and handed the title back the squeeze.
+    expect('w-full min-w-0 break-words font-medium sm:w-auto sm:flex-1').not.toContain('@md:')
   })
 })

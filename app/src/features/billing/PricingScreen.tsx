@@ -154,6 +154,12 @@ export function PricingScreen() {
               // policy is hiding prices, so there is nothing to say at all.
               const free = price === 0
               const isCurrent = plan.id === data.current_plan
+              // The amount and its currency, as the two pieces `formatAmount`
+              // already keeps apart with a no-break space.
+              const [currency, digits] = (price === null
+                ? ''
+                : formatAmount(price, i18n.language)
+              ).split('\u00a0')
               return (
                 <li key={plan.id} className="card flex flex-col gap-3 p-4">
                   <div className="flex items-baseline justify-between gap-2">
@@ -164,8 +170,34 @@ export function PricingScreen() {
                   </div>
 
                   {price !== null && !free && (
+                    /* The price is a currency and a number, and at 200% text the two
+                       together are wider than the card: `--text-h2` is `1.25rem`, so
+                       on a 1365px window it renders at 40px and `IDR 125,000`
+                       measures **226px** in the 181px the three-column grid leaves
+                       it, so the figure the student is deciding about was cut off.
+
+                       `formatAmount` joins the two with a **no-break space**, which
+                       is right at 100% — the currency and its number are one price
+                       and must not drift apart — but it is precisely what forbids
+                       the break a 200% reader needs. `<wbr>` puts the opportunity
+                       back without touching the string: the break falls after the
+                       currency, the digits stay whole, and `textContent` still
+                       carries the same `IDR\u00a0…` the tests match on.
+
+                       `overflow-wrap: anywhere` is deliberately **not** used here,
+                       though it is the right rule for the workspace panels. There,
+                       a long Indonesian word has no break opportunity at all; here
+                       it would split the digits, and `IDR 125,0` / `00` is a price
+                       a student misreads — worse than the clip it replaces. */
                     <p className="text-h2">
-                      {formatAmount(price, i18n.language)}
+                      {currency}
+                      {digits !== undefined && (
+                        <>
+                          {'\u00a0'}
+                          <wbr />
+                          {digits}
+                        </>
+                      )}
                       <span className="text-sm text-muted">
                         {yearly ? t('pricing.perYear') : t('pricing.perMonth')}
                       </span>

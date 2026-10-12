@@ -81,7 +81,7 @@ export function SourcePicker({
                 )
               }}
             />
-            <span className="min-w-0 flex-1 break-words">{source.title}</span>
+            <span className="min-w-0 flex-1 wrap-anywhere">{source.title}</span>
           </label>
         ))}
       </div>

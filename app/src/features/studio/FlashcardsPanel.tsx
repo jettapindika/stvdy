@@ -146,7 +146,27 @@ function DeckRow({ deck }: { deck: Deck }) {
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1 break-words font-medium">
+        {/* `w-full … @md:w-auto @md:flex-1` is load-bearing, and it is the row fix
+            this panel needs rather than a text one. The three siblings are all
+            effectively fixed-width (a count, a status chip, a link) while `flex-1`
+            gives this span a flex basis of `0`, so the title is left the remainder —
+            and with `overflow-wrap: anywhere` (the panel container's rule, which is
+            what stops a long Indonesian word overflowing the box) its min-content is
+            **one character**, so nothing stops the row from squeezing it there.
+            Measured in Chromium on this screen's own fixture: the deck title rendered
+            **24px wide and 308px tall** at 100% text — a line per word — and 18px wide
+            and 1452px tall at 200%.
+
+            The condition is the *panel's* width, not the window's: a 1365px window
+            gives each panel ~157px of content while a 390px phone gives one panel
+            ~350px, so a viewport breakpoint would be the wrong test in both
+            directions. `@container` on the panel content box plus `@md:` (28rem of
+            container) asks the question that matters — is there room for the title
+            and the three chips on one line — and because container breakpoints are
+            rem-based, the threshold doubles with the reader's text size, which is
+            exactly when more room is needed. `ReportRow` carries the same shape with
+            a viewport `sm:` because its own measurement was a phone one. */}
+        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
           {deck.title.length > 0 ? deck.title : t('studio.deck.untitled')}
         </span>
         <span className="meta">{t('studio.deck.cards', { count: deck.card_count })}</span>

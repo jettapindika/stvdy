@@ -170,7 +170,24 @@ export function WorkspaceScreen() {
                 <div className="border-b border-border px-4 py-2">
                   <span className="label">{panel.label}</span>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
+                {/* `wrap-anywhere` (`overflow-wrap: anywhere`) on the container
+                    rather than on each text box: it inherits, and it is the
+                    *container's* width that these boxes were failing on. At 200%
+                    text on a 1365px window each panel track resolves to ~221px and
+                    its content box to 106px, while a word like `workspace's` at
+                    `text-xs` is ~130px of glyphs — so a paragraph that fits at 100%
+                    has an unbreakable word wider than its box. `break-words`
+                    (`overflow-wrap: break-word`) is **not** enough: it only lowers a
+                    box's *content* width, not its min-content size, so the word hangs
+                    out of the box and is cut off — the panel scrolls vertically and
+                    the overflow is horizontal, where nothing can reach it.
+
+                    `anywhere` is the value that also affects min-content sizing,
+                    which is the property these boxes are failing on — the same
+                    reasoning `crates/core`'s week grid records. The cost is honest:
+                    a word may break mid-glyph at 200% text. At 100% nothing
+                    overflows, so nothing breaks. */}
+                <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
                   {panel.id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
                   {panel.id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
                   {panel.id === 'studio' && <StudioPanel workspaceId={workspaceId} />}
@@ -377,7 +394,14 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1 break-words font-medium">
+        {/* `w-full … @md:w-auto @md:flex-1`: the same row shape and the same
+            measurement as `DeckRow`'s title in `FlashcardsPanel` — the three siblings
+            are fixed-width, `flex-1` leaves this span the remainder, and with the
+            panel container's `overflow-wrap: anywhere` its min-content is one
+            character, so the row squeezed it to 18px and 1452px tall. The panel's
+            width is a container fact, not a window one, so the test is `@container`'s
+            `@md` rather than a viewport breakpoint. */}
+        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
           {source.title.length > 0 ? source.title : t('workspaces.source.untitled')}
         </span>
         <span className="meta">{sourceKindLabel(source.kind, t)}</span>
