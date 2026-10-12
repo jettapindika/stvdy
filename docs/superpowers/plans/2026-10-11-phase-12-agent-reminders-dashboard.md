@@ -2373,9 +2373,9 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 | 1 | Formatting | `cargo fmt --all -- --check` | |
 | 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | |
 | 3 | Rust tests | `cargo test --workspace` | |
-| 4 | Web tests | `npm --prefix app test` | |
-| 5 | Web build | `npm --prefix app run build` | |
-| 6 | No CDN | `node scripts/check-no-cdn.mjs` | |
+| 4 | Web tests | `npm --prefix app test` | **585 passed, 0 failed** (this slice's directories: 187) |
+| 5 | Web build | `npm --prefix app run build` | **PASS** (`tsc --noEmit && vite build`) |
+| 6 | No CDN | `node scripts/check-no-cdn.mjs` | **PASS** — "no third-party loads in 3 shipped file(s)" |
 | 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | |
 | 8 | Shell trio | `just check-shell` | |
 | 9 | **Exit gate, part 1** — a WRITE tool creates `pending_actions`, and confirming on device B executes it | `cargo test -p stvdy-server --test actions` | |
@@ -2392,10 +2392,10 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 | 20 | The two doubles | `cargo test -p stvdy-core --test tool_doubles` | |
 | 21 | Route sweep (8 new rows, 2 drivers) | `cargo test -p stvdy-server --test route_sweep` | |
 | 22 | Schema (2 new `documented` rows, 6 new columns) | `cargo test -p stvdy-server --test schema` | |
-| 23 | Gate 5 — accessibility | the five measured checks in Task 16 | |
-| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | |
-| 25 | Gate 7 — honesty | the five statements in Task 16 | |
-| 26 | Smoke | `bash scripts/smoke-phase12.sh` | |
+| 23 | Gate 5 — accessibility | `node scripts/measure-mobile.mjs` at 390×844 | **PASS with a defect fixed** — 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast **4.97:1**, 0 under 44px, 0 clipped, 0 overlapped. The dashboard scrolled sideways **at 100% text** (423 > 390, 15 elements past the edge) before `f38305c`. **Desktop width not measured** — phone viewport only |
+| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **server half NOT RUN** (another slice's). UI half measured in a real browser with `navigator.languages = id-ID`: **PASS**, no locale key rendered — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat") |
+| 25 | Gate 7 — honesty | the five statements in Task 16 | **(a)–(e) all checked.** (c) re-asserted by grepping the shipped bundle, not by reading the component: `AI can make mistakes. Check the citations.` → `app/dist/assets/index-CBDbwWge.js`, and `AI bisa salah` in the same bundle |
+| 26 | Smoke | `bash scripts/smoke-phase12.sh` | **PASS** — six scenarios, incl. the ten-tool wire schema read out of the stub's log and two devices producing one reminder whose `fire_at` is the first. Push degrades to in-app + email (no APNs/FCM credentials) and says so |
 
 ## Execution notes
 
