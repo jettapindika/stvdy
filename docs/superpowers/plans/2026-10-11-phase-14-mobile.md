@@ -379,6 +379,21 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     The walk is **phone-width by default** — `VIEWPORT_WIDTH`/`VIEWPORT_HEIGHT`/
     `VIEWPORT_DPR`/`SCALES`/`OUTPUT` override it so gate 5's desktop leg uses this
     harness rather than a second copy of it.
+    **Which of gate 5's five criteria this command measures, and which it does not**
+    (the reason to name the legs at all): **(b) contrast**, **(c) interactive targets
+    >=44px at phone width** and **(e) 200% text scale without clipping or overlap** are
+    measured on every surface above, both themes, both scales; **(a) reach every control
+    by keyboard alone with a visible focus ring** is measured by the **keyboard leg**
+    added below, on the same control set the target check collects; **(d) no state
+    conveyed by colour alone** is measured on **the six checkout states only**, because
+    those are the surfaces that declare the words their state must show (`words` in
+    `SURFACES`) — every other surface's colour-alone behaviour, and any state that is not
+    a checkout state, is still unmeasured by any committed command. And **(a) is measured
+    for these 20 surfaces and no others**: the study screen (`/study/:deckId`) and the
+    auth routes are not walked (they are in the "not measured" list above), so their
+    keyboard reach is still unmeasured — which is why the three unticked accessibility
+    boxes in Phases 0, 1 and 4 can be closed for (b), (c) and (e), and for (a) only on
+    the surfaces this walk reaches.
     **The desktop leg did not actually work until `bc7eed8`, and the failure was
     silent until someone ran it:** a `nav` step names the phone tab bar's label, and
     the tab bar is `md:hidden` with "Work"/"More" while the desktop sidebar is
@@ -411,6 +426,60 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     through a flex column until an *ancestor* reports the overflow, where the element
     that is too wide reports no overflow of its own. Both scales are therefore
     measured, and both are part of the pass condition.
+    **The keyboard leg (gate 5(a)) was added last, and it asserts three things.** It
+    walks the same control set with real `Tab` presses (`page.keyboard.press`, one
+    `document.activeElement` read per press), from the top of the document, until focus
+    returns to the first stop, leaves the page, or a `4 x controls + 40`-press cap is
+    hit — **and the cap is reported, not silent**. A control the platform keeps in the
+    tab order that no press reaches is a finding; so is a focused control with no
+    visible indicator (a non-zero outline **or** a non-`none` `box-shadow` —
+    deliberately not a colour, a width or a ratio, because `--ring` is theme-keyed and a
+    colour-pinned assertion would break on the next theme change and be deleted rather
+    than fixed); so is a control that keeps focus after a press. Three classes are
+    **excused with their reason and their count printed** rather than reported:
+    `disabled`/`aria-disabled` controls (including the children of a disabled
+    `<fieldset>`, which is why the test is `:disabled` and not `.disabled` — the
+    property reads the attribute, so a fieldset's children would look enabled), the
+    unchecked members of a **radio group**, and the inactive tabs of a **roving-tabindex
+    `[role="tab"]` tablist** — the last two only when the group itself is reachable, and
+    the tablist's arrow keys *measured* rather than assumed (`ArrowRight`/`ArrowLeft` on
+    the focused tab, which `WorkspaceScreen.tsx`'s own `onKeyDown` answers).
+    **Its first run, both legs, found no product defect and six instrument facts**,
+    recorded rather than fixed: (1) the walk measured **0 stops for 9 controls** on
+    `today` — the first surface after `signIn` — because Chrome kept the sequential
+    focus navigation start point past the end of the document across the sign-in
+    navigation, so the first `Tab` went to the browser chrome; the leg now resets the
+    start point through a temporary `tabindex="-1"` on `body`, which is the difference
+    between measuring the whole focus order and measuring its tail; (2) 24 "traps" that
+    were `input[type="date"]` (`#task-due`, `#cheatsheet-exam-date`) taking three presses
+    for its internal month/day/year fields, which is the platform and is now counted
+    separately from a real trap, with the cap as the backstop; (3) the phone walk's 36
+    tab strips (9 per combination) reported as **72 unreached controls** until the
+    group's membership included the active tab — the only member that *is* a Tab stop
+    (`tabIndex={selected ? 0 : -1}`) — because keying the exemption on the member's own
+    `tabindex="-1"` left every group's reached count at zero; (4) the reset reports
+    `nothing in the page` for all 80 combinations — focus was never inside the page when
+    a walk began, which is what made (1) possible;
+    (5) the walk's stops include elements that are not controls and are counted against
+    nothing: the `sr-only` skip link (a target only while focused, so it is ring-checked
+    here and excluded from the 44px count) and, on `pricing`, a `div.overflow-x-auto` —
+    a scrollable region Chromium itself makes keyboard-focusable, which is the platform
+    giving a keyboard user the scroll, not a control the app forgot; (6) at the desktop
+    floor the walk still reaches `button.cite`, which the *target* check exempts there —
+    the exemption is about the 32px floor, not about tabbability, and the two sets are
+    allowed to differ in that direction only. **Both legs are green**: the phone walk is
+    `1012 Tab stops, 0 unreached, 0 without a focus ring, 0 trapping, 144 excused`
+    (56 disabled, 72 roving-tablist tabs, 16 radio-group members), with 36 tablist groups
+    and 4 radio groups arrow-probed and **no member missed**; the desktop walk is
+    `1430 Tab stops, 0 unreached, 0 without a ring, 0 trapping, 248 excused` (104
+    disabled, 48 roving-tablist tabs, 96 radio-group members), 24 and 24 groups probed,
+    none missed. Every one of the 1012 + 1430 stops shows the app's own `solid 2px`
+    outline — none fell back to the browser's `auto 1px` default, so the ring assertion
+    is measuring the app's `--ring` rather than the user agent's. **A green leg is not
+    evidence the check is weak**: the same assertion reported the 72 unreached tabs and
+    the 24 composite "traps" on its first run, and a control with `outline: none` and no
+    shadow is reported by it (checked directly), which is what a leg that found nothing
+    has to be able to show.
 15. **A324 — The adaptive UI is width-based, and Phase 14 verifies it rather than
     introducing a second convention.** `useFormFactor` (768/1024px) is the only
     form-factor source. Phase 14 adds a `phone`/`tablet` render test and the measured

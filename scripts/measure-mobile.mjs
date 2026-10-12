@@ -1003,6 +1003,13 @@ function measureInPage(options) {
     return el
   }
   const targets = []
+  // The keyboard leg walks **these exact elements** rather than re-deriving "a
+  // control" from `TARGETS`: a second definition of the set would measure a different
+  // set the first time either side changed, and the two would then disagree about
+  // what a control is. Stashed on `window` rather than returned, because the walk
+  // needs real key presses *between* reads and `page.evaluate` cannot hand element
+  // references back to Node.
+  const controlElements = []
   for (const el of document.querySelectorAll(TARGETS)) {
     if (!isVisible(el)) continue
     // A skip link is `sr-only` until focused: it is 1x1 by design, and what makes
@@ -1023,6 +1030,7 @@ function measureInPage(options) {
     // Recorded in A323 (Phase 14's gate-5 decision) and beside `.cite` in
     // `app/src/styles.css`, so the next phase finds the reason where the rule is.
     if (el.classList.contains('cite') && desktopFloor === true) continue
+    controlElements.push(el)
     const box = rect(hitArea(el))
     const ok = box.w >= minTarget && box.h >= minTarget
     targets.push({
@@ -1229,6 +1237,274 @@ function measureInPage(options) {
     .filter((entry) => !pastEdge.some((other) => other !== entry && entry.node.contains(other.node)))
     .map(({ node: _node, ...rest }) => rest)
 
+  // --- 4. the keyboard walk's page-side half ----------------------------------
+  //
+  // Gate 5(a) — "reach every control by keyboard alone with a visible focus ring" —
+  // is the one criterion this harness never measured, so it was done by hand
+  // (`var/gate5-keyboard.json`, three report screens) and was not reproducible from
+  // any committed command. It cannot be measured from one `page.evaluate` either: a
+  // real key press has to happen *between* two reads of `document.activeElement`,
+  // and an element reference cannot cross back to Node. So the walk is driven from
+  // Node and this object is its page-side half — the **same** `controlElements` the
+  // target check just built rather than a second definition of "a control" (two
+  // definitions would disagree about the set within a month), the same `describe`,
+  // and one read per press.
+  //
+  // **What the ring assertion is, and why it is not stricter.** A focused control
+  // must show *some* indicator: a non-zero outline, or a non-`none` box-shadow (a
+  // `ring` utility is a shadow). It deliberately asserts no colour, width or ratio:
+  // `--ring` is theme-keyed (`#4f46e5` on light, `#a5b4fc` on dark), so a check
+  // pinned to one of them is a check that breaks the first time a theme is added or
+  // tuned — and a gate that breaks on a deliberate change is a gate that gets
+  // deleted rather than fixed. The ring's contrast against its own background is the
+  // contrast check's business, not this one's.
+  //
+  // The `sr-only` skip link is deliberately **not** in the expected set (the target
+  // check excludes it: it is 1x1 until focused), but it *is* the page's first focus
+  // stop, so it is reached, and ring-checked, like any other stop.
+  //
+  // **What "reached" means, and the three classes it does not apply to.** The
+  // assertion is "every control the platform puts in the tab order is reached by
+  // Tab". Three kinds of control are *not* in the tab order, by the platform's rule
+  // or by a sanctioned ARIA pattern, and each is excused with its reason rather than
+  // reported — the same judgement the `cite` exemption below makes, and for the same
+  // reason: a gate that is permanently red on a deliberate decision is a gate that
+  // gets ignored rather than read.
+  //
+  //   1. **`disabled`** (including a control inside a disabled `<fieldset>`, which is
+  //      why this asks `:disabled` and not `.disabled` — the property reads the
+  //      attribute, so a fieldset's children would look enabled). Not operable by any
+  //      input, and the browser itself removes it from the tab order: asserting Tab
+  //      must reach it asserts something the platform forbids. The fixture's forms
+  //      are empty, so their submits are disabled in the resting state the walk
+  //      measures — a reader who types into the form gets them back.
+  //   2. **A radio group is one tab stop.** Only the checked member is in the tab
+  //      order; the platform moves between the others with the arrow keys. The group
+  //      still has to be reachable, so a group with *no* member reached by Tab is a
+  //      finding — the exemption is conditional on that.
+  //   3. **A roving-tabindex `[role="tab"]` tablist is one tab stop**, the WAI-ARIA
+  //      tabs pattern: `tabIndex={selected ? 0 : -1}` in `WorkspaceScreen.tsx`, whose
+  //      `onKeyDown` moves with ArrowLeft/ArrowRight/Home/End. Same conditional
+  //      exemption as (2), and the arrow keys are *measured* rather than assumed —
+  //      `arrowGroups` below hands the walk the groups it has to prove.
+  //
+  // Excused controls are returned with their reason, so the count is printed and the
+  // elements are in the JSON: an exemption that is silent is the quiet sweep this leg
+  // exists to avoid.
+  const notOperable = (el) =>
+    el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true'
+  /**
+   * The group a control shares its single tab stop with, or null.
+   *
+   * **Membership is by the group, not by the member's own exclusion**, and the first
+   * run of this leg is why that distinction is written down: grouping only the
+   * `tabindex="-1"` tabs left every tablist's `reached` count at zero — the one tab that
+   * *is* a Tab stop is the active one, `tabIndex={selected ? 0 : -1}` — so the phone
+   * walk's 36 tab strips (9 per combination) were reported as 72 unreached controls. The
+   * group is what has to be reachable;
+   * each member is then excused by the group's own count.
+   */
+  const groupOf = (el) => {
+    if (notOperable(el)) return null
+    if (el.tagName === 'INPUT' && el.type === 'radio') {
+      const form = el.form === null ? 'none' : String(idOf(el.form))
+      return { key: `radio:${form}:${el.name}`, reason: 'radio' }
+    }
+    if (el.getAttribute('role') === 'tab') {
+      // No tablist around it: the element is its own group, so it can only be excused by
+      // being reached itself — a lone `role="tab"` with `tabindex="-1"` is a finding.
+      const list = el.closest('[role="tablist"]')
+      return { key: `tab:${String(idOf(list ?? el))}`, reason: 'roving-tab' }
+    }
+    return null
+  }
+  const stops = new Map()
+  const stopOrder = []
+  const ids = new Map()
+  let nextId = 0
+  const idOf = (el) => {
+    const found = ids.get(el)
+    if (found !== undefined) return found
+    const id = nextId
+    nextId += 1
+    ids.set(el, id)
+    return id
+  }
+  const labelOf = (el) =>
+    (el.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 40)
+  /** Every group of controls that share one tab stop, with how many of them Tab reached. */
+  const groupState = () => {
+    const groups = new Map()
+    for (const el of controlElements) {
+      const found = groupOf(el)
+      if (found === null) continue
+      const group =
+        groups.get(found.key) ?? { key: found.key, reason: found.reason, members: [], reached: 0 }
+      group.members.push(el)
+      if (stops.has(el)) group.reached += 1
+      groups.set(found.key, group)
+    }
+    return groups
+  }
+  let walkScroll = null
+  window.__gate5Keyboard = {
+    /** How many controls the walk has to reach: the target check's own set. */
+    expected: controlElements.length,
+    /** Whatever holds focus right now, with the focus indicator it is showing. */
+    read: () => {
+      const el = document.activeElement
+      // `body` and `documentElement` are what Chrome reports when focus has left the
+      // page for its own chrome; they are not a focus stop a reader made.
+      if (!(el instanceof HTMLElement) || el === document.body || el === document.documentElement) {
+        return { id: -1, none: true }
+      }
+      const style = getComputedStyle(el)
+      const width = Number.parseFloat(style.outlineWidth)
+      const hasOutline = Number.isFinite(width) && width > 0 && style.outlineStyle !== 'none'
+      const shadow = style.boxShadow
+      const hasShadow = shadow !== 'none' && shadow !== ''
+      const id = idOf(el)
+      if (!stops.has(el)) {
+        stops.set(el, id)
+        stopOrder.push({ id, el: describe(el), text: labelOf(el) })
+      }
+      return {
+        id,
+        none: false,
+        el: describe(el),
+        text: labelOf(el),
+        outline: `${style.outlineStyle} ${style.outlineWidth}`,
+        shadow,
+        ringOk: hasOutline || hasShadow,
+        // A composite date/time input is one element to `document.activeElement` but
+        // several stops to Tab: the platform moves between its internal month/day/year
+        // fields (and its picker button) while the host keeps focus, so a repeated read
+        // of it is the platform working, not a trap. Flagged here because only the page
+        // knows what the element is.
+        composite:
+          el.tagName === 'INPUT' &&
+          ['date', 'time', 'datetime-local', 'month', 'week'].includes(el.type),
+      }
+    },
+    /**
+     * Puts the sequential focus navigation start point back at the top of the document,
+     * and reports what held focus before it did.
+     *
+     * **This is what makes the walk cover the whole focus order rather than its tail,
+     * and the first run proved it.** Chrome keeps the start point across a navigation:
+     * on the `today` surface — the first one after `signIn`, whose DOM swap removed the
+     * focused submit button — the first `Tab` went straight to the browser chrome and
+     * the walk measured **0 stops for 9 controls**, while every later surface (whose
+     * start point was a `blur()` inside the page) began at the skip link. A walk that
+     * starts mid-document measures a suffix and reports it as the whole: focusing the
+     * body through a temporary `tabindex="-1"` (removed again before the first press, so
+     * the body is not itself a stop) puts the start point where a reader arriving on the
+     * page has it.
+     */
+    resetStart: () => {
+      const before = document.activeElement
+      const at =
+        before instanceof HTMLElement && before !== document.body
+          ? describe(before)
+          : 'nothing in the page'
+      document.body.setAttribute('tabindex', '-1')
+      document.body.focus()
+      document.body.removeAttribute('tabindex')
+      return at
+    },
+    /** Where the page and its scrollers were before the walk, so they can be put back. */
+    captureScroll: () => {
+      walkScroll = {
+        x: window.scrollX,
+        y: window.scrollY,
+        scrollers: [...document.querySelectorAll('body *')]
+          .filter((el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight)
+          .map((el) => ({ el, left: el.scrollLeft, top: el.scrollTop })),
+      }
+    },
+    /**
+     * Puts the page back the way the walk found it.
+     *
+     * Tabbing scrolls each focused element into view — including inside a scroller, and
+     * the tab bar *is* one — so every scroller goes back to the offset it had. **The
+     * blur is load-bearing, not tidiness:** `measureInPage` includes an `sr-only`
+     * control only while it holds focus (that is how the skip link is measured as the
+     * 1x1 target it is at rest), so a walk that ended on the skip link would make the
+     * *next* surface report it as an undersized target — the keyboard leg changing the
+     * numbers of the checks that already passed.
+     */
+    restore: () => {
+      for (const scroller of walkScroll?.scrollers ?? []) {
+        scroller.el.scrollLeft = scroller.left
+        scroller.el.scrollTop = scroller.top
+      }
+      if (walkScroll !== null) window.scrollTo(walkScroll.x, walkScroll.y)
+      const el = document.activeElement
+      if (el instanceof HTMLElement) el.blur()
+    },
+    /**
+     * The reach assertion, which needs element identity and so can only be answered here.
+     *
+     * `unreached` is what the leg reports as a problem: a control the platform keeps in
+     * the tab order that no press reached. `excused` is the three classes above with
+     * their reason and their element, so the exemption is visible rather than silent.
+     * `groups` is the subset of them the walk still has to *prove* with arrow keys —
+     * a group with at least one member reached by Tab and at least one that is not.
+     */
+    summary: () => {
+      const groups = groupState()
+      const unreached = []
+      const excused = []
+      for (const el of controlElements) {
+        if (stops.has(el)) continue
+        if (notOperable(el)) {
+          excused.push({ el: describe(el), text: labelOf(el), reason: 'disabled' })
+          continue
+        }
+        const found = groupOf(el)
+        const group = found === null ? undefined : groups.get(found.key)
+        if (group !== undefined && group.reached > 0) {
+          excused.push({ el: describe(el), text: labelOf(el), reason: group.reason })
+          continue
+        }
+        unreached.push({ el: describe(el), text: labelOf(el) })
+      }
+      return {
+        focusStops: stopOrder.length,
+        unreached,
+        excused,
+        groups: [...groups.values()]
+          .filter((group) => group.reached > 0 && group.reached < group.members.length)
+          .map((group) => ({
+            reason: group.reason,
+            members: group.members.length,
+            reachedByTab: group.reached,
+            // The member to put focus on before pressing an arrow key: one that Tab
+            // already reached, so the probe starts from where the pattern says a reader
+            // is. `focusStop` turns this back into an element.
+            focus: idOf(group.members.find((el) => stops.has(el)) ?? group.members[0]),
+            ids: group.members.map((el) => idOf(el)),
+          })),
+      }
+    },
+    /** Focuses a stop by its id, for the arrow-key probe. Returns whether it landed. */
+    focusStop: (id) => {
+      const el = [...ids.entries()].find(([, value]) => value === id)?.[0]
+      if (el === undefined || !(el instanceof HTMLElement)) return false
+      el.focus()
+      return document.activeElement === el
+    },
+    /** The focused stop's id, for the arrow-key probe. Records no stop. */
+    focused: () => {
+      const el = document.activeElement
+      if (!(el instanceof HTMLElement) || el === document.body) return -1
+      return ids.get(el) ?? -1
+    },
+    /** Element detail for every id this surface handed out, so Node can name what it found. */
+    info: () =>
+      [...ids.entries()].map(([el, id]) => ({ id, el: describe(el), text: labelOf(el) })),
+  }
+
   return {
     targets,
     undersized,
@@ -1310,6 +1586,207 @@ async function openSurface(page, surface) {
     const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
     await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+}
+
+/**
+ * The keyboard leg: gate 5(a), driven from here because a key press has to happen
+ * between two reads of `document.activeElement` and an element reference cannot cross
+ * back to Node. `measureInPage` has already stashed the control set and the reads
+ * (`window.__gate5Keyboard`); this walks it.
+ *
+ * **It starts at the top of the document, deliberately.** Chrome keeps the sequential
+ * focus navigation start point across a navigation, so the first `Tab` after the
+ * `signIn` swap went to the browser chrome on the `today` surface and the walk measured
+ * 0 stops for 9 controls. A walk that starts mid-document measures a suffix of the
+ * focus order and reports it as the whole, so the start point is reset before the first
+ * press (see `resetStart`) and what held focus before the reset is recorded.
+ *
+ * **The loop's three exits, all of them reported.** It stops when focus returns to the
+ * first stop (the natural end of a page's focus order), when focus leaves the document
+ * (Chrome's own chrome holds it — also an end), or when the cap is hit. The cap is
+ * `4 x controls + 40`: a genuine focus order visits each control about once, so four
+ * passes plus a margin is generous, and it is a *function of the set* rather than a
+ * constant so a bigger surface does not silently start reporting a cap. **A cap hit is
+ * a problem**, not a quieter walk: it means the walk cannot say whether the rest of the
+ * set is reachable, and "0 unreached" from a walk that stopped early is the shape of
+ * coverage without the substance.
+ *
+ * **A trap is the previous stop repeating**, with one exemption: a composite date/time
+ * input (`input[type="date"]`, `#task-due` and `#cheatsheet-exam-date` here) is several
+ * stops to Tab — the platform moves between its internal month/day/year fields and its
+ * picker button — while `document.activeElement` stays the host element. Those repeats
+ * are counted and reported separately (`compositeRepeats`), and the cap is the backstop
+ * that still catches a composite control that never lets go.
+ *
+ * The page is left as it was found (`restore`), including the blur that keeps a walk
+ * ending on the `sr-only` skip link from changing the *target* check's next reading.
+ */
+async function walkKeyboard(page, key, problems) {
+  const expected = await page.evaluate(() => window.__gate5Keyboard.expected)
+  const cap = expected * 4 + 40
+  const stops = new Map()
+  const rings = []
+  const traps = []
+  const compositeRepeats = []
+  let firstId = null
+  let previousId = null
+  let focusLeft = false
+  let capped = false
+  let presses = 0
+
+  await page.evaluate(() => {
+    window.__gate5Keyboard.captureScroll()
+  })
+  const startedAt = await page.evaluate(() => window.__gate5Keyboard.resetStart())
+
+  while (presses < cap) {
+    await page.keyboard.press('Tab')
+    presses += 1
+    // Focus is applied synchronously by the press, but `:focus-visible` styling and the
+    // scroll-into-view that follows it are a frame later, and the ring is read from
+    // computed style. 25ms is one frame on a machine under load; a shorter wait reads
+    // the ring of the control the *previous* press focused.
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    const stop = await page.evaluate(() => window.__gate5Keyboard.read())
+    if (stop.none) {
+      focusLeft = true
+      break
+    }
+    if (firstId === null) firstId = stop.id
+    if (stop.id === previousId) {
+      if (stop.composite) compositeRepeats.push({ ...stop, press: presses })
+      else traps.push({ ...stop, press: presses })
+      // Keep going: the cap bounds the loop, and the walk still has to report whether
+      // the rest of the set is reachable.
+    }
+    previousId = stop.id
+    if (!stops.has(stop.id)) {
+      stops.set(stop.id, stop)
+      if (!stop.ringOk) rings.push(stop)
+    }
+    if (stop.id === firstId && stops.size > 1) break
+  }
+  // The cap is a finding rather than a quiet truncation: it means the walk cannot say
+  // whether the rest of the set is reachable. `focusLeft` and the return-to-first exit
+  // are the other two ways out, and both are reported in the line below.
+  if (presses >= cap && !focusLeft) capped = true
+
+  const { unreached, excused, groups, focusStops } = await page.evaluate(() =>
+    window.__gate5Keyboard.summary(),
+  )
+  const info = new Map(
+    (await page.evaluate(() => window.__gate5Keyboard.info())).map((entry) => [entry.id, entry]),
+  )
+  const named = (id) => info.get(id) ?? { id, el: '?', text: '' }
+
+  // The groups the exemptions stand on, measured rather than assumed. Only a group with
+  // a member Tab reached is here, so this can only *add* findings — the group's
+  // reachability itself was already checked by the walk.
+  const arrowReached = []
+  for (const group of groups) {
+    const landed = await page.evaluate((id) => window.__gate5Keyboard.focusStop(id), group.focus)
+    if (!landed) {
+      problems.push(
+        `${key} keyboard: the ${group.reason} group's Tab stop could not be focused to test it`,
+      )
+      continue
+    }
+    const reached = new Set([group.focus])
+    // Both directions: the tablists wrap (ArrowRight cycles the strip), the radio group
+    // does not (ArrowDown from the middle reaches the ones below it, ArrowUp the ones
+    // above), so one direction alone would report a false failure on a radio group.
+    const arrows = group.reason === 'radio' ? ['ArrowDown', 'ArrowUp'] : ['ArrowRight', 'ArrowLeft']
+    for (const arrow of arrows) {
+      for (let step = 0; step < group.members; step++) {
+        await page.keyboard.press(arrow)
+        await new Promise((resolve) => setTimeout(resolve, 25))
+        const id = await page.evaluate(() => window.__gate5Keyboard.focused())
+        if (id === -1) break
+        reached.add(id)
+      }
+    }
+    const missing = group.ids.filter((id) => !reached.has(id))
+    arrowReached.push({
+      reason: group.reason,
+      members: group.members,
+      reachedByTab: group.reachedByTab,
+      reachedByArrow: group.members - missing.length,
+    })
+    for (const id of missing) {
+      const item = named(id)
+      problems.push(
+        `${key} keyboard: ${item.el} "${item.text}" is a ${group.reason} group member that neither Tab nor the arrow keys reach`,
+      )
+    }
+  }
+
+  await page.evaluate(() => {
+    window.__gate5Keyboard.restore()
+  })
+
+  const where = `${key} keyboard`
+  const exit = focusLeft
+    ? 'focus then left the page'
+    : capped
+      ? `stopped at the ${String(cap)}-press cap`
+      : 'focus returned to the first stop'
+  console.log(
+    `  ${where}: ${String(stops.size)} Tab stops for ${String(expected)} controls; ` +
+      `${String(unreached.length)} unreached; ${String(excused.length)} excused by design; ` +
+      `${String(rings.length)} with no focus ring; ${String(traps.length)} trapping; ${exit}`,
+  )
+  for (const group of arrowReached) {
+    console.log(
+      `    ${where}: ${group.reason} group of ${String(group.members)} — ${String(group.reachedByTab)} reached by Tab, ${String(group.reachedByArrow)} by arrow keys`,
+    )
+  }
+  if (compositeRepeats.length > 0) {
+    console.log(
+      `    ${where}: ${String(compositeRepeats.length)} presses stayed inside a composite date/time input (its own internal fields)`,
+    )
+  }
+  for (const item of unreached) {
+    problems.push(
+      `${where}: ${item.el} "${item.text}" is never reached by Tab (${String(focusStops)} Tab stops for ${String(expected)} controls)`,
+    )
+  }
+  for (const item of rings) {
+    problems.push(
+      `${where}: ${item.el} "${item.text}" shows no focus indicator when focused (outline: ${item.outline}; box-shadow: ${item.shadow})`,
+    )
+  }
+  for (const item of traps) {
+    problems.push(
+      `${where}: ${item.el} "${item.text}" keeps focus after Tab (press ${String(item.press)}); a keyboard user cannot get past it`,
+    )
+  }
+  if (capped) {
+    problems.push(
+      `${where}: the Tab walk hit its ${String(cap)}-press cap after ${String(stops.size)} Tab stops with ${String(unreached.length)} of ${String(expected)} controls unreached`,
+    )
+  }
+
+  return {
+    expected,
+    stops: [...stops.values()].map(({ id, el, text, outline, shadow }) => ({
+      id,
+      el,
+      text,
+      outline,
+      shadow,
+    })),
+    startedAt,
+    presses,
+    focusLeft,
+    capped,
+    cap,
+    unreached,
+    excused,
+    arrowGroups: arrowReached,
+    compositeRepeats: compositeRepeats.map(({ el, text, press }) => ({ el, text, press })),
+    rings: rings.map(({ el, text, outline, shadow }) => ({ el, text, outline, shadow })),
+    traps: traps.map(({ el, text, press }) => ({ el, text, press })),
   }
 }
 
@@ -1456,7 +1933,13 @@ async function main() {
           minLarge: MIN_LARGE,
         })
         const key = `${surface.name}/${theme}/x${String(scale)}`
-        results.push({ key, ...measured, seen: [...seen] })
+        // Gate 5(a), on the control set `measureInPage` just collected — the walk is run
+        // here rather than inside that function because a real key press has to happen
+        // between two reads of `document.activeElement`. It restores the page and blurs
+        // before returning, so the `words` check below and the *next* surface both see
+        // the resting state.
+        const keyboard = await walkKeyboard(page, key, problems)
+        results.push({ key, ...measured, keyboard, seen: [...seen] })
 
         console.log(
           `${key}: ${String(measured.targets.length)} targets, ${String(measured.undersized.length)} under ${String(MIN_TARGET)}px; ` +
@@ -1529,6 +2012,22 @@ async function main() {
     )
   }
 
+  // The keyboard leg's own version of the same guard, and it is not redundant: a page
+  // whose controls are all unreachable reports zero focus stops and a long list of
+  // unreached controls, but a leg that was never *driven* (no presses, no reads) would
+  // report zero stops and zero unreached — which reads as a pass. The stops are what
+  // prove the key presses happened.
+  const totalStops = results.reduce((sum, entry) => sum + entry.keyboard.stops.length, 0)
+  const totalUnreached = results.reduce((sum, entry) => sum + entry.keyboard.unreached.length, 0)
+  const totalExcused = results.reduce((sum, entry) => sum + entry.keyboard.excused.length, 0)
+  const totalRingless = results.reduce((sum, entry) => sum + entry.keyboard.rings.length, 0)
+  const totalTraps = results.reduce((sum, entry) => sum + entry.keyboard.traps.length, 0)
+  if (totalStops === 0) {
+    fail(
+      `the keyboard leg reached ${String(totalStops)} Tab stops over ${String(results.length)} combinations — the Tab walk was never driven`,
+    )
+  }
+
   const output = join(root, 'var', process.env.OUTPUT ?? 'gate14-phone.json')
   try {
     execFileSync('mkdir', ['-p', dirname(output)])
@@ -1541,24 +2040,35 @@ async function main() {
   const lowest = Math.min(...results.flatMap((entry) => entry.contrasts.map((pair) => pair.ratio)))
   console.log(
     `\n${String(results.length)} screen/theme/scale combinations: ${String(totalTargets)} targets, ` +
-      `${String(totalPairs)} text pairs, lowest contrast ${String(lowest)}:1`,
+      `${String(totalPairs)} text pairs, lowest contrast ${String(lowest)}:1; ` +
+      `${String(totalStops)} keyboard Tab stops, ${String(totalUnreached)} unreached, ` +
+      `${String(totalExcused)} excused by design, ${String(totalRingless)} without a focus ring, ` +
+      `${String(totalTraps)} trapping`,
   )
   console.log(`full report: ${output}`)
-
-  if (problems.length > 0) {
-    console.error(`\n${String(problems.length)} problems:`)
-    for (const problem of problems) console.error(`  ${problem}`)
-    process.exit(1)
-  }
 
   // The verdict names the viewport, because this walk has two legs now and the
   // sentence it printed before was wrong on the desktop one: it said "on a phone
   // viewport" at 1365px, which is the same defect class as a Result column that
-  // holds a claim the run did not make.
+  // holds a claim the run did not make. The keyboard leg's totals are on it too, so
+  // the one line that says PASS says which legs it is passing. **The failing path
+  // prints the same line with FAIL**, because "which run was this" is exactly the
+  // question a red run leaves a reader with, and the previous version answered it
+  // only when the answer was yes.
   const leg = MIN_TARGET === DESKTOP_TARGET ? 'desktop' : 'phone'
-  console.log(
-    `gate 5 on a ${leg} viewport: PASS (${String(VIEWPORT.width)}x${String(VIEWPORT.height)}, ${String(SCALES.length)} scale(s), both themes)`,
-  )
+  const verdict = (result) =>
+    `gate 5 on a ${leg} viewport: ${result} (${String(VIEWPORT.width)}x${String(VIEWPORT.height)}, ${String(SCALES.length)} scale(s), both themes; ` +
+    `keyboard: ${String(totalStops)} Tab stops, ${String(totalUnreached)} unreached, ${String(totalExcused)} excused, ` +
+    `${String(totalRingless)} without a ring, ${String(totalTraps)} trapping)`
+
+  if (problems.length > 0) {
+    console.error(`\n${String(problems.length)} problems:`)
+    for (const problem of problems) console.error(`  ${problem}`)
+    console.error(`\n${verdict(`FAIL, ${String(problems.length)} problem(s)`)}`)
+    process.exit(1)
+  }
+
+  console.log(verdict('PASS'))
 }
 
 await main()
