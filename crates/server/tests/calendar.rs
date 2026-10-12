@@ -1510,13 +1510,15 @@ enum Grant {
 ///
 /// Recorded because the assertions that matter are about what the pass *asked*: which calendar,
 /// with which cursor, and with which refresh token — the last of which is the only proof that
-/// the stored grant was decrypted.
+/// the stored grant was decrypted. `event` is the outbound half's: the row the pass pushed, so
+/// the request's content is assertable and not only the fact that a call happened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FakeCall {
     method: &'static str,
     calendar_id: Option<String>,
     sync_token: Option<String>,
     refresh_token: Option<String>,
+    event: Option<RemoteEvent>,
 }
 
 /// A [`CalendarApi`] with no network.
@@ -1529,6 +1531,7 @@ struct FakeCalendar {
     calendars: Mutex<Vec<CalendarMeta>>,
     calendars_error: Mutex<Option<CalendarError>>,
     create_error: Mutex<Option<CalendarError>>,
+    push_error: Mutex<Option<CalendarError>>,
     created: Mutex<Vec<String>>,
     calls: Mutex<Vec<FakeCall>>,
 }
@@ -1541,6 +1544,7 @@ impl FakeCalendar {
             calendars: Mutex::new(Vec::new()),
             calendars_error: Mutex::new(None),
             create_error: Mutex::new(None),
+            push_error: Mutex::new(None),
             created: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
         }
@@ -1567,6 +1571,14 @@ impl FakeCalendar {
         *self.calendars_error.lock() = Some(error);
     }
 
+    /// Make every later `upsert_event` fail.
+    ///
+    /// Replaced rather than queued, like [`FakeCalendar::set_grants`]: a queue would put a
+    /// test's refusal behind calls it did not intend to script.
+    fn fail_pushes(&self, error: CalendarError) {
+        *self.push_error.lock() = Some(error);
+    }
+
     /// The summaries `create_calendar` was asked for, in order.
     fn created(&self) -> Vec<String> {
         self.created.lock().clone()
@@ -1574,6 +1586,14 @@ impl FakeCalendar {
 
     fn calls(&self) -> Vec<FakeCall> {
         self.calls.lock().clone()
+    }
+
+    /// The events the outbound half pushed, in order: the push's own record.
+    fn pushes(&self) -> Vec<RemoteEvent> {
+        self.calls()
+            .into_iter()
+            .filter_map(|call| call.event)
+            .collect()
     }
 
     /// The cursor each `list_events` call carried: what "incremental" means, as a value.
@@ -1598,6 +1618,7 @@ impl CalendarApi for FakeCalendar {
             calendar_id: Some(calendar_id.to_string()),
             sync_token: sync_token.map(str::to_string),
             refresh_token: None,
+            event: None,
         });
 
         let answer = {
@@ -1633,6 +1654,7 @@ impl CalendarApi for FakeCalendar {
             calendar_id: None,
             sync_token: None,
             refresh_token: None,
+            event: None,
         });
         if let Some(error) = self.calendars_error.lock().clone() {
             return Err(error);
@@ -1646,6 +1668,7 @@ impl CalendarApi for FakeCalendar {
             calendar_id: None,
             sync_token: None,
             refresh_token: None,
+            event: None,
         });
         if let Some(error) = self.create_error.lock().clone() {
             return Err(error);
@@ -1669,8 +1692,24 @@ impl CalendarApi for FakeCalendar {
             calendar_id: Some(calendar_id.to_string()),
             sync_token: None,
             refresh_token: None,
+            event: Some(event.clone()),
         });
-        Ok(event.clone())
+        if let Some(error) = self.push_error.lock().clone() {
+            return Err(error);
+        }
+
+        // Google's **answer**, not the request echoed back, and the difference is the whole
+        // reason the write-back is assertable: an `events.insert` is given an id by Google, and
+        // every accepted write carries a new etag. A fake that echoed the request would make a
+        // pass that never recorded the answer look idempotent, and the no-churn assertion would
+        // pass for the wrong reason.
+        let mut accepted = event.clone();
+        let accepted_count = self.pushes().len();
+        if accepted.id.is_empty() {
+            accepted.id = format!("g-{accepted_count}");
+        }
+        accepted.etag = format!("v{accepted_count}");
+        Ok(accepted)
     }
 
     async fn refresh_access_token(
@@ -1682,6 +1721,7 @@ impl CalendarApi for FakeCalendar {
             calendar_id: None,
             sync_token: None,
             refresh_token: Some(refresh_token.to_string()),
+            event: None,
         });
 
         let answer = {
@@ -1854,13 +1894,16 @@ async fn run_pass(harness: &TestState, connection_id: Uuid) -> SyncOutcome {
 ///
 /// `external_id`, `etag` and `source` are the three columns the sync's decision reads, and A198
 /// refuses a client all three — so a test writes them directly rather than through a route.
+/// The first two are `Option` because both are nullable and the push half reads the difference:
+/// a row with no `external_id` is one Google has never been told about, and a row with an `etag`
+/// is one whose remote version is known.
 #[allow(clippy::too_many_arguments)]
 async fn insert_connected_event(
     harness: &TestState,
     user_id: Uuid,
     connection_id: Uuid,
-    external_id: &str,
-    etag: &str,
+    external_id: Option<&str>,
+    etag: Option<&str>,
     source: &str,
     title: &str,
     starts_at: &str,
@@ -2214,8 +2257,8 @@ async fn a_cancelled_remote_event_tombstones_an_adopted_row_and_leaves_an_app_ro
         &harness,
         user_id,
         connection_id,
-        "evt-adopted",
-        "a1",
+        Some("evt-adopted"),
+        Some("a1"),
         "google",
         "Rapat himpunan",
         "2026-06-13T01:00:00Z",
@@ -2226,8 +2269,8 @@ async fn a_cancelled_remote_event_tombstones_an_adopted_row_and_leaves_an_app_ro
         &harness,
         user_id,
         connection_id,
-        "evt-app",
-        "p1",
+        Some("evt-app"),
+        Some("p1"),
         "app",
         "Blok belajar",
         "2026-06-14T01:00:00Z",
@@ -2259,6 +2302,355 @@ async fn a_cancelled_remote_event_tombstones_an_adopted_row_and_leaves_an_app_ro
     );
     assert_eq!(own.title, "Blok belajar");
     assert_eq!(own.source, "app");
+}
+
+/// Task 7's outbound half: a row this connection owns is **pushed**, and Google's answer is
+/// written back into it.
+///
+/// Four properties, each of which a plausible implementation gets wrong. The push targets the
+/// calendar the app created (A237) — never `primary`, which the scope cannot write and which
+/// would answer `403`. The returned `id` and `etag` land in the row, because that is the whole
+/// reason the push is idempotent: without the `etag` every pass re-pushes the row and Google
+/// stamps a new `updated` on each one, and without the `id` the second push is a second insert.
+/// A remote change to a row we own is answered with **our** content, not the remote's (A234's
+/// rule 2). And a pass whose listing already carries the `etag` we stored pushes **nothing**
+/// and touches no row — A239's rule, which the ICS half's `304` obeys for the same reason.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_app_owned_event_is_pushed_once_and_a_second_pass_pushes_nothing(pool: PgPool) {
+    let fake = Arc::new(FakeCalendar::new());
+    let harness = TestState::new(pool).with_calendar(fake.clone());
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "push@example.test").await;
+    let user_id = user_id_of(&harness, "push@example.test").await;
+    let connection_id =
+        google_connection(&harness, "push@example.test", Some("study-plan-1")).await;
+
+    // The student's own study block, mirrored to this connection and never pushed: no
+    // `external_id`, because only Google assigns one, and no `etag` for the same reason.
+    insert_connected_event(
+        &harness,
+        user_id,
+        connection_id,
+        None,
+        None,
+        "app",
+        "Blok belajar",
+        "2026-06-14T01:00:00Z",
+        "2026-06-14T02:00:00Z",
+    )
+    .await;
+
+    // Every listing up front, because the fake's script pops its front while more than one
+    // answer is queued: pass 1 gets the empty calendar, and passes 2 and 3 get the event
+    // Google accepted — with a **different summary and a newer `etag`**, which is what an
+    // out-of-band edit in the Study Plan calendar looks like.
+    //
+    // Pass 1: Google's calendar holds nothing of ours.
+    fake.push_listing(Listing::Page(Vec::new(), Some("t1")));
+    let echoed = || {
+        Listing::Page(
+            vec![remote(
+                "g-1",
+                "v2",
+                "Blok belajar (versi Google)",
+                "2026-06-14T01:00:00Z",
+                "2026-06-14T02:00:00Z",
+            )],
+            Some("t2"),
+        )
+    };
+    fake.push_listing(echoed());
+    fake.push_listing(echoed());
+
+    let first = run_pass(&harness, connection_id).await;
+    assert_eq!(
+        first.pushed, 1,
+        "the row is the student's and Google has never been told about it"
+    );
+
+    let pushes = fake.pushes();
+    assert_eq!(pushes.len(), 1, "pushed exactly once");
+    let call = fake
+        .calls()
+        .into_iter()
+        .find(|call| call.method == "upsert_event")
+        .expect("the push");
+    assert_eq!(
+        call.calendar_id.as_deref(),
+        Some("study-plan-1"),
+        "the push goes to the calendar the app created, never `primary` (A237)"
+    );
+    assert_eq!(
+        pushes[0].id, "",
+        "an empty id is what makes the client insert rather than patch"
+    );
+    assert_eq!(pushes[0].summary, "Blok belajar");
+    assert_eq!(pushes[0].start, Some(at("2026-06-14T01:00:00Z")));
+    assert_eq!(pushes[0].end, Some(at("2026-06-14T02:00:00Z")));
+
+    // Google's answer, in the row: its own id, and the version it accepted.
+    let pushed_row = event_state(&harness, connection_id, "g-1")
+        .await
+        .expect("the row Google's id now names");
+    assert_eq!(
+        pushed_row.etag.as_deref(),
+        Some("v1"),
+        "the etag is what makes the next pass see the row as unchanged"
+    );
+    assert_eq!(
+        pushed_row.source, "app",
+        "a push must not reclassify the row as Google's: the conflict policy reads the origin \
+         on the next pass (A234)"
+    );
+    assert_eq!(pushed_row.title, "Blok belajar");
+    assert_eq!(pushed_row.starts_at, at("2026-06-14T01:00:00Z"));
+
+    // Pass 2: the remote has moved — a newer etag, and a summary someone edited in the Study
+    // Plan calendar. The row is ours, so the policy answers `Winner::Local` and it is pushed
+    // again, **with the local content**: the remote cannot hold "the newer version" of a row
+    // only we write to (A234's rule 2).
+    let second = run_pass(&harness, connection_id).await;
+    assert_eq!(
+        second.pushed, 1,
+        "the remote moved, so the row is pushed again"
+    );
+    let pushes = fake.pushes();
+    assert_eq!(pushes.len(), 2);
+    assert_eq!(
+        pushes[1].summary, "Blok belajar",
+        "the push carries the student's title, never the remote's version of it"
+    );
+    assert_eq!(
+        pushes[1].id, "g-1",
+        "the row now has Google's id, so the second push is a patch of that event rather than \
+         a second insert"
+    );
+    let repushed = event_state(&harness, connection_id, "g-1").await.unwrap();
+    assert_eq!(repushed.etag.as_deref(), Some("v2"));
+    assert_eq!(
+        repushed.title, "Blok belajar",
+        "the local copy is the student's: a listing that carries a different summary for a row \
+         we own must not overwrite it (A234's rule 2)"
+    );
+
+    // Pass 3: the same listing as pass 2, and the row now holds the version Google accepted —
+    // so nothing is pushed and no row is touched. Without the `etag` write-back this pass
+    // would push again and Google would stamp a new `updated` on every pass (A239's rule, the
+    // ICS half's `304`).
+    let touched_at = event_updated_at(&harness, connection_id, "g-1").await;
+    let third = run_pass(&harness, connection_id).await;
+    assert_eq!(
+        third.pushed, 0,
+        "a row whose etag matches the remote's must not be pushed again"
+    );
+    assert_eq!(
+        fake.pushes().len(),
+        2,
+        "the fake recorded one push per *change*, not one per pass"
+    );
+    assert_eq!(
+        event_updated_at(&harness, connection_id, "g-1").await,
+        touched_at,
+        "a pass with no local change must not touch the row: every touched row is a change_log \
+         entry every device pulls (A239)"
+    );
+}
+
+/// The push's failures get the listing's treatment (see `stop`), and the half that already
+/// landed is not undone.
+///
+/// That second half is the part a copy of the listing's two arms would get wrong: the inbound
+/// half is committed before the first push is attempted, so a refused or unreachable push must
+/// not cost the student the page this pass imported.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_refused_push_revokes_the_connection_and_a_transport_push_fails_the_pass(pool: PgPool) {
+    let fake = Arc::new(FakeCalendar::new());
+    let harness = TestState::new(pool).with_calendar(fake.clone());
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "push-refused@example.test").await;
+    let user_id = user_id_of(&harness, "push-refused@example.test").await;
+    let connection_id =
+        google_connection(&harness, "push-refused@example.test", Some("study-plan-1")).await;
+    insert_connected_event(
+        &harness,
+        user_id,
+        connection_id,
+        None,
+        None,
+        "app",
+        "Blok belajar",
+        "2026-06-14T01:00:00Z",
+        "2026-06-14T02:00:00Z",
+    )
+    .await;
+
+    // The listing itself succeeded, so the pass has something a push failure could cost it.
+    fake.push_listing(Listing::Page(
+        vec![remote(
+            "evt-a",
+            "e1",
+            "Kriptografi",
+            "2026-06-10T01:00:00Z",
+            "2026-06-10T03:00:00Z",
+        )],
+        Some("t1"),
+    ));
+    fake.fail_pushes(CalendarError::Unauthorized(
+        "the grant was revoked".to_string(),
+    ));
+
+    let outcome = run_pass(&harness, connection_id).await;
+    assert_eq!(outcome.inserted, 1, "the inbound half landed");
+    assert_eq!(outcome.pushed, 0);
+    let state = connection_state(&harness, connection_id).await;
+    assert_eq!(
+        state.status, "revoked",
+        "a refused push is a refused grant: retrying cannot un-revoke it (A247)"
+    );
+    assert_eq!(state.error.as_deref(), Some("the grant was revoked"));
+    assert_eq!(
+        state.sync_token.as_deref(),
+        Some("t1"),
+        "the cursor advanced with the events it covers"
+    );
+    assert!(
+        event_state(&harness, connection_id, "evt-a")
+            .await
+            .is_some(),
+        "a push failure must not cost the student the events this pass imported"
+    );
+
+    // A transport failure is the one a retry is worth, so the pass fails and the worker's
+    // backoff runs.
+    fake.fail_pushes(CalendarError::Transport(
+        "the connection was reset".to_string(),
+    ));
+    fake.push_listing(Listing::Page(Vec::new(), Some("t2")));
+    let connection = load(&harness.state.pool, connection_id)
+        .await
+        .unwrap()
+        .expect("the connection");
+    let error = sync_google(&harness.state, &connection)
+        .await
+        .expect_err("an unreachable push is retryable");
+    assert!(
+        error.to_string().contains("could not be reached"),
+        "{error}"
+    );
+}
+
+/// A connection with no Study Plan calendar pushes **nothing**, and in particular not to
+/// `primary`.
+///
+/// The listing half falls back to `primary`, so a connect that could not resolve the calendar
+/// still imports the student's own Google events; the push half must not follow it there,
+/// because `calendar.app.created` can write only into a calendar the app created and a push
+/// that tried would be a `403` that reads like a credential problem (A234/A237).
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_connection_without_a_study_calendar_pushes_nothing_to_primary(pool: PgPool) {
+    let fake = Arc::new(FakeCalendar::new());
+    let harness = TestState::new(pool).with_calendar(fake.clone());
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "no-calendar@example.test").await;
+    let user_id = user_id_of(&harness, "no-calendar@example.test").await;
+    let connection_id = google_connection(&harness, "no-calendar@example.test", None).await;
+    insert_connected_event(
+        &harness,
+        user_id,
+        connection_id,
+        None,
+        None,
+        "app",
+        "Blok belajar",
+        "2026-06-14T01:00:00Z",
+        "2026-06-14T02:00:00Z",
+    )
+    .await;
+
+    fake.push_listing(Listing::Page(Vec::new(), Some("t1")));
+    let outcome = run_pass(&harness, connection_id).await;
+    assert_eq!(
+        outcome.pushed, 0,
+        "there is no calendar this app is allowed to write to"
+    );
+    assert!(
+        fake.pushes().is_empty(),
+        "a push at `primary` is the 403 the scope pair exists to prevent: {:?}",
+        fake.pushes()
+    );
+    let listed = fake
+        .calls()
+        .into_iter()
+        .find(|call| call.method == "list_events")
+        .expect("the listing");
+    assert_eq!(
+        listed.calendar_id.as_deref(),
+        Some("primary"),
+        "the inbound half's own fallback is unchanged: it reads `primary` and writes nowhere"
+    );
+}
+
+/// A row the student deleted locally is not pushed, whatever the remote says about it.
+///
+/// `CalendarApi` has no delete, so the only write available would **resurrect** the block in
+/// Google. A234's rule 3 — a remote tombstone is ignored for a row we own — is about the
+/// remote's cancellation, not about a row that no longer exists locally: there is nothing to
+/// push, and the deletion waits for a push this seam cannot express.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_locally_deleted_owned_row_is_not_pushed(pool: PgPool) {
+    let fake = Arc::new(FakeCalendar::new());
+    let harness = TestState::new(pool).with_calendar(fake.clone());
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    signed_up(&app, &harness, "deleted@example.test").await;
+    let user_id = user_id_of(&harness, "deleted@example.test").await;
+    let connection_id =
+        google_connection(&harness, "deleted@example.test", Some("study-plan-1")).await;
+    insert_connected_event(
+        &harness,
+        user_id,
+        connection_id,
+        Some("evt-app"),
+        Some("p1"),
+        "app",
+        "Blok belajar",
+        "2026-06-14T01:00:00Z",
+        "2026-06-14T02:00:00Z",
+    )
+    .await;
+
+    // The student deletes it on the phone: a tombstone (`events` is `+sync`), with the
+    // `external_id` and `etag` a previous push left behind.
+    sqlx::query(
+        "update events set deleted_at = $2
+          where connection_id = $1 and external_id = 'evt-app'",
+    )
+    .bind(connection_id)
+    .bind(at("2026-06-02T00:00:00Z"))
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // The listing says the remote moved on — the state that pushes a live row. Without the
+    // `deleted_at is null` filter the policy answers `Winner::Local` and the block comes back
+    // from the dead in Google.
+    fake.push_listing(Listing::Page(vec![cancelled("evt-app", "p2")], Some("t1")));
+    let outcome = run_pass(&harness, connection_id).await;
+    assert_eq!(
+        outcome.pushed, 0,
+        "a row that no longer exists locally is not pushed"
+    );
+    assert!(fake.pushes().is_empty(), "{:?}", fake.pushes());
+    assert!(
+        event_state(&harness, connection_id, "evt-app")
+            .await
+            .expect("the tombstone")
+            .deleted,
+        "the tombstone stands: the push half must not clear it"
+    );
 }
 
 /// The path a student who connects Google Calendar takes today: the poll enqueues a
@@ -2657,6 +3049,196 @@ async fn the_google_client_maps_a_410_to_gone_and_reads_the_last_page_s_cursor()
         !all_day.is_cancelled(),
         "a missing status is not a cancellation"
     );
+}
+
+/// A request target's path segments, parsed rather than string-matched: the claim is about
+/// *where* a value went, and a client that concatenated the calendar id into a query string
+/// would still contain it somewhere in the target.
+fn path_segments(target: &str) -> Vec<String> {
+    url::Url::parse(&format!("http://stub{target}"))
+        .expect("the request target")
+        .path_segments()
+        .map(|segments| segments.map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The outbound client's **request** is the contract, and nothing asserted it before: the push
+/// half's own slice reported `upsert_event` as tested for nothing, and a client that posted to
+/// `primary`, or to a path without the calendar id, or with no bearer header, would have passed
+/// every test in this file.
+///
+/// Four assertions. The method is `POST` for a row Google has never seen — an empty id is what
+/// makes Google assign one — and `PATCH` for a row it has, with the id as the last path
+/// segment. The calendar id is a **path segment** on both, and it is the id the caller passed
+/// rather than a hard-coded `primary`. The bearer header carries the refreshed token. And the
+/// body is the row's content, with instants as `dateTime` rather than as a `date`.
+#[tokio::test]
+async fn the_google_client_inserts_an_unpushed_event_and_patches_a_known_one() {
+    let token_stub = stub_http_json(200, r#"{"access_token": "at-1", "expires_in": 3600}"#).await;
+    let api_stub = stub_http_json(
+        200,
+        r#"{"id": "g-1", "etag": "v1", "status": "confirmed", "summary": "Blok belajar",
+            "start": {"dateTime": "2026-06-14T01:00:00Z"},
+            "end": {"dateTime": "2026-06-14T02:00:00Z"}}"#,
+    )
+    .await;
+    let client = GoogleCalendarApi::with_endpoints(
+        "client-id".to_string(),
+        "client-secret".to_string(),
+        api_stub.base_url().to_string(),
+        format!("{}/token", token_stub.base_url()),
+    )
+    .unwrap();
+    client.refresh_access_token("rt-1").await.unwrap();
+
+    let created = client
+        .upsert_event(
+            "study@group.calendar.google.com",
+            &remote(
+                "",
+                "",
+                "Blok belajar",
+                "2026-06-14T01:00:00Z",
+                "2026-06-14T02:00:00Z",
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        created.id, "g-1",
+        "the answer's id is what the write-back stores, and what makes the next push a patch"
+    );
+
+    let insert = &api_stub.requests()[0];
+    assert_eq!(insert.method, "POST", "an event with no id is an insert");
+    assert_eq!(
+        path_segments(&insert.path),
+        vec!["calendars", "study@group.calendar.google.com", "events"],
+        "the calendar id is a path segment, not a query parameter: {}",
+        insert.path
+    );
+    assert_eq!(insert.header("authorization"), Some("Bearer at-1"));
+    let body: serde_json::Value = serde_json::from_str(&insert.body).expect("a JSON body");
+    assert_eq!(body["summary"], "Blok belajar");
+    assert_eq!(body["start"]["dateTime"], "2026-06-14T01:00:00Z");
+    assert_eq!(body["end"]["dateTime"], "2026-06-14T02:00:00Z");
+
+    // The row Google already has: the id names the event, and the method is a patch.
+    client
+        .upsert_event(
+            "study@group.calendar.google.com",
+            &remote(
+                "g-1",
+                "v1",
+                "Blok belajar",
+                "2026-06-14T01:00:00Z",
+                "2026-06-14T02:00:00Z",
+            ),
+        )
+        .await
+        .unwrap();
+    let patch = &api_stub.requests()[1];
+    assert_eq!(
+        patch.method, "PATCH",
+        "an event Google knows is patched, never inserted a second time"
+    );
+    assert_eq!(
+        path_segments(&patch.path),
+        vec![
+            "calendars",
+            "study@group.calendar.google.com",
+            "events",
+            "g-1"
+        ],
+        "the event id is the last path segment: {}",
+        patch.path
+    );
+    assert_eq!(patch.header("authorization"), Some("Bearer at-1"));
+}
+
+/// The push's status mapping, which is the listing's: `410` is `Gone`, and `401` and `403` are
+/// both `Unauthorized`.
+///
+/// Asserted on `upsert_event` rather than only on `list_events`, because they are different call
+/// sites and the consequences differ: a `410` mapped to `Transport` would retry a request that
+/// cannot succeed, and a revoked grant mapped to `Provider` would record an error on the
+/// connection instead of marking it `revoked` (A247).
+#[tokio::test]
+async fn the_google_client_maps_a_refused_upsert_to_gone_or_unauthorized() {
+    let token_stub = stub_http_json(200, r#"{"access_token": "at-1", "expires_in": 3600}"#).await;
+    let token_url = format!("{}/token", token_stub.base_url());
+
+    let gone = stub_http_json(
+        410,
+        r#"{"error": {"code": 410, "message": "Resource has been deleted"}}"#,
+    )
+    .await;
+    let client = GoogleCalendarApi::with_endpoints(
+        "client-id".to_string(),
+        "client-secret".to_string(),
+        gone.base_url().to_string(),
+        token_url.clone(),
+    )
+    .unwrap();
+    client.refresh_access_token("rt-1").await.unwrap();
+    match client
+        .upsert_event(
+            "study-plan-1",
+            &remote(
+                "",
+                "",
+                "Blok belajar",
+                "2026-06-14T01:00:00Z",
+                "2026-06-14T02:00:00Z",
+            ),
+        )
+        .await
+    {
+        Err(CalendarError::Gone) => {}
+        other => panic!("a 410 must be Gone, not {other:?}"),
+    }
+
+    for (status, body) in [
+        (
+            401,
+            r#"{"error": {"code": 401, "message": "Invalid Credentials"}}"#,
+        ),
+        (
+            403,
+            r#"{"error": {"code": 403, "message": "Request had insufficient authentication scopes."}}"#,
+        ),
+    ] {
+        let refused = stub_http_json(status, body).await;
+        let client = GoogleCalendarApi::with_endpoints(
+            "client-id".to_string(),
+            "client-secret".to_string(),
+            refused.base_url().to_string(),
+            token_url.clone(),
+        )
+        .unwrap();
+        client.refresh_access_token("rt-1").await.unwrap();
+        match client
+            .upsert_event(
+                "study-plan-1",
+                &remote(
+                    "g-1",
+                    "v1",
+                    "Blok belajar",
+                    "2026-06-14T01:00:00Z",
+                    "2026-06-14T02:00:00Z",
+                ),
+            )
+            .await
+        {
+            Err(CalendarError::Unauthorized(reason)) => {
+                assert!(
+                    !reason.is_empty(),
+                    "the reason is what the screen shows: {reason}"
+                )
+            }
+            other => panic!("a {status} must be Unauthorized, not {other:?}"),
+        }
+    }
 }
 
 /// A stub that answers each request with the next body in its script, and records the request

@@ -8,11 +8,14 @@
 //!    event per poll, which every device then pulls — and A232/A247's — a truncated expansion
 //!    keeps every occurrence it read and records `recurrence_truncated` from
 //!    [`Expansion::truncated`], **never** from `occurrences.len()`.
-//!  * [`sync_google`] is a **cursor-driven pull**. Its rules are A236's — a pass that sent no
-//!    cursor was full, a `410` clears the cursor and re-lists fully *in the same pass*, and the
-//!    mode is written back so "an incremental sync that silently stopped being incremental" is
-//!    a value a test asserts rather than an absence nobody sees — and A234's, where the decision
-//!    for each remote event is [`policy::resolve`] rather than a rule this file remembers.
+//!  * [`sync_google`] is a **cursor-driven pull and, for the rows this connection owns, a
+//!    push**. Its rules are A236's — a pass that sent no cursor was full, a `410` clears the
+//!    cursor and re-lists fully *in the same pass*, and the mode is written back so "an
+//!    incremental sync that silently stopped being incremental" is a value a test asserts
+//!    rather than an absence nobody sees — and A234's, where the decision for each event is
+//!    [`policy::resolve`] rather than a rule this file remembers. `Winner::Local` is the
+//!    outbound half: the row is pushed into the calendar this app created (A237) and Google's
+//!    answer is written back, which is what makes the next pass see it as unchanged.
 //!
 //! Both halves share [`SyncOutcome`] and the upsert key.
 //!
@@ -24,7 +27,9 @@
 //!
 //! **Why the writes are idempotent.** The key is `(connection_id, external_id)` (A231), so a
 //! re-poll updates the same rows rather than inserting a second copy of every class. That is
-//! what makes a poll safe to repeat after a crash, and what makes the 304 worth having.
+//! what makes a poll safe to repeat after a crash, and what makes the 304 worth having. The
+//! outbound half leans on the same key: the id Google returns from a push is written back, so
+//! the *next* push patches that event instead of inserting a second copy of it.
 
 use axum::Json;
 use axum::extract::State;
@@ -53,11 +58,17 @@ pub const RECURRENCE_TRUNCATED: &str = "recurrence_truncated";
 /// What one pass did. `was_full` is A236's mode flag: for a Google connection it says whether
 /// the pass sent a `sync_token`, and for an ICS connection every pass that fetched a body is
 /// a full listing.
+///
+/// `pushed` is the outbound half's count: how many of the connection's own rows were written
+/// to Google. It is a field rather than an omission because the pass reports what it did in one
+/// log line, and a pass that pushed three study blocks and reported `0/0/0` would be reporting
+/// a different pass than the one that ran.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SyncOutcome {
     pub inserted: u32,
     pub updated: u32,
     pub deleted: u32,
+    pub pushed: u32,
     pub was_full: bool,
 }
 
@@ -488,7 +499,16 @@ async fn local_day_start(state: &AppState, user_id: Uuid) -> AppResult<DateTime<
 // ---------------------------------------------------------------------------------------
 
 /// One pass over one Google connection: refresh the grant, list, decide each event with
-/// [`policy::resolve`], then write the cursor and the mode (A236).
+/// [`policy::resolve`], push the rows the policy says are ours, then write the cursor and the
+/// mode (A236).
+///
+/// **The two halves, and why they are separate.** The inbound half reads the listing and
+/// decides, per event, with [`policy::resolve`]. The outbound half
+/// ([`push_owned_rows`]) walks the connection's **own** rows — a row Google has never been
+/// told about is in no listing, and it is exactly the row a push exists for — and pushes the
+/// ones the policy answers `Winner::Local` for. Both halves decide with the same function and
+/// the same evidence (the stored `etag`), which is why one policy module is the whole conflict
+/// table.
 ///
 /// **The three failures, and why they are answered differently.** A `410` means the cursor
 /// expired: the remedy is a *different request*, so this pass clears it and lists fully, and
@@ -503,11 +523,10 @@ async fn local_day_start(state: &AppState, user_id: Uuid) -> AppResult<DateTime<
 /// connection, so one pass is one listing, and a connection whose "Study Plan" calendar does
 /// not exist yet still imports the student's own Google events rather than nothing.
 ///
-/// **What this pass does not do.** It never writes to Google. `Winner::Local` — a mirrored row
-/// of the student's own that the remote has not seen — is left exactly as it is, because the
-/// outbound mirror is `CalendarApi::upsert_event` and is a write path of its own; a poll that
-/// pushed on every tick would rewrite every mirrored row on every tick, which is the churn
-/// A239 refuses for the ICS path.
+/// **What this pass does not do.** It never deletes on Google. A row the student deleted
+/// locally is left alone rather than tombstoned remotely: `CalendarApi` has no delete, and the
+/// only write available would resurrect the block. A234's rule 3 covers the *remote* tombstone
+/// for a row we own; the local one is a push this seam cannot express.
 pub async fn sync_google(state: &AppState, connection: &ConnectionRow) -> AppResult<SyncOutcome> {
     let Some(encrypted) = connection.refresh_token_enc.as_deref() else {
         // A row with no grant cannot be fixed by retrying, and one did not come from the
@@ -665,9 +684,11 @@ pub async fn sync_google(state: &AppState, connection: &ConnectionRow) -> AppRes
                     outcome.updated += 1;
                 }
             }
-            // `Local`: the local row stands, and pushing it is the outbound mirror's job
-            // rather than this pass's (see this function's documentation). `Neither`: the two
-            // agree, or neither side has anything to say.
+            // `Local`: the local row stands, and pushing it is the outbound half's job
+            // ([`push_owned_rows`], after this transaction commits) rather than this loop's —
+            // this loop is driven by the listing, and a row Google has never been told about
+            // is in no listing at all. `Neither`: the two agree, or neither side has anything
+            // to say.
             Winner::Local | Winner::Neither => {}
         }
     }
@@ -714,6 +735,35 @@ pub async fn sync_google(state: &AppState, connection: &ConnectionRow) -> AppRes
         AppError::Internal(anyhow::anyhow!("committing a Google sync: {error}"))
     })?;
 
+    // The outbound half, **after** the inbound transaction has committed. Two reasons, and
+    // both are about what a push is: it is an HTTP call, and holding a Postgres transaction
+    // open across one holds a connection — and whatever it has locked — for as long as Google
+    // takes to answer; and the inbound half is already durable, so a push that fails cannot
+    // cost the student the events this pass imported.
+    //
+    // The target is the calendar the **connect flow created** and never `primary`: the
+    // `calendar.app.created` scope can write nowhere else, so a push at `primary` would be a
+    // `403` that reads like a credential problem (A234/A237). A connection whose Study Plan
+    // calendar was never resolved therefore has nothing to push to, and the reason is already
+    // on the row from that connect.
+    outcome.pushed = match connection
+        .study_calendar_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+    {
+        Some(target) => {
+            push_owned_rows(state, connection, api.as_ref(), &page.events, target).await?
+        }
+        None => {
+            tracing::warn!(
+                connection_id = %connection.id,
+                "this Google connection has no Study Plan calendar; its own events cannot be \
+                 pushed"
+            );
+            0
+        }
+    };
+
     tracing::info!(
         connection_id = %connection.id,
         provider = "google",
@@ -722,6 +772,7 @@ pub async fn sync_google(state: &AppState, connection: &ConnectionRow) -> AppRes
         inserted = outcome.inserted,
         updated = outcome.updated,
         deleted = outcome.deleted,
+        pushed = outcome.pushed,
         skipped,
         latency_ms = started.elapsed().as_millis() as u64,
         "the Google calendar was synced"
@@ -884,4 +935,201 @@ async fn tombstone_google_event(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("tombstoning a Google event: {error}")))?;
 
     Ok(affected.rows_affected() > 0)
+}
+
+// ---------------------------------------------------------------------------------------
+// The outbound half (Task 7's push)
+// ---------------------------------------------------------------------------------------
+
+/// One row this connection owns, as the push half needs it: the content Google is told, and the
+/// evidence the decision reads.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct OwnedRow {
+    /// `events.id`, the key the write-back updates by.
+    id: Uuid,
+    /// Google's id for this row, or `None` until a push is accepted. An empty string is read as
+    /// absent, for the reason the sync's own key cannot hold one.
+    external_id: Option<String>,
+    title: String,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    /// The remote's version of this row at our last push, or `None` if it has never been
+    /// pushed.
+    etag: Option<String>,
+}
+
+/// The connection's own live rows, by start.
+///
+/// `source = 'app'` is the origin A234's policy answers `Winner::Local` for; a row we adopted
+/// (`google`) or imported (`ics`) is the remote's and is never pushed.
+///
+/// A row the student **deleted locally** is not selected, and that is the decision rather than
+/// an optimisation: `CalendarApi` has no delete, so the only write available would resurrect
+/// the block in Google — worse than leaving the deletion unpushed, and not something this seam
+/// can express. A234's rule 3 covers the remote tombstone for a row we own; the local one is a
+/// push this half deliberately does not make.
+///
+/// No window, unlike [`sync_ics`]: the Google half has none to match. `list_events` takes a
+/// calendar and a cursor and no time bounds, so a local window here would make the two sides
+/// asymmetric and could strand a row the listing does carry.
+async fn load_owned(state: &AppState, connection: &ConnectionRow) -> AppResult<Vec<OwnedRow>> {
+    sqlx::query_as(
+        "select id, external_id, title, starts_at, ends_at, etag
+           from events
+          where connection_id = $1 and source = 'app' and deleted_at is null
+          order by starts_at asc, id asc",
+    )
+    .bind(connection.id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "reading the connection's own events: {error}"
+        ))
+    })
+}
+
+/// The outbound half: every row this connection owns that the policy says is ours is pushed
+/// into `calendar_id`, and Google's answer is written back into the row.
+///
+/// **Why the loop is over the local rows and not over the listing.** A row Google has never
+/// been told about appears in no listing, and it is exactly the row a push exists for; the
+/// listing is what the *inbound* half iterates. Each row's remote state is looked up from the
+/// page by id, which is the same evidence the inbound half reads, and `policy::resolve` makes
+/// the same decision from it — one conflict table, two callers.
+///
+/// **Why an omission is not a change.** `list_events` always sends `showDeleted=true`, so a
+/// cancellation or a deletion arrives as a `cancelled` event rather than as an omission: a row
+/// we have already pushed and which an incremental listing does not mention has not moved. A
+/// full listing that omits it means Google no longer has it, and re-pushing would be a `patch`
+/// on an id Google does not know — which the client answers as a `404` rather than resurrecting
+/// the event, so the row is left as it is.
+///
+/// Returns how many events were pushed. A failure is answered exactly as the listing's is
+/// ([`stop`]): a refused grant revokes the connection and the pass keeps the counts it earned,
+/// and a retryable failure is returned so the worker's backoff runs.
+async fn push_owned_rows(
+    state: &AppState,
+    connection: &ConnectionRow,
+    api: &dyn stvdy_core::traits::calendar::CalendarApi,
+    events: &[RemoteEvent],
+    calendar_id: &str,
+) -> AppResult<u32> {
+    let mut pushed = 0u32;
+    for row in load_owned(state, connection).await? {
+        // The remote's version of this row, when the listing carries one. A row Google has
+        // never been given has no id to look up.
+        let known = row.external_id.as_deref().filter(|id| !id.is_empty());
+        let remote = known.and_then(|id| events.iter().find(|event| event.id == id));
+
+        // The stored `etag` is the remote's version at our last push, so a difference means one
+        // of the two sides moved — the same reading the inbound half makes of the same column.
+        // A row Google has never been given has no etag either, and is dirty by definition: the
+        // remote cannot hold a version of a row it does not have.
+        let local_dirty = match remote {
+            Some(event) => row.etag.as_deref() != Some(event.etag.as_str()),
+            None => known.is_none(),
+        };
+        let remote_state = RemoteState {
+            changed: local_dirty,
+            deleted: remote.is_some_and(RemoteEvent::is_cancelled),
+        };
+        if policy::resolve(
+            Origin::App,
+            LocalState {
+                exists: true,
+                local_dirty,
+            },
+            remote_state,
+        ) != Winner::Local
+        {
+            continue;
+        }
+
+        // The request carries the row's content and its id **only when Google has one**: an
+        // empty id is what makes the client `insert` — and Google assign one — rather than
+        // `patch`. `status` and `etag` are not part of the request the client builds (its body
+        // is `summary`/`start`/`end`), so they are the local row's own state rather than
+        // something Google is told.
+        let request = RemoteEvent {
+            id: row.external_id.clone().unwrap_or_default(),
+            etag: row.etag.clone().unwrap_or_default(),
+            status: "confirmed".to_string(),
+            summary: row.title.clone(),
+            start: Some(row.starts_at),
+            end: Some(row.ends_at),
+            recurring_event_id: None,
+        };
+
+        let returned = match api.upsert_event(calendar_id, &request).await {
+            Ok(returned) => returned,
+            Err(error) => {
+                // The same treatment a failed listing gets ([`stop`]): a refused grant revokes
+                // the connection, a retryable failure is returned so the worker's backoff runs,
+                // and anything else is recorded on the connection. What is **not** undone is the
+                // inbound half of this pass — it was committed before the first push, and a
+                // failed push must not cost the student the page it imported.
+                stop(state, connection, error).await?;
+                return Ok(pushed);
+            }
+        };
+        write_back_push(&state.pool, &row, &returned).await?;
+        pushed += 1;
+    }
+    Ok(pushed)
+}
+
+/// Google's answer, written back into the row.
+///
+/// **This is what makes the push idempotent.** The stored `etag` is the evidence the next pass
+/// decides on, so a push that did not record Google's `etag` would re-push the row on every
+/// pass and Google would stamp a new `updated` on each one — the churn A239 refuses for the ICS
+/// half. The `id` is written back for the same reason and one more: it is what turns the next
+/// push into a `patch` of the event Google created rather than a second `insert`.
+///
+/// `source` is deliberately **not** written. The row is the student's (`app`), and A234's policy
+/// reads the origin on the next pass: a row reclassified as `google` would be a mirror, and the
+/// local edit the policy protects would be overwritten by the next listing.
+async fn write_back_push(pool: &PgPool, row: &OwnedRow, returned: &RemoteEvent) -> AppResult<()> {
+    // Google's `id`, when it sent one. An empty one is "nothing new" rather than a value to
+    // store: `external_id` is half the `(connection_id, external_id)` key (A231), and an empty
+    // string would collide on the partial unique index.
+    let external_id = if returned.id.is_empty() {
+        row.external_id.clone()
+    } else {
+        Some(returned.id.clone())
+    };
+    // The instants it echoed, and the ones we hold when it echoed none: `starts_at` and
+    // `ends_at` are `not null`, and an answer without them must not blank the row.
+    let starts_at = returned.start.unwrap_or(row.starts_at);
+    let ends_at = returned.end.unwrap_or(row.ends_at);
+
+    // Nothing to write when Google echoed exactly what the row already holds. The statement is
+    // skipped rather than run and left equal, because `events` is `+sync`: every update writes a
+    // `change_log` row (`0017`'s trigger), and every device then pulls it (A239).
+    if external_id == row.external_id
+        && Some(returned.etag.as_str()) == row.etag.as_deref()
+        && starts_at == row.starts_at
+        && ends_at == row.ends_at
+    {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "update events
+            set external_id = $2,
+                etag = $3,
+                starts_at = $4,
+                ends_at = $5
+          where id = $1",
+    )
+    .bind(row.id)
+    .bind(external_id.as_deref())
+    .bind(&returned.etag)
+    .bind(starts_at)
+    .bind(ends_at)
+    .execute(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("recording a pushed event: {error}")))?;
+    Ok(())
 }

@@ -1601,6 +1601,14 @@ cargo test -p stvdy-server --test calendar
 feat(server): Google two-way sync, incremental, with a 410 fallback
 ```
 
+> **Post-review: the outbound half.** The push this task's own text names — "A remote event we
+> own (`source = 'app'`, mirrored) is pushed" — was **not** in the landed pass: it read Google
+> and never wrote to it, so "two-way" was one-way. It landed afterwards as a second phase of the
+> same pass (`push_owned_rows`, `write_back_push` and `load_owned` in
+> `crates/server/src/calendar/sync.rs`), not as the `reconcile` this section sketches. The
+> execution notes' "Task 7's outbound half" records what proves it; the steps above are left as
+> written for the reason the notes give.
+
 ---
 
 ## Task 8: The poll as a row, and the manual sync
@@ -2053,6 +2061,77 @@ left as written so the next phase can see what changed and why.
    slice holding that file, with the order stated: the route first, then the copy, or
    `i18n.test.ts` fails in one direction or the other.
 
+### Task 7's outbound half — landed after the phase, and what proves it
+
+Task 7's own text names the push ("A remote event we own (`source = 'app'`, mirrored) is
+pushed"), `policy::resolve` already answered the case (`Winner::Local` is documented as "Keep
+the local row, and push it to the remote"), and the phase's charge table has a row for it ("app-
+owned event pushed to Google — `0`"). **None of that had an implementation:** `sync_google` read
+Google and never wrote to it, and `CalendarApi::upsert_event` had no caller in the tree — a
+`grep` found the trait declaration, the client's implementation and the test fake's, and nothing
+that called any of them. So the phase's "two-way sync" was one-way, and this landed afterwards.
+
+What landed, in `crates/server/src/calendar/sync.rs`: the pass's second phase
+(`push_owned_rows`) walks the connection's own rows (`load_owned`: `source = 'app'`,
+`deleted_at is null`), decides each with the same `policy::resolve` the inbound half uses, and
+for `Winner::Local` calls `api.upsert_event(study_calendar_id, …)` with the row's title and its
+two instants; `write_back_push` stores Google's `id` and `etag` and the instants it echoed. The
+target is `study_calendar_id` and never `primary`, `source` stays `app`, and the push runs
+**after** the inbound transaction commits so a failed push cannot cost the student the page the
+pass imported. `SyncOutcome` gained `pushed` so the pass reports what it did.
+
+The tests, and what each proves:
+
+- `an_app_owned_event_is_pushed_once_and_a_second_pass_pushes_nothing` — three passes over one
+  row. Pass 1 (Google's calendar holds nothing) pushes **once**, to `study-plan-1`, carrying the
+  row's title and its two instants with an empty id (an insert); Google's returned `id` and
+  `etag` land in the row, which is still `source = 'app'`. Pass 2's listing carries a **newer
+  `etag` and a different summary** — an out-of-band edit — and the row is pushed again with
+  **the student's title**, patching `g-1` rather than inserting a second event (A234's rule 2:
+  the remote cannot hold "the newer version" of a row only we write to). Pass 3's listing is
+  pass 2's, and the row now holds the version Google accepted, so **nothing is pushed and
+  `events.updated_at` is untouched** (A239's rule, the ICS half's `304`). Reverted lines, one
+  per rule: the `Some(target) => push_owned_rows(…)` arm replaced by `0` (the push happens at
+  all); that arm's target changed to `"primary"` (the calendar it goes to); the `etag` column
+  dropped from `write_back_push`'s `update` (the write-back); `local_dirty` forced to `true`
+  for a known remote (the no-churn rule); `summary: row.title.clone()` replaced by the remote's
+  summary (the local copy is the student's).
+- `a_refused_push_revokes_the_connection_and_a_transport_push_fails_the_pass` — an
+  `Unauthorized` push marks the connection `revoked` and the pass **succeeds**; a `Transport`
+  push fails the pass so the worker's backoff runs; and in both cases the events the listing
+  imported in the same pass are still there, with the cursor advanced. Reverted to watch it
+  fail: the same `Some(target) =>` arm, replaced by `0` (nothing left to fail).
+- `a_connection_without_a_study_calendar_pushes_nothing_to_primary` — a connection whose
+  "Study Plan" calendar was never resolved pushes nothing at all, while the *listing* still
+  falls back to `primary`. Reverted to watch it fail: the arm's target forced to `"primary"`,
+  which pushes the row and fires both assertions.
+- `a_locally_deleted_owned_row_is_not_pushed` — a row the student deleted locally is not pushed
+  even when the remote has moved, because the only write this seam has would resurrect it.
+  Reverted to watch it fail: the `deleted_at is null` predicate in `load_owned`.
+- `the_google_client_inserts_an_unpushed_event_and_patches_a_known_one` — the client's **request**:
+  `POST /calendars/<id>/events` for a row with no id, `PATCH /calendars/<id>/events/<id>` for one
+  with, the calendar id a **path segment**, the bearer header, and a body carrying the summary and
+  two `dateTime` instants. This is the half that was tested for nothing before: a client posting to
+  the wrong path, or to `primary`, passed every other test in the file. Reverted lines:
+  `calendar_id` in the insert path replaced by the literal `"primary"` (the calendar id is the
+  caller's), and the insert's `.bearer_auth(&token)` removed (the bearer header).
+- `the_google_client_maps_a_refused_upsert_to_gone_or_unauthorized` — `410` → `Gone`, and `401`
+  **and** `403` → `Unauthorized`, asserted on `upsert_event` rather than only on `list_events`.
+  Reverted line: `send`'s `|| status == reqwest::StatusCode::FORBIDDEN` arm dropped, which turns
+  the `403` into `Provider`.
+
+Counts after this landed: `cargo test -p stvdy-server --test calendar` **24 passed / 0 failed**
+(18 before, so 6 new); `-p stvdy-core --test calendar` 12 passed / 0 failed;
+`-p stvdy-server --test route_sweep` 4 passed / 0 failed; `-p stvdy-server --test schema` 27
+passed / 0 failed; `cargo fmt --all -- --check` clean; `cargo clippy -p stvdy-server
+--all-targets -- -D warnings` clean.
+
+**What is still not verified, in the same words the client's own notes use:** there is no Google
+credential and no network path to Google on this machine, so the furthest honest claim is **the
+push is asserted against a fake and the client's request shape against a stub**. Nothing here has
+been run against Google: the fake is a `CalendarApi` with no network, and the client tests drive
+`GoogleCalendarApi` at a local `stub_http_json` and assert the request it builds.
+
 ### Roadmap gate 5 — accessibility. Measured, two defects found, both fixed
 
 Measured in a real headless Chromium by `scripts/measure-mobile.mjs` at **390×844**, both
@@ -2202,7 +2281,7 @@ named as moved rather than overwritten silently.
 | format | `cargo fmt --all -- --check` | **clean, exit 0** (Task E; the tree was quiet enough) |
 | lints | `cargo clippy --workspace --all-targets -- -D warnings` | **RED, exit 101, 12 errors, 0 in this slice's files.** One was mine — `crates/server/src/calendar/oauth.rs`'s `expect` on a constant `url::Url`, which the workspace's `expect_used = "deny"` refuses; fixed in `23ab8b3`, and the 11 that remain are peer files: `billing/apply.rs`, `billing/webhook.rs`, `chat/agent.rs`, `credits.rs`, `integrations/push.rs`, `jobs/handlers/{ingest,reminders}.rs`, `jobs/schedule.rs` (the reminders pass's `.bind(&window)`, not the calendar poll), `planner/routes.rs`, `syllabus.rs` |
 | tests | `cargo test --workspace` | run with the same tree; see the row's note below — the calendar suites are green, the workspace is red on peer suites |
-| tests, calendar (server) | `cargo test -p stvdy-server --test calendar` | **10 passed, 0 failed** — was 6 before Task E (Task 6's three cases + gate 6's data case) |
+| tests, calendar (server) | `cargo test -p stvdy-server --test calendar` | **10 passed, 0 failed** — was 6 before Task E (Task 6's three cases + gate 6's data case); **24 passed, 0 failed** after Task 7's outbound half landed, see "Task 7's outbound half" below |
 | tests, calendar (core) | `cargo test -p stvdy-core --test calendar` | **12 passed, 0 failed** |
 | tests, route sweep | `cargo test -p stvdy-server --test route_sweep` | **4 passed, 0 failed** — including `every_registered_route_is_classified`, which fails on an unclassified route, so the two new rows are load-bearing |
 | SPA tests | `npm --prefix app test` | **559 passed, 1 failed** at `0312568`; the one failure is `src/features/billing/CheckoutScreen.tsx: undefined` in the raw-colour scan — another slice's uncommitted file, not this one's |
@@ -2220,7 +2299,9 @@ named as moved rather than overwritten silently.
   this repo. The consent routes and their refusals are tested; the code exchange, the refresh
   token's issuance and the "Study Plan" calendar's find-or-create (A237) are not, and the plan's
   Task 6 names all four items. The tests drive a fake; the real `410` arrives after a long idle
-  period.
+  period. **The same holds for the outbound half**: an app-owned event reaching Google is
+  asserted against the fake, and the request the client builds against `common::stub_http_json`
+  — no push has been made to Google from this machine, and none can be.
 - **A successful ICS fetch over HTTP from this smoke run.** The guard is precisely what
   refuses `127.0.0.1`, so a run that pointed the real fetcher at a local stub and passed would
   be proving the guard *absent*. The import, the conditional GET and the 404/410 paths are the
