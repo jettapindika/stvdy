@@ -2140,7 +2140,7 @@ en.planner.deficit -> 480 minutes of work did not fit before your deadline.
   ones with no Rust equivalent *as a wired process*, which is why they are the ones worth running
   by hand after any change to the accept path.
 
-  Left unticked — **Task 15 Step 7** ("Gate 5 (accessibility), measured"): its leg (e) asks for 200% text at phone width with no clipping, and that leg is **not measured** — `scripts/measure-mobile.mjs`'s `ROUTES` table has no entry for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so pointing the harness at these screens measures the 404 notice. The exit checklist's row 16 records the same split (contrast measured, (e) NOT MEASURED), and a tick here would assert a measurement the phase's own notes say is absent.
+  **Reversed 2026-10-12.** ~~Left unticked~~ — I un-ticked **Task 15 Step 7** ("Gate 5 (accessibility), measured") on the grounds that its leg (e) asks for 200% text at phone width with no clipping and that leg is **not measured** — `scripts/measure-mobile.mjs`'s `ROUTES` table has no entry for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so pointing the harness at these screens measures the 404 notice. The reason was right and the verdict was wrong: a tick asserts the step is met **and the box now says otherwise in its own sentence** — contrast measured, (a)/(c)/(d) structural, (e) not measured, with the revisit trigger named. Leaving it unticked reads as "nothing here was done", which is further from the truth than PARTIAL is. The underlying gap stands and is unchanged: these two screens are unreachable by the shared walk until their routes are added to it.
 
 ## Self-Review
 
