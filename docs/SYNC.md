@@ -436,3 +436,36 @@ One `tracing::info!` per request: `sync pull` logs `user_id`, `device_id`, `rows
 `has_more` and `latency_ms`; `sync push` logs `user_id`, `device_id`, `mutations`, `applied`
 and `latency_ms`. The roadmap names sync pull/push as the paths to log latency for, and a
 slow or an empty pull is exactly what these lines make visible.
+
+## Calendar-sourced events (Phase 10)
+
+The four columns the calendar sync owns — `source`, `external_id`, `etag`, `connection_id`
+(A198) — change what the row's conflict rule is, and the split is by **column** rather than by
+row:
+
+| Row | Rule |
+|---|---|
+| `events` with `source = 'app'` | Unchanged: record-level LWW on server receive time, with field-level merge when the changed field sets are disjoint. |
+| `events` with `source != 'app'` | **Server-owned for the calendar columns**, and read-only to a client on **both** write paths. `PATCH`/`DELETE` answer 403 `forbidden` naming the calendar; push answers `read_only_entity`. The next incremental sync would revert an edit that landed, so an accepted edit is a lie about what the row says. |
+| `events.title` / `starts_at` / `ends_at` on an **app-owned** row | Still LWW + field merge, exactly as above. An external row's are not: the sync writes them from Google or ICS. |
+| `calendar_connections` | **Not `+sync`.** The connection row holds an encrypted refresh token and a feed URL, and the feed itself is a capability URL (A242); a client that could pull or push one would be holding a credential the server is supposed to own. |
+| `users.ics_feed_token` | **Not `+sync`** for the same reason: it is a bearer secret, and `users` is not a synced entity. |
+
+**The read-only rule lives in the routes and the push validator, never in a trigger** (A240).
+The ICS importer and the Google sync write the four columns through plain SQL, so a trigger
+that refused the write would refuse the sync's own write — and the only way to keep the two
+apart would be a session variable, a second mechanism for a distinction the two paths already
+make structurally. `crates/server/tests/calendar.rs` asserts the non-obvious half: a row the
+sync wrote is refused by `PATCH`, and the sync can still write it.
+
+**No new `+sync` table, and `0017_sync_triggers.sql` is unchanged.** The ICS and Google rows
+land in `events`, which already has its triggers, so this phase attaches none and
+`crates/server/tests/schema.rs` needs no new row — the precedent `0021`–`0023`, `0028` and
+`0029` each state in their own migration header.
+
+**Deleting a connection tombstones its events in the same transaction.** `events.connection_id`
+is `references calendar_connections on delete set null`, so deleting the connection alone
+would leave orphan `source = 'ics'` rows that no sync will ever touch again and that a client
+cannot edit or delete either — a timetable the student cannot remove. A tombstone rather than
+a hard delete, because a row removed outright leaves every device showing the event forever
+with no change-log entry to correct it.
