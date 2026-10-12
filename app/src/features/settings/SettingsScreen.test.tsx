@@ -83,13 +83,18 @@ const USAGE = {
   provider_cost: { paused: false, resets_at: null },
 }
 
-function setup(row: Row = ROW) {
+function setup(row: Row = ROW, available: string[] = []) {
   const cache = fakeCache({ user_settings: [{ id: 'u1', ...row }] })
   const fake = installFakePlatform('macos', { sync: { read: cache.read } })
   mockFetch((url) => {
     const path = new URL(url).pathname
     if (path === '/auth/me') return jsonResponse(200, USER)
     if (path === '/usage') return jsonResponse(200, USAGE)
+    // `channels_available` is a **second** question from the plan's grant (A288):
+    // what this deployment can deliver on. It defaults to empty here, which is what
+    // the 404 fallback gives every other case in this file, and a case that needs a
+    // channel to be choosable asks for it explicitly.
+    if (path === '/settings') return jsonResponse(200, { channels_available: available })
     return jsonResponse(404, { code: 'not_found', message: 'no' })
   })
   return { fake }
@@ -266,5 +271,58 @@ describe('the channel rows', () => {
         /\bmin-w-11\b/,
       )
     }
+  })
+})
+
+/**
+ * A `/settings` response from a server that predates `reminder_channels`.
+ *
+ * **The version skew is a supported deployment, not a hypothetical.** The shell and
+ * the server are versioned independently and released separately (A353) — a server
+ * hotfix ships alone, and the desktop updater is the only thing that ever moves a
+ * client — so a client newer than the server it talks to is normal. And the sibling
+ * field on this same screen is already guarded for the same reason:
+ * `channels_available` is read as `?? []` because a server without it must degrade
+ * the notification section rather than the screen.
+ *
+ * The defect, observed against a stale server during Phase 12's gate 6 run:
+ * `row.reminder_channels.includes(...)` threw `TypeError: Cannot read properties of
+ * undefined (reading 'includes')` inside the render, and React Router's error
+ * boundary caught it — **the whole Settings screen rendered nothing**, from one
+ * absent metadata field. An absent list means "no channel is on", which is what the
+ * server's own default would have said.
+ */
+describe('a settings row from an older server', () => {
+  it('renders with no channel selected rather than taking the screen down', async () => {
+    // The cast is the point: `SettingsRow` declares the field required because the
+    // current server always sends it, and the case under test is precisely a server
+    // that does not.
+    const older = { ...ROW, reminder_channels: undefined } as unknown as Row
+    setup(older)
+
+    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+
+    // The screen rendered its own content rather than the error boundary's.
+    const inApp = await screen.findByLabelText('In the app')
+    expect(inApp).not.toBeChecked()
+    expect(screen.getByLabelText('Push notifications')).not.toBeChecked()
+    // And the section the rows live in is present, which is what "the screen
+    // rendered" means for a screen whose failure mode was rendering nothing at all.
+    expect(screen.getByText('How Stvdy reaches you')).toBeInTheDocument()
+  })
+
+  it('writes the channel the student picks onto the absent list', async () => {
+    const user = userEvent.setup()
+    const older = { ...ROW, reminder_channels: undefined } as unknown as Row
+    const { fake } = setup(older, ['web', 'push'])
+    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+
+    // `web` rather than `email`: the free plan grants only web and push, and a
+    // channel the plan does not grant is disabled by design (A288), so clicking it
+    // would assert nothing about this defect.
+    await user.click(await screen.findByLabelText('In the app'))
+
+    const last = fake.sync.writes.at(-1)
+    expect(last?.payload.reminder_channels).toEqual(['web'])
   })
 })

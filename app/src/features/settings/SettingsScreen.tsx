@@ -123,6 +123,15 @@ export function SettingsScreen() {
   // granted, selectable and silently never fire — and the student's only evidence
   // would be a reminder that never arrived.
   const availableChannels = settings.data?.channels_available ?? []
+  // Guarded for the same reason as the field above, and the failure it prevents is
+  // worse: the shell and the server are versioned independently (A353), so a client
+  // newer than the server it talks to is a supported deployment. A `/settings`
+  // response from a server that predates this field has no `reminder_channels`, and
+  // `undefined.includes` throws inside the render — which takes the whole screen
+  // down behind the router's error boundary rather than degrading one section. An
+  // absent field means "no channel is on", which is what the server's own default
+  // would have said.
+  const selectedChannels = row.reminder_channels ?? []
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
@@ -216,7 +225,7 @@ export function SettingsScreen() {
               const granted = grantedChannels.includes(channel)
               const available = availableChannels.includes(channel)
               const minPlan = planForReminderChannel(channel)
-              const on = row.reminder_channels.includes(channel)
+              const on = selectedChannels.includes(channel)
               return (
                 <div key={channel} className="flex min-h-11 flex-wrap items-center gap-2">
                   <input
@@ -231,8 +240,8 @@ export function SettingsScreen() {
                     onChange={(event) =>
                       write({
                         reminder_channels: event.target.checked
-                          ? [...row.reminder_channels, channel]
-                          : row.reminder_channels.filter((kept) => kept !== channel),
+                          ? [...selectedChannels, channel]
+                          : selectedChannels.filter((kept) => kept !== channel),
                       })
                     }
                   />
