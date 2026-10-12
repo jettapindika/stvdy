@@ -33,11 +33,11 @@ fn the_page_size_is_defaulted_and_capped() {
     ));
 }
 
-/// `offset` is meaningful only inside an initial pass. Accepting it alongside a
-/// non-zero cursor would page a rank-ordered stream with a seq cursor and deliver the
-/// wrong rows, which is worse than a 400.
+/// `offset` pages the initial pass, and it may travel with the pass's anchor so the
+/// pass set cannot change underneath the client (A164). A bare non-zero cursor is the
+/// incremental walk.
 #[test]
-fn an_offset_is_only_legal_on_the_initial_pass() {
+fn an_offset_pages_the_initial_pass_and_a_bare_cursor_walks_the_clock() {
     assert!(matches!(
         PullQuery::parse(Some(0), Some(20), None).unwrap().kind(),
         CursorKind::Initial { offset: 20 }
@@ -46,10 +46,20 @@ fn an_offset_is_only_legal_on_the_initial_pass() {
         PullQuery::parse(Some(41), None, None).unwrap().kind(),
         CursorKind::Incremental { after: 41 }
     ));
+    // A cursor with an offset is a later page of the anchored pass, not an
+    // incremental request: the cursor is the anchor the pass began at.
+    let anchored = PullQuery::parse(Some(41), Some(20), None).unwrap();
     assert!(matches!(
-        PullQuery::parse(Some(41), Some(20), None),
-        Err(CursorError::OffsetWithCursor)
+        anchored.kind(),
+        CursorKind::Initial { offset: 20 }
     ));
+    assert_eq!(anchored.anchor(), Some(41));
+    // The first page of a pass carries no anchor: the server derives it from the
+    // account's current max(seq).
+    assert_eq!(
+        PullQuery::parse(Some(0), None, None).unwrap().anchor(),
+        None
+    );
 }
 
 /// A new device must never be told to resync: `seq` comes from a global sequence, so an

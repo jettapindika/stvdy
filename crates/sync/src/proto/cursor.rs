@@ -30,8 +30,6 @@ pub enum CursorError {
     NegativeOffset,
     #[error("limit must be between 1 and {MAX_LIMIT}")]
     LimitOutOfRange { limit: i64 },
-    #[error("offset is only meaningful when cursor is 0")]
-    OffsetWithCursor,
 }
 
 /// What a cursor asks for. The two arms are different queries, not two spellings of
@@ -39,7 +37,12 @@ pub enum CursorError {
 /// is a walk up the seq clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorKind {
+    /// A page of the initial pass. The cursor is the **anchor** the page is bounded by:
+    /// 0 means "anchor at the account's current `max(seq)`" (the first page), and any
+    /// other value is the anchor a previous page returned, which is what makes the pass
+    /// set immutable while the client pages through it.
     Initial { offset: i64 },
+    /// A walk up the seq clock, after the pass has completed.
     Incremental { after: i64 },
 }
 
@@ -49,9 +52,13 @@ impl PullQuery {
     ///
     /// A `limit` of 0 or a negative is a caller bug rather than a request for a
     /// smaller page, so it is a 400; anything above the cap is the caller asking for
-    /// too much and is clamped. `offset` is meaningful only inside an initial pass:
-    /// accepting it beside a non-zero cursor would page a rank-ordered stream with a
-    /// seq cursor and deliver the wrong rows, which is worse than a refusal.
+    /// too much and is clamped.
+    ///
+    /// `offset` marks a page of the initial pass, and it may travel with any cursor:
+    /// the client's first page sends `cursor=0&offset=0`, the server answers with the
+    /// pass's anchor as `next_cursor`, and every later page of that pass sends
+    /// `cursor=<anchor>&offset=<n>` so the pass set cannot change underneath it
+    /// (A164). An `offset` of 0 with a non-zero cursor is an incremental request.
     pub fn parse(
         cursor: Option<i64>,
         offset: Option<i64>,
@@ -64,9 +71,6 @@ impl PullQuery {
         let offset = offset.unwrap_or(0);
         if offset < 0 {
             return Err(CursorError::NegativeOffset);
-        }
-        if offset > 0 && cursor != 0 {
-            return Err(CursorError::OffsetWithCursor);
         }
         let limit = match limit {
             None => DEFAULT_LIMIT,
@@ -81,8 +85,11 @@ impl PullQuery {
     }
 
     /// Which of the two queries this cursor is.
+    ///
+    /// An `offset` (or a cursor of 0) is a page of the initial pass; a bare non-zero
+    /// cursor is the incremental walk.
     pub fn kind(&self) -> CursorKind {
-        if self.cursor == 0 {
+        if self.cursor == 0 || self.offset > 0 {
             CursorKind::Initial {
                 offset: self.offset,
             }
@@ -90,8 +97,19 @@ impl PullQuery {
             CursorKind::Incremental { after: self.cursor }
         }
     }
-}
 
+    /// The anchor an initial page is bounded by.
+    ///
+    /// 0 means "anchor at the account's current `max(seq)`": the first page of a pass.
+    /// Any other value is the anchor a previous page returned, so the pass set is the
+    /// one that existed when the pass began.
+    pub fn anchor(&self) -> Option<i64> {
+        match self.cursor {
+            0 => None,
+            anchor => Some(anchor),
+        }
+    }
+}
 /// Whether a cursor is older than the history this account still retains (A165).
 ///
 /// `min_retained_seq` is the per-user watermark compaction writes; 0 means nothing has
