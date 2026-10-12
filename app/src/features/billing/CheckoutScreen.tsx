@@ -123,8 +123,27 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
     )
   }
 
+  // **The wrapping rule, in one place, because it inherits.** `wrap-anywhere` is
+  // `overflow-wrap: anywhere`, and on this container it reaches every box the 200%
+  // measurement found clipping: the order-summary rows and the reference below
+  // them, and — through `CheckoutStatus` — the state's own title, which is another
+  // file. On a 390×844 phone at 200% text the card's content box is 244px, and
+  // three things in it were wider: the order id (`stvdy_01j0…`, a single
+  // unbreakable token at 316px of glyphs), a row whose label's longest word is
+  // 114px and whose value is one unbreakable `IDR\u00a012,345` at 160px (290px
+  // together against 244), and "confirmation" at 219px inside the 200px the status
+  // card leaves beside its icon.
+  //
+  // `anywhere` and not `break-words`: `break-word` lowers only a box's *content*
+  // width, not its **min-content** size, and min-content is what these boxes were
+  // failing on — the flex row could not shrink its items below 114px and 160px. It
+  // is the same rule, for the same reason, that the workspace panels take.
+  //
+  // Money is the one thing it must not reach, and that is a second mechanism rather
+  // than an exception to this one: `break-normal` on the value and the `<wbr />`
+  // inside `LineValue`, below.
   return (
-    <div className="flex flex-col gap-6 px-5 py-6">
+    <div className="flex flex-col gap-6 px-5 py-6 wrap-anywhere">
       <PageHeader title={t('checkout.title')} subtitle={t('checkout.subtitle')} />
 
       {payment.isPending && <SkeletonRows rows={3} label={t('checkout.loading')} />}
@@ -157,12 +176,26 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
           <section className="card flex flex-col gap-2 p-4">
             <h2 className="text-h3">{t('checkout.order')}</h2>
             <dl className="flex flex-col divide-y divide-border text-sm">
-              {orderLines(view, i18n.language).map((line) => (
-                <div key={line.labelKey} className="flex items-baseline justify-between gap-4 py-1.5">
-                  <dt className="text-muted">{t(`checkout.line.${line.labelKey}`, line.params ?? {})}</dt>
-                  <dd className="meta">{line.value}</dd>
-                </div>
-              ))}
+              {orderLines(view, i18n.language).map((line) => {
+                // A money value is the one string on this screen the container's
+                // `anywhere` must not reach, so it takes `break-normal` back — and
+                // that is a second mechanism, not an exception to the first. See
+                // `LineValue`.
+                const money = line.value.includes('\u00a0')
+                return (
+                  <div
+                    key={line.labelKey}
+                    className="flex items-baseline justify-between gap-4 py-1.5"
+                  >
+                    <dt className="text-muted">
+                      {t(`checkout.line.${line.labelKey}`, line.params ?? {})}
+                    </dt>
+                    <dd className={money ? 'meta break-normal' : 'meta'}>
+                      <LineValue value={line.value} />
+                    </dd>
+                  </div>
+                )
+              })}
             </dl>
             {/* The reference a student quotes to support, and the one the webhook
                 logs when an amount does not match (A294). */}
@@ -173,6 +206,44 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * An order-summary value, with a money figure kept whole.
+ *
+ * **This is the second mechanism, and it is deliberately not the first.** The card
+ * takes `overflow-wrap: anywhere` because the order id and the row labels need a
+ * break opportunity wherever it falls; a money figure is the one string that must
+ * not have one, because `IDR 12,345` split as `IDR 12,3` / `45` is a price a
+ * student misreads, and that is worse than the clip it replaced. An identifier and
+ * a figure are both unbreakable tokens in a 244px box, and they are not the same
+ * problem: an id may be cut anywhere, a figure may only be cut at its currency.
+ *
+ * So the value's own box takes `break-normal` back (restoring the default the
+ * container's `anywhere` took away, and with it the digits' min-content width) and
+ * `<wbr>` supplies the one break opportunity the figure does need — after the
+ * currency, which is where `formatAmount` puts the no-break space it joins the two
+ * with. The digits stay whole, and `textContent` still carries the same
+ * `IDR\u00a0…` the money assertions in `CheckoutScreen.test.tsx` match on.
+ *
+ * This is the technique `PricingScreen` uses for the same figure at 200% text, for
+ * the same reason; the two fixes look alike and are not alike, which is why each
+ * file says which one it is.
+ */
+function LineValue({ value }: { value: string }) {
+  const [currency, digits] = value.split('\u00a0')
+  // No no-break space means no currency: a bare count (`formatCount`) or a
+  // percentage has no unit a break could separate from its number, so it inherits
+  // the container's `anywhere` and breaks like any other string.
+  if (digits === undefined) return <>{value}</>
+  return (
+    <>
+      {currency}
+      {'\u00a0'}
+      <wbr />
+      {digits}
+    </>
   )
 }
 

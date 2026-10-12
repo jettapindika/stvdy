@@ -1675,7 +1675,7 @@ exist, which is why it is written here.
 | 20 | Route sweep (every new route classified) | `cargo test -p stvdy-server --test route_sweep` | **4 passed / 0 failed** (slice B's run). |
 | 21 | Schema deviations | `cargo test -p stvdy-server --test schema` | see the Execution notes. |
 | 22 | Threat model §5 rows (Phase 7's suite, extended) | `cargo test -p stvdy-server --test tamper` | **17 passed / 0 failed**, including `every_section_5_fails_row_has_a_case`. **Unchanged, deliberately:** the three webhook attempts went into a §5 *subsection* that points at §9 with named tests, rather than three rows — the row scanner reads every `| … | **Fails.** … |` line until the next `## ` heading, so a table anywhere inside §5 would have been counted as rows and the suite would have gone red for everyone. It stays at 13 rows. A309 records the reasoning. |
-| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at both viewports, in both themes, at 100% and 200%.** Phone (390×844, DPR 3): 76 combinations, 1028 targets, 2988 pairs, lowest contrast 4.97:1, 0 under 44px, the six checkout states all verified in words. Desktop (1365×900, DPR 2): 80 combinations, 1580 targets, 4292 pairs, **0 below requirement**, **0 overlaps**, **0 painted past the edge**, **0 page-width overflows**. Seven defects found — three on the phone leg, four on the desktop — all reported with elements and numbers. The two harness defects the desktop leg exposed (the label mismatch and `MIN_TARGET` not being viewport-keyed) are both fixed; see the Execution notes. |
+| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at both viewports, in both themes, at 100% and 200%.** Phone (390×844, DPR 3): 76 combinations, 1028 targets, 2988 pairs, lowest contrast 4.97:1, 0 under 44px, the six checkout states all verified in words. Desktop (1365×900, DPR 2): 80 combinations, 1580 targets, 4292 pairs, **0 below requirement**, **0 overlaps**, **0 painted past the edge**, **0 page-width overflows**. Seven defects found — three on the phone leg, four on the desktop — all reported with elements and numbers. The two harness defects the desktop leg exposed (the label mismatch and `MIN_TARGET` not being viewport-keyed) are both fixed; see the Execution notes. **Re-measured 2026-10-12 after the checkout fix below: 80 combinations, 1072 targets, 3072 pairs, lowest contrast 4.97:1, and `gate 5 on a phone viewport: PASS` — 0 clipped, 0 overlapped, 0 under 44px, 0 pairs below requirement, 0 painted past the edge, page 390/390 on every surface.** |
 | 24 | Gate 6 — Indonesian, invoice and reminder copy | `cargo test -p stvdy-server --test billing_jakarta` | **4 passed / 0 failed / 0 ignored**, including the two planted-failure controls. See the Execution notes for the quoted output. |
 | 25 | Gate 7 — honesty | the statements in Task 13 Step 8 | **Satisfied by assertion**, each named in the Execution notes with the test that carries it. No new honesty surface was added by Task 13. |
 
@@ -1741,12 +1741,12 @@ Per screen, both themes, at 100% and 200% text (the numbers are the walk's own):
 |---|---|---|---|---|---|---|
 | `pricing` | 5 | 0 | 0 | 0 | 0 | 390/390 |
 | `plan` (the plan/usage screen, `BillingScreen` composed) | 5–9 | 0 | 0 | 0 | 0 | 390/390 |
-| `checkout-waiting` | 6 | 0 | 0 | 2 at 200% (one at 100% before the fix below) | 0 | 390/390 |
-| `checkout-paid` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
-| `checkout-expired` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
-| `checkout-review` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
-| `checkout-failed` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
-| `checkout-offline` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+| `checkout-waiting` | 6 | 0 | 0 | 0 (3 at 200% before the fix below) | 0 | 390/390 |
+| `checkout-paid` | 6 | 0 | 0 | 0 (2 at 200% before the fix below) | 0 | 390/390 |
+| `checkout-expired` | 6 | 0 | 0 | 0 (2 at 200%) | 0 | 390/390 |
+| `checkout-review` | 6 | 0 | 0 | 0 (2 at 200%) | 0 | 390/390 |
+| `checkout-failed` | 6 | 0 | 0 | 0 (2 at 200%) | 0 | 390/390 |
+| `checkout-offline` | 6 | 0 | 0 | 0 | 0 | 390/390 |
 
 - **(b) Contrast — measured, both themes.** The QR's pair is now declared in `tokens.ts`'s
   `PAIRS` (`primary` on `on-primary`, **4.5:1** because a code read by a camera is held to the
@@ -1769,15 +1769,44 @@ Per screen, both themes, at 100% and 200% text (the numbers are the walk's own):
   exist and are reachable, and the ring itself is asserted structurally by
   `src/tokens/invariants.test.ts` rather than photographed. That is a weaker check than a scripted
   tab-through and it is recorded as such.
-- **(e) 200% text — the defects, and they are real.** Every checkout state clips at 200% in both
-  themes: `div.flex.items-baseline.justify-between` (`"Price before discountIDR 12,345"`, scroll
-  290 vs client 244) and `p.text-xs.text-subtle` (`"Order stvdy_01j0…"`, scroll 316 vs client
-  244). Both are `CheckoutScreen.tsx`'s order-summary rows — the class the brief warned about,
-  and the reason it said to grep for it. `checkout-waiting` also clips `p.text-lg.font-medium`
-  (`"Waiting for confirmation"`, scroll 219 vs client 200). **These three are in
-  `app/src/features/billing/CheckoutScreen.tsx`, which this slice does not own**, so they are
-  reported rather than fixed, with the exact elements and numbers above for whoever does. Nothing
-  in `pricing`, `plan` or the status card clips.
+- **(e) 200% text — the defects, and they are real — and now fixed.** Every checkout state clipped
+  at 200% in both themes: `div.flex.items-baseline.justify-between` (`"Price before discountIDR
+  12,345"`, scroll 290 vs client 244), `p.text-xs.text-subtle` (`"Order stvdy_01j0…"`, scroll 316 vs
+  client 244) and — on `checkout-waiting` alone — `p.text-lg.font-medium` (`"Waiting for
+  confirmation"`, scroll 219 vs client 200). All three are in
+  `app/src/features/billing/CheckoutScreen.tsx`, which this slice did not own, so they were
+  reported rather than fixed, with the exact elements and numbers. **They were fixed on
+  2026-10-12** (a dedicated slice, with `CheckoutScreen.tsx` as its file):
+
+  - **`overflow-wrap: anywhere` on the screen's one content container** (Tailwind
+    `wrap-anywhere`, `CheckoutScreen.tsx:146`). One declaration, because the rule inherits: it
+    reaches the order-summary rows, the reference below them, and — through `CheckoutStatus` —
+    the state's own title, which is a *different file*. `anywhere` and not `break-word`: the
+    measurement is of **min-content** width, and `break-word` does not lower it. The row was
+    114px of label (its longest word, `discount`) plus a 16px gap plus the value's one
+    unbreakable token, 160px — 290px inside a 244px box that a flex row cannot shrink below its
+    items' min-contents. This is the same rule, for the same reason, that the workspace panels
+    take, and it closed all 22 findings.
+  - **`break-normal` on the money value, plus a `<wbr />` after the currency**
+    (`CheckoutScreen.tsx`'s `LineValue`). A money figure must **not** take `anywhere`: `IDR 12,3`
+    / `45` is a price a student misreads, which is worse than the clip it replaced. So the
+    value's box restores the default the container took away and `<wbr />` supplies the one break
+    opportunity a figure does need — after the currency, where `formatAmount` puts the no-break
+    space it joins the two with — leaving the digits whole and `textContent` still carrying the
+    same `IDR\u00a0…` the money assertions in `CheckoutScreen.test.tsx` match on. The order id is
+    an identifier and breaks anywhere; the figure is a figure and breaks at its currency. The two
+    fixes look alike and are not alike, which is why both files say which one they are. This is
+    the technique `PricingScreen` already uses for the same figure at 200% text.
+
+  **Re-measured** (`node scripts/measure-mobile.mjs`, 390×844, DPR 3, both themes, 100% and
+  200%) → **80 screen/theme/scale combinations, 1072 targets, 3072 text pairs, lowest contrast
+  4.97:1, 0 clipped, 0 overlapped, 0 under 44px, 0 pairs below requirement, 0 painted past the
+  edge, page 390/390 on every surface, `gate 5 on a phone viewport: PASS`** (before: the 22
+  clipped findings, exit 1). `pricing` stays 0. Pinned by
+  `app/src/features/billing/checkoutLayout.test.ts` — **source** assertions, because jsdom has no
+  layout engine and no clip can be measured in it; the numbers are the browser's. The file's
+  control case re-runs each check against the pre-fix form and fails on it (verified red: 3 of 4
+  tests fail on the pre-fix source).
 
 **Two harness defects this slice found and fixed in `scripts/measure-mobile.mjs`**, both of which
 had made earlier measurements say less than they appeared to:
@@ -1941,7 +1970,8 @@ of `MAIL_DIR`, so a deployment with real SMTP would not produce them.
   name the phone tab bar's labels and the desktop sidebar reads different ones. See gate 5 above.
 - **Three 200%-text clipping defects in `CheckoutScreen.tsx`** (the order-summary rows and the
   status title), reported with exact elements and numbers rather than fixed, because the file
-  belongs to another slice.
+  belongs to another slice. **Fixed 2026-10-12** by a dedicated slice — see gate 5(e) above for the
+  two mechanisms, the re-measured numbers and the regression test.
 - **`crates/server/src/testing.rs`'s `config()` pins some env keys and not others**, so a suite
   that depends on an unpinned key passes or fails by whose machine it runs on. Two slices hit this
   independently (the QRIS base URL, and the three `LLM_*` values) and both fixed it in place; the
