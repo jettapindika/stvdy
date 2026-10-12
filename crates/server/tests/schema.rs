@@ -836,3 +836,118 @@ async fn users_supports_oidc_only_accounts(pool: PgPool) {
             .await;
     assert!(duplicate.is_err(), "google_sub must be unique");
 }
+
+/// The columns the calendar poll, the conditional GET and the two-way sync need, asserted
+/// by name so a migration that silently omits one fails here rather than at first use.
+///
+/// The two defaults are asserted because they are load-bearing rather than cosmetic:
+/// `status = 'connected'` is what makes a connection the screen can render before its first
+/// poll, and `last_sync_was_full = true` is what makes an incremental sync that has never run
+/// read as "no cursor yet" instead of as an incremental pass that found nothing (A236).
+#[sqlx::test(migrations = "../../migrations")]
+async fn calendar_connections_carries_the_poll_and_sync_state(pool: PgPool) {
+    let columns: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select column_name, column_default from information_schema.columns
+         where table_schema = 'public' and table_name = 'calendar_connections'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query columns");
+
+    let default_of = |name: &str| {
+        columns
+            .iter()
+            .find(|(c, _)| c == name)
+            .and_then(|(_, d)| d.clone())
+    };
+
+    for column in [
+        "created_at",
+        "updated_at",
+        "status",
+        "error",
+        "ics_etag",
+        "ics_last_modified",
+        "study_calendar_id",
+        "last_sync_was_full",
+        "watch_channel_id",
+        "watch_expires_at",
+    ] {
+        assert!(
+            columns.iter().any(|(c, _)| c == column),
+            "calendar_connections is missing {column} (has {:?})",
+            columns.iter().map(|(c, _)| c).collect::<Vec<_>>()
+        );
+    }
+
+    assert!(
+        default_of("status").is_some_and(|d| d.contains("connected")),
+        "status must default to 'connected': {:?}",
+        default_of("status")
+    );
+    assert!(
+        default_of("last_sync_was_full").is_some_and(|d| d.contains("true")),
+        "last_sync_was_full must default to true: {:?}",
+        default_of("last_sync_was_full")
+    );
+}
+
+/// The poll's query is "connections whose watermark is older than the interval", so the index
+/// has to carry `last_synced_at`. A missing index is not a wrong answer, it is a full table
+/// scan every fifteen minutes on a table that grows with every connected account.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_calendar_poll_index_carries_the_watermark(pool: PgPool) {
+    let definitions: Vec<String> = sqlx::query_scalar(
+        "select indexdef from pg_indexes
+         where schemaname = 'public' and tablename = 'calendar_connections'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query indexes");
+
+    assert!(
+        definitions.iter().any(|d| {
+            let d = d.to_ascii_lowercase();
+            d.contains("(provider, last_synced_at)")
+        }),
+        "no index on (provider, last_synced_at): {definitions:?}"
+    );
+}
+
+/// `0017_sync_triggers.sql` promises, in its own header, to be the last migration that
+/// attaches a trigger. Phase 10 adds no `+sync` table, so the promise has to still hold: a
+/// later migration that created a trigger would mean the trigger set is no longer readable
+/// in one file, which is what `every_sync_table_has_both_triggers` audits against.
+///
+/// Reads the migration files rather than the database: the property is about the *files*, and
+/// a scratch database cannot tell which migration wrote a trigger.
+#[test]
+fn no_migration_after_0017_attaches_a_trigger() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+    let mut attaching: Vec<String> = Vec::new();
+
+    for entry in std::fs::read_dir(&dir).expect("a readable migrations directory") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_none_or(|extension| extension != "sql") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("a readable migration");
+        let lowered = source.to_ascii_lowercase();
+        if lowered.contains("create trigger") || lowered.contains("create constraint trigger") {
+            attaching.push(
+                path.file_name()
+                    .expect("a file name")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+
+    attaching.sort();
+    assert_eq!(
+        attaching.last().map(String::as_str),
+        Some("0017_sync_triggers.sql"),
+        "0017_sync_triggers.sql must stay the last migration that attaches a trigger, \
+         got {attaching:?}"
+    );
+}
