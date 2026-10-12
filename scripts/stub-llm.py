@@ -108,15 +108,28 @@ class Handler(BaseHTTPRequestHandler):
         plan grants writes, or an entry with no `parameters` object, is a wire-format
         mistake the trait-level double cannot see. Answering 400 makes it a visible
         failure here rather than a refusal the model would have to phrase.
+
+        The shape checked is the [OI]-compatible one — `{"type": "function",
+        "function": {"name", "description", "parameters"}}` — because that is what a
+        real provider accepts and therefore what the server must send. The first
+        version of this read `tool["name"]` at the top level, which is the shape the
+        *trait* uses (`ToolSpec { name, description, parameters }`) and not the shape
+        on the wire; it 400'd every correct request, which is how the smoke run found
+        it. The frames this same file *emits* nest under `function` too, and the
+        server's `parse_tool_calls` reads `call["function"]["name"]`, so a flat
+        validator was inconsistent with both ends of the same wire.
         """
         tools = body.get("tools")
         if not tools:
             return None
         for tool in tools:
-            if not isinstance(tool, dict) or "name" not in tool:
+            if not isinstance(tool, dict):
+                return "a tool entry is not an object"
+            function = tool.get("function")
+            if not isinstance(function, dict) or not function.get("name"):
                 return "a tool entry carries no name"
-            if not isinstance(tool.get("parameters"), dict):
-                return f"{tool['name']} carries no parameters object"
+            if not isinstance(function.get("parameters"), dict):
+                return f"{function['name']} carries no parameters object"
         return None
 
     def do_POST(self):

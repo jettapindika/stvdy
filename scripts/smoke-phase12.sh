@@ -193,7 +193,14 @@ for line in open(sys.argv[1]):
 if tools is None:
     print('FAIL: no request carried a `tools` array; the wire schema was never sent', file=sys.stderr)
     sys.exit(1)
-names = {t['name'] for t in tools}
+# The wire shape is the [OI]-compatible one, nested under `function` — not the
+# trait's `ToolSpec { name, description, parameters }`. Asserting the trait's shape
+# here is what this check did first, and it read a correct request as a missing one.
+def named(tool):
+    function = tool.get('function')
+    return function if isinstance(function, dict) else {}
+
+names = {named(t)['name'] for t in tools if 'name' in named(t)}
 writes = {'create_task', 'update_task', 'create_event', 'schedule_study_block',
           'create_flashcards', 'create_quiz'}
 reads = {'list_tasks', 'find_free_slots', 'get_due_flashcards', 'get_upcoming_deadlines'}
@@ -202,8 +209,9 @@ if missing:
     print(f'FAIL: the wire schema is missing {sorted(missing)}', file=sys.stderr)
     sys.exit(1)
 for tool in tools:
-    if not isinstance(tool.get('parameters'), dict) or 'properties' not in tool['parameters']:
-        print(f"FAIL: {tool['name']} has no JSON schema", file=sys.stderr)
+    parameters = named(tool).get('parameters')
+    if not isinstance(parameters, dict) or 'properties' not in parameters:
+        print(f"FAIL: {named(tool).get('name', tool)} has no JSON schema", file=sys.stderr)
         sys.exit(1)
 print(f'the wire carried {len(tools)} tools, all ten with a JSON schema')
 PY
