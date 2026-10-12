@@ -20,8 +20,10 @@ Without a written agreement from the copyright holder, you may NOT:
    the Software in a way that avoids paying for the service it provides;
 6. remove or alter this notice or any other proprietary marking.
 
-USE OF THE HOSTED SERVICE is governed separately by the terms of service. Where
-the hosted service and this notice differ, the terms of service control.
+USE OF THE HOSTED SERVICE is governed separately by the terms of service and privacy notice
+in `docs/EULA.md`. Where the hosted service and this notice differ, the terms of service
+control. **That document is currently a draft requiring legal review, and the service is
+therefore not launched publicly**; its own banner says so.
 
 ACCESS TO THE SERVICE IS CONTROLLED BY THE SERVER. Client applications are not
 authoritative: entitlements, credits, plan limits, and permissions are decided
