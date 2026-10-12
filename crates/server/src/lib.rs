@@ -25,6 +25,7 @@ pub mod routes;
 pub mod settings;
 pub mod sources;
 pub mod state;
+pub mod study;
 pub mod sync;
 pub mod tasks;
 pub mod telemetry;

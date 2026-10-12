@@ -229,6 +229,9 @@ fn read_only_rows() -> Vec<Row> {
         ro("POST", "/events", "creating an event spends nothing"),
         ro("PATCH", "/events/{id}", "editing an event spends nothing"),
         ro("DELETE", "/events/{id}", "deleting an event spends nothing"),
+        ro("GET", "/sessions", "reads the caller's own sessions"),
+        ro("POST", "/sessions", "a session is free (R1), like a review"),
+        ro("GET", "/activity", "reads the caller's own activity"),
     ]
 }
 
