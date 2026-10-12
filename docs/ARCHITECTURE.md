@@ -713,6 +713,158 @@ text at all, so a cap counted from the sections would read zero and be exceeded 
 asking twice in a row. The refund path is the same one too, with `RefundTarget`
 gaining a `Report` and a `Cheatsheet` arm (A131).
 
+## Entitlements, credits and limits (Phase 7)
+
+### Two layers, and why the engine is pure
+
+`crates/core/src/entitlements/` decides; `crates/server/src/entitlements.rs` feeds it
+and acts on it. The engine is a function of four things — the loaded `PlansFile`, a
+`UsageSnapshot`, a `PlanFacts` and a `Feature` — and performs no IO: no database, no
+clock, no filesystem, no config read. That is not tidiness. The whole plan matrix is
+therefore testable against a scratch `PlansFile` (the generated matrix suite walks
+every `Feature` against every `PlanId` from a config it writes itself), and there is
+exactly one place that can answer "what does this plan allow", so a handler cannot
+end up with a second, drifting answer.
+
+The matrix is passed **in**, never read inside the engine. A `check` that read
+`config/plans.toml` itself would be a second source of the matrix — the exact defect
+the phase's risk section names — and a process-wide installed matrix would need a
+`panic`/`expect` to initialise, which the workspace lints deny. `AppConfig.plans` is
+loaded once at startup and handed over.
+
+### One snapshot, one round trip
+
+`entitlements::snapshot` builds the whole `UsageSnapshot` in **one statement**: twelve
+scalar subselects, all scoped by `user_id`, plus the calling device's `read_only` flag
+read in the same row. One round trip is a correctness property, not a performance one:
+read one counter per query and a write landing between two of them produces a snapshot
+that never existed — "3 of 3 devices" computed from a count taken before a device was
+revoked and a flag taken after.
+
+Every time boundary inside that statement is the **user's own local** one, computed in
+Rust through `chrono-tz` (`util::local_day_start`, `util::local_month_start`) and bound
+as a parameter. `date_trunc('month', now())` cannot express "this account's month has
+rolled": at `2026-10-31T18:00:00Z` a Jakarta account is in November and a UTC account is
+still in October, and only the bound parameter sees the difference.
+
+`require` is the decision every swept handler makes, and it is one line:
+
+```rust
+entitlements::require(&state, &user, Feature::ChatMessage).await?;
+```
+
+It reads the counters, refuses a read-only device before the feature is even
+considered, and otherwise hands the snapshot to the engine. `reserve_in` is the
+monthly-reservation sequence Phase 5 built for decks and quizzes, defined once here, so
+the report, the report section and the cheatsheet cannot become a third, fourth and
+fifth copy of it.
+
+### Counters are derived, never materialised (A147)
+
+There is no counters table and no `counters` column. "How many chat messages today" is
+`count(*) from usage_events where … created_at >= <local day start>`, computed at read
+time — the same source the existing daily cap already counted. One source of truth
+means the cap and the number shown to the user cannot disagree, which a materialised
+counter can (a write that updates the rows but not the counter leaves the two lying
+about each other, and only one of them is enforced).
+
+The consequence is that `reset_counters` is **not a zeroing job**. It is the per-user
+local period-boundary rollover: expire a lapsed grace window, recompute the `read_only`
+flags, enqueue that user's `monthly_grant`, prune old `signup_attempts`. What a period
+boundary actually changes is the subscription's status, the read-only flags and the next
+period's grant — not a stored number.
+
+### The period key, and why the grant needed one (A152)
+
+`credit_ledger.period_key` plus a **partial** unique index on `(user_id, period_key)
+where period_key is not null`, and every grant is `insert … on conflict do nothing`. The
+keys are `'monthly:<local YYYY-MM>'` (free), `'sub:<subscription_id>:<period start>'`
+(paid) and `'expire:<the same key>'` for the expiry row.
+
+`jobs.dedupe_key` alone could not close this. It stops the *job* being enqueued twice;
+it does not stop two different producers from granting in the same month, and there are
+two: the signup grant and the recurring `monthly_grant` job. A duplicate grant is not a
+retry — it is credits, and the roadmap says so in as many words. The partial index makes
+the second grant a no-op **by construction** rather than by scheduling, and the same
+mechanism makes a paid period *extension* grant once per period rather than once per
+calendar month. The index is partial because the ledger's pre-Phase-7 rows have
+`period_key = null` and must be unaffected.
+
+`monthly_rollover` defaults to `false` (A153): with it off, the grant job first writes a
+negative `reason = 'expire'` row for the unspent monthly bucket under the once-only
+`'expire:…'` key, then grants. Purchased credits are never expired.
+
+### The ceiling: where it is enforced, and what bounds its overshoot (A155)
+
+`provider_cost_ceiling_usd` is read in exactly one place, `credits::ceiling_usd`, and
+the spend path compares the month's summed `provider_cost_usd` against it **inside the
+spend's own transaction**, under the per-user advisory lock. A refusal is 422
+`limit_reached`, names the plan whose ceiling is higher (`free 0.50 → pro 2.00 → power
+6.00`), keeps `limit`/`used` null because those carry the plan matrix's sense and these
+figures are dollars, and names the local reset date. BYOK rows are excluded from the sum
+(A156): a call on the user's own key spends their money, and pausing an account for
+spending someone else's would be wrong.
+
+The enforcement point is *before* the provider call and the cost is recorded *after* it,
+so the ceiling is not a hard bound by itself: N concurrent actions can each pass the
+check before any of them records a cost. The **overshoot is bounded by bounding N** —
+the per-account spend cap, an in-process token bucket at `SPEND_PER_MINUTE = 10`
+spend-actions per minute, applied as a `route_layer` over the merged authenticated
+routes and keyed on `MatchedPath`. That is the cap's job, and it is not the total (the
+credits and the ceiling are). The cap's route list is not a second table: the sweep
+asserts every entry in `ratelimit::spending_routes()` is also a `Swept` row, so the two
+cannot drift into "a swept route the cap forgot", which is exactly an unbounded
+overshoot (A161).
+
+### The sweep: the phase's structural defence
+
+`crates/server/tests/route_sweep.rs` is what makes "every route is classified" a fact
+rather than an intention, and it is two tests in opposite directions:
+
+- `every_registered_route_is_classified` **extracts** every `(method, path)` pair
+  registered under `crates/server/src` by parsing the `.route(…)` calls, and compares
+  both ways against the table: a registered route with no row fails, and a row naming a
+  route that is not registered fails too. The second direction is the one that matters —
+  an unclassified-only assertion passes silently, because a route the extractor cannot
+  see is also a route nothing compares.
+- `every_swept_route_refuses_an_exhausted_account` drives each `Swept` row through the
+  real router with an account whose every limit is used, and asserts the row's exact
+  `(status, code)`. A classified route that calls nothing cannot pass.
+
+A third test in the same file,
+`no_file_outside_the_entitlements_layer_reads_a_plan_limit`, greps the whole source tree
+for plan-limit reads and fails naming the file and field — including for `provider_cost_ceiling_usd`, whose single reader it asserts by
+name. The tree is the input, not a list someone maintains.
+
+### Ingestion: the new formats, and the absent-converter policy (A158)
+
+`POST /workspaces/:id/sources` accepts six kinds: `pdf`, `pptx`, `docx`, `url`, `text`
+and `web`. DOCX and PPTX are parsed from the OOXML inside the zip (`zip` + `quick-xml`,
+walking `word/document.xml`'s `<w:t>` runs and `ppt/slides/slideN.xml`'s `<a:t>` runs),
+which is why slide numbers survive: they come from the slide part's own name, not from a
+text heuristic. The extension is the check, not the client's content type — the two
+OOXML kinds share a container, so their extension is the only thing distinguishing them,
+and a browser sends whatever the OS guessed.
+
+A `url` source is fetched by the ingest job, not by the upload request (A162): a link
+the user typed is not expected to exist yet, the request must not block on someone
+else's server, and an SSRF refusal belongs on `sources.error`, which the client already
+renders. A `web` source — "save to workspace" from a search hit — is fetched **during**
+the request, because saving means preserving what was saved. Both go through
+`AppState.fetcher` and never a second `reqwest` call, so the `--block-private-networks`
+guarantee is one implementation. A `web` source stores the fetched text as its object and
+therefore charges storage; a `url` source stores nothing and is bounded only by
+`sources_total` (A163).
+
+The uniform viewer needs a PDF rendition of a DOCX or PPTX, which needs LibreOffice.
+`SOFFICE_BIN` follows A51's absent-binary policy rather than inventing a second one: when
+it is unset the source **still ingests** — the text and the slide numbers come out of the
+OOXML itself — the preview is absent, and one line is logged. `GET /sources/:id/preview`
+then answers 404 rather than serving an empty document that would look like a scan. An
+extractor that silently produced nothing would send the user after the wrong bug; an
+absent converter is visible in the log and in the 404, and the requirement is recorded as
+an image requirement in `docs/RELEASE.md`.
+
 ## Build environment note: the server's release binary is blocked here
 
 **What ships to users builds fine.** `tauri build --no-bundle` and the full

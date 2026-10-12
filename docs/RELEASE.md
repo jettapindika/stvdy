@@ -81,6 +81,17 @@ failure mode is invisible until deploy:
   Chromium in the image is **a PDF nobody can download**, not a failed deploy — which
   is exactly why it needs to be a documented image requirement rather than something
   a health check catches (A130).
+- **The image must bake headless LibreOffice and set `SOFFICE_BIN` to it.** Phase 7's
+  DOCX and PPTX sources get a PDF rendition through
+  `soffice --headless --convert-to pdf` (`crates/server/src/sources/parse.rs::preview_pdf`),
+  stored under `sources.preview_key` and served by `GET /sources/:id/preview`, so the
+  client opens one media type for every source kind. This follows A51's absent-binary
+  policy: when `SOFFICE_BIN` is unset the source **still ingests** — the text and the
+  slide numbers come out of the OOXML itself, with no converter — the preview is absent
+  and one `tracing::info!` is logged; when it is set but the conversion fails, the source
+  still ingests and a `tracing::warn!` is logged, so an unloadable converter is louder
+  than an absent one (A158). A missing LibreOffice is therefore not a crash and not a
+  failed ingest: it is a source with no preview, and the remedy is the image.
 - **Pin the version.** The renderer's output is the document a student prints, and
   the acceptance test asserts a specific page count and a footer read back from the
   renderer. A Chromium upgrade that changes pagination or font metrics would change

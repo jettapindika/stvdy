@@ -94,12 +94,14 @@ intent is permitted, affordable, or well-formed is decided on the right.
 
 ## 5. What a modified client can and cannot do
 
-This is the table to consult before adding any check. Each row is a test case in
-`crates/server/tests/tamper.rs` (Phase 7).
+This is the table to consult before adding any check. Every row whose outcome begins
+"**Fails.**" is a test case in `crates/server/tests/tamper.rs` (Phase 7), asserted by its
+exact error code — and `every_section_5_fails_row_has_a_case` reads this document, so a
+"fails" row added here without a case there fails the suite.
 
 | Attempt | Outcome | Enforced by |
 |---|---|---|
-| Unlock a paid feature by editing UI state | **Fails.** Next request → `422 plan_required` / `feature_locked` | Entitlements read from `users.plan_id` + subscription per request (A22, A21) |
+| Unlock a paid feature by editing UI state | **Fails.** Next request → `403 plan_required` / `feature_locked` | Entitlements read from `users.plan_id` + subscription per request (A22, A21, A143) |
 | Edit the JWT to add a plan or raise limits | **Fails.** The plan is deliberately not a claim in the token | A22 |
 | Grant credits locally, or replay a grant | **Fails.** Balance is `sum(delta)` over `credit_ledger`, written only by the server | A9 |
 | Call the LLM / search / Google directly from the app | **Fails.** No provider key exists on any device | `docs/SPEC.md` § PLATFORMS AND ARCHITECTURE |
@@ -110,6 +112,8 @@ This is the table to consult before adding any check. Each row is a test case in
 | Exceed `web_searches_per_day` / `chat_msgs_per_day` | **Fails.** Counters are `usage_events`, server-side | `docs/SPEC.md` § Entitlements engine |
 | Enable checkout on iOS/Android | **Fails.** Server refuses `platform in (ios, android)` | A24 |
 | Read another user's rows | **Fails.** Every query scoped by `user_id`; pull is filtered; signed URLs are short-lived and scoped | `docs/SPEC.md` § AUTH AND SECURITY; Phase 8 test |
+| Exceed the provider-cost ceiling | **Fails.** The next spend → `422 limit_reached`, naming the plan whose ceiling is higher; the ledger and `usage_events` are untouched | `credits::spend_in` sums the month's `provider_cost_usd` inside the spend's own transaction, `byok = false` only (A148, A155, A156) |
+| Farm signups past the per-IP limit | **Fails.** The next attempt → `429 rate_limited`, logged with the IP, the domain, the count and the rule that tripped | `signup_attempts` is database-backed, so a restart is not a reset (A154, A43) |
 | Farm free accounts | **Slowed, not eliminated.** Verification + signup limits + per-account cap bound the cost | A43 |
 | Fabricate `study_sessions` / `quiz_attempts` / `flashcard_reviews` | **Succeeds.** Accepted — see R1 | — |
 | Read or edit the local SQLite cache | **Succeeds.** Accepted — see R2 | — |
@@ -155,9 +159,28 @@ maintenance cost.
 
 **R5 — Signup limits can produce false positives.** A43's per-IP limit will throttle a shared campus
 NAT or a school lab, which is precisely the target audience.
-*Mitigation:* the limit must be generous enough for a classroom, must be configurable, and must have a
-manual unblock path for support. Log every block with the IP and count so the false-positive rate is
-measurable before it is tuned.
+*Measured:* the limits are **25 signup attempts per IP per rolling 24 h** and **100 per non-public
+email domain per 24 h** (`crates/server/src/ratelimit.rs::SIGNUP_PER_IP_PER_DAY` /
+`SIGNUP_PER_DOMAIN_PER_DAY`). Every attempt is recorded in `signup_attempts` **before** the `users`
+row is written, so a farm's failures count too, and every block is logged at `WARN` with the IP, the
+domain, the count, the limit and which rule tripped —
+`tracing::warn!(%ip, %domain, count, limit, window = "24h", rule, "signup refused")`
+(`crates/server/src/ratelimit.rs`, the only `signup refused` line in the tree). Public mailbox
+domains — `gmail.com`, `googlemail.com`, `yahoo.com`/`yahoo.co.id`/`yahoo.co.uk`, `outlook.com`,
+`hotmail.com`, `icloud.com`, `proton.me`, `aol.com`, `gmx.com`, `zoho.com`, `yandex.com`, and the
+Indonesian providers `telkom.net`, `indosat.net.id`, `xl.co.id`, `cbn.net.id` among others — are
+**exempt from the domain rule** (A154): a farm uses gmail too, so a limit there blocks the product's
+own growth and stops no farm, while the per-IP rule and the per-account ceiling still bound it.
+*Mitigation:* the limit is generous enough for a classroom, is a named constant rather than a magic
+number, and the log line is what makes the false-positive rate measurable before it is tuned. The
+manual unblock path for support is still owed, and `signup_attempts` rows are pruned after
+`SIGNUP_ATTEMPT_RETENTION_HOURS = 48` by the `reset_counters` job.
+*Evidence:* `crates/server/tests/abuse.rs::the_per_ip_signup_limit_trips_and_logs` (asserts the 429,
+the `rate_limited` code, all four fields of the log line, and that the count lives in the database),
+`a_public_email_domain_is_not_rate_limited`, `a_failed_signup_still_records_an_attempt`, and
+`a_forwarded_for_header_cannot_buy_a_second_allowance`.
+*Revisit if:* the block rate on a campus NAT turns out to be material — the log line is the
+measurement, and the numbers above are the ones to retune.
 
 **R6 — Aggregated content can leak through shared caches.** The search result cache (A40) is global
 rather than per-user. A query string carries no user data, so a cache hit reveals only that *someone*
@@ -199,11 +222,11 @@ The design never depends on this column. It is recorded so that no phase mistake
 
 | Check | Phase | Test |
 |---|---|---|
-| Every handler goes through entitlements; no bypass | 7 | grep test over `crates/server/src/routes` asserting each handler calls `check` |
-| Every row of §5 marked "fails" is actually rejected | 7 | `crates/server/tests/tamper.rs` — one case per row, asserting the exact error code |
+| Every handler goes through entitlements; no bypass | 7 | `crates/server/tests/route_sweep.rs` — `every_registered_route_is_classified` extracts every registered `(method, path)` pair from `crates/server/src` and compares the table **both ways**, and `every_swept_route_refuses_an_exhausted_account` drives each `Swept` row through the real router asserting its exact `(status, code)`. `no_file_outside_the_entitlements_layer_reads_a_plan_limit` greps the tree for a plan-limit read and for the single reader of `provider_cost_ceiling_usd` |
+| Every row of §5 marked "fails" is actually rejected | 7 | `crates/server/tests/tamper.rs` — one case per row, asserting the exact error code; `every_section_5_fails_row_has_a_case` reads `docs/THREAT_MODEL.md` and fails when a "fails" row has no case (13 rows today) |
 | No cross-tenant leakage through `change_log` or pull | 8 | pull for user A never contains user B's `seq` |
-| Free-tier abuse controls are live | 7 | unverified account cannot chat/search/ingest; per-IP signup limit trips and logs |
-| Provider cost ceiling stops spend | 7 | an account at its ceiling gets a clear error, not a silent spend |
+| Free-tier abuse controls are live | 7 | `crates/server/tests/abuse.rs` — `an_unverified_account_cannot_chat_generate_search_or_ingest`, `the_per_ip_signup_limit_trips_and_logs`, `a_public_email_domain_is_not_rate_limited`, `the_spend_cap_trips_at_ten_a_minute_and_never_caps_a_read`, `the_spend_cap_is_per_account` |
+| Provider cost ceiling stops spend | 7 | `crates/server/tests/credits.rs::an_account_over_its_provider_cost_ceiling_is_refused` — an account at its ceiling gets `422 limit_reached` naming the plan whose ceiling is higher, with the ledger and `usage_events` untouched; `a_higher_plan_has_a_higher_ceiling` is the other half |
 | Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md` § QUALITY BAR, "Payment tests") |
 | Retrieved text cannot act as instructions | 12 | injection fixture in an uploaded document does not alter tool behaviour |
 | Rendered documents are inert | 6 | a source containing `</div><script>` and `<svg onload=…>` produces a PDF with neither |

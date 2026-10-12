@@ -251,12 +251,33 @@ stored, so an over-quota file never occupies the bucket.
 ```
 
 - `POST /workspaces/:id/sources` (multipart) → 201 `{ "source": "...SourceView" }`.
-  Fields: `kind` in `pdf` or `text`; then `file` (a `.pdf`) for `pdf`, or `text`
-  for `text`; optional `title` (defaults to the filename, or to the first
-  non-empty line of pasted text). The source is stored `pending` and an
-  `ingest_source` job is enqueued. 400 `validation` for a missing or unsupported
-  `kind`, a missing file or text, a non-`.pdf` filename, or empty text. 404 for
-  another user's workspace. 422 `limit_reached` for `max_file_mb` or `storage_mb`.
+  Fields: `kind` in `pdf`, `pptx`, `docx`, `url`, `text` or `web` (Phase 7 adds
+  the last four); then the kind's own payload — `file` for `pdf`/`pptx`/`docx`,
+  `text` for `text`, `url` for `url`/`web`; optional `title` (defaults to the
+  filename, the link's host, the page's own title, or the first non-empty line of
+  pasted text). The source is stored `pending` and an `ingest_source` job is
+  enqueued. 400 `validation` for a missing or unsupported `kind`, a missing
+  payload, a filename whose extension does not match its `kind` (`.pdf`, `.pptx`,
+  `.docx` — the extension is the check, because the two OOXML kinds share a
+  container and a browser's content type is a guess), a link the SSRF guard
+  refuses, a page with no readable text, or empty text. 404 for another user's
+  workspace. 422 `limit_reached` for `sources_total`, `max_file_mb` or
+  `storage_mb`.
+  - **`url`** — a link the user typed. The scheme and host are checked at the
+    request (so a bad link is an immediate 400); the page itself is fetched by
+    the ingest job, so the request does not block on someone else's server and an
+    SSRF refusal lands on `sources.error`. A `url` source stores no bytes: it is
+    bounded by `sources_total` and charges no storage (A162/A163).
+  - **`web`** — "save to workspace" from a search hit. The page is fetched
+    **during the request**, because saving means preserving what was saved; the
+    fetched text is the source's object, so it does charge storage (A162/A163).
+- `GET /sources/:id/preview` → 200 `{ "url", "expires_at" }`, a short-lived URL
+  for the PDF rendition of a `pptx` or `docx` source, so the client opens one
+  media type for every kind. **404** when the source has no rendition — no
+  `SOFFICE_BIN` converter is configured (A158), or the source has no original
+  file (a `url` source) — rather than serving an empty document that would look
+  like a scan. A read of the caller's own source, so it is never
+  entitlement-gated (A149).
 - `GET /workspaces/:id/sources` → 200 `{ "sources": [ "...SourceView" ] }`.
 - `GET /sources/:id/status` → 200
   `{ "id", "status", "chunk_count", "error", "updated_at" }`. `status` is
@@ -775,6 +796,189 @@ direct-storage contract this API does not offer.
   model would cost credits *and* produce different content. 409 `conflict` when the
   row has no stored blocks; 404 for another account's row.
 
+## Entitlements and usage (Phase 7)
+
+Every limit, feature and price comes from `config/plans.toml`, loaded once at
+startup. The decision is made per request from the caller's **effective** plan:
+`users.plan_id` grants paid limits only while the `subscriptions` row's status is
+`active` or `grace` (A146), so a stored plan with no live subscription is free.
+
+### `GET /usage`
+
+The single source of the numbers the plan and usage screen shows (A159). Every
+value is computed — a limit from the loaded matrix, a `used` from the same
+snapshot the decision uses, a cost from `credits::costs`, the one function that
+builds the block, so the number this view reports and the number a route charges
+cannot drift. `null` is never `0`: an axis with no running counter reports `used:
+null`, and `limit: null` means unlimited.
+
+```json
+{ "plan": "free", "name": "Free",
+  "subscription": { "status": "active", "period_end": "2026-11-11T00:00:00Z" },
+  "credits": { "monthly": 60, "purchased": 0, "total": 60 },
+  "storage_bytes": 1048576,
+  "limits": {
+    "workspaces":              { "limit": 2,     "used": 1 },
+    "sources_total":           { "limit": 20,    "used": 1 },
+    "max_file_mb":             { "limit": 20,    "used": null },
+    "storage_mb":              { "limit": 200,   "used": null },
+    "devices_max":             { "limit": 2,     "used": 1 },
+    "credits_per_month":       { "limit": 60,    "used": null },
+    "chat_msgs_per_day":       { "limit": 20,    "used": 0 },
+    "web_searches_per_day":    { "limit": 3,     "used": 0 },
+    "flashcards_per_month":    { "limit": 30,    "used": 0 },
+    "quizzes_per_month":       { "limit": 2,     "used": 0 },
+    "reports_per_month":       { "limit": 1,     "used": 0 },
+    "syllabus_imports_total":  { "limit": 1,     "used": 0 },
+    "google_accounts_max":     { "limit": 0,     "used": null } },
+  "features": {
+    "export_formats": ["md"], "task_ai_breakdown": false, "quick_capture": false,
+    "google_calendar": false, "planner": "manual", "agent_actions": false,
+    "reminder_channels": ["web", "push"], "model_tier": "cheapest",
+    "byok": false, "advanced_analytics": false },
+  "costs": {
+    "chat_message": 1, "web_search": 2, "flashcard_batch_10": 4, "quiz_10": 6,
+    "report_outline": 3, "report_section": 6, "task_breakdown": 2,
+    "syllabus_import": 8, "plan_generation": 2, "agent_turn": 2,
+    "long_doc_threshold_tokens": 20000, "long_doc_credits_per_1k_tokens": 1 },
+  "provider_cost": { "paused": false, "resets_at": "2026-11-01T00:00:00Z" } }
+```
+
+`provider_cost` carries no dollar figure: the user is told *that* the
+provider-cost ceiling is reached and when it resets, not our unit economics. The
+dollars are admin-only (`GET /admin/margin`). `resets_at` is the first midnight
+of the caller's own local month, expressed in UTC, so a `Asia/Jakarta` account
+reads the date it will actually reset on.
+
+### Every route, and what it is
+
+The table below is the same table `crates/server/tests/route_sweep.rs` asserts,
+so the document and the test cannot disagree. **53 rows are registered** and every
+one is classified; a new route that is not in the table fails
+`every_registered_route_is_classified`.
+
+**Swept** — calls the engine for a `Feature`, and an account whose limits are all
+used gets exactly the `(status, code)` in the last column:
+
+| Method | Path | Feature | Refusal |
+|---|---|---|---|
+| POST | `/workspaces` | `CreateWorkspace` | 422 `limit_reached` |
+| POST | `/workspaces/{id}/chat` | `ChatMessage`; `WebSearch` too when the turn ran a chargeable search | 422 `limit_reached` |
+| POST | `/workspaces/{id}/decks` | `FlashcardBatch{n}` | 422 `limit_reached` |
+| POST | `/workspaces/{id}/quizzes` | `CreateQuiz{n}` | 422 `limit_reached` |
+| POST | `/workspaces/{id}/sources` | `UploadSource{size_bytes}` | 422 `limit_reached` |
+| POST | `/workspaces/{id}/reports/outline` | `Report` | 422 `limit_reached` |
+| POST | `/reports/{id}/generate` | credits only (`report_section`) | 402 `insufficient_credits` |
+| GET | `/reports/{id}/export` | `ExportFormat{format}` | 403 `plan_required` |
+| POST | `/workspaces/{id}/cheatsheets` | credits only (`report_section`) | 402 `insufficient_credits` |
+| GET | `/cheatsheets/{id}/pdf` | `ExportFormat{Pdf}` | 403 `plan_required` |
+
+**Read-only** — a read of the caller's own rows, or an action that spends
+nothing. Never gated: the spec requires over-limit data to stay viewable and
+exportable (A149).
+
+| Method | Path | Why it is not swept |
+|---|---|---|
+| GET | `/auth/me` | reads the caller's own account row |
+| POST | `/auth/logout-all` | revoking sessions frees a device slot |
+| POST | `/auth/resend-verification` | must work while locked out by A43 |
+| POST | `/auth/google/set-password` | an account action, not a plan feature |
+| GET | `/devices` | reads the caller's own devices |
+| PATCH | `/devices/{id}` | renaming a device spends nothing |
+| DELETE | `/devices/{id}` | revoking a device is the remedy a device refusal names |
+| PUT | `/devices/{id}/push-token` | registering a token is not a plan feature |
+| GET | `/workspaces` | reads the caller's own workspaces |
+| GET | `/workspaces/{id}` | reads the caller's own workspace |
+| PATCH | `/workspaces/{id}` | renaming spends nothing |
+| DELETE | `/workspaces/{id}` | deleting is the remedy a workspace refusal names |
+| GET | `/chunks/{id}` | reads a chunk of the caller's source |
+| GET | `/workspaces/{id}/messages` | reads the caller's own thread |
+| GET | `/workspaces/{id}/decks` | reads the caller's own decks |
+| GET | `/decks/{id}` | reads the caller's own deck |
+| GET | `/decks/{id}/due` | reads the caller's own due cards |
+| POST | `/flashcards/{id}/review` | a review is free (R1): studying never costs credits |
+| GET | `/workspaces/{id}/quizzes` | reads the caller's own quizzes |
+| GET | `/quizzes/{id}` | reads the caller's own quiz |
+| POST | `/quizzes/{id}/attempts` | an attempt is free (R1), like a review |
+| GET | `/quizzes/{id}/results` | reads the caller's own results |
+| GET | `/workspaces/{id}/sources` | reads the caller's own sources |
+| GET | `/sources/{id}/status` | polls ingestion, which is already paid for |
+| GET | `/sources/{id}/file` | reads the caller's own file |
+| GET | `/sources/{id}/preview` | reads the caller's own PDF rendition; a read, so an over-limit account keeps it (A149) |
+| DELETE | `/sources/{id}` | deleting frees a slot, per the refusal's message |
+| GET | `/workspaces/{id}/reports` | reads the caller's own reports |
+| GET | `/reports/{id}` | reads the caller's own report |
+| PATCH | `/reports/{id}` | editing an outline spends nothing |
+| GET | `/cheatsheets/{id}` | reads the caller's own cheatsheet |
+| GET | `/workspaces/{id}/cheatsheets` | reads the caller's own cheatsheets |
+| GET | `/cheatsheets/{id}/html` | the HTML is the document the credits already bought; only the PDF is gated |
+| POST | `/cheatsheets/{id}/re-render` | re-rendering is a pure function of stored blocks and charges nothing |
+| GET | `/usage` | reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159) |
+
+**Exempt** — no authenticated user at all.
+
+| Method | Path | Why |
+|---|---|---|
+| GET | `/health` | no user |
+| POST | `/auth/signup` | credentials; a limit check here would refuse the request that could fix the account |
+| POST | `/auth/login` | credentials; rate-limited by `ratelimit::auth_layer` |
+| POST | `/auth/refresh` | credentials; holds no bearer token yet |
+| POST | `/auth/logout` | credentials; holds a refresh token, not a session |
+| POST | `/auth/verify-email` | credentials; the token is the authorisation |
+| POST | `/auth/google/exchange` | a single-use ticket, not a bearer token |
+| GET | `/auth/google/start` | a browser redirect to Google |
+| GET | `/auth/google/callback` | Google's redirect back, not the user's |
+| GET | `/objects/{id}` | an HMAC-signed URL whose whole point is that it works without a session |
+| PATCH | `/admin/users/{id}/plan` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
+| POST | `/admin/users/{id}/credits` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
+| GET | `/admin/margin` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
+
+### The refusals
+
+Every refusal is the standard five-key envelope
+(`{code, message, min_plan, limit, used}`), and the fields are populated by the
+variant that produced it:
+
+| `code` | Status | Raised by | `min_plan` | `limit` / `used` |
+|---|---|---|---|---|
+| `limit_reached` | **422** | a counted limit at its maximum: `CreateWorkspace`, `ChatMessage`, `WebSearch`, `FlashcardBatch`, `CreateQuiz`, `Report`, `UploadSource`, `DeviceLogin` | the plan that lifts it, or `null` on the top plan, where the limit is a genuine maximum and nothing is for sale (A140) | the limit and the count against it, so the UI can say "3 of 3 devices" |
+| `plan_required` | **403** | a feature a higher plan has: `ExportFormat`, `TaskBreakdown`, `QuickCapture`, `GoogleCalendar`, `PlanGeneration`, `AgentAction`, `Byok`, `ReminderChannel`, `AdvancedAnalytics` | the cheapest plan that actually grants the feature, from the matrix — never simply the next plan up | `null` / `null` |
+| `feature_locked` | **403** | locked with no upgrade to offer: no plan grants the feature at all, or the calling device's platform is `ios`/`android` (`config/billing_policy.toml` forbids selling there, A143); also a device over `devices_max`, whose remedy is to sign another device out | `null` | `null` / `null` |
+| `insufficient_credits` | **402** | the balance cannot pay for the action | the plan whose monthly allowance is higher, so a spent-out user is told what fixes it | `null` / `null` |
+| `email_not_verified` | **403** | any action that spends provider money, until the address is confirmed (A43) | `null` | `null` / `null` |
+
+`plan_required` and `feature_locked` are not synonyms: `plan_required` means a
+purchase fixes it and the client may be told which plan; `feature_locked` means
+no purchase does, so the client is offered none (A143). The platform in that
+decision comes from `devices.platform`, never from the request body (A144).
+
+## Admin (Phase 7)
+
+Three routes, all `AdminUser`-only (a non-admin gets 404, not 403 — A7). The
+admin surface is deliberately API-only until Phase 13, which adds the payment
+routes, the manual mark/refund and the completed margin report.
+
+- `PATCH /admin/users/:id/plan` body `{ "plan": "pro" }` → 200
+  `{ "user": { "id", "plan_id" } }`. Writes the stored plan **and** a live
+  `subscriptions` row, because `users.plan_id` alone grants nothing (A146). 400
+  `validation` for an unknown plan id, 404 for an unknown user.
+- `POST /admin/users/:id/credits` body
+  `{ "credits": 100, "bucket": "monthly"|"purchased", "idempotency_key": "..." }`
+  → 200 `{ "granted": bool, "bucket", "credits" }`. `bucket` is validated rather
+  than defaulted, so a typo is a 400 and never a silent monthly grant; the row's
+  `reason` is `admin`, and `period_key = "admin:<idempotency_key>"` against the
+  ledger's partial unique index, so a second call with the same key is
+  `granted: false` and writes nothing.
+- `GET /admin/margin?from=&to=` → 200 `MarginReport`: `per_plan[]` with
+  `provider_cost_usd`, `byok_cost_usd` and `ceiling_usd` (the plan's
+  `provider_cost_ceiling_usd`, attached by the route through
+  `credits::ceiling_usd`, the field's one reader), a `provider_cost` split of
+  `free_usd`/`paid_usd`/`byok_usd`, and `revenue`/`conversion` — which are
+  **`null`**, not `0`: nothing in this phase can compute them, and a `0` would
+  read as a real figure. BYOK cost is its own column because a BYOK call spends
+  the user's own key, so counting it would overstate our cost (A156). Defaults to
+  the last 30 days; 400 when `from >= to`.
+
 ## Tasks (Phase 9)
 
 CRUD `/tasks`, `POST /tasks/quick-capture`, `POST /tasks/:id/breakdown`.
@@ -812,9 +1016,12 @@ CRUD `/goals`, `POST /goals/:id/plan`, `POST /plans/accept`, `POST /plan/replan`
 `GET /settings`, `PUT /settings`, `PUT /settings/api-key`,
 `DELETE /settings/api-key`.
 
-## Account (Phase 7)
+## Account (Phase 15)
 
-`DELETE /account`, `GET /account/export`.
+`DELETE /account`, `GET /account/export`. Re-tagged from Phase 7 (A160): neither
+is in the roadmap's Phase 7 paragraph, and both need the retention and purge
+machinery (`purge_deleted_accounts`, the `## Data retention` schedule) that ships
+with the release prerequisites.
 
 ## Billing (Phase 13)
 
@@ -829,3 +1036,7 @@ rather than trusting the client.
 ## Admin (Phase 13)
 
 Users, plan overrides, manual payment mark/refund, credit grants, margin report.
+The plan override, the credit grant and the margin report are already live from
+Phase 7 (`## Admin (Phase 7)` above); this phase adds the payment half and the
+completed margin report (revenue and conversion, which Phase 7 returns as
+`null`).
