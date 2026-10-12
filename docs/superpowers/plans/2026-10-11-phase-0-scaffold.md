@@ -106,7 +106,7 @@ Inherited from `docs/superpowers/plans/2026-10-11-study-os-master-roadmap.md` §
 - Consumes: nothing.
 - Produces: workspace crate names `stvdy-core`, `stvdy-sync`, `stvdy-server` (lib names `stvdy_core`, `stvdy_sync`, `stvdy_server`); `[workspace.dependencies]` that every later task extends.
 
-- [ ] **Step 1: Write the toolchain + workspace manifests**
+- [x] **Step 1: Write the toolchain + workspace manifests**
 
 `rust-toolchain.toml`:
 ```toml
@@ -259,7 +259,7 @@ prepare:
     cargo sqlx prepare --workspace
 ```
 
-- [ ] **Step 2: Create the three crate manifests**
+- [x] **Step 2: Create the three crate manifests**
 
 `crates/core/Cargo.toml`:
 ```toml
@@ -343,7 +343,7 @@ tokio = { workspace = true, features = ["full"] }
 workspace = true
 ```
 
-- [ ] **Step 3: Minimal crate roots so the workspace compiles**
+- [x] **Step 3: Minimal crate roots so the workspace compiles**
 
 `crates/core/src/lib.rs`:
 ```rust
@@ -417,17 +417,17 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 4: Verify the workspace compiles**
+- [x] **Step 4: Verify the workspace compiles**
 
 Run: `cargo build --workspace`
 Expected: compiles; `Cargo.lock` created. If a pinned version does not exist, the error names the crate and the available versions. Fix the pin rather than loosening it to `*`.
 
-- [ ] **Step 5: Verify lints are enforced**
+- [x] **Step 5: Verify lints are enforced**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings`
 Expected: clean. Then temporarily add `let x: Option<u8> = None; x.unwrap();` to `crates/server/src/main.rs` and re-run: expected failure with `used `unwrap()` on an `Option` value`. Remove the line.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -454,7 +454,7 @@ git commit -m "chore: cargo workspace skeleton with pinned toolchain and lint ga
   - `load_plans(path: &Path) -> CoreResult<PlansFile>` and `PlansFile::validate()`
   - `CreditAction` enum used by Phase 7's ledger
 
-- [ ] **Step 1: Write the config file**
+- [x] **Step 1: Write the config file**
 
 `config/plans.toml`:
 ```toml
@@ -594,7 +594,7 @@ byok = true
 advanced_analytics = true
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `crates/core/tests/plans_matrix.rs`:
 ```rust
@@ -717,12 +717,12 @@ fn validation_requires_free_pro_and_power() {
 }
 ```
 
-- [ ] **Step 3: Run the tests to confirm they fail**
+- [x] **Step 3: Run the tests to confirm they fail**
 
 Run: `cargo test -p stvdy-core --test plans_matrix`
 Expected: FAIL to compile. `unresolved import stvdy_core::config`. `uuid` must also be added as a dev-dependency of `stvdy-core` for the test (add `uuid.workspace = true` under `[dev-dependencies]`).
 
-- [ ] **Step 4: Implement the loader**
+- [x] **Step 4: Implement the loader**
 
 `crates/core/src/config/mod.rs`:
 ```rust
@@ -1032,12 +1032,12 @@ pub struct Platform;
 pub struct PlatformPolicy;
 ```
 
-- [ ] **Step 5: Run the tests to confirm they pass**
+- [x] **Step 5: Run the tests to confirm they pass**
 
 Run: `cargo test -p stvdy-core --test plans_matrix`
 Expected: PASS (8 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add config/plans.toml crates/core
@@ -1061,7 +1061,7 @@ git commit -m "feat(core): typed plans.toml loader with plan matrix tests"
   - `BillingPolicy::for_platform(&self, Platform) -> &PlatformPolicy`, `BillingPolicy::purchase_allowed(&self, Platform) -> bool`
   - `load_billing_policy(path: &Path) -> CoreResult<BillingPolicy>`
 
-- [ ] **Step 1: Write the config file**
+- [x] **Step 1: Write the config file**
 
 `config/billing_policy.toml`:
 ```toml
@@ -1093,7 +1093,7 @@ show_prices = false
 allow_purchase_cta_in_locked_messages = false
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `crates/core/tests/billing_policy.rs`:
 ```rust
@@ -1170,12 +1170,12 @@ fn mobile_must_not_be_more_permissive_than_desktop() {
 }
 ```
 
-- [ ] **Step 3: Run the test to confirm it fails**
+- [x] **Step 3: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-core --test billing_policy`
 Expected: FAIL to compile. `load_billing_policy` does not exist.
 
-- [ ] **Step 4: Implement the loader**
+- [x] **Step 4: Implement the loader**
 
 `crates/core/src/config/billing_policy.rs` (replace the stub):
 ```rust
@@ -1302,12 +1302,12 @@ pub fn load_billing_policy(path: &Path) -> CoreResult<BillingPolicy> {
 }
 ```
 
-- [ ] **Step 5: Run the tests to confirm they pass**
+- [x] **Step 5: Run the tests to confirm they pass**
 
 Run: `cargo test -p stvdy-core`
 Expected: PASS (11 tests total across both integration test binaries).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add config/billing_policy.toml crates/core
@@ -1325,7 +1325,7 @@ git commit -m "feat(core): billing_policy loader that structurally forbids mobil
 - Consumes: nothing.
 - Produces: Postgres functions `touch_updated_at()`, `log_change()`, `log_change_by_user()`; tables `plans`, `users`, `devices`, `auth_sessions`, `push_tokens`, `change_log`, `mutation_log`.
 
-- [ ] **Step 1: Create migrations 0001–0005**
+- [x] **Step 1: Create migrations 0001–0005**
 
 `docs/SPEC.md` § DATABASE SCHEMA is a **sketch, not a script**. It says so in its own heading ("create as migrations; add sensible indexes and FKs"), states the sync columns as a *rule* rather than writing them into each table body, and describes the trigger behaviour in prose. So: **copy each `create table` body as the source, then apply the deltas below *and* the sync-column rule.** Do not copy the section verbatim. A verbatim copy produces tables with no `user_id`/`updated_at`/`deleted_at`, and Task 7's schema test plus the exit checklist (32 triggers, three sync columns on every `+sync` table) would both fail.
 
@@ -1352,7 +1352,7 @@ git commit -m "feat(core): billing_policy loader that structurally forbids mobil
   ```
 - `0005_change_log_mutation_log.sql`: `change_log` + its index, `mutation_log`.
 
-- [ ] **Step 2: Write `0006_sync_functions.sql`**
+- [x] **Step 2: Write `0006_sync_functions.sql`**
 
 ```sql
 -- Sync plumbing. Two behaviours, applied to every +sync table by 0016:
@@ -1440,7 +1440,7 @@ begin
 end $$;
 ```
 
-- [ ] **Step 3: Start the database and apply the migrations**
+- [x] **Step 3: Start the database and apply the migrations**
 
 Run: `docker compose up -d postgres` (the compose file lands in Task 8; if it does not exist yet, run the container directly):
 ```bash
@@ -1456,7 +1456,7 @@ Expected: `0001`…`0006` applied without error.
 
 Note: `cargo install --locked sqlx-cli` no longer works in sqlx 0.9 (Cargo.lock is untracked), hence the fallback command.
 
-- [ ] **Step 4: Verify the schema by inspection**
+- [x] **Step 4: Verify the schema by inspection**
 
 Run:
 ```bash
@@ -1464,7 +1464,7 @@ psql "$DATABASE_URL" -c "\df touch_updated_at" -c "\df log_change" -c "\df log_c
 ```
 Expected: three functions present; `change_log` has `seq bigserial` PK and the `(user_id, seq)` index.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add migrations
@@ -1482,7 +1482,7 @@ git commit -m "feat(db): extensions, plans, users, devices, sync log and sync fu
 - Consumes: `0003_users.sql` (FK target `users`).
 - Produces: `workspaces`, `sources`, `chunks`, `messages`, `decks`, `flashcards`, `flashcard_reviews`, `quizzes`, `quiz_questions`, `quiz_attempts`, `reports`, `report_revisions`.
 
-- [ ] **Step 1: Create the five migrations**
+- [x] **Step 1: Create the five migrations**
 
 Same rule as Task 4: `docs/SPEC.md` supplies the table bodies; you supply the sync columns (the rule in Task 4 Step 1 applies to every `-- +sync` table here), the indexes below, and the FKs the spec's heading asks for but does not write. Apply these deltas:
 
@@ -1506,12 +1506,12 @@ Same rule as Task 4: `docs/SPEC.md` supplies the table bodies; you supply the sy
 
 The `chunks` migration must keep the exact index set from the spec (HNSW on `embedding` with `vector_cosine_ops`, GIN on `tsv`, btree on `content_hash`).
 
-- [ ] **Step 2: Apply and inspect**
+- [x] **Step 2: Apply and inspect**
 
 Run: `sqlx migrate run && psql "$DATABASE_URL" -c "\d chunks" -c "\d report_revisions"`
 Expected: `chunks.embedding` is `vector(768)`, `chunks.tsv` is `tsvector` with `GENERATED ALWAYS ... STORED`; both indexes listed. `report_revisions` exists with its index.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add migrations
@@ -1529,7 +1529,7 @@ git commit -m "feat(db): content tables (workspaces, sources, chunks, chat, stud
 - Consumes: `log_change()`, `log_change_by_user()`, `touch_updated_at()` from Task 4.
 - Produces: `tasks`, `goals`, `study_sessions`, `user_settings`, `pending_actions`, `calendar_connections`, `events`, `subscriptions`, `payments`, `webhook_events`, `credit_ledger`, `usage_events`, `discount_codes`, `user_api_keys`, `jobs`; triggers on all 16 sync tables.
 
-- [ ] **Step 1: Create migrations 0012–0015**
+- [x] **Step 1: Create migrations 0012–0015**
 
 `docs/SPEC.md` supplies the table bodies; the sync-column rule from Task 4 Step 1 applies to every `-- +sync` table here (`tasks`, `goals`, `study_sessions`, `pending_actions`, `events`, `cheatsheets`). Add these deltas:
 
@@ -1563,7 +1563,7 @@ git commit -m "feat(db): content tables (workspaces, sources, chunks, chat, stud
   create unique index on jobs (dedupe_key) where dedupe_key is not null;
   ```
 
-- [ ] **Step 2: Write `0016_cheatsheets.sql`**
+- [x] **Step 2: Write `0016_cheatsheets.sql`**
 
 ```sql
 -- The cheatsheet document itself (print/PDF export). Only metadata syncs: the
@@ -1601,7 +1601,7 @@ create index on cheatsheets (user_id, status);
 create index on cheatsheets (user_id, created_at desc);
 ```
 
-- [ ] **Step 3: Write `0017_sync_triggers.sql`**
+- [x] **Step 3: Write `0017_sync_triggers.sql`**
 
 This migration **must be last**, because it attaches triggers to every synced table
 created before it. A future `+sync` table is added by inserting its migration above this
@@ -1642,7 +1642,7 @@ create trigger user_settings_log_change
   for each row execute function log_change_by_user();
 ```
 
-- [ ] **Step 4: Apply and verify trigger coverage**
+- [x] **Step 4: Apply and verify trigger coverage**
 
 Run:
 ```bash
@@ -1664,7 +1664,7 @@ group by 1 having count(*) filter (where a.attname in ('user_id','updated_at','d
 ```
 Expected: **zero rows.** Any row returned is a `+sync` table missing one of the three columns, which Task 7's schema test would catch later. Better to see it here.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add migrations
@@ -1682,7 +1682,7 @@ git commit -m "feat(db): study OS, calendar, billing, jobs, cheatsheets tables a
 - Consumes: all migrations; `sqlx::test` (which creates a fresh database per test and applies `migrations/`).
 - Produces: the guard that keeps every later phase's sync tables honest.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/schema.rs`:
 ```rust
@@ -2126,12 +2126,12 @@ async fn deleting_a_user_cascades_its_change_log(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to confirm the sync contract holds**
+- [x] **Step 2: Run the tests to confirm the sync contract holds**
 
 Run: `cargo test -p stvdy-server --test schema`
 Expected: PASS (9 tests). If `every_sync_table_has_the_sync_columns` fails, the named table is missing a column in its migration. Fix the migration, do not weaken the test.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/server/tests/schema.rs
@@ -2153,7 +2153,7 @@ git commit -m "test(db): assert sync columns, trigger coverage and change_log se
   - `server::config::AppConfig::from_env() -> anyhow::Result<AppConfig>` with fields `database_url`, `bind_addr`, `plans: PlansFile`, `billing_policy: BillingPolicy`, `env: Env`, `jwt_secret: SecretString`
   - `server::db::connect(cfg) -> anyhow::Result<PgPool>`, `server::db::migrate(&pool)`, `server::db::seed_plans(&pool, &PlansFile)`
 
-- [ ] **Step 1: Write `docker-compose.yml`**
+- [x] **Step 1: Write `docker-compose.yml`**
 
 ```yaml
 services:
@@ -2232,7 +2232,7 @@ volumes:
   miniodata:
 ```
 
-- [ ] **Step 1b: Write `searxng/settings.yml`**
+- [x] **Step 1b: Write `searxng/settings.yml`**
 
 `searxng/settings.yml`:
 ```yaml
@@ -2284,7 +2284,7 @@ docker compose exec searxng wget -qO- "http://127.0.0.1:8080/search?q=test&forma
 ```
 Expected: a JSON object with a `results` array, not the `Verifying your browser…` HTML page (which is what a *public* SearXNG instance returns to an unauthenticated JSON client).
 
-- [ ] **Step 2: Write `.env.example`**
+- [x] **Step 2: Write `.env.example`**
 
 ```dotenv
 # --- runtime ---
@@ -2371,7 +2371,7 @@ QRIS_API_KEY=
 QRIS_CALLBACK_TOKEN=
 ```
 
-- [ ] **Step 3: Write the failing test for config loading**
+- [x] **Step 3: Write the failing test for config loading**
 
 `crates/server/tests/config.rs`:
 ```rust
@@ -2408,12 +2408,12 @@ fn a_missing_plans_file_is_reported_with_its_path() {
 }
 ```
 
-- [ ] **Step 4: Run the test to confirm it fails**
+- [x] **Step 4: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-server --test config`
 Expected: FAIL to compile. `stvdy_server::config::AppConfig` does not exist.
 
-- [ ] **Step 5: Implement `config.rs`**
+- [x] **Step 5: Implement `config.rs`**
 
 ```rust
 use std::net::SocketAddr;
@@ -2517,7 +2517,7 @@ impl AppConfig {
 }
 ```
 
-- [ ] **Step 6: Implement `db.rs`**
+- [x] **Step 6: Implement `db.rs`**
 
 ```rust
 use anyhow::Context;
@@ -2575,12 +2575,12 @@ pub async fn seed_plans(pool: &PgPool, plans: &PlansFile) -> anyhow::Result<()> 
 
 `PlanConfig` must derive `Serialize` for `seed_plans`. Add `Serialize` to its derive list and to `PlansFile`'s, and `#[serde(serialize_with)]` is not needed because `limit_of` only affects deserialization.
 
-- [ ] **Step 7: Run the tests**
+- [x] **Step 7: Run the tests**
 
 Run: `cargo test -p stvdy-server --test config`
 Expected: PASS (2 tests).
 
-- [ ] **Step 8: Verify migrations + seeding against the real database**
+- [x] **Step 8: Verify migrations + seeding against the real database**
 
 Run:
 ```bash
@@ -2591,7 +2591,7 @@ cargo test -p stvdy-server --test schema -- --nocapture
 ```
 Expected: schema tests PASS against the compose database.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add docker-compose.yml .env.example crates/server
@@ -2615,7 +2615,7 @@ git commit -m "feat(server): env config, DB pool, migration runner and plan seed
   - `routes::router(state: AppState) -> axum::Router`
   - `telemetry::init(&str)`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/health.rs`:
 ```rust
@@ -2704,12 +2704,12 @@ fn error_mapping_matches_the_documented_table() {
 }
 ```
 
-- [ ] **Step 2: Run the test to confirm it fails**
+- [x] **Step 2: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-server --test health`
 Expected: FAIL to compile. `stvdy_server::routes` does not exist.
 
-- [ ] **Step 3: Implement `error.rs`**
+- [x] **Step 3: Implement `error.rs`**
 
 ```rust
 use axum::http::StatusCode;
@@ -2821,7 +2821,7 @@ impl IntoResponse for AppError {
 }
 ```
 
-- [ ] **Step 4: Implement `state.rs`, `routes/*`, `telemetry.rs`, `main.rs`**
+- [x] **Step 4: Implement `state.rs`, `routes/*`, `telemetry.rs`, `main.rs`**
 
 `state.rs`:
 ```rust
@@ -2970,12 +2970,12 @@ async fn shutdown_signal() {
 
 Add `pub mod routes;` to `lib.rs` (Task 1 already lists it).
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cargo test -p stvdy-server`
 Expected: PASS (schema 9 + config 2 + health 3).
 
-- [ ] **Step 6: Smoke-test the running server**
+- [x] **Step 6: Smoke-test the running server**
 
 Run:
 ```bash
@@ -2989,7 +2989,7 @@ kill %1
 ```
 Expected: `{"status":"ok","version":"0.1.0","env":"dev","plans":3}` and `404`. This is the phase's real smoke test: the server boots, migrates, seeds and answers.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/server
@@ -3017,7 +3017,7 @@ git commit -m "feat(server): axum app with health, request-id tracing and typed 
   - `MutationResult { Applied{seq}, Rejected{code,message}, Conflict{winner} }`
   - `ErrorCode` (`serde` snake_case) matching the server's error codes
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/sync/tests/wire.rs`:
 ```rust
@@ -3216,12 +3216,12 @@ fn mutation_results_carry_the_rejection_reason() {
 }
 ```
 
-- [ ] **Step 2: Run the test to confirm it fails**
+- [x] **Step 2: Run the test to confirm it fails**
 
 Run: `cargo test -p stvdy-sync`
 Expected: FAIL to compile. The `proto` modules are empty.
 
-- [ ] **Step 3: Implement the DTOs**
+- [x] **Step 3: Implement the DTOs**
 
 `crates/sync/src/proto/entities.rs`:
 ```rust
@@ -3477,12 +3477,12 @@ pub enum ErrorCode {
 
 Update `crates/sync/src/proto/mod.rs` to also `pub mod error;` and re-export `ErrorCode`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test -p stvdy-sync`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/sync
@@ -3501,7 +3501,7 @@ git commit -m "feat(sync): shared protocol DTOs with entity/table bijection test
 - Consumes: nothing.
 - Produces: `npm --prefix app run dev|build|test`; `app/dist` as Tauri's `frontendDist`; the `@/` path alias to `app/src`; `src/test/setup.ts` with jest-dom matchers.
 
-- [ ] **Step 1: Write `package.json`**
+- [x] **Step 1: Write `package.json`**
 
 ```json
 {
@@ -3551,7 +3551,7 @@ git commit -m "feat(sync): shared protocol DTOs with entity/table bijection test
 }
 ```
 
-- [ ] **Step 2: Write the build config**
+- [x] **Step 2: Write the build config**
 
 `app/vite.config.ts`:
 ```ts
@@ -3667,7 +3667,7 @@ Note: TypeScript 7 defaults `types` to `[]` and enables `noUncheckedSideEffectIm
 import '@testing-library/jest-dom/vitest'
 ```
 
-- [ ] **Step 3: Write `styles.css` with Tailwind v4 tokens**
+- [x] **Step 3: Write `styles.css` with Tailwind v4 tokens**
 
 ```css
 @import "tailwindcss";
@@ -3704,7 +3704,7 @@ import '@testing-library/jest-dom/vitest'
 @custom-variant pointer-fine (@media (pointer: fine));
 ```
 
-- [ ] **Step 4: Write the failing test**
+- [x] **Step 4: Write the failing test**
 
 `app/src/lib/time.test.ts`:
 ```ts
@@ -3732,12 +3732,12 @@ describe('time helpers', () => {
 })
 ```
 
-- [ ] **Step 5: Run the test to confirm it fails**
+- [x] **Step 5: Run the test to confirm it fails**
 
 Run: `cd app && npm install && npm test`
 Expected: FAIL. `./time` cannot be resolved. (`npm install` may need `npm install --force` if a peer range conflicts; resolve by aligning versions rather than disabling peer checks.)
 
-- [ ] **Step 6: Implement the helpers and the app shell**
+- [x] **Step 6: Implement the helpers and the app shell**
 
 `app/src/lib/time.ts`:
 ```ts
@@ -3969,12 +3969,12 @@ export function TabBar() {
 }
 ```
 
-- [ ] **Step 7: Run the tests and the build**
+- [x] **Step 7: Run the tests and the build**
 
 Run: `cd app && npm test && npm run build`
 Expected: 3 tests PASS; `dist/` created. Then `npm run dev` and load `http://localhost:5173`. The shell renders with the sidebar and the "Today" placeholder.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app
@@ -3993,7 +3993,7 @@ git commit -m "feat(app): vite+react+tailwind SPA scaffold with adaptive shell a
 - Consumes: `@tauri-apps/api` (only inside `desktop.ts`/`mobile.ts`), `@tauri-apps/plugin-os` for the platform name.
 - Produces: a `Platform` interface with `formFactor()`, `kind()`, `secureStore`, `notifications`, `files`, `deepLinks`, `openExternal()`, `updater`, `haptics`; a singleton `platform`; `isTauri()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `app/src/platform/platform.test.ts`:
 ```ts
@@ -4023,12 +4023,12 @@ describe('form factor', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to confirm it fails**
+- [x] **Step 2: Run the test to confirm it fails**
 
 Run: `cd app && npm test -- platform`
 Expected: FAIL. Cannot resolve `./index`.
 
-- [ ] **Step 3: Implement the adapter**
+- [x] **Step 3: Implement the adapter**
 
 `app/src/platform/types.ts`:
 ```ts
@@ -4368,7 +4368,7 @@ export function mobilePlatform(kind: PlatformKind): Platform {
 
 Add `@tauri-apps/plugin-haptics` `2.4.2` to `package.json` dependencies.
 
-- [ ] **Step 4: Enforce the adapter boundary**
+- [x] **Step 4: Enforce the adapter boundary**
 
 Add `app/src/platform/boundary.test.ts`:
 ```ts
@@ -4398,12 +4398,12 @@ describe('platform boundary', () => {
 })
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd app && npm test`
 Expected: PASS (5 tests: 3 time + 2 platform + 1 boundary).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app
@@ -4422,7 +4422,7 @@ git commit -m "feat(app): platform adapter with enforced Tauri import boundary"
 - Consumes: `app/dist` as `frontendDist`; the Task 12 `installPlatform`.
 - Produces: `tauri dev`/`tauri build` for macOS and Windows; IPC commands `health_ping`, `secret_set`, `secret_get`, `secret_delete`.
 
-- [ ] **Step 1: Scaffold the shell and inspect the generated config**
+- [x] **Step 1: Scaffold the shell and inspect the generated config**
 
 Run:
 ```bash
@@ -4437,7 +4437,7 @@ cd ..
 ```
 Expected: `src-tauri/` created. Because `frontendDist` is `../app/dist`, Tauri runs the before-commands with cwd `<root>/app`, which is where `package.json` lives (verified in the CLI source; see docs/ASSUMPTIONS.md A36).
 
-- [ ] **Step 2: Write `src-tauri/tauri.conf.json`**
+- [x] **Step 2: Write `src-tauri/tauri.conf.json`**
 
 ```json
 {
@@ -4494,7 +4494,7 @@ Expected: `src-tauri/` created. Because `frontendDist` is `../app/dist`, Tauri r
 
 `connect-src` must list the API origin, or `fetch` from the webview fails; `ipc:` and `http://ipc.localhost` are required by Tauri's own IPC.
 
-- [ ] **Step 3: Write `src-tauri/Cargo.toml` and `build.rs`**
+- [x] **Step 3: Write `src-tauri/Cargo.toml` and `build.rs`**
 
 `src-tauri/build.rs`:
 ```rust
@@ -4572,7 +4572,7 @@ panic = "abort"
 strip = true
 ```
 
-- [ ] **Step 4: Write the shell source**
+- [x] **Step 4: Write the shell source**
 
 `src-tauri/src/keychain.rs`:
 ```rust
@@ -4781,7 +4781,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 5: Write the capability files**
+- [x] **Step 5: Write the capability files**
 
 `src-tauri/capabilities/default.json`:
 ```json
@@ -4829,7 +4829,7 @@ fn main() {
 }
 ```
 
-- [ ] **Step 6: Install the adapter at startup**
+- [x] **Step 6: Install the adapter at startup**
 
 Replace the render block in `app/src/main.tsx` so the Tauri adapter is chosen before the first render:
 ```tsx
@@ -4848,7 +4848,7 @@ async function bootstrap() {
 void bootstrap()
 ```
 
-- [ ] **Step 7: Build and smoke-test the desktop app**
+- [x] **Step 7: Build and smoke-test the desktop app**
 
 Run:
 ```bash
@@ -4860,7 +4860,7 @@ npm run tauri dev
 ```
 Expected: the window opens showing the shell; in the devtools console `await window.__TAURI_INTERNALS__.invoke('health_ping')` returns `stvdy-shell 0.1.0`, and `secret_set`/`secret_get` round-trip a value (on macOS this may prompt for keychain access the first time. That is expected and is the Phase 1 prototype data point).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src-tauri app/src/main.tsx app/package.json app/package-lock.json
@@ -4879,7 +4879,7 @@ git commit -m "feat(shell): tauri 2 desktop shell with keychain, plugins and cap
 - Consumes: `justfile` targets, `app/package.json` scripts, `src-tauri`.
 - Produces: a green CI badge; `.sqlx` so lint jobs compile without a database.
 
-- [ ] **Step 1: Generate and commit the offline query cache**
+- [x] **Step 1: Generate and commit the offline query cache**
 
 Run:
 ```bash
@@ -4891,7 +4891,7 @@ git add .sqlx
 ```
 Expected: `.sqlx/` contains one JSON file per compile-time-checked query. Phase 0 has none yet, so the directory may be created empty. That is fine and later phases add entries. `cargo sqlx prepare --check --workspace` must exit 0.
 
-- [ ] **Step 2: Write the workflow**
+- [x] **Step 2: Write the workflow**
 
 `.github/workflows/ci.yml`:
 ```yaml
@@ -4995,7 +4995,7 @@ jobs:
         run: npm --prefix app run tauri build -- ${{ matrix.args }}
 ```
 
-- [ ] **Step 3: Verify the workflow locally as far as possible**
+- [x] **Step 3: Verify the workflow locally as far as possible**
 
 Run:
 ```bash
@@ -5006,7 +5006,7 @@ npm --prefix app test && npm --prefix app run build
 ```
 Expected: all clean. The `SQLX_OFFLINE=true` clippy run proves the lint job will pass without a database.
 
-- [ ] **Step 4: Commit and push to see CI run**
+- [x] **Step 4: Commit and push to see CI run**
 
 ```bash
 git add .github .sqlx
@@ -5028,7 +5028,7 @@ Expected: all four jobs green. The `desktop` job is the phase's macOS/Windows pr
 - Consumes: nothing.
 - Produces: the documents later phases append to; each has the section headings the phase table promises.
 
-- [ ] **Step 1: Write the four stubs**
+- [x] **Step 1: Write the four stubs**
 
 Each file gets its headings plus an explicit "filled by phase N" marker, so a later phase cannot silently skip documentation:
 
@@ -5048,16 +5048,16 @@ Each file gets its headings plus an explicit "filled by phase N" marker, so a la
 - `## Data retention` (Phase 15). Per-category retention (change_log 90 days per A19; uploads and chunks for the life of the workspace; `usage_events` and billing rows as required for margin and tax; account deletion semantics and the scheduled hard delete). UU PDP requires a stated schedule, not just a delete button.
 - `## Data processing agreements` (Phase 15). The vendor list needing a DPA before public launch: LLM provider, Exa/Tavily (A3), VPS host, object storage, SMTP, and the payment gateway (B1). UU PDP explicitly requires formalized vendor contracts.
 
-- [ ] **Step 2: Write `README.md`**
+- [x] **Step 2: Write `README.md`**
 
 Include: what the project is (one paragraph), the architecture in five bullets, the trust boundary in two sentences (server is the only enforcement point; see `docs/THREAT_MODEL.md`), prerequisites (Rust 1.94.1, Node 24, Docker, Xcode for iOS, Android Studio + NDK for Android), the quick start (`docker compose up -d`, `cp .env.example .env`, `sqlx migrate run`, `cargo run -p stvdy-server`, `npm --prefix app install`, `npm --prefix app run dev`, `npm --prefix app run tauri dev`), the `justfile` targets, the CI gates, and pointers to `docs/SPEC.md`, `docs/ASSUMPTIONS.md`, `docs/THREAT_MODEL.md` and the plan files.
 
-- [ ] **Step 3: Verify the links resolve**
+- [x] **Step 3: Verify the links resolve**
 
 Run: `ls docs/ docs/research/ docs/superpowers/plans/ config/ migrations/`
 Expected: every file referenced from `README.md` exists.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs
@@ -5070,18 +5070,18 @@ git commit -m "docs: architecture, API, sync and release stubs plus README quick
 
 All must be true before the phase is called done:
 
-- [ ] `cargo fmt --all -- --check` clean.
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean, **and** the `unwrap_used`/`expect_used` lint demonstrably fires (Task 1 Step 5).
-- [ ] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
-- [ ] `npm --prefix app test` and `npm --prefix app run build` green.
-- [ ] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2. 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
-- [ ] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty (not the `Verifying your browser…` HTML page). On the **production host** it must also have an empty `unresponsive_engines`. Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8088/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`). See A3 for the measured baseline. If only `google cse` answers, check first that `brave`, `duckduckgo`, `qwant` and `startpage` are absent from `unresponsive_engines`: if they appear, the tuned list is not in effect. If they are absent, the config is correct and the shortfall is the dev laptop's own network (it blocks `mojeek`), which understates this tier by ~3.6× and must not be tuned around.
-- [ ] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
+- [x] `cargo fmt --all -- --check` clean.
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean, **and** the `unwrap_used`/`expect_used` lint demonstrably fires (Task 1 Step 5).
+- [x] `cargo test --workspace` green: plans matrix (8), billing policy (3), schema (9), config (2), health (3), sync wire (7), plus app tests (6).
+- [x] `npm --prefix app test` and `npm --prefix app run build` green.
+- [x] `docker compose up -d` then `sqlx migrate run` applies `0001`–`0017` with no error; **34** sync triggers exist (17 tables × 2. 16 `log_change` tables plus `user_settings` via `log_change_by_user`), and no non-sync table has one. The Task 6 Step 4 column query returns zero rows.
+- [x] `docker compose up -d` reports `searxng` **healthy**, and `just db-search` prints a JSON object whose `results` array is non-empty (not the `Verifying your browser…` HTML page). On the **production host** it must also have an empty `unresponsive_engines`. Verify the engine count too, since the tuned list depends on two upstream-disabled engines being re-enabled: `curl -s localhost:8088/config | jq '[.engines[] | select(.enabled and (.categories | index("general")))] | length'` should report **≥ 3 answering engines** on the production host (`google cse`, `mojeek`, `mwmbl`). See A3 for the measured baseline. If only `google cse` answers, check first that `brave`, `duckduckgo`, `qwant` and `startpage` are absent from `unresponsive_engines`: if they appear, the tuned list is not in effect. If they are absent, the config is correct and the shortfall is the dev laptop's own network (it blocks `mojeek`), which understates this tier by ~3.6× and must not be tuned around.
+- [x] `cargo run -p stvdy-server` + `curl localhost:8080/health` returns `{"status":"ok",...,"plans":3}`; `/nope` returns 404 with `{"code":"not_found"}`.
 - [ ] `npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green.
-- [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
-- [ ] `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md` exist with their headings and phase markers; `docs/THREAT_MODEL.md` exists and is linked from `docs/ARCHITECTURE.md` § Trust boundary and from `README.md`.
+- [x] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
+- [x] `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/SYNC.md`, `docs/RELEASE.md` exist with their headings and phase markers; `docs/THREAT_MODEL.md` exists and is linked from `docs/ARCHITECTURE.md` § Trust boundary and from `README.md`.
 - [ ] The SPA shell passes the accessibility gate (roadmap § Verification Gates 5) on the screens it has: keyboard-only navigation reaches every control with a visible focus ring, the default theme meets contrast, and no interactive element is below the 44px touch target on a phone-width viewport.
-- [ ] Phase summary posted; wait for "continue".
+- [x] Phase summary posted; wait for "continue".
 
 ## Self-Review
 
@@ -5129,3 +5129,8 @@ Deviations and discoveries from actually running the plan. The plan text above i
 | Fresh DB `sqlx migrate run` | 17 migrations, **34 triggers**, `insert into users` works with no app code |
 | Server smoke | `/health` → `{env:dev,plans:3,status:ok,version:0.1.0}`; `/nope` → typed 404; `x-request-id` propagated |
 | Web render | verified in headless Chrome: shell renders, deep route returns 200 |
+
+**Boxes left unticked, and why.**
+
+  - Phase 0 exit checklist, "`npm --prefix app run tauri build -- --no-bundle` succeeds on macOS; the Windows job in CI is green" -- the macOS half is attested by the verification table above (the shell builds, launches and round-trips a real keychain secret), but no artefact records the Windows job's own result: the workflow carries the job, its green run is not in the tree.
+  - Phase 0 exit checklist, "The SPA shell passes the accessibility gate ... on a phone-width viewport" -- no measurement of the Phase 0 shell is recorded in this file or anywhere else in the doc set; the accessibility measurements that exist are Phases 5, 7 and 14's, on the screens those phases added.
