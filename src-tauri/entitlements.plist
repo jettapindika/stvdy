@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The hardened runtime is on (`bundle.macOS.hardenedRuntime`, A333), and it
+	     blocks JIT and unsigned executable memory. These two are the ones the shell
+	     needs and nothing else is added: an entitlement here is a hole that survives
+	     review, so "just in case" is the wrong reason to add one.
+
+	     - `allow-jit`: the webview's JavaScript engine needs it. Without it the
+	       webview does not start, which is the whole UI.
+	     - `allow-unsigned-executable-memory`: the webview's own code generation
+	       writes executable pages it has not signed.
+
+	     `com.apple.security.cs.disable-library-validation` is deliberately absent:
+	     it exists for loading unsigned plugins and the shell loads none. A future
+	     plugin that needs it is a decision with a reason, not a default.
+
+	     `com.apple.security.network.client` is also absent, and correctly so: that
+	     key belongs to the App Sandbox, which this app does not enable. Hardened
+	     runtime alone does not restrict outgoing connections, so adding it would
+	     suggest a sandbox that is not there. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

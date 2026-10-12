@@ -299,6 +299,13 @@ fn a_signed_manifest_verifies_and_a_mutated_one_does_not() {
     // (3) No signature → Err. An unsigned manifest is the "no signature at all"
     // case: both the empty string and a base64-wrapped empty string must be refused
     // rather than treated as "nothing to check".
+    //
+    // **Honest about *why* these fail.** Both are rejected by the signature's own
+    // decoder, before any cryptography runs — a manifest whose `signature` field is
+    // absent or empty is a manifest the plugin's deserializer refuses outright
+    // (`the `signature` field was not set on the updater response`). So these two
+    // assert the *structural* refusal, and the case below is what asserts the
+    // cryptographic one.
     assert!(
         verify_signed_manifest(manifest, "", &pubkey_b64).is_err(),
         "a manifest with no signature must not verify"
@@ -308,9 +315,36 @@ fn a_signed_manifest_verifies_and_a_mutated_one_does_not() {
         "a manifest with an empty signature must not verify"
     );
 
+    // (3b) A well-formed signature over *different* bytes → Err.
+    //
+    // This is the case the empty ones cannot see, and it is the replay an attacker
+    // would actually attempt: take a genuine `.sig` from an older release, pair it
+    // with a manifest you wrote, and let the app read the version it names. The
+    // signature decodes, the key id matches, and only the Ed25519 verification
+    // rejects it — so unlike (3) this one is a statement about the cryptography.
+    let other = minisign::sign(
+        Some(&keypair.pk),
+        &keypair.sk,
+        std::io::Cursor::new(b"{\"version\":\"9.9.9\"}"),
+        Some("version:9.9.9"),
+        Some("untrusted comment: signature from the Phase 15 fixture key"),
+    )
+    .expect("the fixture key signs a different manifest");
+    assert!(
+        verify_signed_manifest(manifest, &plugin_base64(&String::from(other)), &pubkey_b64)
+            .is_err(),
+        "a signature over different bytes must not verify"
+    );
+
     // (4) A signature from someone else's key → Err. This is the forged-manifest
-    // case the phase exists to prevent, and the two above cannot see it: the bytes
-    // are genuine and the signature is well-formed, it just is not ours.
+    // case the phase exists to prevent, and the cases above cannot see it: the bytes
+    // are genuine and the signature is well-formed and correctly made, it just is
+    // not ours.
+    //
+    // The second assertion is what makes the first one mean "the key is pinned"
+    // rather than "signatures do not work": the very same signature verifies against
+    // the key that produced it, so pinning the committed public key is the only
+    // thing rejecting it.
     let attacker = minisign::KeyPair::generate_unencrypted_keypair().expect("a second keypair");
     let forged = minisign::sign(
         None,
@@ -320,10 +354,21 @@ fn a_signed_manifest_verifies_and_a_mutated_one_does_not() {
         Some("untrusted comment: signature from a key that is not ours"),
     )
     .expect("the attacker's key signs the same manifest");
+    let forged_b64 = plugin_base64(&String::from(forged));
     assert!(
-        verify_signed_manifest(manifest, &plugin_base64(&String::from(forged)), &pubkey_b64)
-            .is_err(),
+        verify_signed_manifest(manifest, &forged_b64, &pubkey_b64).is_err(),
         "a manifest signed by a different key must not verify"
+    );
+    let attacker_pubkey_b64 = plugin_base64(
+        &attacker
+            .pk
+            .to_box()
+            .expect("a public key box")
+            .into_string(),
+    );
+    assert!(
+        verify_signed_manifest(manifest, &forged_b64, &attacker_pubkey_b64).is_ok(),
+        "the forged signature must be valid against its own key, or the case above proves nothing"
     );
 }
 
@@ -462,6 +507,71 @@ fn the_macos_bundle_pins_hardened_runtime_and_the_minimum_version() {
     assert!(
         macos.get("signingIdentity").is_none(),
         "`signingIdentity` must not be committed; it comes from the workflow's secret"
+    );
+
+    // **The config names a file, so the file has to be there and has to be the
+    // right file.** `bundle.macOS.entitlements` is a path, and a path that does not
+    // resolve is a `tauri build` failure on macOS — one that only a macOS runner
+    // sees, which is the same class of defect as a plugin registered without its
+    // permission. This asserts the path resolves and that the file says what the
+    // plan says it says.
+    let entitlements_path = root().join("src-tauri").join("entitlements.plist");
+    let entitlements = std::fs::read_to_string(&entitlements_path).unwrap_or_else(|error| {
+        panic!(
+            "`bundle.macOS.entitlements` names a file that must exist: {}: {error}",
+            entitlements_path.display()
+        )
+    });
+
+    // Exactly the two the shell needs (A333). The second assertion is the one that
+    // matters: an entitlement added "just in case" is a hole that survives review,
+    // so an extra `com.apple.security.*` key is a failure rather than a curiosity.
+    let expected = [
+        "com.apple.security.cs.allow-jit",
+        "com.apple.security.cs.allow-unsigned-executable-memory",
+    ];
+    for key in expected {
+        assert!(
+            entitlements.contains(key),
+            "the entitlements file must carry {key}"
+        );
+    }
+
+    // Comments are stripped before the keys are counted: this file's own comment
+    // names `disable-library-validation` as the key it is deliberately *not*
+    // granting, and a mention in a comment is not a grant.
+    let mut body = String::new();
+    let mut in_comment = false;
+    for line in entitlements.lines() {
+        let line = line.trim();
+        if in_comment {
+            in_comment = !line.contains("-->");
+            continue;
+        }
+        if line.starts_with("<!--") {
+            in_comment = !line.contains("-->");
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+
+    let mut granted: Vec<&str> = body
+        .match_indices("com.apple.security.")
+        .map(|(at, _)| {
+            let rest = &body[at..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+                .unwrap_or(rest.len());
+            &rest[..end]
+        })
+        .filter(|key| !expected.contains(key))
+        .collect();
+    granted.sort_unstable();
+    granted.dedup();
+    assert!(
+        granted.is_empty(),
+        "the hardened runtime blocks what is not granted; these are not needed: {granted:?}"
     );
 }
 

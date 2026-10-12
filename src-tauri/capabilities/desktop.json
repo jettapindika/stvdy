@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop-only",
-  "description": "Global shortcut is desktop only. The updater capability arrives in Phase 15 with its signing keypair and release endpoint.",
+  "description": "Global shortcut and the updater are desktop only. `tauri-plugin-updater` declares `ios: none, android: none`, and mobile updates ship through TestFlight and Play, so a mobile build must not see this permission — which is why it is here rather than in `default.json`.",
   "windows": ["main"],
   "platforms": ["macOS", "windows", "linux"],
-  "permissions": ["global-shortcut:default"]
+  "permissions": ["global-shortcut:default", "updater:default"]
 }

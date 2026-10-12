@@ -41,18 +41,27 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist"
     },
     "windows": {
-      "nsis": { "installMode": "perMachine" }
+      "nsis": { "installMode": "perMachine" },
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com"
     }
   },
   "plugins": {
     "deep-link": {
       "desktop": { "schemes": ["stvdy"] },
       "mobile": [{ "scheme": ["stvdy"] }]
+    },
+    "updater": {
+      "endpoints": ["https://updates.stvdy.app/{{target}}/{{arch}}/{{current_version}}"],
+      "pubkey": "<the operator's minisign public key>",
+      "windows": { "installMode": "passive" }
     }
   }
 }
