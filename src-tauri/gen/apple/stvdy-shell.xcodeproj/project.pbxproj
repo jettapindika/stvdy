@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1BB17D98BDF3AF51478E3FDD /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3F083A8A45111BFF10EE73D7 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2445FB67128AF883B69CB74E /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43FF95EA038D13FA45AA28D /* ShareViewController.swift */; };
 		414CAB4383FA202F6C6477AD /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 36C4510CE87E3090FE5B3D3D /* libapp.a */; };
 		4DDDEBB1FCD1A0CD8A9DFE78 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A7EA9A1FA900298FEB213303 /* LaunchScreen.storyboard */; };
 		55EDD583A768FD9BEF94D452 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A3AB3513774352127041357 /* UIKit.framework */; };
@@ -21,7 +23,32 @@
 		FCD4C021AA5FC9AB02F0B31F /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 2CD1096D90F5D3331B5152E0 /* assets */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5A20C9C9E17EC949E3BB59A6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7D753B97E621A74DDF6DEC59 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CAABEEF259A691EDF85223D0;
+			remoteInfo = ShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F41847CD68A1AE30CD329DEC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1BB17D98BDF3AF51478E3FDD /* ShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		0FB2EE6E98A4DE1DF4713A88 /* push.rs */ = {isa = PBXFileReference; path = push.rs; sourceTree = "<group>"; };
 		153CE62F38AE52DE4ED22CAA /* stvdy-shell_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "stvdy-shell_iOS.entitlements"; sourceTree = "<group>"; };
 		18EC27DCF79DD7B37F5DCEC4 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		19C273CBA385F8CE19C60793 /* queries.rs */ = {isa = PBXFileReference; path = queries.rs; sourceTree = "<group>"; };
@@ -31,6 +58,7 @@
 		3028773F55891E5AFBA85D12 /* stvdy-shell_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "stvdy-shell_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		32B35B3AA603DCCD30EC1BCC /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		36C4510CE87E3090FE5B3D3D /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		3F083A8A45111BFF10EE73D7 /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		560BC1F438DD18B6F0397635 /* transport.rs */ = {isa = PBXFileReference; path = transport.rs; sourceTree = "<group>"; };
 		5AA4F0E476A30DECBDF87C4E /* deeplink.rs */ = {isa = PBXFileReference; path = deeplink.rs; sourceTree = "<group>"; };
 		61E8D8C2B7E28ACF3237EFF2 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
@@ -41,8 +69,10 @@
 		849792F3ABC76A8B36941FA2 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		899C5727C3E72D5566A70C7A /* commands.rs */ = {isa = PBXFileReference; path = commands.rs; sourceTree = "<group>"; };
 		A17B78C4C12D57F2F0C54257 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		A5422E9C95CBD8F8D4E556E5 /* share.rs */ = {isa = PBXFileReference; path = share.rs; sourceTree = "<group>"; };
 		A7E87B2E866D04F508D9C09D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		A7EA9A1FA900298FEB213303 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		B43FF95EA038D13FA45AA28D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		C148D9AC6A3B078681BB8718 /* keychain.rs */ = {isa = PBXFileReference; path = keychain.rs; sourceTree = "<group>"; };
 		C2C3171F05AE372EF33F87A6 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		CFC88406FDECC9E2614289EB /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -102,6 +132,7 @@
 				6C5B5EB620C7665E143D9C2A /* Assets.xcassets */,
 				A7EA9A1FA900298FEB213303 /* LaunchScreen.storyboard */,
 				57B24B98785E0F296BD3D54D /* Externals */,
+				73E8786EC84C83D0B77AFA40 /* ShareExtension */,
 				75F541826935D74B83505B5F /* Sources */,
 				7EBD3BB2CE5D229FB9975950 /* src */,
 				FA8A15F4C4538347C94A9008 /* stvdy-shell_iOS */,
@@ -115,6 +146,14 @@
 			children = (
 			);
 			path = Externals;
+			sourceTree = "<group>";
+		};
+		73E8786EC84C83D0B77AFA40 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				B43FF95EA038D13FA45AA28D /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
 			sourceTree = "<group>";
 		};
 		75A64B4FEF0B92DB8CD5570E /* stvdy-shell */ = {
@@ -142,6 +181,8 @@
 				C148D9AC6A3B078681BB8718 /* keychain.rs */,
 				849792F3ABC76A8B36941FA2 /* lib.rs */,
 				29E32921BEFADAF0B7368A01 /* main.rs */,
+				0FB2EE6E98A4DE1DF4713A88 /* push.rs */,
+				A5422E9C95CBD8F8D4E556E5 /* share.rs */,
 				367B3FC9A8C9340F9EA5C900 /* cache */,
 				E91452E0222503062156A952 /* sync */,
 			);
@@ -152,6 +193,7 @@
 		8FF21FDE10DEC03FF74E5225 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				3F083A8A45111BFF10EE73D7 /* ShareExtension.appex */,
 				3028773F55891E5AFBA85D12 /* stvdy-shell_iOS.app */,
 			);
 			name = Products;
@@ -184,14 +226,14 @@
 			path = "stvdy-shell_iOS";
 			sourceTree = "<group>";
 		};
-		"TEMP_3F8B7CAB-C3FC-412D-A876-F44B6760E3C9" /* x86_64 */ = {
+		"TEMP_10F17C6F-8417-4847-8B05-82E3F443359C" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
 			sourceTree = "<group>";
 		};
-		"TEMP_5B70C685-EB2A-4F14-9F42-49783DA63796" /* arm64 */ = {
+		"TEMP_C7347255-9F33-4572-B1FA-6CD9DAC69B11" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -209,10 +251,12 @@
 				7170072C665FBAA37AEBB2E0 /* Sources */,
 				B4D76541216E14A9FA8F7494 /* Resources */,
 				D14D3CBF2E4BCDC0236B9B56 /* Frameworks */,
+				F41847CD68A1AE30CD329DEC /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BA715F657A1793B3884A8C28 /* PBXTargetDependency */,
 			);
 			name = "stvdy-shell_iOS";
 			packageProductDependencies = (
@@ -220,6 +264,23 @@
 			productName = "stvdy-shell_iOS";
 			productReference = 3028773F55891E5AFBA85D12 /* stvdy-shell_iOS.app */;
 			productType = "com.apple.product-type.application";
+		};
+		CAABEEF259A691EDF85223D0 /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 66913F9EA88B05406D172F54 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				87E8FFF2E3284C4748A5505C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			packageProductDependencies = (
+			);
+			productName = ShareExtension;
+			productReference = 3F083A8A45111BFF10EE73D7 /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -247,6 +308,7 @@
 			projectRoot = "";
 			targets = (
 				BE04A2D8F4BB1888D3F20A98 /* stvdy-shell_iOS */,
+				CAABEEF259A691EDF85223D0 /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -297,7 +359,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		87E8FFF2E3284C4748A5505C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2445FB67128AF883B69CB74E /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BA715F657A1793B3884A8C28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CAABEEF259A691EDF85223D0 /* ShareExtension */;
+			targetProxy = 5A20C9C9E17EC949E3BB59A6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		190CF54EDC6ACC3762956A22 /* debug */ = {
@@ -384,10 +462,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arrm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy;
-				PRODUCT_NAME = "Stvdy";
+				PRODUCT_NAME = Stvdy;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -471,13 +549,51 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arrm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy;
-				PRODUCT_NAME = "Stvdy";
+				PRODUCT_NAME = Stvdy;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		CF112DF4959A7541F2B85260 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy.ShareExtension;
+				PRODUCT_NAME = ShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = debug;
+		};
+		DF4EC23B9ECC1F16B0BAF87B /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.stvdy.ShareExtension;
+				PRODUCT_NAME = ShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = release;
 		};
@@ -489,6 +605,15 @@
 			buildConfigurations = (
 				190CF54EDC6ACC3762956A22 /* debug */,
 				869041ECE5FB99DA5E12C8B8 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		66913F9EA88B05406D172F54 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CF112DF4959A7541F2B85260 /* debug */,
+				DF4EC23B9ECC1F16B0BAF87B /* release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;

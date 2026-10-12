@@ -3,6 +3,7 @@ pub mod commands;
 pub mod deeplink;
 pub mod keychain;
 pub mod push;
+pub mod share;
 pub mod sync;
 
 use tauri::Manager;
@@ -70,6 +71,8 @@ pub fn run() {
             sync::commands::local_state_get,
             sync::commands::local_state_set,
             push::push_token,
+            share::share_pending,
+            share::share_clear,
         ]);
 
     #[cfg(desktop)]
@@ -249,19 +252,41 @@ pub fn run() {
                 }
             }
 
+            // The share inbox (A312). On iOS the Share Extension has already copied the
+            // file into the App Group container by the time the app is launched or
+            // resumed — the extension cannot open the app, so this is the only handover
+            // there is. Reading it here covers a cold start; `RunEvent::Resumed` below
+            // covers the warm one, where a share arrives while the app is backgrounded.
+            share::announce(app.handle());
+
             Ok(())
         })
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
     // The event loop is the whole app: if it cannot start there is nothing to continue
     // into, so this is the one place a hard exit is right. Logged and exited non-zero
     // rather than `expect`-ed, because a supervisor should see a failure rather than a
     // process that quietly vanished -- and because a panic message on stderr is not a
     // record anyone can search.
-    if let Err(error) = result {
-        tracing::error!(%error, "the Stvdy shell could not start");
-        std::process::exit(1);
-    }
+    let app = match result {
+        Ok(app) => app,
+        Err(error) => {
+            tracing::error!(%error, "the Stvdy shell could not start");
+            std::process::exit(1);
+        }
+    };
+
+    // The callback form rather than `Builder::run`, because the share import has to
+    // happen on resume as well as on setup: on a phone the app is usually *already
+    // running* when a file is shared to it, so `setup` never runs again and the file
+    // would sit in the inbox until the next cold launch. `Resumed` is the OS's own
+    // "this app is in front now", and the import is a directory read — cheap enough to
+    // run on every one of them.
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Resumed = event {
+            share::announce(handle);
+        }
+    });
 }
 
 /// Logs only the action label: a URL query string can carry an OAuth `code`,

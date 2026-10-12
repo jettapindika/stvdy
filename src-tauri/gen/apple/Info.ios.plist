@@ -6,12 +6,39 @@
 
   The CLI reads this file and merges it *into* the project's own
   `gen/apple/stvdy-shell_iOS/Info.plist`, so what lives here is only what the
-  generated plist cannot express. Empty at Task 1 (the config and the generated
-  project are the task); Task 4 adds `UIBackgroundModes` and
-  `BGTaskSchedulerPermittedIdentifiers` for the Share Extension and the
-  background scheduler, which is the same file the App Group entitlement is
-  declared beside.
+  generated plist cannot express.
+
+  **What is here, and what deliberately is not.**
+
+  - `UIBackgroundModes` — `fetch` and `processing` are what make
+    `BGAppRefreshTask` and `BGProcessingTask` schedulable at all (A315/A317);
+    `remote-notification` is what lets an APNs silent push wake the app without a
+    user-visible alert (A310). Without the array, `BGTaskScheduler.submit` fails at
+    runtime with `BGTaskSchedulerErrorCodeUnavailable` and nothing in the build
+    complains.
+  - `BGTaskSchedulerPermittedIdentifiers` — the two identifiers the app registers
+    handlers for. A launch the scheduler woke for an identifier *not* in this list
+    throws `NSInternalInconsistencyException` and the app is killed, so this list and
+    the plugin's `scheduler.rs` constants are the same two strings and
+    `tests/config.rs` compares them rather than trusting a comment.
+
+  **The App Group is not here, and that is not an omission.** An App Group is an
+  *entitlement* (`com.apple.security.application-groups`), not a plist key: it is
+  declared on both targets in `gen/apple/project.yml.template` and XcodeGen writes it
+  into the two `.entitlements` files. A plist key of that name would be ignored.
 -->
 <plist version="1.0">
-<dict/>
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>app.stvdy.sync.refresh</string>
+		<string>app.stvdy.sync.processing</string>
+	</array>
+</dict>
 </plist>
