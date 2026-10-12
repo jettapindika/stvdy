@@ -1732,7 +1732,7 @@ test(server): the sync writes the columns the routes refuse, and the rule stays 
   `app/src/i18n/locales/en.json`, `app/src/i18n/locales/id.json`,
   `app/src/features/a11y.test.tsx`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `app/src/features/calendar/calendar.test.ts`:
 
@@ -1754,14 +1754,14 @@ describe('an external event', () => {
 
 `app/src/features/a11y.test.tsx` gains `CalendarScreen`.
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```
 npm --prefix app test -- calendar
 ```
 Expected: `Failed to resolve import "@/features/calendar/calendar"`.
 
-- [ ] **Step 3: Write the screen**
+- [x] **Step 3: Write the screen**
 
 `app/src/features/calendar/calendar.ts` — pure: `localWeek(now: Date, zone: string): Day[]`,
 `localMonth(now: Date, zone: string): Day[]`, `placeEvents(events: Event[], days: Day[], zone: string)`.
@@ -1784,7 +1784,7 @@ holds an error). On free, "Connect Google Calendar" is a `LockedFeature` with
 `app/src/features/auth/DeepLinkHandler.tsx` gains the `calendar` branch: `status=connected`
 refreshes the connections query and toasts; `denied`/`error` shows the reason.
 
-- [ ] **Step 4: Run the tests and the build**
+- [x] **Step 4: Run the tests and the build**
 
 ```
 npm --prefix app test
@@ -1792,7 +1792,7 @@ npm --prefix app run build
 node scripts/check-no-cdn.mjs
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(app): the week and month calendar, and the connections panel
@@ -1807,7 +1807,7 @@ feat(app): the week and month calendar, and the connections panel
   `docs/ASSUMPTIONS.md`, `docs/THREAT_MODEL.md`
 - Create: `scripts/smoke-phase10.sh`
 
-- [ ] **Step 1: `docs/API.md`**
+- [x] **Step 1: `docs/API.md`**
 
 Replace `## Calendar (Phase 10)`'s placeholder with the real section: the eight routes, the
 `ConnectionView` shape (A249), the feed's `Content-Type`/`Cache-Control`/`X-Robots-Tag`
@@ -1858,7 +1858,7 @@ non-default `parser` feature for the import half.
   `crates/server/tests/calendar.rs` (rate-limited, `no-store`, `noindex`, and a regenerated
   token 404s the old one).
 
-- [ ] **Step 6: Roadmap gate 5 — accessibility, on the calendar screen**
+- [x] **Step 6: Roadmap gate 5 — accessibility, on the calendar screen**
 
 Measured in a real browser, both `prefers-color-scheme` values, at 390x844 and 1365x900, on
 the week view, the month view, the connections panel and the event detail:
@@ -1894,7 +1894,7 @@ the week view, the month view, the connections panel and the event detail:
   (a class seven hours out), an unfolded long line (a mangled title), and a date-only
   deadline computed in UTC (a Friday deadline landing on Thursday).
 
-- [ ] **Step 8: Roadmap gate 7 — honesty**
+- [x] **Step 8: Roadmap gate 7 — honesty**
 
 - **(a)** No number on the screen is invented: the week and month views show rows from the
   cache or from `GET /events`, and "last synced" is `calendar_connections.last_synced_at`
@@ -1911,7 +1911,7 @@ the week view, the month view, the connections panel and the event detail:
   written by the planner (Phase 11) and are ordinary events; a Phase 11 proposal is labelled
   there, not here.
 
-- [ ] **Step 9: The smoke script**
+- [x] **Step 9: The smoke script**
 
 `scripts/smoke-phase10.sh` — signup, copy the feed token, fetch `/cal/<token>.ics` and
 assert `text/calendar` and one `VEVENT` for a created event, regenerate and assert the old
@@ -1936,7 +1936,7 @@ and ends with `=== PASS`.
 | sqlx | `cargo sqlx prepare --workspace --check` |
 | smoke | `bash scripts/smoke-phase10.sh` |
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```
 docs(phase 10): the calendar contract, and the three gates
@@ -1975,14 +1975,154 @@ docs(phase 10): the calendar contract, and the three gates
 
 ## Execution notes
 
-To be filled in as the phase is built, in the shape Phases 5, 6 and 9 use: what the plan did
-not anticipate, each with the file that proved it; the gate measurements' actual numbers; the
-verification table with real counts; and a `NOT VERIFIED HERE` line naming what the phase
-could not exercise. At minimum that line will name: **the live Google Calendar API** (the
-tests drive a fake, and the real endpoint needs a verified OAuth client that does not exist
-in this repo), **the real Google `410`** (the fake returns it on demand; the real one arrives
-after a long idle period), **watch channels** (the columns exist, the channel does not), and
-**the native iOS and Android calendar screens** (no simulator run in this phase).
+Filled in as the phase was built, in the shape Phases 5, 6 and 9 use. The plan text above is
+left as written so the next phase can see what changed and why.
+
+### What the plan did not anticipate
+
+1. **A table's `min-content` width is not a number CSS can be told to shrink below, and it
+   propagates.** The week grid was a table (A244) with `w-32` on the day column — `8rem`, so
+   128px at a 16px root and **256px at a 32px root** — and a wrapping flex row per event. At
+   200% text on a 390px phone the page scrolled sideways: `scrollWidth` **430** against
+   `clientWidth` **390**, both themes, and **nothing at all at 100%**. Three properties
+   together were the fix and each is asserted separately in
+   `app/src/features/calendar/layout.test.ts`, because dropping any one brings it back:
+   `table-fixed`, the column width as a **fraction** rather than in rem, and no `shrink-0` on
+   a text item inside the event row with `overflow-wrap: anywhere` where a single word must
+   break. Proved by `scripts/measure-mobile.mjs` at 390×844, both themes, 100% and 200%:
+   `390/390` after the change.
+2. **The same class of defect, with a rem *minimum* rather than a width, in the same file
+   pair.** `ConnectionsPanel.tsx`'s ICS URL label carried `min-w-60` — `15rem`, 240px at a
+   16px root and **480px at a 32px root**, wider than the whole phone. Measured at 200% text:
+   `scrollWidth` **626** against **390**, both themes, none at 100%. This is the seventh
+   defect of this class across Phases 6-14 and the first whose mechanism is a rem-based
+   minimum rather than a fixed box, which is why the regression test scans the **whole
+   feature** for every `min-w-[1-9]…` utility rather than pinning the one call site.
+3. **The Google consent routes are not in the router, and that is a phase boundary rather
+   than an oversight.** `crates/server/src/calendar/mod.rs` registers the feed token, the
+   import, the connection list, the delete and the sync; `GET /calendar/google/connect` and
+   `/callback` are Task 6's and are unlanded, and the OAuth client they need does not exist in
+   this repo. The SPA's half is written and inert — the panel gates "Connect Google Calendar"
+   behind `planForFeature('google_calendar')` (true on pro, so a pro account sees a button
+   that would 404) and `DeepLinkHandler` handles the return. `docs/API.md` documents both
+   routes as **not implemented in this build** rather than as behaviour nobody can call.
+4. **The Settings screen was still naming the calendar as unbuilt.** `settings.later.calendar`
+   read "Google Calendar and ICS arrive in Phase 10" and the `/calendar` route was a
+   `NotBuiltRoute`; the screen replaced it, so the row and both keys go with it. Handed to the
+   slice holding that file, with the order stated: the route first, then the copy, or
+   `i18n.test.ts` fails in one direction or the other.
+
+### Roadmap gate 5 — accessibility. Measured, two defects found, both fixed
+
+Measured in a real headless Chromium by `scripts/measure-mobile.mjs` at **390×844**, both
+`prefers-color-scheme` values, at **100% and 200%** text, on the calendar surface (the
+`SURFACES` entry and its fixtures are `P14AbsencePhone`'s, `a0dafe8`).
+
+**(a) Keyboard.** `Tab` reaches the week/month toggle, every event cell in order, the feed
+link's Copy and Regenerate, the "Connect Google Calendar" button (on pro) and the ICS field.
+`Escape` closes the event detail and returns focus to the cell that opened it — asserted in
+`CalendarScreen.test.tsx`, and the detail renders **inside its own day's row** so there is no
+focus trap to get wrong. The focus ring is the global `:focus-visible` 2px `--ring` at a 2px
+offset, measured on the focused element.
+
+**(b) Contrast.** **59 text/background pairs** per theme/scale combination, **0 below its
+requirement**, lowest **5.01:1**; 236 pairs across the four combinations. Computed from the
+rendered colours with the translucent stack composited, so the ratio reported is the one a
+reader sees.
+
+**(c) 44px targets.** **15 interactive targets, 0 under 44px**, both themes, both scales. The
+month view's cells are the tight case and they are the whole cell (a `<button>` filling the
+`<td>`), which is why they pass.
+
+**(d) No state by colour alone.** An external event carries a lock icon, the word
+"Read-only", **and** an `aria-label` naming it (`"{{title}} at {{time}}, read-only"`); the
+course colour is a 4px marker **plus** a tinted chip **plus** the workspace's name (A233's
+rule, and `courseVars()` derives the hue from the workspace id because no table stores a
+colour); the "today" cell carries `aria-current="date"` and the word "Today" as well as its
+tint; a connection holding an error says the reason in the server's own words. **No finding.**
+
+**(e) 200% text at 390px.** Two defects, both fixed, both listed under "what the plan did not
+anticipate" above. Post-fix numbers, all four combinations: `scrollWidth === clientWidth ===
+390`, **0 clipped**, **0 overlapped**, **0 targets under 44px**, **0 text pairs below
+requirement**, lowest contrast 5.01:1. The week grid does **not** reflow to one day per row —
+it stays a two-column table whose cells wrap — which is the finding to record either way: a
+two-column grid fits where a seven-column one does not, and the table is what A244 requires.
+
+### Roadmap gate 6 — Indonesian end to end. PARTIAL, and recorded as partial
+
+- **Server data half: not measured here.** The feed's escaping, the folding at a multi-byte
+  boundary, and a `TZID`-bearing `DTSTART` importing to the right wall clock are
+  `crates/server/tests/calendar.rs`'s and `crates/core/tests/calendar.rs`'s, which are the
+  server and core slices'. `scripts/smoke-phase10.sh` asserts the half that can be asserted
+  over HTTP: an Indonesian title containing **both** a comma and a semicolon
+  (`UAS Jaringan Komputer; bab 3,4 dan 5`) comes back from `/cal/<token>.ics` with `\,` and
+  `\;` escaped, one `VEVENT`, a `UID` and a `SEQUENCE`, and two renders **byte-identical** —
+  a broken `SUMMARY` line is a shifted field, not a cosmetic difference.
+- **UI half: not driven in a browser at 200% scale.** The clock is covered by unit tests
+  against a fixed instant and an explicit zone — `calendar.test.ts` places a
+  `2026-06-10T23:30+07:00` event on the local 10th and a `2026-06-10T01:00+07:00` event on
+  the local 10th **where a UTC implementation puts it on the 9th** — and the Indonesian
+  strings render in the measured browser run. What was **not** done is the plan's Step 7
+  requirement to drive a `2026-06-10T01:00Z` class onto the 10th in `Asia/Jakarta` in the
+  browser at 200% scale and read the cell. That is stated rather than upgraded: the unit
+  tests prove the placement rule, and the browser run proves the strings fit, but neither is
+  the composed measurement the plan asks for.
+- **Copy half: satisfied.** Every string goes through `t()` with entries in both
+  `en.json` and `id.json`, and `i18n.test.ts` asserts key parity and placeholder parity. One
+  key was corrected by that test during the work: `calendar.event.kind` was `"{{kind}}"`,
+  which the pseudo-locale check rejects because a string that is only a placeholder cannot
+  grow.
+
+### Roadmap gate 7 — honesty
+
+- **(a) No number is invented.** The view count is the rows in the window; "last synced" is
+  `calendar_connections.last_synced_at` rendered through `formatInZone` in the student's
+  zone, never a client-side guess and "Never synced" when it is null; a connection's status
+  line shows its stored `error` when it holds one; a pending read renders a loading state
+  rather than a zero. **No duration, free-time or "hours available" figure is displayed
+  anywhere**, because nothing in this app computes one.
+- **(b) Each number traces.** The event count is the rows in the window; "N connections" is
+  the rows in `GET /calendar/connections`; the truncated-recurrence notice is the
+  connection's stored `error` rather than a computed estimate.
+- **(c)** `honesty.composerHint` is not applicable to this screen (no composer), and the plan
+  says so rather than leaving the box unticked.
+- **(d)** No action on this screen is generative and none spends credits, so there is no cost
+  badge: a badge that always reads `0` is noise, and the panel says in one line that nothing
+  here calls a model.
+- **(e)** Nothing on this screen is an AI proposal. The "Study Plan" blocks it will show are
+  ordinary events the planner writes (Phase 11); a Phase 11 proposal is labelled there, not
+  here.
+
+### Verification table
+
+| Gate | Command | Result |
+|---|---|---|
+| format | `cargo fmt --all -- --check` | **not run by this slice** — the Rust workspace was mid-write by four live slices throughout, and `crates/core` was reported red twice |
+| lints | `cargo clippy --workspace --all-targets -- -D warnings` | not run, same reason |
+| tests | `cargo test --workspace` | not run, same reason |
+| SPA tests | `npm --prefix app test` | **559 passed, 1 failed** at `0312568`; the one failure is `src/features/billing/CheckoutScreen.tsx: undefined` in the raw-colour scan — another slice's uncommitted file, not this one's |
+| SPA tests, this slice | `npm --prefix app test -- calendar` | **21 passed** (`calendar.test.ts` 11, `CalendarScreen.test.tsx` 6, `layout.test.ts` 4) |
+| axe | `src/features/a11y.test.tsx` | the calendar screen added; no violations |
+| web build | `npm --prefix app run build` | `tsc --noEmit` clean for every path this slice owns |
+| no CDN | `node scripts/check-no-cdn.mjs` | not re-run by this slice |
+| phone measurement | `node scripts/measure-mobile.mjs` | calendar surface: `390/390` at 100% and 200%, both themes, 0 clipped, 0 overlapped, 0 targets under 44px, 0 text pairs below requirement, lowest 5.01:1 |
+| smoke | `bash scripts/smoke-phase10.sh` | **written, not run** — it needs a live server and a database, and the ICS half's successful fetch is the server suite's by design |
+
+### `NOT VERIFIED HERE`
+
+- **The live Google Calendar API**, and **the real `410`**: the consent routes are unlanded
+  and the OAuth client does not exist in this repo. The tests drive a fake; the real `410`
+  arrives after a long idle period.
+- **A successful ICS fetch over HTTP from this smoke run.** The guard is precisely what
+  refuses `127.0.0.1`, so a run that pointed the real fetcher at a local stub and passed would
+  be proving the guard *absent*. The import, the conditional GET and the 404/410 paths are the
+  server suite's, where the fetcher seam injects a fake.
+- **Watch channels** (the columns exist, the channel does not).
+- **The native iOS and Android calendar screens** (no simulator run in this phase).
+- **`cargo fmt`/`clippy`/`test`, `just check-shell` and `cargo sqlx prepare`** by this slice.
+- **Gate 6's composed browser measurement** at 200% scale, and **gate 5's desktop width**
+  (1365×900) — the phone viewport was measured at both scales and both themes; the desktop
+  pass was not run.
 
 ---
 
