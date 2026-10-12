@@ -80,7 +80,12 @@ export interface AcceptPayload {
   blocks: {
     starts_at: string
     ends_at: string
-    goal_id: string | null
+    /**
+     * A `Uuid` on the wire, not an `Option<Uuid>`: a kept block echoes the **nil** id rather
+     * than `null`, because the body is `deny_unknown_fields` and a `null` is a 400 for the
+     * whole batch. `acceptBody` is the only thing that builds this.
+     */
+    goal_id: string
     topic: string
     kind: string
   }[]

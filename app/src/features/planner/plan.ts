@@ -329,7 +329,7 @@ export function workloadFor(
 }
 
 /** Why a drag was refused, in the words the preview renders. */
-export type MoveRefusal = 'backwards' | 'busy' | 'window' | 'daily_max'
+export type MoveRefusal = 'backwards' | 'busy' | 'window' | 'daily_max' | 'pinned'
 
 /** What the grid needs to judge a move: the busy time it was given and the window. */
 export interface MoveContext {
@@ -415,6 +415,15 @@ export function moveBlock(
   const block = blocks[index]
   if (block === undefined) return { ok: false, reason: 'backwards' }
 
+  // **A kept block may not be moved, and this is the server's rule rather than a courtesy.**
+  // A pinned block arrives as the nil-goal / `"Pinned"` pair, and `POST /plans/accept` resolves
+  // it back to its committed event by the **exact** `(starts_at, ends_at)` range (A265) —
+  // because contract § 6's `Interval` carries no goal attribution and the server's only way to
+  // name the row is the range it supplied. Move it and that lookup finds nothing, so the whole
+  // batch is refused with 409. Found by the smoke run: a dragged pinned block made every block
+  // in the plan unsaveable.
+  if (isKeptBlock(block)) return { ok: false, reason: 'pinned' }
+
   const start = new Date(Date.parse(block.starts_at) + deltaMinutes * 60_000)
   const end = new Date(Date.parse(block.ends_at) + deltaMinutes * 60_000)
 
@@ -438,8 +447,16 @@ export function moveBlock(
 export interface AcceptBlock {
   starts_at: string
   ends_at: string
-  /** `null` for a kept block: the server resolves it from the committed row. */
-  goal_id: string | null
+  /**
+   * The block's goal, or [`NIL_GOAL_ID`] for a kept block.
+   *
+   * **Not `null`, and that is a wire fact rather than a preference.** `AcceptBlock.goal_id` is
+   * a `Uuid`, not an `Option<Uuid>`, and the body is `deny_unknown_fields` — so a `null` is a
+   * deserialization failure and a 400 for the whole batch. A kept block goes back **exactly as
+   * it arrived**: the nil id and the topic `"Pinned"`, which is the pair the server's own
+   * `is_pinned()` reads.
+   */
+  goal_id: string
   topic: string
   kind: string
 }
@@ -447,27 +464,26 @@ export interface AcceptBlock {
 /**
  * The body `POST /plans/accept` takes, from the blocks the student is looking at.
  *
- * Two mappings matter and both are the server's contract rather than a choice
- * here:
+ * Two mappings matter and both are the server's contract rather than a choice here:
  *
- * - **A kept block goes back as `goal_id: null` and the topic `"Pinned"`**, exactly
- *   as it arrived. The server resolves it to its committed event by the exact
- *   `(starts_at, ends_at)` range and refuses when that is ambiguous; inventing a
- *   goal id for it would be the client guessing at something it cannot know.
- * - **`pinned` is not sent.** `AcceptBlock` is `deny_unknown_fields`, so an extra
- *   field is a 400 for the whole batch — the drag's marker is the client's own
- *   bookkeeping and the server needs only the times.
+ * - **A kept block is echoed unchanged.** It arrives with `goal_id` as the nil UUID and the
+ *   topic `"Pinned"`, and the server resolves it to its committed event by the exact
+ *   `(starts_at, ends_at)` range (A265). Sending `null` for the goal is a 400 (the field is a
+ *   `Uuid`), and inventing a real goal id would be the client guessing at something it cannot
+ *   know.
+ * - **`pinned` is not sent.** `AcceptBlock` is `deny_unknown_fields`, so an extra field is a
+ *   400 for the whole batch — the drag's marker is the client's own bookkeeping and the server
+ *   reads only the times, the goal and the topic.
  *
  * The kind is a string on the wire: `"review"` for a review-reserved block and
- * `"new_material"` for anything else, which is the pair the server's own test
- * accepts.
+ * `"new_material"` for anything else, which is the pair the server's own test accepts.
  */
 export function acceptBody(blocks: ProposedBlock[]): { blocks: AcceptBlock[] } {
   return {
     blocks: blocks.map((block) => ({
       starts_at: block.starts_at,
       ends_at: block.ends_at,
-      goal_id: isKeptBlock(block) ? null : block.goal_id,
+      goal_id: block.goal_id,
       topic: block.topic,
       kind: isReviewBlock(block) ? 'review' : 'new_material',
     })),

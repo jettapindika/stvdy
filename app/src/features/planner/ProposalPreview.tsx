@@ -216,29 +216,43 @@ export function ProposalPreview({
                               // The label carries what the block is and what the
                               // arrow keys do, because the position on the grid is
                               // a visual fact and the keyboard user has no grid.
-                              aria-label={t('planner.grid.moveLabel', {
-                                subject: kept ? t('planner.pinned') : subject.text,
-                                start: clockLabel(placed.block.starts_at, timeZone),
-                                end: clockLabel(placed.block.ends_at, timeZone),
-                              })}
-                              onKeyDown={(event) => {
-                                if (event.key === 'ArrowLeft') {
-                                  event.preventDefault()
-                                  nudge(index, -NUDGE_MIN)
-                                }
-                                if (event.key === 'ArrowRight') {
-                                  event.preventDefault()
-                                  nudge(index, NUDGE_MIN)
-                                }
-                                if (event.key === 'ArrowUp') {
-                                  event.preventDefault()
-                                  nudge(index, -NUDGE_MIN * 4)
-                                }
-                                if (event.key === 'ArrowDown') {
-                                  event.preventDefault()
-                                  nudge(index, NUDGE_MIN * 4)
-                                }
-                              }}
+                              aria-label={
+                                kept
+                                  ? t('planner.grid.keptLabel', {
+                                      start: clockLabel(placed.block.starts_at, timeZone),
+                                      end: clockLabel(placed.block.ends_at, timeZone),
+                                    })
+                                  : t('planner.grid.moveLabel', {
+                                      subject: subject.text,
+                                      start: clockLabel(placed.block.starts_at, timeZone),
+                                      end: clockLabel(placed.block.ends_at, timeZone),
+                                    })
+                              }
+                              // A kept block is not movable, and the keys are not bound rather
+                              // than bound-and-refused: the server resolves it by its exact
+                              // range, so a move makes the whole accept a 409 (A265).
+                              onKeyDown={
+                                kept
+                                  ? undefined
+                                  : (event) => {
+                                      if (event.key === 'ArrowLeft') {
+                                        event.preventDefault()
+                                        nudge(index, -NUDGE_MIN)
+                                      }
+                                      if (event.key === 'ArrowRight') {
+                                        event.preventDefault()
+                                        nudge(index, NUDGE_MIN)
+                                      }
+                                      if (event.key === 'ArrowUp') {
+                                        event.preventDefault()
+                                        nudge(index, -NUDGE_MIN * 4)
+                                      }
+                                      if (event.key === 'ArrowDown') {
+                                        event.preventDefault()
+                                        nudge(index, NUDGE_MIN * 4)
+                                      }
+                                    }
+                              }
                               className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-field px-2 py-2 text-left hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
                             >
                               <span className="meta shrink-0">

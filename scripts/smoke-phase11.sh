@@ -208,10 +208,19 @@ WS="$(field '["workspace"]["id"]' < "$TMP/ws.json")"
 [ -n "$WS" ] || fail "no workspace created"
 
 # A goal on free, so the refusal is asserted against the matrix's own `planner = "manual"`
-# rather than against a plan id this script picked. The id is random because the entitlement
-# check runs **first**: a free account is refused before the row is looked up, which is the
-# ordering that makes the refusal structural (A257).
-FREE_GOAL="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+# rather than against a plan id this script picked.
+#
+# **The goal is a real row, and that is a finding rather than a convenience.** The first
+# version of this script sent a random uuid and expected 403; it got **404**, because
+# `reserve_and_enqueue` resolves the goal through `goals::owned_goal` *before* the entitlement
+# check, so a goal that does not exist is a 404 and never reaches the matrix. The ordering is
+# deliberate (a foreign goal id must be a 404 rather than a 403 that confirms the row exists),
+# so the refusal this scenario is about needs a goal the caller really owns.
+FREE_GOAL="$(curl -fsS -X POST "$BASE/goals" -H "authorization: Bearer $ACCESS" \
+  -H 'content-type: application/json' \
+  -d "{\"title\":\"UAS Kripto\",\"target_date\":\"2026-12-15T23:00:00Z\",\"workspace_id\":\"$WS\",\"source_ids\":[]}" \
+  | field '["goal"]["id"]')"
+[ -n "$FREE_GOAL" ] || fail "no goal created on the free plan"
 STATUS="$(curl -sS -o "$TMP/free-plan.json" -w '%{http_code}' -X POST \
   "$BASE/goals/$FREE_GOAL/plan" -H "authorization: Bearer $ACCESS")"
 [ "$STATUS" = "403" ] || fail "a free account's plan must be 403, got $STATUS: $(cat "$TMP/free-plan.json")"
@@ -219,8 +228,13 @@ STATUS="$(curl -sS -o "$TMP/free-plan.json" -w '%{http_code}' -X POST \
   || fail "the refusal must be plan_required: $(cat "$TMP/free-plan.json")"
 [ "$(field '["min_plan"]' < "$TMP/free-plan.json")" = "pro" ] \
   || fail "the refusal must name the plan that grants it: $(cat "$TMP/free-plan.json")"
-printf 'free plan, POST /goals/<id>/plan -> %s %s min_plan=%s\n' "$STATUS" \
-  "$(field '["code"]' < "$TMP/free-plan.json")" "$(field '["min_plan"]' < "$TMP/free-plan.json")"
+# And the refusal is before the charge and before the row: a refused plan must leave neither.
+FREE_LEDGER="$(db "select coalesce(sum(delta),0) from credit_ledger where user_id = '$UID_'")"
+FREE_PROPOSALS="$(db "select count(*) from plan_proposals where user_id = '$UID_'")"
+[ "$FREE_PROPOSALS" = "0" ] || fail "a refused plan wrote $FREE_PROPOSALS proposal row(s)"
+printf 'free plan, POST /goals/<id>/plan -> %s %s min_plan=%s (proposals=%s, balance=%s)\n' "$STATUS" \
+  "$(field '["code"]' < "$TMP/free-plan.json")" "$(field '["min_plan"]' < "$TMP/free-plan.json")" \
+  "$FREE_PROPOSALS" "$FREE_LEDGER"
 
 # ==========================================================================================
 # 2 and 3. The syllabus: the first import is allowed, the second is refused by count
@@ -294,12 +308,28 @@ say "4. the Jakarta pair, quoted (gate 6)"
 python3 - "$TMP/draft.json" <<'PY'
 import json, sys
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 items = json.load(open(sys.argv[1]))["items"]
 exam = next(i for i in items if i["kind"] == "exam")
 deadline = next(i for i in items if i["kind"] == "deadline")
-assert exam["when"] == "2026-11-15T23:00:00Z", exam["when"]
+jakarta = ZoneInfo("Asia/Jakarta")
+
+# The fixture (`scripts/fixtures/phase11-answers.json`) states the exam at 06:00 Jakarta on
+# the 15th of December, so the sharp property is that its UTC date is the **14th**.
+assert exam["when"] == "2026-12-14T23:00:00Z", exam["when"]
+exam_utc = datetime.fromisoformat(exam["when"].replace("Z", "+00:00"))
+assert exam_utc.date().isoformat() == "2026-12-14", exam_utc
+assert exam_utc.astimezone(jakarta).date().isoformat() == "2026-12-15", exam_utc
+assert exam_utc.astimezone(jakarta).hour == 6, exam_utc
+
+# The evening case, which a UTC-bucketing implementation gets right by accident: 23:59
+# Jakarta on the 12th is 16:59Z on the same day.
 assert deadline["when"] == "2026-11-12T16:59:00Z", deadline["when"]
-print("06:00 Jakarta on the 16th -> " + exam["when"] + " (UTC date 15, Jakarta date 16)")
+deadline_utc = datetime.fromisoformat(deadline["when"].replace("Z", "+00:00"))
+assert deadline_utc.astimezone(jakarta).date().isoformat() == "2026-11-12", deadline_utc
+
+print("06:00 Jakarta on the 15th -> " + exam["when"]
+      + " (UTC date 14, Jakarta date " + exam_utc.astimezone(jakarta).date().isoformat() + ")")
 print("23:59 Jakarta on the 12th -> " + deadline["when"] + " (same UTC day)")
 PY
 
@@ -342,15 +372,22 @@ STATUS="$(curl -sS -o "$TMP/confirmed.json" -w '%{http_code}' -X POST \
   "$BASE/syllabus/$DRAFT/confirm" -H "authorization: Bearer $ACCESS" \
   -H 'content-type: application/json' -d "@$TMP/confirm.json")"
 [ "$STATUS" = "200" ] || fail "the confirm answered $STATUS: $(cat "$TMP/confirmed.json")"
-python3 - "$TMP/confirmed.json" <<'PY'
+python3 - "$TMP/confirmed.json" "$TMP/draft.json" <<'PY'
 import json, sys
 body = json.load(open(sys.argv[1]))
-# One kept meeting (COUNT=8 weekly → 8 events, capped at the confirm horizon), one kept
-# deadline → one task, one kept exam → one goal.
-assert body["goals"] == 1, body
-assert body["tasks"] == 1, body
-assert body["events"] >= 1, body
-print(f"confirm -> events={body['events']} tasks={body['tasks']} goals={body['goals']} status={body['status']}")
+items = json.load(open(sys.argv[2]))["items"]
+# The expectations come from the draft the confirm was built from, not from a literal: the
+# counts are a function of which items were kept, so a hardcoded number would stop asserting
+# anything the moment the fixture changed.
+kept = [i for i in items if i["index"] != next(x for x in items if x["title"] == "Praktikum Jaringan")["index"]]
+deadlines = [i for i in kept if i["kind"] == "deadline"]
+exams = [i for i in kept if i["kind"] == "exam"]
+meetings = [i for i in kept if i["kind"] == "class"]
+assert body["tasks"] == len(deadlines), (body, deadlines)
+assert body["goals"] == len(exams), (body, exams)
+assert body["events"] >= len(meetings), (body, meetings)
+print(f"confirm -> events={body['events']} tasks={body['tasks']} goals={body['goals']} status={body['status']}"
+      f" (kept {len(meetings)} meeting(s), {len(deadlines)} deadline(s), {len(exams)} exam(s))")
 PY
 MEETINGS="$(db "select count(*) from events where user_id = '$UID_' and kind = 'class'")"
 DROPPED="$(db "select count(*) from events where user_id = '$UID_' and title = 'Praktikum Jaringan'")"
@@ -363,7 +400,9 @@ STATUS="$(curl -sS -o "$TMP/reconfirm.json" -w '%{http_code}' -X POST \
 [ "$STATUS" = "409" ] || fail "a second confirm must be 409, got $STATUS: $(cat "$TMP/reconfirm.json")"
 printf 'second confirm -> %s %s\n' "$STATUS" "$(field '["code"]' < "$TMP/reconfirm.json")"
 
-GOAL_ID="$(db "select id from goals where user_id = '$UID_' and deleted_at is null")"
+# The exam's own goal, named rather than picked by `limit 1`: the free-plan refusal above
+# created a goal of its own, and a bare `select id from goals` returns both rows.
+GOAL_ID="$(db "select id from goals where user_id = '$UID_' and title = 'UAS Jaringan' and deleted_at is null")"
 TARGET_UTC="$(db "select to_char(target_date at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') from goals where id = '$GOAL_ID'")"
 TARGET_LOCAL="$(db "select to_char(target_date at time zone 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI') from goals where id = '$GOAL_ID'")"
 printf 'the exam goal: target_date %s UTC = %s Asia/Jakarta\n' "$TARGET_UTC" "$TARGET_LOCAL"
@@ -410,20 +449,26 @@ proposal = body["proposal"]
 blocks = proposal["blocks"]
 assert blocks, proposal
 jakarta = ZoneInfo("Asia/Jakarta")
+def local(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(jakarta)
 for block in blocks:
-    start = datetime.fromisoformat(block["starts_at"].replace("Z", "+00:00")).astimezone(jakarta)
-    end = datetime.fromisoformat(block["ends_at"].replace("Z", "+00:00")).astimezone(jakarta)
+    start, end = local(block["starts_at"]), local(block["ends_at"])
     assert start.hour >= 8, f"a block starts before 08:00 Jakarta: {start}"
     assert end.hour <= 22 or (end.hour == 0 and end.minute == 0), f"a block ends after 22:00 Jakarta: {end}"
-# The day load is in Jakarta's days: every day named holds at least one block that starts on it.
-for day in proposal["day_load"]:
-    on_it = [b for b in blocks
-             if datetime.fromisoformat(b["starts_at"].replace("Z", "+00:00")).astimezone(jakarta).date().isoformat() == day["date"]]
-    assert on_it, f"day_load names {day['date']}, which holds no block in Jakarta's days"
+# `day_load` names **every** day of the horizon — a day with capacity and nothing planned is a
+# real row — so the property is that each block is on a day the planner named, not the converse.
+# (The first version of this assertion had it backwards and failed against a correct server;
+# the Rust gate's copy of it had the same mistake.)
+named = {d["date"] for d in proposal["day_load"]}
+assert named, proposal
+for block in blocks:
+    day = local(block["starts_at"]).date().isoformat()
+    assert day in named, f"the block at {block['starts_at']} is on Jakarta's {day}, which day_load does not name"
+with_blocks = sum(1 for d in named if any(local(b["starts_at"]).date().isoformat() == d for b in blocks))
 print(f"blocks={len(blocks)} deficit_min={proposal['deficit_min']} warnings={proposal['warnings']}")
-print("first block: " + blocks[0]["starts_at"] + " -> "
-      + datetime.fromisoformat(blocks[0]["starts_at"].replace("Z", "+00:00")).astimezone(jakarta).strftime("%Y-%m-%d %H:%M Asia/Jakarta"))
-print("day_load: " + ", ".join(f"{d['date']}={d['planned_min']}/{d['capacity_min']}" for d in proposal["day_load"]))
+print("first block: " + blocks[0]["starts_at"] + " -> " + local(blocks[0]["starts_at"]).strftime("%Y-%m-%d %H:%M Asia/Jakarta"))
+print(f"day_load: {len(named)} day(s) in the horizon, {with_blocks} of them holding a block")
+print("day_load minutes: " + ", ".join(f"{d['date']}={d['planned_min']}/{d['capacity_min']}" for d in proposal["day_load"] if d["planned_min"] > 0))
 PY
 
 # ==========================================================================================
@@ -458,32 +503,69 @@ STATUS="$(curl -sS -o "$TMP/reaccept.json" -w '%{http_code}' -X POST "$BASE/plan
 printf 'second accept -> %s %s\n' "$STATUS" "$(field '["code"]' < "$TMP/reaccept.json")"
 
 # A drag that the server refuses: the block moved onto a class event. The client refuses this
-# locally too (A264 is the control, this is the courtesy), and the refusal is the whole batch.
+# locally too (A264 is the control, this is the courtesy).
+#
+# **It needs a fresh proposal, and that is the finding.** The first version of this scenario
+# reused the proposal it had just accepted, so it hit the *status* arm — 409 "this proposal is
+# accepted and cannot be accepted again" — and proved nothing about the block validation. The
+# two arms are different code paths and the batch-validation one is the one A264 is about, so
+# this asks for a second proposal and drags a block onto a real class event.
 say "7b. a dragged block that overlaps a class is refused, and nothing is written"
 CLASS_START="$(db "select starts_at from events where user_id = '$UID_' and kind = 'class' order by starts_at limit 1")"
-python3 - "$TMP/accept.json" "$CLASS_START" "$TMP/accept-overlap.json" <<'PY'
+[ -n "$CLASS_START" ] || fail "no class event to overlap; the confirm's meeting did not expand"
+STATUS="$(curl -sS -o "$TMP/plan2.json" -w '%{http_code}' -X POST \
+  "$BASE/goals/$GOAL_ID/plan" -H "authorization: Bearer $ACCESS")"
+[ "$STATUS" = "202" ] || fail "the second plan request must be 202, got $STATUS: $(cat "$TMP/plan2.json")"
+PROPOSAL2="$(field '["proposal_id"]' < "$TMP/plan2.json")"
+for _ in $(seq 1 60); do
+  curl -fsS "$BASE/plans/$PROPOSAL2" -H "authorization: Bearer $ACCESS" > "$TMP/proposal2.json"
+  P2_STATUS="$(field '["proposal"]["status"]' < "$TMP/proposal2.json")"
+  [ "$P2_STATUS" = "ready" ] && break
+  [ "$P2_STATUS" = "failed" ] && fail "the second plan failed: $(cat "$TMP/proposal2.json")"
+  sleep 1
+done
+[ "$P2_STATUS" = "ready" ] || fail "the second proposal did not reach ready (status $P2_STATUS)"
+python3 - "$TMP/proposal2.json" "$CLASS_START" "$TMP/accept-overlap.json" <<'PY'
 import json, sys
 from datetime import datetime, timedelta, timezone
-body = json.load(open(sys.argv[1]))
-class_start = datetime.fromisoformat(sys.argv[2].replace(" ", "T").replace("+00", "+00:00"))
+view = json.load(open(sys.argv[1]))["proposal"]
+body = view["proposal"]
+class_start = datetime.fromisoformat(sys.argv[2].replace(" ", "T"))
 if class_start.tzinfo is None:
     class_start = class_start.replace(tzinfo=timezone.utc)
-block = body["blocks"][0]
 start = class_start + timedelta(minutes=10)
 end = start + timedelta(minutes=50)
-body["blocks"][0] = {**block, "starts_at": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                     "ends_at": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-json.dump(body, open(sys.argv[3], "w"))
-print(f"moving block 0 onto the class at {sys.argv[2]}")
+blocks = [{
+    "starts_at": b["starts_at"],
+    "ends_at": b["ends_at"],
+    "goal_id": b["goal_id"],
+    "topic": b["topic"],
+    "kind": "review" if b["kind"] == "Review" else "new_material",
+} for b in body["blocks"]]
+# A **pinned** block is the one block the client may not move: `apply::resolve_pinned` names
+# its committed row by the exact range the server supplied, so a moved pinned block finds
+# nothing and refuses the whole batch with 409. The first version of this scenario dragged
+# `blocks[0]`, which after a first accept *is* pinned, and got exactly that 409 — the server
+# was right and the scenario was wrong. So the drag targets the first block that is not kept.
+NIL = "00000000-0000-0000-0000-000000000000"
+target = next(i for i, b in enumerate(blocks) if not (b["goal_id"] == NIL and b["topic"] == "Pinned"))
+blocks[target] = {**blocks[target],
+                  "starts_at": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "ends_at": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+json.dump({"proposal_id": view["id"], "blocks": blocks}, open(sys.argv[3], "w"))
+print(f"moving block {target} onto the class at {sys.argv[2]}")
 PY
-# The proposal is `accepted`, so this refusal has to come from the validation rather than from
-# the status: the 409 above is the status arm, and this is the block arm. A fresh proposal is
-# what makes the two distinguishable.
+BLOCKS_BEFORE_REFUSAL="$(db "select count(*) from events where user_id = '$UID_' and kind = 'study_block'")"
 STATUS="$(curl -sS -o "$TMP/overlap.json" -w '%{http_code}' -X POST "$BASE/plans/accept" \
   -H "authorization: Bearer $ACCESS" -H 'content-type: application/json' -d "@$TMP/accept-overlap.json")"
-[ "$STATUS" = "409" ] || [ "$STATUS" = "400" ] \
-  || fail "an overlapping accept must be refused, got $STATUS: $(cat "$TMP/overlap.json")"
-printf 'an overlapping block -> %s %s\n' "$STATUS" "$(field '["message"]' < "$TMP/overlap.json")"
+[ "$STATUS" = "400" ] || fail "an overlapping block must be 400 validation, got $STATUS: $(cat "$TMP/overlap.json")"
+[ "$(field '["code"]' < "$TMP/overlap.json")" = "validation" ] \
+  || fail "the overlap refusal must be validation: $(cat "$TMP/overlap.json")"
+BLOCKS_AFTER_REFUSAL="$(db "select count(*) from events where user_id = '$UID_' and kind = 'study_block'")"
+[ "$BLOCKS_AFTER_REFUSAL" = "$BLOCKS_BEFORE_REFUSAL" ] \
+  || fail "a refused batch wrote $((BLOCKS_AFTER_REFUSAL - BLOCKS_BEFORE_REFUSAL)) row(s)"
+printf 'an overlapping block -> %s %s | study_block events unchanged at %s\n' "$STATUS" \
+  "$(field '["message"]' < "$TMP/overlap.json")" "$BLOCKS_AFTER_REFUSAL"
 
 # ==========================================================================================
 # 8. The replan: the accepted blocks come back pinned and unchanged
@@ -509,12 +591,21 @@ for _ in $(seq 1 60); do
 done
 [ "$R_STATUS" = "ready" ] || fail "the replan did not reach ready (status $R_STATUS)"
 
-# The old proposal is superseded in the same transaction the new one is written, so a client
-# polling the old id is told what happened rather than left with a proposal that never moves.
+# An **accepted** proposal stays `accepted`: its blocks are real rows in the student's calendar,
+# and marking it superseded would say the plan was replaced when the study time is still there.
+# The supersede rule is for the goal's *outstanding* proposals (`planning`/`ready`), which is
+# what the first version of this assertion got wrong — it expected `superseded` and the server
+# was right. The second proposal from 7b is the one that must be superseded by this replan.
 OLD_STATUS="$(curl -fsS "$BASE/plans/$PROPOSAL" -H "authorization: Bearer $ACCESS" | field '["proposal"]["status"]')"
-[ "$OLD_STATUS" = "superseded" ] || fail "the old proposal is $OLD_STATUS, not superseded"
+[ "$OLD_STATUS" = "accepted" ] || fail "the accepted proposal is $OLD_STATUS, not accepted"
+STALE_STATUS="$(curl -fsS "$BASE/plans/$PROPOSAL2" -H "authorization: Bearer $ACCESS" | field '["proposal"]["status"]')"
+[ "$STALE_STATUS" = "superseded" ] \
+  || fail "the goal's outstanding proposal is $STALE_STATUS, not superseded"
 
-python3 - "$TMP/accepted.json" "$TMP/replan-ready.json" <<'PY'
+# The request body, not the response: `$TMP/accepted.json` holds `{event_ids}` and the body the
+# client sent is `$TMP/accept.json`. The first version read the response and got `KeyError:
+# 'blocks'`, which is the shape of a test reading the wrong file rather than a server bug.
+python3 - "$TMP/accept.json" "$TMP/replan-ready.json" <<'PY'
 import json, sys
 committed = json.load(open(sys.argv[1]))["blocks"]
 replan = json.load(open(sys.argv[2]))["proposal"]["proposal"]["blocks"]
@@ -528,7 +619,8 @@ assert len(pinned) >= len(committed), (
 kept = [b for b in pinned if b["topic"] == "Pinned" and b["goal_id"] == "00000000-0000-0000-0000-000000000000"]
 print(f"committed={len(committed)} pinned={len(pinned)} kept-with-nil-goal={len(kept)} of {len(replan)} block(s)")
 PY
-printf 'replan -> %s | the previous proposal is %s\n' "$R_STATUS" "$OLD_STATUS"
+printf 'replan -> %s | the accepted proposal is %s, the outstanding one is %s\n' \
+  "$R_STATUS" "$OLD_STATUS" "$STALE_STATUS"
 
 # ==========================================================================================
 # 9. The prompts the model actually received
@@ -560,17 +652,37 @@ for name, requests in (("syllabus.v1", extraction), ("planner_effort.v1", effort
     assert "Asia/Jakarta" in prompt, f"{name}: the prompt did not carry the student's zone"
     print(f"{name}: zone=Asia/Jakarta chars={len(prompt)}")
 
-# The student's own words are data, not instructions: the syllabus text is inside the block the
-# composer writes, which is what stops a document from steering the model.
+# The student's own document is data, not instructions: the composer wraps every retrieved
+# source in `<sources>`, which is the delimiter that stops a syllabus from steering the model.
+# (The first version of this check looked for `<user_context_data>`, which is the *variable*
+# block the module declares — the document itself arrives as a source. Found by running it.)
 syllabus = extraction[-1]["messages"][0]["content"]
+assert "<sources>" in syllabus and "</sources>" in syllabus, "the document is not delimited"
 for needle in ("Jaringan Komputer", "UAS 15 Desember"):
-    assert inside_a_data_block(syllabus, needle), (
-        f"{needle!r} is interpolated outside a <user_context_data> block, so the model reads the "
-        "document as an instruction")
+    assert inside_a_data_block(syllabus, needle) or (
+        syllabus.rfind("<sources>", 0, syllabus.find(needle))
+        < syllabus.find(needle)
+        < syllabus.find("</sources>", syllabus.find(needle))
+    ), (
+        f"{needle!r} is interpolated outside a <sources> block, so the model reads the document "
+        "as an instruction"
+    )
+# The goal title is the variable block the effort module declares and lists as untrusted. The
+# title is the goal the plan was asked for (`UAS Jaringan`), not the topic (`Silabus Jaringan`).
 goal_title = effort[-1]["messages"][0]["content"]
-assert inside_a_data_block(goal_title, "Silabus Jaringan") or "goal_title" in goal_title, (
-    "the goal title must be delimited as data")
-print("syllabus.v1: the document sits inside <user_context_data>")
+assert inside_a_data_block(goal_title, "UAS Jaringan"), (
+    "the goal title must be delimited as data in the effort prompt"
+)
+print("syllabus.v1: the document sits inside <sources>; planner_effort.v1: the goal title inside <user_context_data>")
+# Reported rather than asserted, because the fix is the prompt module's: `topics_json` carries
+# the student's own **source titles**, and it is interpolated outside the data block. A source
+# titled to look like an instruction is a student-controlled string reaching the model
+# undelimited — the same class A254 fixed for `semester_context`. Not this slice's file.
+topics_at = goal_title.find("Topics (each with its source size")
+block_end = goal_title.find("</user_context_data>")
+if topics_at > block_end:
+    print("NOTE: topics_json sits outside <user_context_data>, and it carries the student's own "
+          "source titles — a prompt-injection surface for the prompt module's owner, not this slice's")
 PY
 
 printf '\n=== PASS\n'

@@ -993,13 +993,15 @@
       "empty": "Nothing planned",
       "busy": "Busy",
       "now": "Now",
-      "moveLabel": "{{subject}}, {{start}} to {{end}}. Use the arrow keys to move it."
+      "moveLabel": "{{subject}}, {{start}} to {{end}}. Use the arrow keys to move it.",
+      "keptLabel": "Kept block, {{start}} to {{end}}. It stays where it is."
     },
     "refused": {
       "backwards": "A block has to end after it starts.",
       "busy": "That would overlap a class or another event.",
       "window": "That is outside your study hours.",
-      "daily_max": "That would put the day over your daily study limit."
+      "daily_max": "That would put the day over your daily study limit.",
+      "pinned": "A block you already added stays where it is. The planner keeps it exactly."
     }
   },
   "reports": {

@@ -140,6 +140,20 @@ describe('the drag-adjust rules', () => {
     expect(moveBlock(full, 1, 0, CONTEXT)).toEqual({ ok: false, reason: 'daily_max' })
   })
 
+  it('refuses to move a block the student already added, because the server resolves it by range', () => {
+    // Found by the smoke run against the wired server: a pinned block round-trips as the nil
+    // goal plus `"Pinned"`, and `POST /plans/accept` names its committed row by the **exact**
+    // `(starts_at, ends_at)` range it supplied (A265). Move it and the lookup finds nothing, so
+    // the whole batch is refused with 409 — one dragged block made every block unsaveable.
+    const kept = block({ goal_id: NIL_GOAL_ID, topic: PINNED_TOPIC, pinned: true })
+    expect(moveBlock([kept], 0, 60, CONTEXT)).toEqual({ ok: false, reason: 'pinned' })
+    expect(moveBlock([kept], 0, -60, CONTEXT)).toEqual({ ok: false, reason: 'pinned' })
+    // A block the student dragged earlier in this same preview is not kept: it has its own goal
+    // and has not been accepted yet, so it stays movable.
+    const moved = block({ pinned: true })
+    expect(moveBlock([moved], 0, 60, CONTEXT).ok).toBe(true)
+  })
+
   it('marks a dragged block as pinned, so a replan keeps it exactly', () => {
     // This is the one place the UI can create a state the planner must then honour
     // (contract § 6 step 7): a moved block is the student's own placement, and a
@@ -181,10 +195,11 @@ describe('the proposal preview', () => {
     expect(blockSubject(block(), () => undefined)).toEqual({ kind: 'goal', text: 'Jaringan' })
   })
 
-  it('sends a kept block back as null plus the pinned topic, and omits the client’s own flag', () => {
-    // `AcceptBlock` is `deny_unknown_fields`, so an extra field is a 400 for the
-    // whole batch: the drag marker is the client's bookkeeping and the server reads
-    // only the times, the goal and the topic.
+  it('echoes a kept block unchanged, because the field is a Uuid and null is a 400', () => {
+    // `AcceptBlock.goal_id` is a `Uuid`, not an `Option<Uuid>`, and the body is
+    // `deny_unknown_fields` — so a `null` is a deserialization failure and a 400 for the whole
+    // batch. The nil id plus `"Pinned"` is the pair the server's own `is_pinned()` reads, and
+    // the block goes back exactly as it arrived.
     const body = acceptBody([
       block(),
       block({
@@ -204,13 +219,14 @@ describe('the proposal preview', () => {
       topic: 'Jaringan',
       kind: 'new_material',
     })
-    expect(body.blocks[1]?.goal_id).toBeNull()
+    expect(body.blocks[1]?.goal_id).toBe(NIL_GOAL_ID)
     expect(body.blocks[1]?.topic).toBe(PINNED_TOPIC)
     expect(body.blocks[2]?.kind).toBe('review')
     for (const sent of body.blocks) {
       expect(Object.keys(sent).sort()).toEqual(
         ['starts_at', 'ends_at', 'goal_id', 'kind', 'topic'].sort(),
       )
+      expect(typeof sent.goal_id).toBe('string')
     }
   })
 })

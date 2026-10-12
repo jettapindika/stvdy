@@ -976,13 +976,15 @@
       "empty": "Belum ada rencana",
       "busy": "Sibuk",
       "now": "Sekarang",
-      "moveLabel": "{{subject}}, {{start}} sampai {{end}}. Pakai tombol panah untuk memindahkannya."
+      "moveLabel": "{{subject}}, {{start}} sampai {{end}}. Pakai tombol panah untuk memindahkannya.",
+      "keptLabel": "Blok yang dipertahankan, {{start}} sampai {{end}}. Tetap di tempatnya."
     },
     "refused": {
       "backwards": "Blok harus selesai setelah dimulai.",
       "busy": "Itu akan bertabrakan dengan kelas atau acara lain.",
       "window": "Itu di luar jam belajarmu.",
-      "daily_max": "Itu akan membuat harimu melebihi batas belajar harian."
+      "daily_max": "Itu akan membuat harimu melebihi batas belajar harian.",
+      "pinned": "Blok yang sudah kamu tambahkan tetap di tempatnya. Penjadwal menyimpannya persis."
     }
   },
   "reports": {
