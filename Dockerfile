@@ -32,9 +32,6 @@ COPY migrations ./migrations
 COPY prompts ./prompts
 COPY templates ./templates
 COPY config ./config
-# The committed query cache. Without it `sqlx::query!` macros need a live database at
-# build time, which would make the image build depend on Postgres.
-COPY .sqlx ./.sqlx
 # The print assets. `rust-embed` compiles them into the binary, so a file missing from
 # the repository fails the build here rather than 404ing at print time (A339).
 COPY assets ./assets
@@ -47,8 +44,8 @@ ENV SQLX_OFFLINE=true
 # `target/release/deps/` (`pdf-<hash>` among them). `cargo build` alone does **not** build
 # test targets, and without this the image would carry no acceptance test and the whole
 # point of copying `target/release/` would be lost: CI would look for `deps/pdf-*` and find
-# nothing. It needs no database — `SQLX_OFFLINE` compiles the queries against the committed
-# cache.
+# nothing. It needs no database: this tree has no compile-time query macros, so
+# `cargo build` never asks Postgres for a schema.
 RUN cargo build --release --workspace --locked \
     && cargo test --release --workspace --no-run --locked
 

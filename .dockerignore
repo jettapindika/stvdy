@@ -3,7 +3,7 @@
 #
 # What must **not** be excluded is the set the `build` stage copies: `Cargo.toml`,
 # `Cargo.lock`, `rust-toolchain.toml`, `crates/`, `migrations/`, `prompts/`,
-# `templates/`, `config/`, `.sqlx/` and `assets/`. A pattern here that swallowed one of
+# `templates/`, `config/` and `assets/`. A pattern here that swallowed one of
 # those would fail the build with a missing file rather than with a useful message, so the
 # list below is only things no stage reads.
 

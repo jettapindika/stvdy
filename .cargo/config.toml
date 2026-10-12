@@ -1,4 +1,6 @@
 [env]
-# CI sets SQLX_OFFLINE=true for the lint/build jobs, where no database is
-# available and queries compile against the committed .sqlx cache.
+# CI sets SQLX_OFFLINE=true for the lint/build jobs, where no database is available.
+# There is no `.sqlx` cache to compile against — this tree has no compile-time query
+# macros, and `cargo sqlx prepare --workspace --check` exits 0 without writing one — so
+# the flag costs nothing here and keeps a job from reaching for a database it has not got.
 SQLX_OFFLINE = "false"
