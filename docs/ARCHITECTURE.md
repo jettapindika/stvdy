@@ -1365,3 +1365,77 @@ unit-tested against a fixed instant and an explicit `Asia/Jakarta` zone. The gri
 **table** rather than absolutely-positioned divs, because a grid a keyboard cannot enter and a
 screen reader cannot read is not a grid; and the course colour is a 4px marker **plus** a
 tinted chip **plus** the workspace's name, never the colour alone.
+
+## Planner (Phase 11)
+
+The planner is the most-tested pure function in the product and the easiest thing in the
+product to make non-deterministic, so the split is the same one the entitlements engine uses
+and the discipline is mechanical rather than a comment.
+
+**`crates/core/src/planner/` is pure.** `PlannerInput` in, `PlanProposal` out: no database, no
+clock, no IO, no network. `now` is a **field of the input, not a call**, which is what makes
+the whole algorithm testable against a fixed instant and what contract § 6 means by "same
+input ⇒ same output". The module uses `BTreeMap`/`BTreeSet` and total orders only.
+
+**`crates/server/src/planner/` is the only thing that builds a `PlannerInput`** — it reads the
+goal, the busy calendar, the due cards and the quiz weaknesses — and the only thing that turns
+a `PlanProposal` into rows. The effort estimate is the one model call and it estimates
+**minutes only**: `prompts/planner_effort.v1.md` says in its own text that the scheduler is
+deterministic code that runs after it, and the module returns nothing but numbers. `now` is
+read **once**, inside `input_for`, and nothing below reads a clock.
+
+The seven steps run in this order, and the order is the contract: (1) horizon =
+`max(target_date).local_date() + 1 day`, clipped to `[today, today + max_horizon_days]`
+(A267); (2) study windows per local day from `user_settings`, minus `busy ∪ pinned` (A265);
+(3) demand per topic from the estimate, weighted `1 + spread_k × (1 − accuracy)` with a topic
+of no attempts weighing 1 (A258); (4) the review pass, which reserves the spaced-repetition
+revisits and outranks everything after it; (5) allocation by `(deadline, created_at, id)`, a
+**total** order because `goals.created_at` is always set; (6) the deadline buffer
+(`deadline_buffer_min = 120`) and the daily maximum, which produce `deficit_min` and the two
+warnings; (7) the Power balancer (A268), bounded to 100 iterations, moving the latest
+**movable** block — not pinned, not review-reserved — to the least-loaded day.
+
+**The extraction rides `ingest_source`** (A250) because the roadmap's § 8 job list is fixed
+and has no syllabus kind: `sources.kind='syllabus'` gets a parse arm and then one extra step
+that composes `syllabus.v1.md`, calls the model, and writes `syllabus_drafts`. It is
+idempotent — the draft is keyed uniquely on `source_id`, so a retry `update`s the same row.
+A permanent failure refunds the eight credits the upload charged.
+
+**The proposal is not synced; the accepted blocks are** (A252/A263). `plan_proposals` is
+server-owned and read-only for clients except through `GET /plans/:id`; what reaches every
+device is the `events` the accept wrote, with `goal_id` set. `syllabus_drafts` is the same
+shape for the same reason. Neither table attaches a sync trigger, so
+`0017_sync_triggers.sql` stays the last trigger-attaching migration.
+
+**The determinism defence is three tests, not a review.**
+
+1. `crates/core/tests/planner.rs::the_same_input_produces_byte_identical_output` builds the
+   same logical input **through two different construction paths** — one feeding the accuracy
+   map from a `HashMap`, one from a `BTreeMap` — and asserts the two `serde_json::to_vec`
+   results are byte-for-byte equal. A `HashMap` whose iteration order leaks into the output
+   cannot pass that, because the two paths insert in different orders.
+2. `crates/core/tests/planner_purity.rs` reads every file under `crates/core/src/planner/`
+   with `include_str!` and fails on `Utc::now`, `Local::now`, `SystemTime`, `HashMap`,
+   `HashSet`, `sort_unstable` or `partial_cmp`. The rule is mechanical rather than a comment.
+3. `replan_keeps_pinned_blocks_exactly` pins the property that makes replanning trustworthy at
+   all: a block the student has already committed to is kept exactly, and one they are sitting
+   in is treated as busy rather than rescheduled over.
+
+**The DST day is where local-date arithmetic silently skips or duplicates a block.**
+`chrono_tz`'s `from_local_datetime` returns a `LocalResult` with three shapes and `Single(..)`
+is the one everybody writes. Two tests use `Europe/London` with a study window that crosses
+the transition — 2026-03-29 (the 01:00 hour does not exist) and 2026-10-25 (it happens twice)
+— and assert the capacity in minutes, which is 23 and 25 hours' worth of window respectively.
+`Asia/Jakarta` has no DST, so a test that used it would prove nothing; gate 6 uses Jakarta for
+the *end-to-end* flow and these two use London for the arithmetic.
+
+**The SPA's arithmetic is pure for the same reason** (`app/src/features/planner/plan.ts`). The
+week grid's "today", the days-until-the-exam figure and every block's position take `now` and
+the IANA zone as parameters and read no clock, so a day boundary is the zone's day rather than
+UTC's: an exam at 06:00 Jakarta on the 16th is `23:00Z` on the **15th**, and an implementation
+that bucketed by UTC date would put it a day early with nothing on screen to say so. A dragged
+block becomes **pinned** and the preview says so, because that is the one place the UI can
+create a state the planner then has to honour. The grid is a **table** — one row per local day
+— rather than absolutely-positioned divs, and a block is a `<button>` whose arrow keys move it
+by 15 minutes, because a pointer-only drag is a control a keyboard user cannot reach and a
+jsdom test cannot drive.

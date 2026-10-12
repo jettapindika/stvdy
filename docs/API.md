@@ -1241,12 +1241,134 @@ incremental sync silently reverts.
 
 ## Goals and planner (Phase 11)
 
-CRUD `/goals`, `POST /goals/:id/plan`, `POST /plans/accept`, `POST /plan/replan`.
+A goal is the anchor the planner schedules against: an exam or a deadline with a
+date, plus the sources its topics come from. Every route here takes `AuthUser`
+except the two that spend credits, which take `VerifiedUser` because A43 keeps a
+spend behind a confirmed address.
+
+| Method | Path | Status | Notes |
+|---|---|---|---|
+| `GET` | `/goals` | 200 `{goals}` | Live goals for the caller, tombstone-free. |
+| `POST` | `/goals` | 201 `{goal}` | `{title, target_date, workspace_id, source_ids}`. |
+| `GET` | `/goals/:id` | 200 `{goal}` / 404 | Another account's goal is a 404, never a 403. |
+| `PATCH` | `/goals/:id` | 200 `{goal}` / 404 | Partial write. |
+| `DELETE` | `/goals/:id` | 204 | A tombstone: the goal is synced, so the removal has to reach every device. Its blocks survive with `goal_id` null (`on delete set null`). |
+| `GET` | `/goals/:id/progress` | 200 | `{goal_id, window_days, topic_coverage_pct, quiz_accuracy_pct, cards_due, weak_topics, topics}`. |
+| `POST` | `/goals/:id/plan` | 202 `{proposal_id}` | Reserves `plan_generation` (2 credits) and enqueues `plan_goal`. |
+| `GET` | `/plans/:id` | 200 `{proposal}` / 404 | The poll. |
+| `POST` | `/plans/accept` | 200 `{event_ids}` | Writes the blocks. Spends nothing. |
+| `POST` | `/plan/replan` | 202 `{proposal_id}` | Reserves 2 more credits. |
+
+**`GET /goals/:id/progress` is the honesty surface.** There is no composite
+readiness score and no grade prediction; `quiz_accuracy_pct` is `null`, never `0`,
+when the goal has no attempts, because `0%` is a claim the app cannot make from an
+empty set. `topic_coverage_pct` is `null` when the goal has no topics yet. `topics`
+is the list the coverage is computed over, so a screen can show what the percentage
+is a percentage *of*.
+
+**Planning is a job, not a route** (A253). `POST /goals/:id/plan` reserves the two
+credits, writes a `plan_proposals` row in status `planning`, enqueues the job and
+answers 202 with `{proposal_id}`; `GET /plans/:id` is how a client polls. The
+contrast with `create_outline` is deliberate: one short call may run in a route, a
+whole-document call may not.
+
+`GET /plans/:id` answers **200 in every status** — `planning`, `ready`, `failed`,
+`accepted`, `superseded` — because a poll that turned a normal outcome into an HTTP
+error would force every client to treat it as an exception before it could show the
+message. The body is `{proposal: {id, goal_id, status, proposal, deficit_min,
+warnings, prompt_version, error, created_at, updated_at}}`.
+
+`proposal` is the pure module's `PlanProposal`: `blocks[]` (`starts_at`, `ends_at`,
+`goal_id`, `topic`, `kind` ∈ `NewMaterial|Review`, `pinned`), `day_load[]`
+(`date`, `planned_min`, `capacity_min`), `deficit_min`, and `warnings[]` — either
+`{"Overloaded": {"days": [...]}}` or `{"PastDeadline": {"goal_id": …}}`, and the
+enum is closed (A262). **`deficit_min` is a real computed number**: it is the
+minutes of demand the horizon could not hold, and a plan that dropped the excess
+silently would look complete and leave the student unprepared.
+
+A **pinned** block arrives with `goal_id` `00000000-0000-0000-0000-000000000000`
+and the topic `"Pinned"` (A265): contract § 6's `Interval` carries no goal
+attribution. A client echoes such a block back **unchanged** — the server resolves
+it to its committed event by the exact `(starts_at, ends_at)` range.
+
+### Refusals
+
+| Code | Status | When |
+|---|---|---|
+| `plan_required` | 403, `min_plan: "pro"` | The plan's `planner = "manual"`. Structural, not a copy decision: `Feature::PlanGeneration` is `planner != manual` (A257). |
+| `insufficient_credits` | 402 | Not enough credits for the 2. |
+| `validation` | 400 | `POST /plans/accept` naming the offending block index. |
+| `conflict` | 409 | A second accept of one proposal, or a replan of a goal with no live proposal. |
+| `not_found` | 404 | Another account's goal or proposal. |
+
+**`POST /plans/accept` re-validates the client's blocks and writes the whole batch
+or none of it** (A264). The client may drag a block; the server still checks the
+merged result against busy time, the study window and `max_study_min_per_day`, and
+answers 400 naming the block rather than writing part of a plan. The body is
+`{proposal_id, blocks: [{starts_at, ends_at, goal_id, topic, kind}]}` with
+`deny_unknown_fields`, and `kind` is a string: `"review"` case-insensitively for a
+review-reserved block, anything else for new material. Accept spends nothing — the
+two credits were charged at plan time.
+
+A replan (A265) splits the goal's existing blocks: one that starts after `now` is
+**pinned** and kept exactly; one that has already started joins the busy set,
+because a replan must not schedule new material over a session the student is
+sitting in.
 
 ## Syllabus (Phase 11)
 
-`POST /workspaces/:id/syllabus`, `GET /syllabus/:id/draft`,
-`POST /syllabus/:id/confirm`.
+| Method | Path | Status | Notes |
+|---|---|---|---|
+| `POST` | `/workspaces/:id/syllabus` | 202 `{draft_id, source_id}` | Multipart: `file` or `text`, optional `title`. `VerifiedUser`. Charges `syllabus_import` (8). |
+| `GET` | `/syllabus/:id/draft` | 200 / 409 | The extraction and the review list. 409 `conflict` while it is still being read. |
+| `POST` | `/syllabus/:id/confirm` | 200 `{draft_id, status, events, tasks, goals}` | The only writer of the rows. 409 on a second confirm. |
+
+**Nothing reaches `events`, `tasks` or `goals` until the student confirms.** The
+extraction is a model's reading of a document, and a wrong reading written straight
+through is the failure the review step exists to prevent. So the upload writes a
+`sources` row with `kind = 'syllabus'` and enqueues `ingest_source`, which gains one
+step for that kind: compose `syllabus.v1.md`, call the model, write
+`syllabus_drafts` (A250 — no new job kind is added, because the roadmap's § 8 list is
+fixed). The extraction is idempotent: the draft is keyed uniquely on `source_id`, so
+a retry updates the same row rather than appending a second one. A parse failure is
+permanent; a model or transport failure is transient and retried once with a
+corrective turn.
+
+The draft body is `{draft_id, source_id, status, error, course, items[]}`, where each
+item is `{index, kind: "class"|"deadline"|"exam", title, evidence, needs_check, when,
+rrule, start_time, end_time, topics, weight_percent}`.
+
+**There is no `confidence` field, and that is the point (A261).** The model returns a
+score per item and the honesty rules forbid showing one, so the score is used to
+**order** the list (lowest first, where the student's attention is) and to set
+`needs_check` below `REVIEW_FLAG_CONFIDENCE = 0.6`; what the screen shows is the
+**evidence quote** — the exact source line the item was read from — because a quoted
+line is what actually lets a student verify the item. An empty quote is a parse
+failure and a retry, not a weaker citation.
+
+`status` is `pending | extracting | ready | failed | confirmed`. A `failed`
+extraction is **200** with `status: "failed"` and the error in the body rather than a
+4xx: this endpoint's job is to report the draft's state.
+
+The confirm body is `{items: [{index, keep, title?, when?, rrule?, topics?,
+source_ids?}]}`, `deny_unknown_fields`. An absent field means **"keep what the
+extraction said"** rather than "clear it". An index that is not in the draft is a
+400, and so is one that appears twice — both checked before anything is written, so
+a malformed body cannot produce a half-written confirm. One transaction: the draft
+must be `ready` and the caller's, the status becomes `confirmed`, and every kept
+item's rows are written together.
+
+The confirm mapping is fixed (A269): a kept meeting → one `events` row per expanded
+occurrence (`kind='class'`, `source='app'`, expanded with Phase 10's
+`calendar::expand` and capped at `MAX_OCCURRENCES = 60`); a kept deadline → one
+`tasks` row (`due_at` set, `priority` 1, `estimate_min` null); a kept exam → one
+`goals` row (`target_date` set, `source_ids` the workspace sources the student
+selected, or every live source when they selected none).
+
+**Free is capped by count, not refused.** `syllabus_imports_total = 1`, so the first
+import is granted and the second is 422 `limit_reached`. The count and the charge
+commit with the reserving row, so a failure rolls the charge back with it, and a
+permanent extraction failure refunds the eight credits (A253).
 
 ## Calendar (Phase 10)
 
@@ -1432,6 +1554,76 @@ wrote is refused by `PATCH`, and the sync can still write it.
 
 `GET /actions/pending`, `POST /actions/:id/confirm`, `POST /actions/:id/reject`.
 
+A **WRITE tool never executes on its own** (A271). The gate has no arm that can run one, so a
+`create_task` the model emits becomes a row in `pending_actions` plus an `action` event on the
+chat stream, and the only thing that turns that row into a domain row is the confirm below.
+
+### `GET /actions/pending`
+
+Auth. Runs the lazy expiry first (A274), then answers the caller's proposals:
+
+```json
+{ "actions": [ { "id", "tool", "args", "status", "created_at", "expires_at",
+                 "resolved_at", "resolved_by_device_id", "result", "error",
+                 "message_id" } ] }
+```
+
+`status` is the server's and is one of `pending`, `confirmed`, `rejected`, `expired`. The list
+carries the **pending** rows plus every row resolved in the last `RESOLVED_VISIBLE_HOURS` (24)
+— which is what lets a card confirmed on device A read "Confirmed" on device B rather than
+vanish — newest first, `limit 50`.
+
+The lazy expiry is one `update … set status = 'expired'` before the select. A `GET` that
+writes is deliberate: the alternative is a scheduler pass over every account's pending actions
+and the roadmap § 8 job-kind list is fixed with no expiry kind, and the claim re-checks
+`expires_at` inside its own transaction, so this is the convenience and not the enforcement.
+
+### `POST /actions/:id/confirm`
+
+Auth, `Feature::AgentAction` → `403 plan_required`, checked **before the row is read** — so an
+account without the entitlement is refused whatever the id names.
+
+Body: `{ "args": { … } }`, optional and `deny_unknown_fields`. Absent confirms exactly what was
+proposed; present is the Edit half of Confirm/Edit/Dismiss and is re-parsed through the same
+`parse_args` the proposal went through, so an edit can only ever **narrow** what the model
+proposed — the tool's bounds, the field rules and the closed `additionalProperties` all apply
+again. An invalid edit is `400` and the row stays `pending`.
+
+Order is the contract: plan → row → claim → execute → record → commit. The claim is a guarded
+state flip inside the execution's own transaction (A275):
+
+```sql
+update pending_actions set status = 'confirmed', resolved_at = now(),
+       resolved_by_device_id = $3
+ where id = $1 and user_id = $2 and status = 'pending' and expires_at > now()
+ returning id
+```
+
+**Zero rows is `409 conflict`**, with a body naming the current status — so a second tap, on
+either device, writes nothing and the client's remedy is to re-read the row. The executor runs
+inside that transaction, so a failure rolls the claim back and a `confirmed` row can never be a
+row that did nothing. `resolved_by_device_id` is what makes "confirm on device B" a fact rather
+than a claim.
+
+Another account's proposal is `404`, never `403`: a `403` would confirm the id exists.
+
+A confirmed `create_flashcards` or `create_quiz` charges `flashcard_batch_10` / `quiz_10` on
+the deck and quiz paths' own spend — the executor calls those routes' service functions, so
+there is one implementation of "create a deck" and one price for it (A276).
+
+The one failure the rollback cannot cover is the enqueue **after** the commit: the row *was*
+written and the job that generates it could not be queued. That is recorded on the row as
+`error` and answered as a failure, so the card on every device says why the work did not start
+rather than claiming a deck that is not generating.
+
+### `POST /actions/:id/reject`
+
+Auth. Deliberately **not** gated by the plan: it spends nothing and frees the student from a
+card, and gating it would leave a downgraded account unable to dismiss a proposal it can no
+longer confirm. Single-winner like the confirm, and for the same reason — two devices
+dismissing the same card must agree about what happened, so the second is told `409` rather
+than silently succeeding. `404` for another account's row.
+
 ## Sessions and activity (Phase 9)
 
 Auth. A study session is append-only and client-id'd: the timer mints the id when it
@@ -1500,8 +1692,22 @@ not catch.
     "max_study_min_per_day": 240, "block_len_min": 50, "break_min": 10,
     "reminder_channels": ["web"], "quiet_start_hour": 22, "quiet_end_hour": 7,
     "language": "id", "theme": "system", "updated_at": "2026-10-12T03:02:05Z" },
-  "timezone": "Asia/Jakarta" }
+  "timezone": "Asia/Jakarta",
+  "channels_available": ["web", "push", "email"] }
 ```
+
+**`channels_available` is what this deployment can actually deliver on** (A288), and
+it is a different question from what the plan grants. `telegram` and `discord` are
+in `config/plans.toml`, `PUT /settings` keeps accepting them for Power, and no
+transport sends them — so the field is derived from the transports that exist:
+`web` and `email` unconditionally (the in-app feed and the desktop shell's local
+notification need no transport, and the mailer is always present because a
+deployment with no SMTP credentials gets the dev sink), and `push` only when
+APNs/FCM credentials are configured. The order is the matrix's own. The settings
+screen offers only what appears here, because the alternative — a channel that is
+granted, selectable and silently never fires — leaves the student's only evidence a
+reminder that never arrived. A delivery on a channel with no transport is recorded
+with `reason = 'channel_not_implemented'` and logged at `warn`.
 
 - `GET /settings` → 200 the shape above.
 - `PUT /settings` body = any subset of `{ "study_start_hour", "study_end_hour",
@@ -1549,10 +1755,104 @@ Greenwich and every date on the Today view with it (A6).
 `PUT /settings/api-key` and `DELETE /settings/api-key` are **Phase 13** (BYOK): the
 screen names them and they are not built here.
 
+## Reminders (Phase 12)
+
+`POST /reminders`, `GET /reminders`, `POST /reminders/:id/ack`.
+
+**Registration is the client's, and it is idempotent by the dedupe key.** The spec says
+clients may schedule local notifications from synced events and tasks so reminders work
+offline; this route is what tells the server the same reminder exists.
+
+```json
+POST /reminders  { "kind": "task_due" | "event_soon", "subject_id": "<uuid>",
+                   "fire_at": "2026-10-16T15:59:00Z" }
+             →   { "applied": true, "reminder_id": "<uuid>" }        (201 / 200)
+```
+
+`cards_due` is **not** registrable: it is day-granular and derived from the deck, so a client
+has nothing to compute it from that the server does not already have. The subject must be the
+caller's own and its kind must match the payload's — a `task_due` naming an event id would
+register a reminder that fires at the wrong time and is attributed to the wrong row, which no
+later layer can detect — so a foreign or mismatched subject is `404`.
+
+`fire_at` is bounded in both directions, each with a message naming the bound: no earlier than
+`now - CLOCK_SKEW_MIN` (5 minutes, the same slack the session validator grants a client's own
+clock) and no later than `now + MAX_LOOKAHEAD_DAYS` (14). The lower bound is what stops a
+client registering a reminder in the past, where it would fire immediately and be delivered as
+though it were due.
+
+**The key is `(kind, subject_id, the user's local date)` and never the computed instant**
+(A284). The server re-derives the local date from `users.timezone` rather than trusting the
+client's zone, because a device whose zone is stale would otherwise register the same reminder
+under a second key — which is exactly the duplicate the key exists to prevent. The write is
+`insert … on conflict (dedupe_key) do nothing returning id`, so two devices that compute 19:00
+and 19:01 produce **one** row and it keeps the **first** `fire_at`. `applied` says whether this
+call was the one that stored it — the Phase 9 `POST /sessions` shape, for the same reason: a
+client that retries after a lost response can tell whether its write landed without re-reading.
+A quiet-hours deferral is applied here and not left to the sweep, so a reminder stored inside
+the quiet window lands at the window's end rather than at the next tick.
+
+`GET /reminders` is the in-app channel's feed: due, pending, and not yet acknowledged **by this
+device**, newest first, `limit 20`. A `skipped` reminder stays in the feed on purpose (A286) —
+a reminder that silently never arrives is what the student reports as "reminders are broken" —
+and `skip_reason` is the only thing that distinguishes "quiet hours moved it past its subject"
+from "the push token is dead".
+
+`POST /reminders/:id/ack` records a `reminder_deliveries` row `(channel='web', device_id = this
+device, status='sent')`, `on conflict do nothing` so a double tap is a no-op. It is **per
+device**: an ack for the account would silence a reminder on a device the student had not
+looked at yet.
+
+Neither route is in the offline-write list (A283): a registration requires connectivity and
+queues nothing. The client's local schedule is what covers the offline case, and it needs no
+server at all.
+
 ## Dashboard (Phase 12)
 
-`GET /dashboard`. `POST /sessions` has moved to `## Sessions and activity (Phase
-9)`, where the timer that writes it lives.
+`GET /dashboard`, `GET /dashboard/topics`. `POST /sessions` has moved to
+`## Sessions and activity (Phase 9)`, where the timer that writes it lives.
+
+Both routes report **only what traces to a row** (A289), which is the honesty gate's
+requirement stated as a design rule: every figure is a count or a sum over rows the student
+owns, and there is no composite score, no predicted grade and no "retention".
+
+```json
+GET /dashboard?from=2026-09-28&to=2026-10-12
+ →  { "from", "to",
+      "time_per_course": [ { "workspace_id", "title", "minutes" } ],
+      "review_activity": [ { "local_date", "reviews" } ],
+      "totals": { "minutes_studied", "reviews", "cards_due", "quizzes_taken" } }
+```
+
+`from`/`to` are **local days** (`YYYY-MM-DD`) in the account's zone, not instants: a session at
+23:30 Jakarta is today, and a UTC window would ask for yesterday. Minutes come from
+`study_sessions` joined through `workspaces`; reviews from `flashcard_reviews`; `cards_due` is
+the same due-card query the study screen reads, so the number is the size of the queue a review
+would actually put in front of the student. Another account's rows are never counted.
+
+```json
+GET /dashboard/topics   →  403 plan_required (min_plan "power") on a plan without
+                            Feature::AdvancedAnalytics
+ →  { "quiz_mastery": [ { "source_id", "title", "attempts", "correct", "accuracy" } ],
+      "weak_topics":   [ …same shape… ],
+      "weak_threshold": { "accuracy", "min_attempts" }, "plan_route": "/goals/{goal_id}/plan" }
+```
+
+Two routes rather than one with a flag, so the sweep can drive a real refusal and the screen
+can render a locked card for the part that is locked while the rest of the dashboard keeps
+working: one route would have made the whole screen a 403 on Free.
+
+**A topic with no attempts is absent, never shown as 0%** — an uncomputable number must not
+reach the screen. `weak_topics` is a filter of `quiz_mastery` rather than a second query, so
+the two lists cannot disagree.
+
+The client **renders** `weak_threshold` and does not apply it: a client-side threshold would be
+a second definition of "weak", and the two would disagree the first time the server's was
+tuned — the card would then show topics the server does not consider weak. Likewise the
+weak-topic card names the planner as the remedy **in prose** and hands nothing over: a handover
+would need a goal to attach the block to and there is no goal picker yet, so a call would have
+to invent one. `plan_route` is served for Phase 11's goal picker to use; it is a planner
+dependency, not a dashboard one.
 
 ## Account (Phase 15)
 

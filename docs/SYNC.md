@@ -260,6 +260,24 @@ needs both the client's changed keys (`patch`) and the row the client edited fro
 The wire type is unchanged — `payload` is `Option<Value>` and its shape is ours;
 `Entity::payload_shape()` names which shape an entity uses.
 
+### `events.goal_id` (Phase 11)
+
+`events` gained `goal_id uuid references goals(id) on delete set null` (A263), and it is a
+**plain column of a synced entity**: `log_change()` logs the whole row, so both triggers are
+unchanged, the `Entity::Event` payload shape is unchanged, and the cache column in
+`src-tauri` is the only client-side consequence. Two rules follow and both are the server's:
+
+- **A client never sets it.** A planned block's goal is decided by `POST /plans/accept`, which
+  resolves a pinned block back to its committed row by the exact `(starts_at, ends_at)` range
+  and refuses when that lookup is ambiguous (A265) — so a client-supplied `goal_id` would be a
+  guess at something it cannot know. The REST `POST /events` and `PATCH /events/:id` paths
+  ignore it, the same way they ignore the calendar-owned columns (A198).
+- **A tombstoned goal nulls it on every device.** The FK's `on delete set null` fires where the
+  delete is applied, and `goals` deletes are tombstones rather than row deletes, so the pull
+  ships the goal's tombstone and the event row keeps its own `goal_id` until the device
+  applies it. A device that has the goal tombstoned and the block still linked shows the block
+  with no goal, which is the honest state: the anchor is gone, the study time is not.
+
 ### The merge rule for tasks and events (A177)
 
 The other writer's changed set is `{k : stored[k] != base[k]}`, **excluding `updated_at`**
@@ -336,8 +354,49 @@ rather than overwritten. The walk cannot be left to the client — the subtree a
 is not the subtree the account has, because another device may have added a subtask since
 that one last pulled.
 
-## Offline scope
+### `pending_actions` resolution is server-owned and single-winner (Phase 12)
 
+`pending_actions` stays in the table above's last row — server-owned, read-only for clients
+except via its dedicated endpoints — and this phase makes that a mechanism rather than a
+statement.
+
+- **The entity is unchanged and stays out of `is_client_writable()`.** Confirm and reject are
+  `POST /actions/:id/confirm` and `.../reject`, not pushes, so a client **cannot** push a
+  resolution. Offline, both buttons fail and say so instead of queueing work the server would
+  never receive. `docs/API.md` § Actions is the contract.
+- **The resolution columns travel**, which is what makes the cross-device half of the exit gate
+  a read fact: `resolved_at`, `resolved_by_device_id`, `result`, `error` and `expires_at` are
+  ordinary synced columns, so the card that was confirmed on device A reads "Confirmed" on
+  device B rather than vanishing. `GET /actions/pending` also carries the last day's
+  resolutions for a client that was offline across the resolution.
+- **Single winner.** The transition is one guarded `update … where status = 'pending' and
+  expires_at > now() returning …` **inside the execution's own transaction** (A275), so a
+  second tap on either device matches zero rows, writes nothing, and answers `409` naming the
+  current status. The executor runs inside that transaction, so a failure rolls the claim back
+  and a `confirmed` row can never be a row that did nothing. A read-then-write would have a
+  window wide enough for two taps, which is the normal case here and not the exceptional one.
+- **`expires_at` is written by every producer and carries no SQL default** (A273): the Rust
+  constant is the only place the TTL lives, so a default duplicating it would be a second
+  source of truth for the same number. Expiry is lazy on read (A274) and re-checked inside the
+  claim, so the list is a convenience and the claim is the enforcement.
+
+### `reminders` and `reminder_deliveries` are not synced (A283)
+
+Neither is a `+sync` table and neither gets an `Entity` variant. A reminder is **server-owned
+scheduling state**: the client's local notifications are computed from *synced* events, tasks
+and settings, and the server's copy exists so a reminder still fires when no client is running.
+Adding an entity would mean attaching a trigger from `0017_sync_triggers.sql`, which must stay
+the last trigger-attaching migration. Both therefore have a `documented` row in
+`crates/server/tests/schema.rs` and a row in `docs/ASSUMPTIONS.md` § Schema deviations — the
+`search_cache` and `syllabus_drafts` precedent.
+
+The client's half needs no sync at all: `app/src/features/reminders/localSchedule.ts` computes
+the same reminders from the rows it already holds, under the same dedupe key, so a phone in
+aeroplane mode still schedules today's deadlines — and the `seen` list in `Platform.localState`
+plus the keys `GET /reminders` reports for this device is what stops a reminder being both
+pushed and scheduled (A285).
+
+## Offline scope
 Native clients can **read** all synced data offline, and **write** offline only
 tasks, events, flashcard reviews, quiz attempts, study sessions and settings.
 Chat, generation, web search, uploads/ingestion, checkout and calendar connect
