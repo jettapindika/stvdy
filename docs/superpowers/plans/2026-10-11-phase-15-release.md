@@ -1035,6 +1035,28 @@ artifact whose integrity the whole channel rests on, so the workflow verifies it
 output: it downloads the published manifest back over HTTPS, verifies the signature
 against the committed public key, and fails if that round trip does not hold.
 
+**The read-back is implemented, and it is deliberately not in the `manifest` job.** That
+job produces and signs the manifest; the round trip belongs to `release`, which runs
+*after* publication — a job that verified a signature it had just produced would be
+checking the wrong bytes, and A345's point is that a pipeline which only *produces* a
+signature has not checked that the published copy carries it. Two details in the step are
+load-bearing:
+
+- The URLs are built from the endpoint in `src-tauri/tauri.conf.json` with the pairs the
+  manifest carries, so the URL that is verified and the URL the app fetches cannot drift
+  apart. A hand-written URL here would be a second copy of the endpoint, and the second
+  copy is the one that goes stale.
+- The step passes `--manifest-url` and **deliberately no `--manifest-dir`**:
+  `scripts/verify-release-artifacts.sh` prefers a directory over a URL when both are given,
+  so passing the local file would check the file on disk and never fetch the published
+  bytes — which is exactly the round trip being asserted. It runs once per
+  `{{target}}/{{arch}}` pair, so a manifest that is published under one pair and 404s under
+  the other fails.
+
+It has not been executed (see the note under step 5); what is verified is that the step is
+present, that it names the URL the config names, and that it cannot fall back to the local
+file.
+
 - [x] **Step 4: The version, in one place**
 
 A step asserts `Cargo.toml [workspace.package] version`, `src-tauri/tauri.conf.json
