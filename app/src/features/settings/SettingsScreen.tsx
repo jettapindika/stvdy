@@ -117,6 +117,12 @@ export function SettingsScreen() {
   }
 
   const grantedChannels = usage.data?.features.reminder_channels ?? []
+  // What this deployment can actually deliver on (A288), which is a different
+  // question from what the plan grants. `telegram` and `discord` are granted to
+  // Power by the matrix and have no transport, so a row that offered them would be
+  // granted, selectable and silently never fire — and the student's only evidence
+  // would be a reminder that never arrived.
+  const availableChannels = settings.data?.channels_available ?? []
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
@@ -208,6 +214,7 @@ export function SettingsScreen() {
             <legend className="label">{t('settings.notifications.channels')}</legend>
             {CHANNELS.map((channel) => {
               const granted = grantedChannels.includes(channel)
+              const available = availableChannels.includes(channel)
               const minPlan = planForReminderChannel(channel)
               const on = row.reminder_channels.includes(channel)
               return (
@@ -216,9 +223,11 @@ export function SettingsScreen() {
                     id={`channel-${channel}`}
                     type="checkbox"
                     checked={on}
-                    // A locked channel is not choosable at all: the remedy is the
-                    // plan, not a refusal after the fact.
-                    disabled={!granted}
+                    // A locked channel is not choosable at all, and neither is one
+                    // this deployment cannot deliver on: in both cases the remedy is
+                    // elsewhere, and a control that refuses after the fact is worse
+                    // than one that is visibly unavailable (A288).
+                    disabled={!granted || !available}
                     onChange={(event) =>
                       write({
                         reminder_channels: event.target.checked
@@ -227,13 +236,24 @@ export function SettingsScreen() {
                       })
                     }
                   />
-                  {/* The label is the hit area, and it carries `min-h-11` for the
-                      same reason `LockedFeature`'s link does: measured in Chromium at
-                      390px it was **65.9x22**, so a thumb aimed at the channel name
-                      and landing a few pixels high hit the row `<div>` and toggled
-                      nothing. The checkbox itself is 13x13 by design — the label is
-                      what a finger reaches. */}
-                  <label htmlFor={`channel-${channel}`} className="text-body flex min-h-11 items-center">
+                  {/* The label is the hit area, and it carries `min-h-11` and
+                      `min-w-11` for the same reason `LockedFeature`'s link does.
+                      Measured in Chromium at 390px: the label was **65.9x22**, so
+                      a thumb aimed at the channel name and landing a few pixels
+                      high hit the row `<div>` and toggled nothing (Phase 14);
+                      and with the height fixed, `input#channel-email` was
+                      **35.3x44** at 100% text in both themes, because "Email" is a
+                      short word and the label is only as wide as its text. The
+                      width is on **every** channel label rather than the email row:
+                      the next short name ("Web", "Push") has the same defect, and a
+                      per-row fix is one that gets forgotten. It costs a 9px sliver
+                      on the narrow rows and buys the 44px target the gate requires.
+                      The checkbox itself stays 13x13 — the label is what a finger
+                      reaches. */}
+                  <label
+                    htmlFor={`channel-${channel}`}
+                    className="text-body flex min-h-11 min-w-11 items-center"
+                  >
                     {t(`settings.channel.${channel}`)}
                   </label>
                   {!granted && minPlan !== null ? (
@@ -242,6 +262,11 @@ export function SettingsScreen() {
                     <span className="chip chip-due">
                       {t('settings.notifications.locked', { plan: minPlan })}
                     </span>
+                  ) : !available ? (
+                    // Granted by the plan and not deliverable yet. The sentence names
+                    // which of the two it is, because "not available" alone reads as
+                    // a bug rather than as a channel that is coming.
+                    <span className="chip chip-due">{t('settings.notifications.notYet')}</span>
                   ) : null}
                 </div>
               )
@@ -353,6 +378,14 @@ export function SettingsScreen() {
           <p className="text-small text-muted">{t('settings.plan.hint')}</p>
           <Link to="/billing" className="link inline-flex min-h-11 items-center self-start">
             {t('settings.plan.open')}
+          </Link>
+          <hr className="border-border" />
+          {/* The dashboard's only route in, on every form factor. It is not a sixth
+              nav label (A189), and this section is where a student is already
+              looking at what their plan gives them. */}
+          <p className="text-small text-muted">{t('settings.plan.progressHint')}</p>
+          <Link to="/dashboard" className="link inline-flex min-h-11 items-center self-start">
+            {t('settings.plan.progress')}
           </Link>
         </div>
       </Section>
