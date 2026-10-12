@@ -20,6 +20,7 @@ use axum::http::StatusCode;
 use chrono::Duration;
 use serde_json::json;
 use sqlx::PgPool;
+use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::testing::TestState;
 use uuid::Uuid;
 
@@ -97,6 +98,27 @@ async fn store_key(
         "/settings/api-key",
         token,
         json!({ "key": key, "base_url": base_url, "model": "byok-model" }),
+    )
+    .await
+}
+
+/// Drives the chat route as a **plain JSON** request, for the cases that refuse before the
+/// stream starts.
+///
+/// A refusal is an HTTP status with the documented error envelope, not an SSE frame: the
+/// route never opens the stream, so `sse_events` would return an empty event list and an
+/// assertion on `events[0]` would panic rather than report the refusal.
+async fn chat_json(
+    app: &axum::Router,
+    workspace_id: &str,
+    token: &str,
+) -> (StatusCode, serde_json::Value) {
+    request(
+        app,
+        "POST",
+        &format!("/workspaces/{workspace_id}/chat"),
+        token,
+        json!({ "message": "What absorbs light?" }),
     )
     .await
 }
@@ -314,6 +336,12 @@ async fn a_byok_call_consumes_no_credits_and_is_recorded_as_byok(pool: PgPool) {
 async fn the_ceiling_does_not_pause_a_byok_account(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // A **server** provider, because the route resolves it before it reaches the ceiling: with
+    // no `LLM_BASE_URL` the non-BYOK half would answer 502 `provider_error` and the test would
+    // be asserting the wrong refusal. Installing one is what makes "the ceiling refuses" a
+    // statement about the ceiling.
+    let scripted = std::sync::Arc::new(ScriptedLlm::new(vec!["Chlorophyll.".to_string()]));
+    let harness = harness.with_llm(scripted);
     let app = router(&harness);
     let (user_id, token) = account(&harness, "byok-ceiling@example.test", "power", "macos").await;
 
@@ -339,19 +367,13 @@ async fn the_ceiling_does_not_pause_a_byok_account(pool: PgPool) {
 
     // Without a key, the ceiling refuses: this is the assertion that keeps the BYOK case
     // from being vacuous, because it shows the same account and the same route do refuse.
-    let (status, body) = common::sse_events(
-        &app,
-        &format!("/workspaces/{workspace_id}/chat"),
-        &token,
-        json!({ "message": "What absorbs light?" }),
-    )
-    .await;
+    let (status, body) = chat_json(&app, &workspace_id, &token).await;
     assert_eq!(
         status,
         StatusCode::UNPROCESSABLE_ENTITY,
         "an account past its ceiling is refused on the server's provider: {body:?}"
     );
-    assert_eq!(body[0].json()["code"], "limit_reached", "{body:?}");
+    assert_eq!(body["code"], "limit_reached", "{body:?}");
 
     // With a key, the same request succeeds: the ceiling bounds *our* provider bill, and a
     // call on the student's key is not ours (A156).
@@ -450,19 +472,13 @@ async fn a_downgraded_account_keeps_its_key_and_uses_the_server_provider(pool: P
         "Chlorophyll absorbs light.",
     )
     .await;
-    let (status, body) = common::sse_events(
-        &app,
-        &format!("/workspaces/{workspace_id}/chat"),
-        &token,
-        json!({ "message": "What absorbs light?" }),
-    )
-    .await;
+    let (status, body) = chat_json(&app, &workspace_id, &token).await;
     assert_eq!(
         status,
         StatusCode::BAD_GATEWAY,
         "with no server provider configured the turn is refused: {body:?}"
     );
-    assert_eq!(body[0].json()["code"], "provider_error", "{body:?}");
+    assert_eq!(body["code"], "provider_error", "{body:?}");
 
     // And a downgraded account cannot *store* a new one, because the gate is the plan.
     let (status, body) = store_key(&app, &token, SECRET, "https://api.example.test/v1").await;
@@ -477,6 +493,11 @@ async fn a_downgraded_account_keeps_its_key_and_uses_the_server_provider(pool: P
 async fn a_key_with_no_endpoint_is_refused_on_use(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // The same server provider as the ceiling case, for the same reason: the route resolves
+    // the provider before `provider_for` can refuse, so with none configured the request would
+    // be refused for the wrong reason and the assertion would pass without testing the key.
+    let scripted = std::sync::Arc::new(ScriptedLlm::new(vec!["Chlorophyll.".to_string()]));
+    let harness = harness.with_llm(scripted);
     let app = router(&harness);
     let (_, token) = account(&harness, "byok-noendpoint@example.test", "power", "macos").await;
 
@@ -501,17 +522,11 @@ async fn a_key_with_no_endpoint_is_refused_on_use(pool: PgPool) {
         "Chlorophyll absorbs light.",
     )
     .await;
-    let (status, body) = common::sse_events(
-        &app,
-        &format!("/workspaces/{workspace_id}/chat"),
-        &token,
-        json!({ "message": "What absorbs light?" }),
-    )
-    .await;
+    let (status, body) = chat_json(&app, &workspace_id, &token).await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body:?}");
-    assert_eq!(body[0].json()["code"], "provider_error", "{body:?}");
+    assert_eq!(body["code"], "provider_error", "{body:?}");
     assert!(
-        body[0].json()["message"]
+        body["message"]
             .as_str()
             .unwrap_or_default()
             .contains("endpoint"),

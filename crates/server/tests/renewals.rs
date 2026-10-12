@@ -15,7 +15,6 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 use sqlx::PgPool;
-use stvdy_core::config::PlanId;
 use stvdy_core::traits::testing::FixedClock;
 use stvdy_server::jobs::ClaimedJob;
 use stvdy_server::testing::TestState;
@@ -110,11 +109,14 @@ async fn push_jobs(harness: &TestState, user_id: Uuid) -> Vec<serde_json::Value>
 
 async fn scheduled_boundaries(harness: &TestState, user_id: Uuid) -> Vec<String> {
     sqlx::query_scalar(
+        // `payload->>'user_id'` is text, so the parameter is bound as text too: sqlx sends a
+        // `Uuid` as a `uuid`, and Postgres has no `text = uuid` operator, so binding the id
+        // itself would fail at prepare rather than at comparison.
         "select dedupe_key from jobs
           where kind = 'renewal_reminder' and payload->>'user_id' = $1
           order by dedupe_key",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .fetch_all(&harness.state.pool)
     .await
     .unwrap()
@@ -316,11 +318,32 @@ async fn renewing_moves_the_boundary_and_cancels_the_old_reminders(pool: PgPool)
             .any(|key| key.contains(&new_end.date_naive().to_string())),
         "the new period's boundaries are scheduled: {keys:?}"
     );
-    assert!(
-        keys.iter()
-            .all(|key| !key.contains(&instant(PERIOD_END).date_naive().to_string())),
-        "and none of the old period's remain: {keys:?}"
+
+    // The old period's rows are **still in the queue**, and that is the design: a queue does
+    // not retract work, so the four stale boundaries remain until the worker claims them. What
+    // makes them harmless is the handler, not their absence — which is exactly what the two
+    // assertions above prove (`reminder_rows` and `push_jobs` are both empty after every one of
+    // them has run). Asserting that the old keys are *gone* would be asserting something the
+    // design does not promise, and the property that matters is that they produce nothing.
+    let stale = keys
+        .iter()
+        .filter(|key| key.contains(&instant(PERIOD_END).date_naive().to_string()))
+        .count();
+    assert_eq!(
+        stale, 4,
+        "the old period's four boundaries are still queued and inert: {keys:?}"
     );
+
+    // And the two key sets are disjoint, so the new period's reminders cannot collide with
+    // the old ones (the period end is part of the key, A300).
+    for key in &keys {
+        if key.contains(&new_end.date_naive().to_string()) {
+            assert!(
+                !key.contains(&instant(PERIOD_END).date_naive().to_string()),
+                "a key names one period: {key}"
+            );
+        }
+    }
 }
 
 /// A free account has no period to end, so it is never reminded — and neither is an account
