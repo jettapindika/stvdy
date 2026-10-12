@@ -19,6 +19,7 @@ use axum::routing::get;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use stvdy_sync::proto::Entity;
@@ -291,9 +292,26 @@ pub async fn list(
         ));
     }
 
-    // Overlap, not containment: an event is in the window when it starts before the window
-    // ends **and** ends after the window starts. A containment filter (`starts_at between`)
-    // silently drops the long event the student most needs to see.
+    let rows = list_in(&state.pool, user.user_id, from, to).await?;
+    Ok(Json(json!({ "events": rows })))
+}
+
+/// The one event-window query.
+///
+/// `GET /events` calls it, and so does the agent's `find_free_slots` and
+/// `get_upcoming_deadlines` (A276): the tool's busy set is therefore exactly the events the
+/// calendar shows, which is what stops the agent from telling a student a slot is free when
+/// the screen shows a class in it.
+///
+/// Overlap, not containment: an event is in the window when it starts before the window ends
+/// **and** ends after the window starts. A containment filter (`starts_at between`) silently
+/// drops the long event the student most needs to see.
+pub(crate) async fn list_in(
+    pool: &PgPool,
+    user_id: Uuid,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> AppResult<Vec<EventView>> {
     let sql = format!(
         "select {} from events
           where user_id = $1 and deleted_at is null
@@ -301,15 +319,13 @@ pub async fn list(
           order by starts_at asc, id asc",
         event_columns()
     );
-    let rows: Vec<EventView> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(user.user_id)
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(user_id)
         .bind(from)
         .bind(to)
-        .fetch_all(&state.pool)
+        .fetch_all(pool)
         .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("listing events: {error}")))?;
-
-    Ok(Json(json!({ "events": rows })))
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("listing events: {error}")))
 }
 
 /// `POST /events`. 201 `{event}`.
@@ -318,6 +334,40 @@ pub async fn create(
     user: AuthUser,
     Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    // One transaction, so the id check and the insert cannot interleave with a second
+    // request minting the same id. The work itself is [`create_in`], which the agent's
+    // confirm path calls too: one implementation of "create an event", two callers (A276).
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning an event: {error}")))?;
+    let created = create_in(&mut tx, &user, body).await?;
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing an event: {error}")))?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "event": created }))))
+}
+
+/// Creates one event row in the caller's transaction.
+///
+/// **The one implementation of "create an event" through the field rules.** `POST /events`
+/// calls it, and so does `crate::actions::execute` for a confirmed `create_event` or
+/// `schedule_study_block` proposal (A276): a proposal therefore cannot produce an event the
+/// route would refuse, and a confirmed event carries the same `change_log` entry the route's
+/// would.
+///
+/// `source` defaults to `app` and the tool contract has no way to name another one — the
+/// `external` kind and the `google`/`ics` sources are the calendar's, and a proposal that
+/// could write one would put a fabricated import in the student's calendar (A198's
+/// neighbour). `validate_event` refuses the calendar's columns outright, so this default is
+/// the second layer of that rule.
+pub(crate) async fn create_in(
+    conn: &mut sqlx::PgConnection,
+    user: &AuthUser,
+    body: Value,
+) -> AppResult<EventView> {
     let id = body
         .get("id")
         .and_then(Value::as_str)
@@ -332,7 +382,7 @@ pub async fn create(
 
     let taken: bool = sqlx::query_scalar("select exists (select 1 from events where id = $1)")
         .bind(id)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("checking an event id: {error}")))?;
     if taken {
@@ -347,9 +397,49 @@ pub async fn create(
     row.entry("source".to_string())
         .or_insert_with(|| json!(APP_SOURCE));
 
-    let created = insert_event(&state.pool, Value::Object(row)).await?;
+    check_workspace_owned(&mut *conn, user.user_id, row.get("workspace_id")).await?;
 
-    Ok((StatusCode::CREATED, Json(json!({ "event": created }))))
+    insert_event(&mut *conn, Value::Object(row)).await
+}
+
+/// Refuses a `workspace_id` that is not the caller's.
+///
+/// The same rule [`crate::tasks::create_in`] applies, for the same reason: the foreign key only
+/// requires that the workspace exists, so without this a body — or a confirmed `create_event` /
+/// `schedule_study_block` proposal — files an event into another account's workspace. The
+/// caller cannot read it back (`events` is read through `list_in`, scoped by `user_id`), which
+/// is what makes it quiet: the row is nonetheless in the victim's workspace, where a
+/// workspace-scoped read, count or export sees a class they never added.
+///
+/// `task_id` is deliberately **not** checked the same way. Its `on delete set null` and the
+/// fact that `insert_event` maps a dangling reference to a 400 means a foreign task id is
+/// refused at the constraint — and unlike a workspace, a task id in an event is a link the
+/// victim's own reads filter out, because every read of an event goes through its `user_id`.
+async fn check_workspace_owned(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    workspace_id: Option<&Value>,
+) -> AppResult<()> {
+    let Some(Value::String(raw)) = workspace_id else {
+        return Ok(());
+    };
+    let id = Uuid::parse_str(raw)
+        .map_err(|_| AppError::Validation("workspace_id is not a uuid".to_string()))?;
+    let owned: bool = sqlx::query_scalar(
+        "select exists (select 1 from workspaces
+                         where id = $1 and user_id = $2 and deleted_at is null)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("checking a workspace: {error}")))?;
+    if !owned {
+        return Err(AppError::Validation(
+            "workspace_id must be one of your workspaces".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Inserts one event row and returns it, in whatever executor the caller has.
@@ -436,6 +526,10 @@ pub async fn update(
     // row and are never in `event.fields()`.
     merged.insert("id".to_string(), json!(id));
     merged.insert("user_id".to_string(), json!(user.user_id));
+
+    // The same rule [`create_in`] applies: a patch that names a `workspace_id` must name the
+    // caller's own, or the merge is a way to move an event into another account's workspace.
+    check_workspace_owned(&mut tx, user.user_id, merged.get("workspace_id")).await?;
 
     let sql = format!(
         "update events t set

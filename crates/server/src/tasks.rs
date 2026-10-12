@@ -27,6 +27,7 @@ use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
@@ -411,12 +412,28 @@ pub async fn list(
     user: AuthUser,
     Query(query): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
+    let rows = list_in(&state.pool, user.user_id, &query).await?;
+    Ok(Json(json!({ "tasks": rows })))
+}
+
+/// The one task-list query.
+///
+/// `GET /tasks` calls it, and so does the agent's `list_tasks` READ tool (A276), so the tool
+/// answers with exactly the rows the screen shows — same ordering, same tombstone exclusion,
+/// same ownership. A second statement for the tool would be a second answer to "what are the
+/// student's tasks", and the two would disagree the first time the order changed.
+///
+/// The order is `stvdy_core::tasks::order_tasks`'s, written out: due first with the undated
+/// last, then priority, then position, then `created_at`, then the id. The id breaks every
+/// tie, because a batch insert shares `created_at` to the microsecond and an order that
+/// stopped short of the id would come back shuffled (A196).
+pub(crate) async fn list_in(
+    pool: &PgPool,
+    user_id: Uuid,
+    query: &ListQuery,
+) -> AppResult<Vec<TaskView>> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
-    // The order is `stvdy_core::tasks::order_tasks`'s, written out: due first with the
-    // undated last, then priority, then position, then `created_at`, then the id. The id
-    // breaks every tie, because a batch insert shares `created_at` to the microsecond and
-    // an order that stopped short of the id would come back shuffled (A196).
     let sql = format!(
         "select {} from tasks
           where user_id = $1 and deleted_at is null
@@ -429,19 +446,17 @@ pub async fn list(
           limit $7",
         task_columns(None)
     );
-    let rows: Vec<TaskView> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(user.user_id)
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(user_id)
         .bind(query.status.as_deref())
         .bind(query.workspace_id)
         .bind(query.parent_id)
         .bind(query.due_before)
         .bind(query.due_after)
         .bind(limit)
-        .fetch_all(&state.pool)
+        .fetch_all(pool)
         .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("listing tasks: {error}")))?;
-
-    Ok(Json(json!({ "tasks": rows })))
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("listing tasks: {error}")))
 }
 
 /// `POST /tasks`. 201 `{task}`, 409 when the id is already taken.
@@ -450,8 +465,39 @@ pub async fn create(
     user: AuthUser,
     Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    // A8: the client mints the id offline, so a body may carry one; the server generates
-    // one only when it does not.
+    // One transaction, so the id check and the insert cannot interleave with a second
+    // request minting the same id. The body of the work is [`create_in`], which the
+    // agent's confirm path calls too: one implementation of "create a task", two callers
+    // (A276).
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a task: {error}")))?;
+    let created = create_in(&mut tx, &user, body).await?;
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a task: {error}")))?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "task": created }))))
+}
+
+/// Creates one task row in the caller's transaction.
+///
+/// **The one implementation of "create a task".** `POST /tasks` calls it, and so does
+/// `crate::actions::execute` for a confirmed `create_task` proposal, so a proposal cannot
+/// produce a row the route would refuse and the two cannot disagree about what a task is
+/// (A276). The alternative — the executor inserting its own row — is the defect class
+/// Phase 9's offline gate found four times over.
+///
+/// The id comes from the body when it carries one (A8: the client mints it offline) and is
+/// generated otherwise; the taken check is global rather than scoped to the caller, because
+/// the PK is global and "this id is taken" is the same answer either way.
+pub(crate) async fn create_in(
+    conn: &mut sqlx::PgConnection,
+    user: &AuthUser,
+    body: Value,
+) -> AppResult<TaskView> {
     let id = body
         .get("id")
         .and_then(Value::as_str)
@@ -471,7 +517,7 @@ pub async fn create(
     // have. An id is not a secret; the row is.
     let taken: bool = sqlx::query_scalar("select exists (select 1 from tasks where id = $1)")
         .bind(id)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("checking a task id: {error}")))?;
     if taken {
@@ -494,8 +540,49 @@ pub async fn create(
     row.entry("position".to_string())
         .or_insert_with(|| json!(0));
 
-    let created = insert_task(&state.pool, Value::Object(row)).await?;
-    Ok((StatusCode::CREATED, Json(json!({ "task": created }))))
+    check_workspace_owned(&mut *conn, user.user_id, row.get("workspace_id")).await?;
+
+    insert_task(&mut *conn, Value::Object(row)).await
+}
+
+/// Refuses a `workspace_id` that is not the caller's.
+///
+/// **`tasks.workspace_id`'s foreign key only requires that the workspace exists**, so without
+/// this a body — or, worse, an agent proposal — can file a row into another account's
+/// workspace. The caller cannot read it back (`GET /tasks?workspace_id=…` is scoped by
+/// `user_id`), which is what makes it quiet rather than loud: the row is nonetheless *in the
+/// victim's workspace*, so every workspace-scoped read, count, export or future cascade sees a
+/// task the victim never created. The confirm path reaching it is what makes this worth
+/// closing here rather than in the route: the check lives in the one function both call (A276).
+///
+/// A null workspace is fine — a task need not belong to one (`tasks.workspace_id` is nullable)
+/// — and an absent field means "leave it alone", which is the partial-write case `NewTask`
+/// distinguishes from an explicit null.
+async fn check_workspace_owned(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    workspace_id: Option<&Value>,
+) -> AppResult<()> {
+    let Some(Value::String(raw)) = workspace_id else {
+        return Ok(());
+    };
+    let id = Uuid::parse_str(raw)
+        .map_err(|_| AppError::Validation("workspace_id is not a uuid".to_string()))?;
+    let owned: bool = sqlx::query_scalar(
+        "select exists (select 1 from workspaces
+                         where id = $1 and user_id = $2 and deleted_at is null)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("checking a workspace: {error}")))?;
+    if !owned {
+        return Err(AppError::Validation(
+            "workspace_id must be one of your workspaces".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// `PATCH /tasks/:id`. 200 `{task}`, 404 for another account's row or a tombstone.
@@ -505,15 +592,41 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    let task = validate_task(id, &body, false).map_err(Reject::into_app_error)?;
-
-    // One transaction, and the row is locked while it is read: the merge below is a
-    // read-then-write, and two devices patching the same task would otherwise each write a
-    // row built from a state the other had already replaced.
+    // One transaction, and the row is locked while it is read: the merge in [`update_in`]
+    // is a read-then-write, and two devices patching the same task would otherwise each
+    // write a row built from a state the other had already replaced.
     let mut tx =
         state.pool.begin().await.map_err(|error| {
             AppError::Internal(anyhow::anyhow!("beginning a task edit: {error}"))
         })?;
+
+    let updated = update_in(&mut tx, &user, id, body).await?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a task edit: {error}")))?;
+
+    Ok(Json(json!({ "task": updated })))
+}
+
+/// Applies one task patch in the caller's transaction.
+///
+/// **The one implementation of "update a task".** `PATCH /tasks/:id` calls it, and so does
+/// `crate::actions::execute` for a confirmed `update_task` proposal (A276). The merge is
+/// why it must share the row lock with its caller: it reads the stored row, overlays the
+/// fields the body named, and writes the result back, so a second writer between the two
+/// steps would be writing over a state it never saw.
+///
+/// `deleted_at` is not a REST-writable field: deleting is `DELETE`, and restoring is a
+/// client's sync concern. Dropping it here is what makes that true even when the body names
+/// it, and it is why the executor's `update_task` arm cannot tombstone a row by accident.
+pub(crate) async fn update_in(
+    tx: &mut sqlx::PgTransaction<'_>,
+    user: &AuthUser,
+    id: Uuid,
+    body: Value,
+) -> AppResult<TaskView> {
+    let task = validate_task(id, &body, false).map_err(Reject::into_app_error)?;
 
     let stored: Option<Value> = sqlx::query_scalar(
         "select to_jsonb(t) from tasks t where t.id = $1 and t.user_id = $2 \
@@ -521,7 +634,7 @@ pub async fn update(
     )
     .bind(id)
     .bind(user.user_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("reading a task: {error}")))?;
 
@@ -533,9 +646,6 @@ pub async fn update(
         .as_object()
         .cloned()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("a task row is not a JSON object")))?;
-    // `deleted_at` is not a REST-writable field: deleting is `DELETE`, and restoring is a
-    // client's sync concern. Dropping it here is what makes that true even when the body
-    // names it.
     for (key, value) in task.fields() {
         if key == "deleted_at" {
             continue;
@@ -543,12 +653,12 @@ pub async fn update(
         merged.insert(key, value);
     }
 
-    let updated = update_task(&mut tx, id, user.user_id, &Value::Object(merged)).await?;
-    tx.commit()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a task edit: {error}")))?;
+    // The same rule as [`create_in`]'s: a patch that names a `workspace_id` must name the
+    // caller's own. Without this a proposal could *move* an existing task into another
+    // account's workspace, which is the same cross-tenant write with an extra step.
+    check_workspace_owned(&mut *tx, user.user_id, merged.get("workspace_id")).await?;
 
-    Ok(Json(json!({ "task": updated })))
+    update_task(&mut *tx, id, user.user_id, &Value::Object(merged)).await
 }
 
 /// Tombstones a task **and its live descendants** (A197), in the caller's transaction.
