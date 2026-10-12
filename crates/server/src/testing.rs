@@ -79,13 +79,15 @@ pub fn config() -> AppConfig {
             // window would otherwise change what the sync suites compact.
             ("CHANGE_LOG_RETENTION_DAYS", "90"),
             ("CHANGE_LOG_TOMBSTONE_RETENTION_DAYS", "180"),
-            // Pinned empty for the same reason, and with one more: a developer with a
-            // real gateway in `.env` would otherwise make every suite in this crate
-            // build a `QrisConfig` the test state does not use. A test that wants a
-            // gateway builds its own config through `from_env_at`.
-            ("QRIS_BASE_URL", ""),
-            ("QRIS_API_KEY", ""),
-            ("QRIS_CALLBACK_TOKEN", ""),
+            // A gateway is configured here because `TestState` hands out a
+            // `TestGateway` handle: `AppState::payment` and `config.qris` are two halves of
+            // one question — "is there a gateway" — and a state with the handle and no
+            // config is a state that cannot exist in production (see `without_gateway`).
+            // The base URL points nowhere on purpose: the double never opens a socket, and
+            // a suite that wants a real wire uses `common::stub_http_json`.
+            ("QRIS_BASE_URL", "http://127.0.0.1:1"),
+            ("QRIS_API_KEY", "test-qris-api-key"),
+            ("QRIS_CALLBACK_TOKEN", "test-qris-callback-token"),
             ("QRIS_SIGNATURE_SCHEME", "hmac_sha256_hex"),
             ("QRIS_SIGNATURE_HEADER", "X-Callback-Signature"),
             ("QRIS_WEBHOOK_IPS", ""),

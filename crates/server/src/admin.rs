@@ -741,10 +741,13 @@ pub async fn list_payments(
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
 
     let rows: Vec<PaymentRow> = sqlx::query_as(
+        // `amount_idr` and `gateway_fee_idr` are `int` (migration 0014) while the DTO reads
+        // them as `i64`, so they are cast here: sqlx decodes by SQL type, and an `INT4`
+        // column read into an `i64` field is a decode error, not a widening.
         "select p.id, p.user_id, p.kind, p.plan_id, p.billing_period, p.credits, p.provider,
-                p.order_id, p.provider_payment_id, p.amount_idr, p.discount_code,
-                p.gateway_fee_idr, p.status, p.review_reason, p.expires_at, p.paid_at,
-                p.reconciled_at, p.created_at
+                p.order_id, p.provider_payment_id, p.amount_idr::bigint as amount_idr,
+                p.discount_code, p.gateway_fee_idr::bigint as gateway_fee_idr, p.status,
+                p.review_reason, p.expires_at, p.paid_at, p.reconciled_at, p.created_at
            from payments p
           where $1::text is null or p.status = $1
           order by p.created_at desc
@@ -776,7 +779,7 @@ pub struct PaymentRow {
     pub provider_payment_id: Option<String>,
     pub amount_idr: i64,
     pub discount_code: Option<String>,
-    pub gateway_fee_idr: Option<i32>,
+    pub gateway_fee_idr: Option<i64>,
     pub status: String,
     pub review_reason: Option<String>,
     pub expires_at: DateTime<Utc>,

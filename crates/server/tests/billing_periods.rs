@@ -31,7 +31,7 @@ use stvdy_server::testing::TestState;
 use uuid::Uuid;
 
 mod common;
-use common::{json, signed_up};
+use common::signed_up;
 
 const PASSWORD: &str = "correct horse battery";
 
@@ -312,11 +312,11 @@ async fn an_upgrade_switches_immediately_and_charges_the_prorated_difference(poo
         end,
     )
     .await;
-    let caller = caller(&harness, user_id, "macos").await;
+    let who = caller(&harness, user_id, "macos").await;
 
     let view = stvdy_server::billing::periods::upgrade(
         &harness.state,
-        &caller,
+        &who,
         PlanId::Power,
         BillingPeriod::Monthly,
     )
@@ -354,8 +354,8 @@ async fn an_upgrade_switches_immediately_and_charges_the_prorated_difference(poo
     );
 
     // The entitlement decision sees power now, which is the point of the switch.
-    let caller = caller(&harness, user_id, "macos").await;
-    assert_eq!(caller.effective_plan(), PlanId::Power);
+    let who = caller(&harness, user_id, "macos").await;
+    assert_eq!(who.effective_plan(), PlanId::Power);
 }
 
 /// A downgrade is recorded, not applied: the plan changes at the period end and the paid
@@ -379,11 +379,11 @@ async fn a_downgrade_waits_for_the_period_end_and_never_shortens_paid_time(pool:
         end,
     )
     .await;
-    let caller = caller(&harness, user_id, "macos").await;
+    let who = caller(&harness, user_id, "macos").await;
 
     let change = stvdy_server::billing::periods::downgrade(
         &harness.state,
-        &caller,
+        &who,
         PlanId::Pro,
         BillingPeriod::Monthly,
     )
@@ -400,9 +400,9 @@ async fn a_downgrade_waits_for_the_period_end_and_never_shortens_paid_time(pool:
     let (plan, _, still_end) = subscription_row(&harness, user_id).await;
     assert_eq!(plan, "power", "the paid plan is untouched");
     assert_eq!(still_end, end, "and so is the paid time");
-    let caller = caller(&harness, user_id, "macos").await;
+    let who = caller(&harness, user_id, "macos").await;
     assert_eq!(
-        caller.effective_plan(),
+        who.effective_plan(),
         PlanId::Power,
         "a recorded downgrade grants nothing away before the boundary"
     );
