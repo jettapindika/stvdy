@@ -26,6 +26,7 @@
     "@tauri-apps/plugin-updater": "^2.13.3",
     "eventsource-parser": "4.1.1",
     "i18next": "^26.4.3",
+    "qrcode-generator": "1.4.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-i18next": "^17.0.16",
