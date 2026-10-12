@@ -449,7 +449,7 @@ fn replace_url(html: &str, prefix: &str, replacement: &str) -> String {
         out.push_str(replacement);
         let after = &rest[at + prefix.len()..];
         let end = after
-            .find(|c: char| matches!(c, '"' | '\'' | '>' | ')' | ' ' | '\n' | '\r' | '\t'))
+            .find(['"', '\'', '>', ')', ' ', '\n', '\r', '\t'])
             .unwrap_or(after.len());
         rest = &after[end..];
     }
