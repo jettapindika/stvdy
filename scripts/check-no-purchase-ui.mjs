@@ -49,7 +49,6 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const dist = join(root, 'app/dist')
 const policyFile = join(root, 'config', 'billing_policy.toml')
 
 /**
@@ -194,6 +193,24 @@ function readShipped(dir) {
 function isCli() {
   return process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 }
+
+/**
+ * Which build to inspect.
+ *
+ * Defaults to the web/desktop `app/dist`, and the store gate passes the mobile
+ * build explicitly:
+ *
+ *   node scripts/check-no-purchase-ui.mjs                  # app/dist
+ *   node scripts/check-no-purchase-ui.mjs app/dist-mobile  # the store build
+ *
+ * **The store build is the one that matters for the store rule.** `app/dist` is
+ * what the shell and `check-no-cdn.mjs` read, and on the web/desktop targets a
+ * checkout route is legitimate — so that run is a regression check on the shared
+ * build, and the `dist-mobile` run is the actual "no purchase UI in the bundle
+ * the phone downloads" proof. Both are in CI, and the output names the directory
+ * it read so a green result cannot be attributed to the wrong artifact.
+ */
+const dist = process.argv[2] === undefined ? join(root, 'app/dist') : join(root, process.argv[2])
 
 if (isCli()) {
   let files

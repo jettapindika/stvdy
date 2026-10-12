@@ -12,14 +12,14 @@ import { PageHeader } from '@/components/layout/Section'
  * rather than tidiness (A322). `/billing` chooses its element by platform at the
  * router, so the phone renders `MobilePlanScreen`, which composes
  * `PlanUsageSections` and a sentence saying the app does not sell subscriptions;
- * **this** element is the one that carries prices and buy buttons, and a phone
- * build therefore cannot reach them. `config/billing_policy.toml` is the second
- * lock, not the only one.
+ * **this** element is the one that carries prices and buy buttons.
  *
- * The account's own numbers — the plan, the renewal date, the credits, the limits
- * and the costs — are one copy, in `PlanUsageSections`, shared by both elements, so
- * the phone and the desktop cannot drift into showing different numbers for the
- * same account.
+ * `BillingScreen` is guarded by `__PURCHASE_UI__`, the same build-time constant the
+ * router's purchase routes use, and that guard is what makes the store build's
+ * bytes clean rather than merely its rendering: in the store build this is
+ * `false ? <BillingScreen /> : null`, the branch is dropped, and with it the
+ * imports that reach `POST /billing/checkout`. A `platform.kind()` check would
+ * leave every one of those modules in the file.
  */
 export function PlanUsageScreen() {
   const { t } = useTranslation()
@@ -28,7 +28,7 @@ export function PlanUsageScreen() {
     <div className="flex flex-col gap-6 px-5 py-6">
       <PageHeader title={t('billing.planAndUsage')} subtitle={t('plan.subtitle')} />
       <PlanUsageSections />
-      <BillingScreen />
+      {__PURCHASE_UI__ ? <BillingScreen /> : null}
     </div>
   )
 }

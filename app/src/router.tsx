@@ -97,6 +97,44 @@ function CheckoutRoute() {
 }
 
 /**
+ * The routes that only exist where purchase UI is allowed.
+ *
+ * **The guard is a build-time constant, and that is the whole mechanism** (A322).
+ * `__PURCHASE_UI__` is a `define` in `vite.config.ts`, so in the store build this
+ * expression is `false ? [...] : []`, the minifier drops the dead branch, and the
+ * references to `PricingScreen` and `CheckoutScreen` disappear with it. Those two
+ * modules then have no remaining reference and are dropped, and with them their
+ * transitive dependencies — `api/queries/billing.ts`, which holds the
+ * `POST /billing/checkout` call, and `features/billing/checkout.ts`.
+ *
+ * A `platform.kind()` check here would not do any of that. It is a run-time
+ * condition, so the branch is dead for a phone at run time while every module it
+ * names is still in the file — which is exactly the state this replaces, and why
+ * `scripts/check-no-purchase-ui.mjs` was red on the shipped bundle. The claim in
+ * A322 ("the checkout component is tree-shaken out of the mobile chunk") is true
+ * only from here on.
+ *
+ * The array is spread into the route children rather than the entries being
+ * written inline, so the mobile build's route table simply has two fewer entries
+ * and no conditional element remains to be resolved at run time.
+ */
+const purchaseRoutes = __PURCHASE_UI__
+  ? [
+      // The pricing page (A305). It renders on web and desktop only, and it
+      // says so itself rather than being hidden: on a phone the policy forbids
+      // purchase UI, and a route that vanished would be a dead link from
+      // whatever named it. In the store build the route is not registered at
+      // all, so there is no link to be dead.
+      { path: 'pricing', element: <PricingScreen /> },
+      // The QRIS checkout screen, keyed by the payment it is about. A route
+      // rather than a panel, because a student who reloads, or opens the link
+      // on another device, must land back on the same live invoice — and the
+      // poll is what recovers a webhook the gateway never delivered (A301).
+      { path: 'billing/checkout/:paymentId', element: <CheckoutRoute /> },
+    ]
+  : []
+
+/**
  * Routes.
  *
  * Every destination in the navigation resolves to a real screen. The ones that
@@ -185,23 +223,9 @@ export const router = createBrowserRouter([
             path: 'billing',
             element: <BillingRoute />,
           },
-          // The pricing page (A305). It renders on web and desktop only, and it
-          // says so itself rather than being hidden: on a phone the policy forbids
-          // purchase UI, and a route that vanished would be a dead link from
-          // whatever named it. What a phone gets is the honest sentence and no
-          // price, no button and no link — the same rule `MobilePlanScreen` states.
-          {
-            path: 'pricing',
-            element: <PricingScreen />,
-          },
-          // The QRIS checkout screen, keyed by the payment it is about. A route
-          // rather than a panel, because a student who reloads, or opens the link
-          // on another device, must land back on the same live invoice — and the
-          // poll is what recovers a webhook the gateway never delivered (A301).
-          {
-            path: 'billing/checkout/:paymentId',
-            element: <CheckoutRoute />,
-          },
+          // The pricing page and the checkout screen, where the build allows
+          // purchase UI at all (A322). Empty in the store build.
+          ...purchaseRoutes,
           // Reached from the sync status control rather than from the nav (A189):
           // the sidebar and the phone tab bar are both built from the same five
           // labels, and Settings — which the spec nests Devices under — is still a

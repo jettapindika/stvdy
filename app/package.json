@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:mobile": "tsc --noEmit && VITE_PLATFORM=mobile vite build",
+    "check:no-purchase-ui": "node ../scripts/check-no-purchase-ui.mjs app/dist-mobile",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

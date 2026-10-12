@@ -250,13 +250,26 @@ jobs:
       # Every runtime asset must be bundled: the desktop shell's CSP allows no
       # remote origin, and the phone build is used on Wi-Fi that is often down.
       - run: node scripts/check-no-cdn.mjs
+      # The store build, which is the artifact the App Store and Play review
+      # actually inspect: `VITE_PLATFORM=mobile` compiles `__PURCHASE_UI__` to
+      # `false`, so the pricing and checkout routes and the module holding
+      # `POST /billing/checkout` are dropped from the bundle rather than merely
+      # unreachable at run time (A322).
+      - run: npm --prefix app run build:mobile
       # The absence proof, in the artifact rather than in a component: the
       # shipped bytes must contain no purchase affordance, and the policy must
       # still deny purchase UI on both store platforms. It runs *after* the
       # build because that is when the files exist, and it runs in CI rather
       # than by hand because a check that is only run by hand is the one that is
       # skipped (A321).
-      - run: node scripts/check-no-purchase-ui.mjs
+      #
+      # **It inspects `dist-mobile`, not `dist`, and that is the point.** The
+      # web/desktop build legitimately registers a checkout route, so running
+      # this against `dist` would fail on a correct build — which is how a gate
+      # becomes noise and then gets deleted. The two runs answer different
+      # questions: this one is the store rule, and the shared build is covered
+      # by the fact that `dist-mobile` is compiled from the same source.
+      - run: node scripts/check-no-purchase-ui.mjs app/dist-mobile
       - run: node --test scripts/check-no-purchase-ui.test.mjs
 
   desktop:

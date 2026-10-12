@@ -5,6 +5,9 @@
 # Node / frontend
 /app/node_modules
 /app/dist
+# The store build (`VITE_PLATFORM=mobile`), which is the bundle the iOS and
+# Android shells load and the artifact `check-no-purchase-ui.mjs` inspects.
+/app/dist-mobile
 /app/coverage
 # Vitest's own cache, written when a reporter flag is passed (`--reporter=json`
 # creates `app/.vitest/json/output.json`). The rule above covers only the
