@@ -272,7 +272,7 @@ fn an_insufficient_balance_is_a_refusal_the_model_can_repeat() {
 /// not confuse it with a different call.
 #[test]
 fn a_refusal_is_answered_not_dropped() {
-    let reasons: [Refusal; 6] = [
+    let reasons: [Refusal; 7] = [
         Refusal::ToolsUnsupported,
         Refusal::UnknownTool,
         Refusal::NotOnPlan {
@@ -288,6 +288,7 @@ fn a_refusal_is_answered_not_dropped() {
             needed: 2,
             available: 1,
         },
+        Refusal::UsageLimit,
     ];
     for reason in reasons {
         let expected = reason.message();

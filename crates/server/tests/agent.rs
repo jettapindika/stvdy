@@ -553,6 +553,17 @@ async fn a_turn_that_cannot_afford_the_agent_turn_is_told_so(pool: PgPool) {
         follow_up.contains("credits"),
         "the model is told about the balance: {follow_up}"
     );
+    // The sentence arrives as a `tool_result` that names the call it answers — the tool and
+    // the call id — which is what makes it the refusal *path* rather than a remark about the
+    // conversation the model could mistake for its own thought.
+    assert!(
+        follow_up.contains("create_task"),
+        "the refusal names the tool it answers: {follow_up}"
+    );
+    assert!(
+        follow_up.contains("call_1"),
+        "the refusal names the call id it answers: {follow_up}"
+    );
 
     let ledger: Vec<(String, i32, String)> = sqlx::query_as(
         "select bucket, delta, reason from credit_ledger where user_id = $1 order by created_at",

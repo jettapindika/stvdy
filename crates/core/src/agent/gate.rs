@@ -56,10 +56,15 @@ pub enum GateDecision {
 
 /// Why a call did not run.
 ///
-/// The first five are `gate`'s and are pure. `InsufficientCredits` is the sixth and is
-/// constructed by the *server*, because a balance is a database fact and `gate` reads
-/// nothing (A271/A282) — it is in this enum anyway because it has to reach the model through
-/// the same `tool_result` path as every other refusal.
+/// The first five are `gate`'s and are pure. The last two are constructed by the *server*,
+/// because a balance and a spent provider-cost ceiling are database facts and `gate` reads
+/// nothing (A271/A282) — they are in this enum anyway because they have to reach the model
+/// through the same `tool_result` path as every other refusal.
+///
+/// `InsufficientCredits` and `UsageLimit` are deliberately two variants rather than one: the
+/// spend refuses a turn for either reason, and "you are out of credits" and "your plan's
+/// monthly AI usage limit is reached" are different sentences about different facts. A single
+/// variant would force the model to tell the student the wrong one.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum Refusal {
     /// The provider cannot call tools, so nothing it emitted could have been honoured.
@@ -73,8 +78,16 @@ pub enum Refusal {
     Invalid { message: String },
     /// The turn has already proposed [`MAX_PROPOSALS_PER_TURN`] things (A278).
     ProposalLimit { max: u8 },
-    /// The `agent_turn` spend failed. Constructed by the server, never by [`gate`].
+    /// The `agent_turn` spend was refused for the balance. Constructed by the server, never
+    /// by [`gate`].
     InsufficientCredits { needed: i64, available: i64 },
+    /// The `agent_turn` spend was refused because the account has reached its plan's monthly
+    /// provider-cost ceiling. Constructed by the server, never by [`gate`].
+    ///
+    /// Distinct from [`Refusal::InsufficientCredits`] because it is a different fact: the
+    /// balance may be healthy and the ceiling still reached, and a student told "you need more
+    /// credits" for a usage limit they cannot lift by buying is told the wrong remedy.
+    UsageLimit,
 }
 
 impl Refusal {
@@ -110,6 +123,11 @@ impl Refusal {
                 "this action costs {needed} credits and the user has {available}; tell the \
                  user they need more credits before it can run"
             ),
+            Refusal::UsageLimit => {
+                "the user's plan has reached its monthly AI usage limit; tell the user it \
+                 resets before this action can run, and do not tell them to buy credits for it"
+                    .to_string()
+            }
         }
     }
 }

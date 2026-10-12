@@ -16,10 +16,10 @@
 //!
 //! The turn's cost is here rather than in the route for the same reason: `agent_turn` is
 //! charged **once per turn, at the first tool call** (A282), which is a fact about the turn
-//! that only the code seeing the calls can know. A balance that cannot cover it becomes
-//! `Refusal::InsufficientCredits` — constructed here, because a balance is a database fact
-//! and `gate` reads nothing — and reaches the model through the same `tool_result` path as
-//! every other refusal.
+//! that only the code seeing the calls can know. A spend that refuses the turn becomes
+//! `Refusal::InsufficientCredits` or `Refusal::UsageLimit` — constructed here, because a
+//! balance and a spent provider-cost ceiling are database facts and `gate` reads nothing —
+//! and reaches the model through the same `tool_result` path as every other refusal.
 
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
@@ -97,6 +97,15 @@ pub struct Turn {
     /// again — including when the attempt failed, because retrying a balance check per call
     /// would make the price of a turn depend on how many tools the model chose.
     charged: bool,
+    /// Why the charge was refused, once it has been.
+    ///
+    /// The charge is attempted once (above), so a later call in the same turn skips the spend
+    /// — and without remembering the reason, that skip would read as "already paid" and the
+    /// call would run: a turn that could not afford its first tool call would run its second
+    /// for free. The reason is the **turn's**, not the call's, because the charge is: if the
+    /// turn cannot afford `agent_turn`, it cannot afford any tool it goes on to call, and the
+    /// model gets the same sentence it got the first time.
+    refusal: Option<Refusal>,
     /// What the charge added, for the `usage` event: `chat_message + agent_turn` (A282).
     pub extra_cost: i64,
     /// The balance after the charge, when it succeeded.
@@ -114,6 +123,7 @@ impl Turn {
         Self {
             own_key,
             charged: false,
+            refusal: None,
             extra_cost: 0,
             remaining: None,
             proposals: 0,
@@ -140,17 +150,17 @@ pub async fn handle(
     let decision = gate(call, ctx);
 
     // The refusal is a decision, not an error (A271): it is answered, not dropped. Two of the
-    // six refusals can be decided here rather than by the gate — the balance is a database
-    // fact, and `gate` reads nothing — so the check below replaces the decision when the turn
-    // cannot afford its own tool call.
+    // seven refusals can be decided here rather than by the gate — the balance and the plan's
+    // monthly ceiling are database facts, and `gate` reads nothing — so the check below
+    // replaces the decision when the turn cannot afford its own tool call.
     let decision = if matches!(decision, GateDecision::Refuse { .. }) {
         decision
     } else {
         match charge_turn(state, user, turn).await {
             Ok(()) => decision,
-            Err((needed, available)) => GateDecision::Refuse {
+            Err(reason) => GateDecision::Refuse {
                 tool: call.name.clone(),
-                reason: Refusal::InsufficientCredits { needed, available },
+                reason,
             },
         }
     };
@@ -189,20 +199,21 @@ pub async fn handle(
 
 /// Charges `agent_turn` once per turn, at the first tool call (A282).
 ///
-/// `Err((needed, available))` is a balance that cannot cover the price, and the caller turns
-/// it into `Refusal::InsufficientCredits`. The daily cap slots are both empty: `agent_turn`
-/// is not a counted allowance in the matrix, and passing the chat cap would refuse the tool
-/// call for a *message* limit the message spend has already checked.
-///
-/// The two numbers come from `entitlements::snapshot` on the failure path only, because
-/// `AppError::Entitlement` deliberately carries `limit`/`used` and not a balance (its
-/// `insufficient_credits` case leaves both null). One extra read on the path that is about to
-/// tell the student to top up is worth an accurate sentence.
-async fn charge_turn(state: &AppState, user: &AuthUser, turn: &mut Turn) -> Result<(), (i64, i64)> {
-    eprintln!(
-        "DEBUG charge_turn charged={} own_key={}",
-        turn.charged, turn.own_key
-    );
+/// `Err(reason)` is the spend's refusal, carried out as a [`Refusal`] rather than a tuple so
+/// the two ways the spend can refuse — a balance that cannot cover the price, and the plan's
+/// monthly provider-cost ceiling — stay two distinct sentences. The caller turns it into
+/// `GateDecision::Refuse`. The daily cap slots are both empty: `agent_turn` is not a counted
+/// allowance in the matrix, and passing the chat cap would refuse the tool call for a
+/// *message* limit the message spend has already checked.
+async fn charge_turn(state: &AppState, user: &AuthUser, turn: &mut Turn) -> Result<(), Refusal> {
+    // A turn that was refused stays refused, and this check comes **before** the
+    // `charged` one: the charge is attempted once, so a later call in the same turn skips the
+    // spend — and if the skip were read as "already paid", the call would run. That is exactly
+    // how an unaffordable turn wrote a proposal: the first call was refused, the model was told
+    // and called the tool again, and the second call passed the `charged` guard and proposed.
+    if let Some(reason) = turn.refusal.clone() {
+        return Err(reason);
+    }
     if turn.charged {
         return Ok(());
     }
@@ -243,20 +254,41 @@ async fn charge_turn(state: &AppState, user: &AuthUser, turn: &mut Turn) -> Resu
     .await
     {
         Ok(spent) => {
-            eprintln!(
-                "DEBUG charge_turn SPENT cost={cost} remaining={}",
-                spent.remaining
-            );
             turn.extra_cost += cost;
             turn.remaining = Some(spent.remaining);
             Ok(())
         }
+        // **Every** entitlement refusal refuses the turn, which is what this arm being on the
+        // class rather than on one code buys. The arm this replaced named
+        // `insufficient_credits` alone, so `limit_reached` — the provider-cost ceiling, which
+        // `spend_in` checks *before* it reads a balance — fell through to the "real failure"
+        // arm below, the turn continued as if it had paid, and the tool ran anyway.
+        //
+        // The two kinds stay distinct because they are two different sentences: a spent
+        // balance and a reached usage ceiling are not the same fact, and the model is the one
+        // that has to say the true one to the student.
         Err(AppError::Entitlement { code, .. }) if code == "insufficient_credits" => {
+            // `AppError::Entitlement` deliberately carries `limit`/`used` and not a balance,
+            // so the numbers come from `entitlements::snapshot`. One extra read on the path
+            // that is about to tell the student to top up is worth an accurate sentence.
             let available = crate::entitlements::snapshot(state, user)
                 .await
                 .map(|snapshot| snapshot.credits.total())
                 .unwrap_or(0);
-            Err((cost, available))
+            let reason = Refusal::InsufficientCredits {
+                needed: cost,
+                available,
+            };
+            turn.refusal = Some(reason.clone());
+            Err(reason)
+        }
+        // The ceiling, and the honest reading of any other entitlement refusal: the account
+        // cannot buy this turn. Refusing is the safe direction, because the alternative — what
+        // the old catch-all did — is running the call.
+        Err(AppError::Entitlement { code, .. }) => {
+            tracing::info!(%code, "the agent turn was refused for the account's plan");
+            turn.refusal = Some(Refusal::UsageLimit);
+            Err(Refusal::UsageLimit)
         }
         Err(error) => {
             // Anything else is a real failure — a lock timeout, a database error — and
