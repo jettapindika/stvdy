@@ -69,9 +69,25 @@ const APP_URL = process.env.APP_URL ?? 'http://localhost:5173'
  * numbers here are comparable with the ones in those plans. `deviceScaleFactor: 3`
  * is a real phone's pixel ratio; it does not change CSS-pixel measurements, which
  * is what the 44px target is stated in.
+ *
+ * The three of them are overridable by environment variable **with these values as
+ * the defaults**, because gate 5 has a second leg at desktop width and the same
+ * checks apply to it: a `w-32` column or a `min-w-40` field is a defect on a 1365px
+ * window too, just one that only shows at 200% text rather than at 100%. A second
+ * script that copied this one to change a constant would be a second harness to
+ * keep in step, and the two would disagree about what a defect is within a month.
+ * The default is what keeps every existing phase's recorded numbers comparable: run
+ * with no variables set and this measures exactly what it measured before.
+ *
+ *   VIEWPORT_WIDTH=1365 VIEWPORT_HEIGHT=900 VIEWPORT_DPR=2 SCALES=100,200 \
+ *     OUTPUT=gate5-desktop.json node scripts/measure-mobile.mjs
  */
-const VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 3 }
-const SCALES = [100, 200]
+const VIEWPORT = {
+  width: Number(process.env.VIEWPORT_WIDTH ?? 390),
+  height: Number(process.env.VIEWPORT_HEIGHT ?? 844),
+  deviceScaleFactor: Number(process.env.VIEWPORT_DPR ?? 3),
+}
+const SCALES = (process.env.SCALES ?? '100,200').split(',').map((value) => Number(value))
 
 /** Where Chromium is looked for, the same list `render/chrome.rs` uses. */
 const CHROME_CANDIDATES = [
@@ -225,12 +241,201 @@ const CONNECTION = {
 }
 
 /**
+ * One workspace, with material in it.
+ *
+ * The workspace screen is five of the surfaces below, and every one of them would
+ * measure an empty state if the workspace had nothing in it: the panel strip, the
+ * source rows, the chat thread and the three Studio forms all only exist once
+ * there is something to render. The name is Indonesian and long on purpose — a
+ * string that fits proves nothing, and this one has to survive a list row at 200%
+ * text beside two buttons and a count.
+ */
+const WORKSPACE = {
+  id: 'w1',
+  name: 'Kriptografi dan Keamanan Informasi Terapan',
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+  source_count: 2,
+}
+
+/**
+ * Two sources, both ready.
+ *
+ * Ready rather than processing on purpose: a ready source is the only one the
+ * Studio pickers will offer, so a pending one would leave every Studio form
+ * measuring its "no indexed sources" hint instead of its controls. The titles are
+ * Indonesian and long for the same reason as the workspace's.
+ */
+const SOURCES = [
+  {
+    id: 's1',
+    workspace_id: 'w1',
+    kind: 'pdf',
+    title: 'Bab 4 — Algoritma Kunci Publik dan Tanda Tangan Digital',
+    url: null,
+    file_size: 1048576,
+    mime: 'application/pdf',
+    status: 'ready',
+    error: null,
+    created_at: '2026-10-11T08:00:00Z',
+  },
+  {
+    id: 's2',
+    workspace_id: 'w1',
+    kind: 'pptx',
+    title: 'Kuliah 7 — Fungsi Hash dan Integritas Pesan',
+    url: null,
+    file_size: 524288,
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    status: 'ready',
+    error: null,
+    created_at: '2026-10-11T08:00:00Z',
+  },
+]
+
+/**
+ * A thread with both roles in it.
+ *
+ * The assistant turn carries a citation marker and the chunk it resolves to, so
+ * the answer's chips and the "based on N sources" line are on screen and are
+ * measured — they are links, and a link is a target. An empty thread would
+ * measure the empty state, which is the one state on that screen with no controls
+ * in it at all.
+ */
+const MESSAGES = [
+  {
+    id: 'm1',
+    workspace_id: 'w1',
+    role: 'user',
+    content: 'Jelaskan bagaimana tanda tangan digital memverifikasi keaslian dokumen.',
+    citations: [],
+    used_web: false,
+    created_at: '2026-10-11T08:00:00Z',
+  },
+  {
+    id: 'm2',
+    workspace_id: 'w1',
+    role: 'assistant',
+    content:
+      'Tanda tangan digital memakai kunci privat penanda tangan untuk mengenkripsi ringkasan dokumen, lalu penerima memverifikasinya dengan kunci publik [1].',
+    citations: [{ type: 'chunk', chunk_id: 'k1', source_id: 's1', page: 12 }],
+    used_web: false,
+    created_at: '2026-10-11T08:00:01Z',
+  },
+]
+
+/** One ready deck, so the Studio flashcards panel renders a row rather than its empty state. */
+const DECK = {
+  id: 'd1',
+  workspace_id: 'w1',
+  title: 'Kriptografi Kunci Publik — Kartu Ulangan',
+  source_ids: ['s1'],
+  status: 'ready',
+  error: null,
+  requested_count: 10,
+  card_count: 10,
+  created_at: '2026-10-11T08:00:00Z',
+}
+
+/** One ready quiz, for the same reason as the deck. */
+const QUIZ = {
+  id: 'q1',
+  workspace_id: 'w1',
+  title: 'Kuis Kriptografi Kunci Publik dan Fungsi Hash',
+  difficulty: 'medium',
+  question_types: 'mixed',
+  source_ids: ['s1', 's2'],
+  status: 'ready',
+  error: null,
+  requested_count: 10,
+  question_count: 10,
+  created_at: '2026-10-11T08:00:00Z',
+}
+
+/** One ready report, with an outline, so the row renders its count and its link. */
+const REPORT = {
+  id: 'r1',
+  workspace_id: 'w1',
+  title: 'Ringkasan Kriptografi untuk Ujian Akhir Semester',
+  status: 'ready',
+  error: null,
+  outline: {
+    title: 'Ringkasan Kriptografi untuk Ujian Akhir Semester',
+    sections: [
+      { heading: 'Kriptografi kunci publik', purpose: 'Dasar', labels: [1], gaps: false },
+      { heading: 'Fungsi hash', purpose: 'Integritas', labels: [2], gaps: false },
+    ],
+  },
+  body_md: '# Ringkasan\n\nIsi.',
+  sections: [
+    { heading: 'Kriptografi kunci publik', body_md: 'Isi.', generating: false, error: null },
+    { heading: 'Fungsi hash', body_md: 'Isi.', generating: false, error: null },
+  ],
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+}
+
+/**
+ * Two proposals waiting for the student, so the agent card is measured rather than
+ * only its absence.
+ *
+ * Both tools, because they stress different things: `create_task` renders the
+ * card's five-field `<dl>` (a long Indonesian title and notes, a `due_at` the card
+ * formats, and the longest sentence on the card) while `create_flashcards` is the
+ * one whose price the matrix states, so it is the only one that renders
+ * `agent.card.cost`. Supplied by the Phase 12 slice that owns the screen.
+ */
+const PENDING_ACTIONS = [
+  {
+    id: 'a1',
+    tool: 'create_task',
+    args: {
+      title: 'Selesaikan laporan kriptografi untuk Jumat',
+      notes: 'Sertakan analisis fungsi hash dan tanda tangan digital pada bab empat.',
+      due_at: '2026-10-16T16:59:00Z',
+      estimate_min: 90,
+      priority: 1,
+    },
+    status: 'pending',
+    created_at: '2026-10-12T08:00:00Z',
+    expires_at: '2026-10-13T08:00:00Z',
+    resolved_at: null,
+    resolved_by_device_id: null,
+    result: null,
+    error: null,
+    message_id: 'm2',
+  },
+  {
+    id: 'a2',
+    tool: 'create_flashcards',
+    args: { title: 'Kartu Ulangan Kriptografi Kunci Publik', count: 10, source_ids: ['s1', 's2'] },
+    status: 'pending',
+    created_at: '2026-10-12T08:00:05Z',
+    expires_at: '2026-10-13T08:00:05Z',
+    resolved_at: null,
+    resolved_by_device_id: null,
+    result: null,
+    error: null,
+    message_id: 'm2',
+  },
+]
+
+/**
  * The phone surfaces this walks, by the taps a phone takes to reach them.
  *
  * The tab bar's five labels are the five destinations, and `/billing` is reached
  * the way a phone reaches it — through Settings — which is also the assertion that
  * it is reachable at all: a screen nothing links to would otherwise be measured by
  * URL and would pass while being invisible to a user.
+ *
+ * The five workspace surfaces are reached the same way, and each one re-walks its
+ * whole path from the tab bar rather than continuing from wherever the previous
+ * surface left the page: a surface whose steps only work in the order the list
+ * happens to be written is a surface that silently measures the wrong screen the
+ * first time the list is reordered. The workspace screen is the one screen Phase 14
+ * left uncovered, and its panels are where the `min-w-40` this walk was written for
+ * lives (`features/studio/QuizPanel.tsx`) — the panel strip only exists below `lg`,
+ * so a phone is the only viewport that renders it at all.
  */
 const SURFACES = [
   { name: 'today', steps: [{ nav: 'Today' }] },
@@ -239,6 +444,50 @@ const SURFACES = [
   { name: 'tasks', steps: [{ nav: 'Tasks' }] },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
+  {
+    name: 'workspace-sources',
+    steps: [{ nav: 'Work' }, { link: WORKSPACE.name }],
+  },
+  {
+    name: 'workspace-chat',
+    steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Chat' }],
+  },
+  {
+    name: 'workspace-studio-flashcards',
+    steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Studio' }],
+  },
+  {
+    name: 'workspace-studio-quiz',
+    steps: [
+      { nav: 'Work' },
+      { link: WORKSPACE.name },
+      { tab: 'Studio' },
+      { tab: 'Quiz' },
+    ],
+  },
+  {
+    name: 'workspace-studio-report',
+    steps: [
+      { nav: 'Work' },
+      { link: WORKSPACE.name },
+      { tab: 'Studio' },
+      { tab: 'Report' },
+    ],
+  },
+  // Reached from Settings, the way a phone reaches it, and the one screen on this
+  // list with a bar chart in it. Requested by Phase 12's own gate-5 slice, which
+  // owns the screen and supplied the fixture bodies below.
+  { name: 'dashboard', steps: [{ nav: 'More' }, { link: 'View your progress' }] },
+  // The same chat thread with two proposals waiting under it, so the agent cards
+  // are measured rather than only their absence. The card renders straight from
+  // `GET /actions/pending`, so no step beyond the thread's own is needed — and both
+  // tools are in the fixture on purpose, because they stress different things:
+  // `create_task` renders the five-field `<dl>` and the longest sentence on the
+  // card (`agent.card.noCost`), `create_flashcards` the one that shows a price.
+  {
+    name: 'workspace-chat-proposal',
+    steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Chat' }],
+  },
 ]
 
 /**
@@ -261,7 +510,80 @@ const ROUTES = {
   '/auth/refresh': () => ({ access_token: 'access-1', refresh_token: 'refresh-1', expires_at: null }),
   '/auth/me': () => USER,
   '/usage': () => USAGE,
-  '/workspaces': () => ({ workspaces: [] }),
+  // One workspace, so the list renders a row (a name link, a count, Rename and
+  // Delete) rather than its empty state — and so the five workspace surfaces below
+  // have a link to walk through.
+  '/workspaces': () => ({ workspaces: [WORKSPACE] }),
+  // The workspace screen's five reads, plus the two per-row status reads the source
+  // rows make. A missing one 404s and the walk measures an error notice instead of
+  // the screen it meant to measure.
+  '/workspaces/w1': () => ({ workspace: WORKSPACE }),
+  '/workspaces/w1/sources': () => ({ sources: SOURCES }),
+  '/sources/s1/status': () => ({
+    id: 's1',
+    status: 'ready',
+    chunk_count: 48,
+    error: null,
+    updated_at: '2026-10-11T08:00:00Z',
+  }),
+  '/sources/s2/status': () => ({
+    id: 's2',
+    status: 'ready',
+    chunk_count: 21,
+    error: null,
+    updated_at: '2026-10-11T08:00:00Z',
+  }),
+  '/workspaces/w1/messages': () => ({ messages: MESSAGES }),
+  // Two pending proposals rather than none: the card is what the chat surface has
+  // to fit a five-field definition list into, and an empty list measures the
+  // screen without it.
+  '/actions/pending': () => ({ actions: PENDING_ACTIONS }),
+  '/workspaces/w1/decks': () => ({
+    decks: [DECK],
+    cost: { per_batch: 4, batch_size: 10, max_cards: 30 },
+  }),
+  '/workspaces/w1/quizzes': () => ({
+    quizzes: [QUIZ],
+    cost: { per_batch: 6, batch_size: 10, max_questions: 20 },
+  }),
+  '/workspaces/w1/reports': () => ({ reports: [REPORT] }),
+  // The two Phase 12 screens' reads. `/dashboard` is requested with a query string
+  // and the table is keyed by pathname, so one entry answers every window.
+  '/dashboard': () => ({
+    from: '2026-09-12',
+    to: '2026-10-12',
+    time_per_course: [
+      { workspace_id: 'w1', title: WORKSPACE.name, minutes: 415 },
+      { workspace_id: 'w2', title: 'Aljabar Linier dan Matriks', minutes: 95 },
+    ],
+    review_activity: [
+      { local_date: '2026-10-06', reviews: 34 },
+      { local_date: '2026-10-07', reviews: 0 },
+      { local_date: '2026-10-08', reviews: 61 },
+    ],
+    totals: { minutes_studied: 510, reviews: 95, cards_due: 27, quizzes_taken: 6 },
+  }),
+  '/dashboard/topics': () => ({
+    quiz_mastery: [
+      {
+        source_id: 's1',
+        title: 'Fungsi Hash dan Integritas Pesan',
+        attempts: 24,
+        correct: 19,
+        accuracy: 0.79,
+      },
+      {
+        source_id: 's2',
+        title: 'Algoritma Kunci Publik',
+        attempts: 8,
+        correct: 3,
+        accuracy: 0.375,
+      },
+    ],
+    weak_topics: [
+      { source_id: 's2', title: 'Algoritma Kunci Publik', attempts: 8, correct: 3, accuracy: 0.375 },
+    ],
+  }),
   '/tasks': () => ({ tasks: [TASK] }),
   '/settings': () => ({ settings: SETTINGS_ROW, timezone: USER.timezone }),
   // The calendar reads these five; a missing one 404s and the walk measures the
@@ -466,11 +788,28 @@ function measureInPage(options) {
   // *ancestor* of an offending element reports the same overflow again — so only the
   // innermost element of a chain is reported, which is the one that is actually too
   // wide.
+  //
+  // A fourth: `truncate` is `overflow: hidden; text-overflow: ellipsis;
+  // white-space: nowrap`, so an element carrying it *declares* that its text will be
+  // cut off and shows an ellipsis to say so — it is the sanctioned single-line label
+  // treatment, and reporting it as such would fail the gate on the pattern rather
+  // than on a defect.
+  //
+  // It is excluded **only when the element also carries a non-empty `title`**, and
+  // that condition is the whole point rather than a detail. An ellipsis on a phone
+  // has no hover, so a truncated string with nothing else carrying it is text a
+  // reader cannot reach — which is the same defect this check exists for, arriving
+  // by a different route. With a `title` the full string is recoverable (by long
+  // press, by the accessibility tree, by a desktop hover), so the truncation is a
+  // presentation choice; without one it is a dead end and stays a failure.
   const clipped = []
   const CLIPS_BY_DESIGN = new Set(['INPUT', 'SELECT', 'TEXTAREA'])
   for (const el of document.querySelectorAll('body *')) {
     if (!isVisible(el)) continue
     if (el.classList.contains('sr-only')) continue
+    if (el.classList.contains('truncate') && (el.getAttribute('title') ?? '').trim() !== '') {
+      continue
+    }
     if (CLIPS_BY_DESIGN.has(el.tagName)) continue
     const style = getComputedStyle(el)
     if (style.overflowX === 'auto' || style.overflowX === 'scroll') continue
@@ -611,11 +950,17 @@ async function signIn(page) {
  * The access token lives in memory only on the web build, so a reload would drop
  * the session and every measurement after the first surface would be of a sign-in
  * screen. Clicking is also what a phone does, and it exercises the tab bar itself.
+ *
+ * Three kinds of step, because a phone reaches a screen three ways: a `nav` is one
+ * of the five tab-bar destinations, a `link` is any `<a>` the screen renders, and a
+ * `tab` is a `role="tab"` button in one of the two panel strips. The last one is not
+ * decoration: the workspace screen's panels are behind it, and a panel measured by
+ * URL instead would pass while being unreachable by tap.
  */
 async function openSurface(page, surface) {
   for (const step of surface.steps) {
-    const wanted = step.nav ?? step.link
-    const scope = step.nav === undefined ? 'a' : 'nav a'
+    const wanted = step.nav ?? step.link ?? step.tab
+    const scope = step.nav === undefined ? (step.link === undefined ? '[role="tab"]' : 'a') : 'nav a'
     const found = await page.evaluate(
       (selector, label) => {
         const link = [...document.querySelectorAll(selector)].find(
@@ -650,7 +995,9 @@ async function main() {
     fail(`${APP_URL} is not reachable (${error.message}) — start the dev server first`)
   }
 
-  console.log(`measuring ${APP_URL} at ${VIEWPORT.width}x${VIEWPORT.height} with ${chrome}`)
+  console.log(
+    `measuring ${APP_URL} at ${String(VIEWPORT.width)}x${String(VIEWPORT.height)} at ${SCALES.map((scale) => `${String(scale)}%`).join('/')} text with ${chrome}`,
+  )
 
   const browser = await puppeteer.launch({
     executablePath: chrome,
@@ -778,7 +1125,7 @@ async function main() {
     )
   }
 
-  const output = join(root, 'var', 'gate14-phone.json')
+  const output = join(root, 'var', process.env.OUTPUT ?? 'gate14-phone.json')
   try {
     execFileSync('mkdir', ['-p', dirname(output)])
   } catch {
