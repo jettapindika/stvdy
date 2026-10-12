@@ -1959,48 +1959,48 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
 
 ## Phase 8 exit checklist
 
-- [ ] `crates/sync/src/proto/cursor.rs` exists; the default and cap are 200/1000; an
+- [x] `crates/sync/src/proto/cursor.rs` exists; the default and cap are 200/1000; an
       `offset` is legal only on the initial pass; a cursor of 0 is never stale.
-- [ ] The initial pass is anchored at the user's `max(seq)`, and a write during the pass
+- [x] The initial pass is anchored at the user's `max(seq)`, and a write during the pass
       cannot shift a row out of it.
-- [ ] `crates/sync/src/client/` exists with the engine, the outbox, the apply, the
+- [x] `crates/sync/src/client/` exists with the engine, the outbox, the apply, the
       conflict table and the transport trait, and `crates/sync` links neither `rusqlite`
       nor `reqwest`.
-- [ ] `GET /sync/pull` pages by seq ascending, is rank-ordered on the initial pass,
+- [x] `GET /sync/pull` pages by seq ascending, is rank-ordered on the initial pass,
       ships only the allowlisted columns, and answers 410 `resync_required` below the
       watermark.
-- [ ] A pull for account A contains no seq and no row id belonging to account B, and the
+- [x] A pull for account A contains no seq and no row id belonging to account B, and the
       payload loader is scoped by `user_id` in its own statement.
-- [ ] `POST /sync/push` takes the advisory lock as its first statement, sets
+- [x] `POST /sync/push` takes the advisory lock as its first statement, sets
       `app.device_id` second, uses a savepoint per mutation, and calls Phase 7's `decide`
       rather than a copy of it.
-- [ ] A replayed `mutation_id` returns the stored result and applies nothing.
-- [ ] A rejected mutation does not abort the batch; `Message`, `Source` and a derived
+- [x] A replayed `mutation_id` returns the stored result and applies nothing.
+- [x] A rejected mutation does not abort the batch; `Message`, `Source` and a derived
       flashcard field are `read_only_entity` over the wire.
-- [ ] A mutation whose id belongs to another account is `not_found` and writes nothing; a
+- [x] A mutation whose id belongs to another account is `not_found` and writes nothing; a
       `mutation_id` belonging to another account is a conflict and never returns that
       account's result.
-- [ ] A body claiming another device's id is 403.
-- [ ] Append-only duplicates are ignored and report the existing seq.
-- [ ] Disjoint task/event edits both survive; overlapping edits resolve by server receive
+- [x] A body claiming another device's id is 403.
+- [x] Append-only duplicates are ignored and report the existing seq.
+- [x] Disjoint task/event edits both survive; overlapping edits resolve by server receive
       time; a tombstone beats an edit and the loser is told; an explicit restore wins.
-- [ ] `GET /sync/stream` emits `event: seq` with the current max on connect, polls every
+- [x] `GET /sync/stream` emits `event: seq` with the current max on connect, polls every
       2s, and carries only the caller's own clock.
-- [ ] `compact_change_log` keeps tombstones longer than upserts, writes the watermark,
+- [x] `compact_change_log` keeps tombstones longer than upserts, writes the watermark,
       runs as a per-day singleton, and its 410 has a working full-resync path.
-- [ ] The shell has a SQLite cache, an outbox, a `defer_foreign_keys` apply path, a
+- [x] The shell has a SQLite cache, an outbox, a `defer_foreign_keys` apply path, a
       deferred-child retry, a wipe, and no access token in the database.
-- [ ] The SPA has a sync status, a Devices screen, and an online-only web path; the
+- [x] The SPA has a sync status, a Devices screen, and an online-only web path; the
       locale files carry every string in both languages.
-- [ ] Three simulated devices converge; the isolation test passes; two devices pushing
+- [x] Three simulated devices converge; the isolation test passes; two devices pushing
       overlapping batches both succeed.
-- [ ] Roadmap gate 5 (accessibility) performed and recorded, with measurements.
-- [ ] Roadmap gate 6 (Indonesian) performed and recorded, both copy and data.
-- [ ] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
-- [ ] `docs/{SYNC,API,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same
+- [x] Roadmap gate 5 (accessibility) performed and recorded, with measurements.
+- [x] Roadmap gate 6 (Indonesian) performed and recorded, both copy and data.
+- [x] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
+- [x] `docs/{SYNC,API,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same
       phase.
-- [ ] `bash scripts/smoke-phase8.sh` prints `=== PASS`.
-- [ ] The full quality gate is green.
+- [x] `bash scripts/smoke-phase8.sh` prints `=== PASS`.
+- [x] The full quality gate is green.
 
 ### Exit checklist table (gate | command | result)
 
@@ -2033,6 +2033,244 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
 ---
 
 ## Execution notes
+
+### The phase summary: the three roadmap gates, measured
+
+Performed on the built bundle (`VITE_API_BASE_URL` pointed at the running server on
+`:8091`) in a real headless Chromium, driven over CDP, against the real API and the real
+Postgres — not in jsdom, which has no layout engine and where every
+`getBoundingClientRect()` is zeros. The instrument is the same one Phase 7 used
+(`/tmp/gate7-a11y.js`): it composites each element's real backdrop and applies WCAG 2.1
+relative luminance, presses real `Tab` keys and measures the ring on the focused element,
+measures targets from `getBoundingClientRect()`, and compares `scrollWidth` to `clientWidth`.
+Nothing is asserted from the stylesheet.
+
+The account was driven with real state: two devices (`MacBook Pro` / macOS and
+`Pixel 8` / android), a task with an Indonesian title and notes, 25 further tasks so the
+Tasks screen scrolls, and `devices.last_sync_at` written by the server by two real pulls.
+
+#### Roadmap gate 5, accessibility: **PASS** — one defect found, fixed, and re-measured
+
+The defect is the one the SPA slice flagged as unmeasured, and it was real.
+
+**Found.** At 390×844 with 200% text on `/devices`: the tab bar's band was
+`fixed inset-x-0 bottom-0`, so it was painted **over** the content, and `main` reserved its
+height with `padding-bottom: calc(2.75rem + 1px + 3rem + env(safe-area-inset-bottom, 0px))`.
+The `3rem` was meant to cover the sync chip's row, whose measured height is **73.2px at 100%
+text and 176.4px at 200%** — the chip wraps, because `max-w-64` caps it at 256px inside a
+390px viewport. The band's own height at 200% is **265.4px** against the **185px** reserved.
+Measured at the bottom of the scroll, the last line box of the reset sentence
+("…so there is nothing to reset.", 40px line, top 571, bottom 611) sat **32.4px behind the
+opaque band** (top 578.6), and `document.elementFromPoint` at that point returned the chip.
+At 100% the same screen cleared by 22.8px only because the content happened to be short.
+
+**Fixed structurally, not by raising the constant.** The shell root is now a column on a
+phone (`.shell-phone`, applied from the same `isPhone` that renders the band) and the band
+is a `sticky bottom-0` flow sibling **below** `main`, so it takes the height it needs and
+the reservation arithmetic is gone. The safe-area inset is still honoured — it is the nav's
+own `pb-safe-bottom`, so it is part of the band's measured height. The tab bar's
+`overflow-x-auto` and the 44px item minimum are untouched, so nothing was solved by
+shrinking.
+
+**Re-measured**, same screen, same instrument:
+
+| | 100% light | 100% dark | 200% light | 200% dark |
+|---|---|---|---|---|
+| shell direction / band position | `column` / `sticky` | `column` / `sticky` | `column` / `sticky` | `column` / `sticky` |
+| band height | 118.2px | 118.2px | 265.4px | 265.4px |
+| `main` reserved padding | **0px** | 0px | **0px** | 0px |
+| last line clearance | **+23.8px** | +23.8px | **+47.6px** | +47.6px |
+| `elementFromPoint` at that line | the paragraph | the paragraph | the paragraph | the paragraph |
+| document width | 390/390 | 390/390 | 390/390 | 390/390 |
+
+**(a) Keyboard, with a visible ring.** On `/devices` at 390×844: **11 stops** — the skip
+link, the four Rename/Sign out buttons, the sync chip, and the five tab-bar items — every
+one with `outline: solid 2px` at a 2px offset, measured on the focused element itself:
+**6.29:1** light / **8.9:1** dark for the chip and the tab items, **5.97:1** light /
+**9.61:1** dark for the row buttons. At 1365px: **12 stops** (the sidebar's five items, the
+credit meter, the sync control, the four row buttons), same ring, **6.29:1** light /
+**8.9:1** dark.
+
+**(b) Contrast, computed, both themes.** 390px: **25 text/background pairs, 0 below
+requirement**, lowest **7.87:1** (light) / **7.23:1** (dark). 1365px: **27 pairs, 0 below
+requirement**, lowest **7.87:1** light / **7.23:1** dark. The requirement is 4.5:1.
+
+**(c) 44px targets at phone width.** `targets()` at 390px returns **0 targets under 44px**:
+the tab items are 78×44, the chip is **256×65** at 100% (and 342×160 at 200%, where it wraps
+rather than shrinking), the row buttons are 91×44 and 92×44. At 1365px the sidebar's items
+are 215×40, which the clause does not cover (it is about phone width, where the tab bar
+carries navigation at 44px) — the same reading Phase 7's gate recorded.
+
+**(d) No state in colour alone.** The status is a **word** inside the control's accessible
+name — "Synced", "Syncing", "Needs attention", "Offline", "Signed out on this device" — with
+a chip tone that only repeats it. The accessible name of the phone chip reads
+"Synced · This build keeps nothing on this device · Devices and sync", so the state survives
+monochrome and is not carried by the tone.
+
+**(e) 200% text at 390px.** Root 16px → **32px**, read back from `getComputedStyle`.
+`document.scrollingElement.scrollWidth === clientWidth === 390`: **no horizontal page
+overflow**, and **0 elements clipped off-screen** except the tab bar's fifth item
+(`left 361, right 435`), which is Phase 6's documented and load-bearing case: the bar is
+`overflow-x: auto` (`scrollWidth 435 > clientWidth 390`, `scrollable: true`), so "More" is
+reachable by swipe and by `Tab` and is not lost — the alternative was a sixth nav item, which
+A189 refused. The band grew from 118.2px to 265.4px and the content still cleared it.
+
+**The regression test.** `app/src/components/layout/shellLayout.test.ts`, **7 cases**, all
+passing. jsdom has no layout engine, so a rendered height cannot be asserted from
+`npm --prefix app test`; the honest assertion is on the **structure** that makes the overlap
+impossible, in the technique `tokens/invariants.test.ts` uses: the shell root is a column
+applied from `isPhone`, `main` carries no `padding-bottom`, `.shell-main-phone` is gone, the
+pre-fix expression `2.75rem + 1px + 3rem` appears nowhere in the applied CSS, the band is
+`sticky bottom-0` and not `fixed`, both band rows are opaque, the nav keeps `overflow-x-auto`
+and the items keep `min-height: 2.75rem`. **Every assertion fails against the pre-fix form** —
+verified by evaluating the same predicates against `git show HEAD:` of the three files, where
+six of them are false.
+
+#### Roadmap gate 6, Indonesian: **PASS**, both halves
+
+**(a) The copy half.** `npm --prefix app test -- i18n` → **10 passed, 0 failed** (6 before
+this phase, +4 for the language tag below). `sync.*` is **12 keys** and `devices.*` is **26
+keys**, every one present in both `en.json` and `id.json` with identical placeholder sets
+(`pending_one`/`_other` only in English, which is the plural rule and not a gap). The
+Indonesian was **read out of the rendered DOM**, not out of the locale file: with the
+browser's `navigator.languages` overridden to `['id-ID','id']` before boot, the built app
+renders "Lewati ke konten", "Perangkat dan sinkronisasi", "Setiap perangkat yang masuk ke
+akunmu, dan kapan masing-masing terakhir sinkron.", "Sudah masuk", "Terakhir sinkron 12 Oct
+2026, 10:09", "Perangkat ini", "Belum pernah sinkron", "Ubah nama", "Keluar", "Versi ini
+tidak menyimpan salinan lokal datamu, jadi tidak ada yang perlu dihapus.", and the status
+word "Tersinkron". The revoke confirm renders the Indonesian sentence with the device name
+interpolated: "Keluarkan MacBook Pro? Salinan lokalnya dihapus saat perangkat itu terhubung
+lagi."
+
+**(b) The data half.** `crates/server/tests/sync_push.rs::indonesian_text_round_trips_byte_exact`
+→ **1 passed, 0 failed** (byte-exact through push and pull in both directions). On the wire in
+this run, device 1 pushed `Ringkasan bab tiga: sel dan membran` (seq 659) and device 2's pull
+returned the same string; the Tasks screen in the Indonesian browser renders it alongside the
+25 seeded Indonesian titles, so the copy and the data are read on one screen.
+
+**One defect found here, and fixed.** `app/index.html` shipped a static `<html lang="en">`
+and nothing ever updated it: the whole Indonesian UI — the default for this product's primary
+audience, since the language is resolved from the OS or browser — was announced with an
+English voice. That is **WCAG 2.2 SC 3.1.1, Level A**, and it was invisible to every test in
+the repository because nothing asserted the document's language. `i18n/index.ts` now sets
+`document.documentElement.lang` from the same resolved language `init` receives, **before the
+first render** and again on `languageChanged`; the value is the language key itself (`en`,
+`id`), which are valid BCP 47 tags — deliberately not `INTL_LOCALE`, which is a *formatting*
+choice and would claim a regional variety the copy does not have. The pseudo-locale
+(`en-XA`, registered only under `import.meta.env.DEV`) passes through unchanged, which is
+correct: it is a valid tag, `detectLanguage` can never return it, and it cannot ship.
+`i18n.test.ts` gains **4 cases** asserting the initial resolution for `id`, for `en`, and for
+a language the app does not ship (which falls back to `en` because that is what it renders),
+plus the change; **two of them fail against the pre-fix module** — verified by restoring
+`git show HEAD:app/src/i18n/index.ts` and re-running, which gave `Tests 2 failed | 8 passed`.
+
+#### Roadmap gate 7, honesty: **PASS**, all six clauses
+
+- **(a) The status traces to stored facts.** "Last synced 12 Oct 2026, 10:09" is
+  `devices.last_sync_at`, written by the server in the same transaction as the pull and the
+  push (A180) and read back from `GET /devices` in this run; the component formats that
+  stored instant and never reads a clock at render time. The offline-capable case renders
+  "Not synced yet" for a device that has signed in and never pulled, and the web build
+  renders "This build keeps nothing on this device" rather than naming a time it cannot have.
+  The status is derived from the outbox length and the last pass's stored outcome.
+- **(b) The copy carries no banned claim.** A scan of **all 38 `sync.*`/`devices.*` keys in
+  both languages** for `100%`, `verified`, any percentage, `upgrade`, a price (`Rp`/`USD`/
+  `IDR`/`$` followed by digits), the word `price`, the word `plan`, and any `http(s)://` link
+  returns **0 hits**. The one `42%` in the app is `styleguide.chips.working`, which is the
+  styleguide's own staged sample and not a claim about the user's data.
+- **(c) Not applicable, and stated rather than skipped.** There is no chat composer on the
+  status control or the Devices screen; the screens have no model-backed action at all.
+- **(d) No generative action, so no credit cost is shown.** The rendered DOM contains no
+  credit number, and the two screens make no request that spends: the routes they call are
+  `GET /devices`, `PATCH /devices/:id`, `DELETE /devices/:id`, the three `/sync/*` routes and
+  the local cache. Stated explicitly because the clause asks for it.
+- **(e) No AI proposal on these screens.** The status control and the Devices screen render
+  no suggestion, no proposed change and no accept/reject affordance. The only model-derived
+  surface in the app is the chat composer's pending actions, which is not here.
+- **(f) No price, no upgrade control, no external link.** Asserted over the **whole rendered
+  container**: `/Rp\s*[\d.,]|USD\s*[\d.,]|IDR\s*[\d.,]|\$\s*[\d.,]/` → false, `/upgrade/i` →
+  false, `a[href^="http"]` → **0** (every link is internal: `/devices`, `/`, `/workspaces`,
+  `/calendar`, `/tasks`, `/settings`, `#main`).
+
+**The one honesty rule nothing asserted, found by mutation-checking.** `SyncStatus.tsx`'s
+state derivation has five guards; four are pinned by a named case (removing each fails its
+case, verified one at a time). The fifth — that a refusal outranks a pending write — was
+**not**: removing it left `Tests 6 passed (6)`, exit 0, while the component's own doc comment
+claims the rule. Its consequence is a gate 7(d)-shaped lie: a report with `needs_attention`
+**and** `outbox > 0` would render "Syncing" and a refused write would look like it was still
+on its way. `SyncStatus.test.tsx` gains one case asserting **both halves** (the word is the
+refusal's, the pending count is still on screen, the server's code is still named), which
+**fails against the guard removed** — verified, `1 failed | 6 passed (7)`.
+
+#### Roadmap gate 3, the smoke run: **PASS**
+
+`bash scripts/smoke-phase8.sh` against the real server on `:8091`, the real Postgres and two
+real devices, in **6.7 seconds**. Ten scenarios, and it prints what it asserted:
+
+```
+1. two accounts, and two devices on the first        A=…7e32 device1=bd80d063 device2=fbe416d6 | B=…f1b0
+2. device 1 pushes an Indonesian task                applied{seq=659}
+3. device 2 pulls the row at the same seq            1 change, seq=659, next_cursor=659, has_more=false
+4. the replay applies nothing                        {'status':'applied','seq':659} identical;
+                                                     updated_at and the change_log count unchanged
+5. device 2 tombstones; device 1 pulls it            2 changes, last seq=660 op=delete data=null
+6. device 1 edits against the tombstone              conflict; winner deleted_at=2026-10-12T03:01:30Z
+7. Message + Source + task in one batch              read_only_entity, read_only_entity, applied{seq=661}
+8. A's pull ∩ B's seqs and B's ∩ A's                 empty both ways (3 vs 1 seqs, all own)
+9. below the retained history                        watermark=661 > cursor=660 -> 410 resync_required;
+                                                     from 0 -> 200, 1 surviving change, task present
+10. device 2 revoked                                 DELETE -> 204; its pull -> 401; device 1 still 200
+=== PASS
+```
+
+The 410 leg ages the account's rows past both windows and lets the **real**
+`compact_change_log` job decide what to delete and write the watermark, because a 90-day
+retention window cannot be aged inside a run; the same job the scheduler enqueues ran, only
+`changed_at` was moved.
+
+**No model stub.** Nothing on the sync path calls an LLM, so the script starts no stub and
+says so: inventing a model step to look thorough would be the opposite of what the run is
+for. `just smoke-server-phase7` is a sufficient server.
+
+### The quality gate, as measured on this tree
+
+| Gate | Command | Result |
+|---|---|---|
+| Format | `cargo fmt --all -- --check` | **fails**, and on **no Phase 8 file**: 17 diffs, all in `crates/core`/`crates/server` files belonging to the Phase 10/11/13 slices in flight in this tree (`calendar/`, `syllabus.rs`, `payment/`, `ingest.rs`, `testing.rs`, `ssrf.rs`, `search.rs`). `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` (the `src-tauri`-only form) → **clean, 0 diffs** |
+| Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **fails**, and on **no Phase 8 file**: 4 errors, in `crates/server/src/auth/google.rs` (unused import), `crates/core/tests/generation_syllabus.rs` (`useless format!`), `crates/server/src/jobs/handlers/ingest.rs` (too many arguments), `crates/server/src/syllabus.rs` (complex type). All are peers' uncommitted work |
+| Shell format/lints/tests | `cargo fmt/clippy/test --manifest-path src-tauri/Cargo.toml` | **clean**: fmt 0 diffs (the `src-tauri`-only form), clippy 0 warnings, tests **31 passed, 0 failed** (19 lib + 12 `tests/cache.rs`) |
+| Web tests | `npm --prefix app test` | **414 passed, 0 failed**, 46 files (was 377 in 42 before this phase; +37 in +4 files: 7 shell-layout, 4 language tag, 1 refusal precedence, and the peers' Phase 9 files) |
+| Web build | `npm --prefix app run build` | **exit 0**, `tsc --noEmit` clean, built in 257ms |
+| No CDN | `node scripts/check-no-cdn.mjs` | **exit 0** — `no third-party loads in 3 shipped file(s)` |
+| Offline queries | `cargo sqlx prepare --workspace --check` | **exit 0** — `.sqlx/` is an empty directory and stays untracked; this repo uses the runtime `query*` API throughout |
+| Rust tests | `cargo test --workspace` | **not green on this tree**, for peers' reasons rather than this phase's: see "What this run could not measure" below |
+
+The suite counts this phase owns were measured individually (see the table above them):
+`crates/sync` **32 passed** (engine 15, protocol 4, wire 13), `sync_pull` **13**,
+`sync_push` **19**, `sync_stream` **3**, `sync_compaction` **6**,
+`sync_convergence` **8** — the exit gate.
+
+### What this run could not measure, and why
+
+1. **`cargo test --workspace` and the two whole-workspace gates were not green at the moment
+   this slice closed**, and the failures are **not this phase's**: every `cargo fmt` diff and
+   every `cargo clippy` error on this tree is in a file owned by a slice that is mid-edit
+   (Phase 10's calendar, Phase 11's syllabus, Phase 13's payment). The four Phase 8 app files
+   and the shell are clean under their own commands. A green workspace run needs those slices
+   to land; the honest statement is "this phase's files are clean, the workspace is not,
+   and the reason is in the other slices' working trees", not "the gate passed".
+2. **The conflict-loser's field-level detail is not surfaced in the UI.** The engine records
+   `NeedsAttention{code: "conflict"}` and the store writes the server's winner; which field
+   lost is not shown. The spec does not ask for it and no wire field was added; it is a
+   follow-up for whichever phase wants it, and it is recorded rather than quietly omitted.
+3. **The band's `sticky` overlap mid-scroll is by design and was not measured as a defect.**
+   Sticky means the band still paints over content while the page is scrolling — that is what
+   sticky is for, and both band rows are opaque so nothing shows through. What the fix
+   removes is the band covering the *end* of the content, which is the case that lost text.
+4. **`docs/OPERATIONS.md` does not exist** and is not this phase's file; Phase 15's image
+   slice asked for it and was told so.
+
+### Notes
 
 1. **Phase 7 must be merged before Task 3.** Tasks 1 and 2 do not need it; Task 4 is a
    transport around `sync::push::decide` and cannot start without it. Task 1 Step 1 is
