@@ -44,7 +44,7 @@ trace to rows.
 
 **Tech Stack:** Rust (core + server), Postgres/sqlx, `chrono-tz`, `reqwest` (APNs/FCM),
 React + Vite + TypeScript + Tailwind, TanStack Query. **One new crate feature, no new
-crate:** `reqwest` gains `http2` in the workspace manifest (A268), because APNs' provider
+crate:** `reqwest` gains `http2` in the workspace manifest (A288), because APNs' provider
 API is HTTP/2-only and this workspace builds `reqwest` with `default-features = false`.
 
 **Exit gate (observable, from the roadmap):** a WRITE tool creates `pending_actions`;
@@ -85,7 +85,7 @@ dashboard metrics are right.
 > "dedupe on the fire time", and it is wrong: the moment quiet hours move a delivery, or a
 > device computes 19:00 and another 19:01, the key changes and the student gets two
 > notifications. The defence is a key derived from **the subject and the user's local
-> date, never the computed instant** (A264), enforced in three places — the unique
+> date, never the computed instant** (A284), enforced in three places — the unique
 > `dedupe_key`, `on conflict do nothing` on register, and an atomic claim plus
 > `unique (reminder_id, channel, device_id)` on delivery — and
 > `crates/server/tests/reminders.rs::two_devices_asking_for_the_same_reminder_produce_one_row`
@@ -95,7 +95,7 @@ dashboard metrics are right.
 > **The third risk: a confirm that executes twice.** Two devices, one card, both taps
 > arrive. The plausible implementation reads the row, checks `status = 'pending'` in Rust
 > and then writes — a check-then-act with a window wide enough for two taps. The defence is
-> a single-winner transition inside the execution's own transaction (A255):
+> a single-winner transition inside the execution's own transaction (A275):
 > `update pending_actions set status = 'confirmed' … where id = $1 and user_id = $2 and
 > status = 'pending' returning *`, so the loser gets zero rows and answers `409 conflict`
 > having written nothing. `crates/server/tests/actions.rs::a_second_confirm_is_a_conflict_and_writes_nothing`
@@ -137,7 +137,7 @@ dashboard metrics are right.
 | Action | Cost | Read from | Note |
 |---|---|---|---|
 | `chat_message` | 1 | `credits::chat_message_cost` | unchanged; a turn with no tool call costs exactly this |
-| `agent_turn` | 2 | `CreditAction::AgentTurn` (`config/plans.toml:15`) | charged **once per turn**, at the first tool call (A262) |
+| `agent_turn` | 2 | `CreditAction::AgentTurn` (`config/plans.toml:15`) | charged **once per turn**, at the first tool call (A282) |
 | `flashcard_batch_10` | 4 | `credits::` on the deck path | what a confirmed `create_flashcards` costs, on the deck path's own spend |
 | `quiz_10` | 6 | `credits::` on the quiz path | same, for `create_quiz` |
 
@@ -147,8 +147,8 @@ dashboard metrics are right.
 | `ReminderChannel(Web)` | ✓ | ✓ | ✓ | in-app, and the desktop shell's local notification |
 | `ReminderChannel(Push)` | ✓ | ✓ | ✓ | APNs / FCM |
 | `ReminderChannel(Email)` | — | ✓ | ✓ | the `Mailer` |
-| `ReminderChannel(Telegram)` | — | — | ✓ | **granted, no transport yet** (A268) |
-| `ReminderChannel(Discord)` | — | — | ✓ | **granted, no transport yet** (A268) |
+| `ReminderChannel(Telegram)` | — | — | ✓ | **granted, no transport yet** (A288) |
+| `ReminderChannel(Discord)` | — | — | ✓ | **granted, no transport yet** (A288) |
 | `AdvancedAnalytics` (`feature.rs:38`) | — | — | ✓ | `GET /dashboard/topics` |
 
 ---
@@ -192,7 +192,7 @@ dashboard metrics are right.
   `allow_upgrade_hint`, i.e. from `billing_policy`, **not** from the plan's tool grant.
   That distinction matters and this plan does not disturb it: the sentence's job is to say
   *how* to phrase "not on your plan" (permissively on web/desktop, neutrally on mobile),
-  while *whether* a write tool exists is decided by which `ToolSpec`s go on the wire (A252).
+  while *whether* a write tool exists is decided by which `ToolSpec`s go on the wire (A272).
   **No prompt file needs editing in this phase**, and no new `ModuleId` is registered: tools
   travel as `ToolSpec`s, not as prompt text.
 - `crates/core/src/prompts/registry.rs` is the reason no prompt edit is needed: the
@@ -213,7 +213,7 @@ dashboard metrics are right.
 - `migrations/0017_sync_triggers.sql:14-19` already lists `pending_actions` in its
   `id_tables` array, so both triggers exist; `crates/server/tests/schema.rs` asserts
   exactly that table set. **This phase adds no `+sync` table and touches no trigger
-  array**, and its two new tables are deliberately not `+sync` (A263).
+  array**, and its two new tables are deliberately not `+sync` (A283).
 - `crates/sync/src/proto/entities.rs`: `Entity::PendingAction` exists with
   `table_name() == "pending_actions"`, `dependency_rank() == 16` (`:107`), and it is
   **excluded from `is_client_writable()`** (`:112`) — so a client cannot push a confirm,
@@ -236,11 +236,11 @@ dashboard metrics are right.
   `crates/server/src/settings.rs` gates each channel through
   `entitlements::require(Feature::ReminderChannel(c))` before the write (A201), and
   `crates/server/src/study.rs` delivers `POST /sessions`, `GET /sessions`, `GET /activity`.
-  Phase 9's A208 explicitly assigns "the Study hub, reminders and the dashboard" out of
+  Phase 9's A228 explicitly assigns "the Study hub, reminders and the dashboard" out of
   Phase 9 and into this one.
 - `crates/core/src/config/plans.rs:126` already has `CreditAction::AgentTurn` and
   `config/plans.toml:15` already has `agent_turn = 2`. **The key exists and nothing reads
-  it**, which is why A262 is a decision rather than a new key.
+  it**, which is why A282 is a decision rather than a new key.
 - `crates/server/src/util.rs` has `local_day_start(timezone, clock)`,
   `local_month_start`, `next_local_month_start` and `local_month_key` — the `chrono-tz`
   helpers, with the "never a fixed offset" rule in their doc comments. The reminder engine's
@@ -255,7 +255,7 @@ dashboard metrics are right.
   `push_tokens (device_id primary key, provider text, token text, updated_at)` with
   `provider` in `apns | fcm`, and `crates/server/src/devices.rs:256` already writes it (the
   Phase 1 token-registration route). `devices.last_seen_at` exists and **nothing writes it**
-  (Phase 8's note) — the "most recently active device" rule (A265) needs it, so this phase
+  (Phase 8's note) — the "most recently active device" rule (A285) needs it, so this phase
   writes it on sync pull/push through Phase 8's `sync` module.
 - `crates/server/src/integrations/` holds `clock`, `documents`, `embedder`, `fetch`, `llm`,
   `mailer`, `search`, `storage`; `Providers` (`integrations/mod.rs:19-38`) exposes
@@ -269,7 +269,7 @@ dashboard metrics are right.
   "query", "rustls", "stream", "multipart"] }`, and reqwest 0.13.5's own `default` list is
   `["default-tls", "charset", "http2", "system-proxy"]` (verified in the vendored
   `Cargo.toml`, `http2 = ["dep:h2", "hyper/http2", "hyper-util/http2", …]`). APNs' provider
-  API is HTTP/2-only, so A268 adds the feature.
+  API is HTTP/2-only, so A288 adds the feature.
 
 ### The job kinds are already reserved in SQL, and the scheduler has two arms
 
@@ -288,7 +288,7 @@ dashboard metrics are right.
   tick would be a timing test"), `enqueue_boundary_jobs`, `enqueue_grant`, and a private
   `enqueue_kind`. The dedupe key is `"<kind>:<user_id>:<local YYYY-MM>"` and the file's own
   comment says "the key *is* the watermark". The reminder tick mirrors this shape rather
-  than inventing a second one (A267).
+  than inventing a second one (A287).
 - `crates/server/src/jobs/mod.rs` has `enqueue(pool, queue, kind, payload, dedupe_key)`,
   `enqueue_at(…, run_at)`, `Queue`, `ClaimedJob`, `Failure::{transient, permanent}`.
 - `crates/server/src/testing.rs` has `TestState::{new, with_llm, with_clock, with_embedder,
@@ -316,7 +316,7 @@ dashboard metrics are right.
   `states.needsAttention`.
 - `app/src/features/billing/plans.ts` reads the cost table out of `config/plans.toml` and
   today exports only `report_outline`/`report_section` (Phase 9 adds `task_breakdown`).
-  The confirmation card's cost comes from here (A257), never a literal.
+  The confirmation card's cost comes from here (A277), never a literal.
 - `crates/server/tests/route_sweep.rs` is a `ROUTES` classification table with
   `Class::{Swept, ReadOnly, Exempt}`, a `Row { method, path, class, reason, feature,
   refusal }`, `every_registered_route_is_classified` (fails on an unclassified route **and**
@@ -336,8 +336,8 @@ dashboard metrics are right.
   "fabricated append-only rows" risk — which the dashboard reads from, so R1 gains a
   sentence.
 - `docs/ASSUMPTIONS.md` highest row is **A131** (Phase 6 wrote A119–A131; Phase 7's plan
-  reserves A140–A163, Phase 8 A164–A189, Phase 9 A190–A209, Phase 10 A210–A229 and
-  Phase 11 A230–A249). **This phase pins A250 onward.**
+  reserves A140–A163, Phase 8 A164–A189, Phase 9 A190–A229, Phase 10 A230–A249 and
+  Phase 11 A250–A269). **This phase pins A270 onward.**
 - `migrations/` highest file today is `0025_entitlements_limits.sql`. Phase 7's plan claims
   `0025`/`0026`, Phase 8 `0027`, Phase 9 `0028`, Phase 10 `0029` and Phase 11 `0030`/`0031`,
   so this phase takes **`0032`** and **`0033`**.
@@ -353,27 +353,27 @@ file is the bug.
 | Inherited | What this phase does with it |
 |---|---|
 | Phase 8's `crates/sync/src/client/{engine,outbox,apply,conflict,transport}.rs` and `Platform.sync` | Nothing. `pending_actions` reaches every device through the ordinary pull, because it is a `+sync` entity with rank 16. The cross-device half of the exit gate is a *sync* fact, not new code. |
-| Phase 8's `crates/server/src/sync/pull.rs` | Task 13 writes `devices.last_seen_at` on a pull, which is the only writer that column will have. It is the input to A265's "most recently active device". |
-| Phase 9's `crates/server/src/tasks.rs`, `events.rs`, `study.rs`, `settings.rs` and their route handlers | Task 6 moves each create/update handler's **body** into a `pub(crate)` service function and makes the route a thin wrapper, so the confirm path calls one implementation (A256). Task 5 reads `user_settings` through Phase 9's `settings::load_or_create`. |
+| Phase 8's `crates/server/src/sync/pull.rs` | Task 13 writes `devices.last_seen_at` on a pull, which is the only writer that column will have. It is the input to A285's "most recently active device". |
+| Phase 9's `crates/server/src/tasks.rs`, `events.rs`, `study.rs`, `settings.rs` and their route handlers | Task 6 moves each create/update handler's **body** into a `pub(crate)` service function and makes the route a thin wrapper, so the confirm path calls one implementation (A276). Task 5 reads `user_settings` through Phase 9's `settings::load_or_create`. |
 | Phase 9's `PUT /settings` per-channel `require(Feature::ReminderChannel(c))` (A201) | Unchanged. This phase adds `channels_available` to the `GET /settings` body and never re-checks a channel on the write path. |
 | Phase 9's quiet-hours columns and its wrap-midnight membership rule (A202) | The reminder engine's only input for quiet hours. `in_quiet_hours` in `crates/core/src/reminders.rs` is a *second* implementation of the membership test only in the sense that it lives in core; the plan pins the same wrap-midnight semantics and tests `22 → 7`. |
-| Phase 9's `POST /sessions` `{applied: bool}` precedent | `POST /reminders` uses the same shape for the same reason: a client that retries after a lost response can tell whether its write landed (A265). |
-| Phase 10's `crates/core/src/calendar/expand.rs` and its guarded `fetch_guarded_text` | Not used by this phase. `find_free_slots` reads `events` rows that Phase 10 already wrote; the Discord webhook that would need the guard is deferred (A268). |
-| Phase 11's `crates/core/src/planner/` and `POST /goals/:id/plan` | The dashboard's weak-topic card hands its topic to this route rather than proposing blocks itself (A269). **No second planner.** |
+| Phase 9's `POST /sessions` `{applied: bool}` precedent | `POST /reminders` uses the same shape for the same reason: a client that retries after a lost response can tell whether its write landed (A285). |
+| Phase 10's `crates/core/src/calendar/expand.rs` and its guarded `fetch_guarded_text` | Not used by this phase. `find_free_slots` reads `events` rows that Phase 10 already wrote; the Discord webhook that would need the guard is deferred (A288). |
+| Phase 11's `crates/core/src/planner/` and `POST /goals/:id/plan` | The dashboard's weak-topic card hands its topic to this route rather than proposing blocks itself (A289). **No second planner.** |
 | Phase 11's `crates/server/src/goals.rs` | `schedule_study_block` may carry a `goal_id`, validated against the caller's goals. |
-| Phase 4's due-card query and Phase 5's results query | `get_due_flashcards` and the dashboard's `quiz_mastery` call the same SQL the study and quiz routes call; the plan states the extraction rule once (A256) and applies it here too. |
+| Phase 4's due-card query and Phase 5's results query | `get_due_flashcards` and the dashboard's `quiz_mastery` call the same SQL the study and quiz routes call; the plan states the extraction rule once (A276) and applies it here too. |
 
 ---
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A250–A269** in the same commits as the code. Phase 6 wrote
+`docs/ASSUMPTIONS.md` as rows **A270–A289** in the same commits as the code. Phase 6 wrote
 A119–A131 (reserved to A139), Phase 7 holds A140–A163, Phase 8 holds A164–A189, Phase 9
-holds A190–A209, Phase 10 holds A210–A229 and Phase 11 holds A230–A249, so this block
-starts at A250.
+holds A190–A229, Phase 10 holds A230–A249 and Phase 11 holds A250–A269, so this block
+starts at A270.
 
-1. **A250 — The tool registry is a closed enum of ten tools, and `ToolKind` is the only
+1. **A270 — The tool registry is a closed enum of ten tools, and `ToolKind` is the only
    split that matters.** `ToolName::{CreateTask, UpdateTask, ListTasks, CreateEvent,
    FindFreeSlots, ScheduleStudyBlock, CreateFlashcards, CreateQuiz, GetDueFlashcards,
    GetUpcomingDeadlines}` is the spec's own list, and `kind()` is a `matches!` on it, so a
@@ -382,18 +382,18 @@ starts at A250.
    asserts the names against the literal list from `prompts/base.v2.md`'s
    `<tools_and_actions>` section, so the prompt and the registry cannot drift.
 
-2. **A251 — READ tools execute inline; WRITE tools only propose; `gate()` is the only
+2. **A271 — READ tools execute inline; WRITE tools only propose; `gate()` is the only
    decision point.** `GateDecision::{Execute, Propose, Refuse}` with
    `Refusal::{ToolsUnsupported, UnknownTool, NotOnPlan, Invalid, ProposalLimit,
    InsufficientCredits}`, checked in that order and documented as the order. The first five
    are `gate`'s and are pure; `InsufficientCredits` is the sixth and is the one the *server*
-   constructs, because a balance is a database fact and `gate` reads nothing (A262). The
+   constructs, because a balance is a database fact and `gate` reads nothing (A282). The
    chat route holds no tool logic: it hands every `ToolCall` to `gate` and acts on the
    verdict. A refusal is a *decision*, not an error: the model is told why so it can say so
    in the student's language, and the alternative — dropping the call as `routes.rs:330`
    does today — would leave the model answering as if it had succeeded.
 
-3. **A252 — The tool list sent to the provider is the plan's tool list, and nothing else
+3. **A272 — The tool list sent to the provider is the plan's tool list, and nothing else
    is.** `agent::tool_specs(state, user)` returns the four READ specs always plus the six
    WRITE specs only when `Feature::AgentAction` is granted, and that one function is the
    only caller of `agent::tools::specs(agent_actions)`. A free account is therefore offered
@@ -406,7 +406,7 @@ starts at A250.
    billing policy to the plan matrix, and mobile's neutral copy is a legal requirement while
    the tool list is a product decision.
 
-4. **A253 — `pending_actions` gains six columns in `0032`, which is an ALTER on an existing
+4. **A273 — `pending_actions` gains six columns in `0032`, which is an ALTER on an existing
    `+sync` table and therefore sits *after* `0017_sync_triggers.sql`.**
    `expires_at timestamptz not null`, `resolved_at timestamptz`,
    `resolved_by_device_id uuid references devices on delete set null`, `result jsonb`,
@@ -419,7 +419,7 @@ starts at A250.
    SQL default**, because a default duplicating a Rust constant is a second source of truth
    for the same number.
 
-5. **A254 — Expiry is lazy on read, not a job kind.** The roadmap § 8 list is fixed and has
+5. **A274 — Expiry is lazy on read, not a job kind.** The roadmap § 8 list is fixed and has
    no expiry kind, so `GET /actions/pending` runs one statement before its select:
    `update pending_actions set status = 'expired', resolved_at = now() where user_id = $1
    and status = 'pending' and expires_at <= now()`. A GET that writes is not a smell here:
@@ -430,7 +430,7 @@ starts at A250.
    `expires_at` inside their own transaction, so a lazy expiry is a convenience and not the
    enforcement.
 
-6. **A255 — Confirm and reject are single-winner transitions inside the execution's
+6. **A275 — Confirm and reject are single-winner transitions inside the execution's
    transaction.** `update pending_actions set status = 'confirmed', resolved_at = now(),
    resolved_by_device_id = $3, result = $4 where id = $1 and user_id = $2 and
    status = 'pending' and expires_at > now() returning id`. Zero rows is `409 conflict` with
@@ -440,7 +440,7 @@ starts at A250.
    did nothing. `resolved_by_device_id` is what makes the exit gate's "confirm on device B"
    a fact rather than a claim.
 
-7. **A256 — The executor calls the same service functions the REST routes call, and a grep
+7. **A276 — The executor calls the same service functions the REST routes call, and a grep
    test forbids a second implementation.** `crates/server/src/actions/execute.rs` contains
    no `insert into`/`update`/`delete` on a domain table: it matches on `ToolName` and calls
    `tasks::create_in`, `tasks::update_in`, `events::create_in`, `decks::create_in`,
@@ -451,7 +451,7 @@ starts at A250.
    confirms a `create_task` proposal and a direct `POST /tasks` with the same body produce
    the same row **and the same `change_log` entry**, which is the behavioural half.
 
-8. **A257 — The `action` event's shape is the roadmap's, unchanged, and the card's cost
+8. **A277 — The `action` event's shape is the roadmap's, unchanged, and the card's cost
    comes from `plans.ts`.** `sse::action(pending_action_id, tool, args)` emits
    `{"pending_action_id": …, "tool": …, "args": {…}}` and nothing else. The roadmap § 4 fixes
    that body, and adding a `cost` field would be a contract change made by a phase plan. The
@@ -459,36 +459,36 @@ starts at A250.
    `app/src/features/billing/plans.ts`, which is the same source every other cost on screen
    comes from — the rule Phase 6 wrote down and Phase 9 repeated.
 
-9. **A258 — `MAX_PROPOSALS_PER_TURN = 3`, and every refusal is answered.** A fourth write
+9. **A278 — `MAX_PROPOSALS_PER_TURN = 3`, and every refusal is answered.** A fourth write
    call in one turn is `Refusal::ProposalLimit`, which reaches the model as a `tool_result`
    so it can tell the student "I've prepared three things for you to confirm; ask me again
    for the rest". The cap is what stops a poisoned document (or a looping model) from
    filling the confirmation surface with proposals the student has to dismiss one by one,
    and it is a bound rather than a policy: three is what one screen can show.
 
-10. **A259 — The injection defence is structural, and the test's anti-vacuity is
-    two-sided.** No WRITE tool ever executes without a human confirm (A251), so a poisoned
+10. **A279 — The injection defence is structural, and the test's anti-vacuity is
+    two-sided.** No WRITE tool ever executes without a human confirm (A271), so a poisoned
     document cannot cause a write by construction; the test's job is to prove the *gate* is
     what stops it, which it does by asserting the double emitted the call **and** that the
     poison text was in the prompt inside `<sources>`. The plan does not claim the model is
     unpoisonable, and a test that asserted the model stayed silent would be asserting
     something the server cannot control.
 
-11. **A260 — An id argument must be a UUID, so a citation label cannot become one.**
+11. **A280 — An id argument must be a UUID, so a citation label cannot become one.**
     `ToolArgs` parses through `serde` into `Uuid`, so `"1"` and `"[1]"` — the labels a
     retrieved document cites itself by — fail with `Refusal::Invalid` and the refusal goes
     back to the model. Ownership is the second layer: a well-formed UUID that is not the
     caller's is `NotFound` at gate time for a READ and at confirm time for a WRITE, so the
     poisoned document cannot address another student's workspace, task or source.
 
-12. **A261 — A turn that handled at least one tool call persists its assistant message even
+12. **A281 — A turn that handled at least one tool call persists its assistant message even
     when the text is empty.** The current rule ("a blank answer is not persisted") exists so
     a client never sees an empty assistant turn, and a turn that produced a confirmation
     card is not empty: it produced the card. The error path is therefore narrowed to a turn
     with **neither** text **nor** a handled tool call, and `content = ''` is written for the
     tool-only case so the client has a message id to hang the card on.
 
-13. **A262 — `agent_turn` is charged once per turn, at the first tool call, on top of
+13. **A282 — `agent_turn` is charged once per turn, at the first tool call, on top of
     `chat_message`.** The key already exists in `config/plans.toml` and
     `CreditAction::AgentTurn` already exists, and charging nothing would leave a priced
     action with no reader. Charging up front would raise the price of every chat turn for
@@ -499,7 +499,7 @@ starts at A250.
     reaches the model as a `tool_result` so it can tell the student to top up rather than
     the call vanishing mid-answer.
 
-14. **A263 — `reminders` and `reminder_deliveries` are new tables and deliberately NOT
+14. **A283 — `reminders` and `reminder_deliveries` are new tables and deliberately NOT
     `+sync`.** A reminder is server-owned scheduling state: the client's local notifications
     are computed from *synced* events, tasks and settings, and the server's copy exists so a
     reminder still fires when no client is running. There is no `Entity` variant for either,
@@ -508,7 +508,7 @@ starts at A250.
     `crates/server/tests/schema.rs` and a row in `docs/ASSUMPTIONS.md` § Schema deviations —
     the `search_cache` and `syllabus_drafts` precedent.
 
-15. **A264 — The dedupe key is `(user, kind, subject, local date)` and never the computed
+15. **A284 — The dedupe key is `(user, kind, subject, local date)` and never the computed
     fire instant.** One function, `reminders::dedupe_key(kind, subject_key, local_date) ->
     String`, is called by both producers: the client's `POST /reminders` and the server's
     sweep. The subject key is the task's or event's id, or the local date for the
@@ -516,7 +516,7 @@ starts at A250.
     the key alone, which is the whole point: two devices computing the same due time
     produce one row, and the row's key does not change when the delivery time does.
 
-16. **A265 — Cross-device dedupe is three layers, and push goes to the most recently active
+16. **A285 — Cross-device dedupe is three layers, and push goes to the most recently active
     device.** (1) `unique (dedupe_key)` on `reminders`, so the second writer loses; (2)
     `insert … on conflict (dedupe_key) do nothing returning id` on `POST /reminders`, which
     answers `{applied: bool, reminder_id}` — the Phase 9 `POST /sessions` shape, for the same
@@ -529,7 +529,7 @@ starts at A250.
     is the fallback when a device has no token (the push payload carries `reminder_id`, and
     the client keeps the ids it has already shown in `Platform.localState`).
 
-17. **A266 — Quiet hours defer a reminder; past the stale window it is skipped with a
+17. **A286 — Quiet hours defer a reminder; past the stale window it is skipped with a
     reason.** A reminder whose `fire_at` falls inside the student's quiet window moves to the
     window's end (`quiet_end` on the same local day, or the next one when the window wraps
     midnight) **without changing its key**. If the deferral would land later than the
@@ -538,7 +538,7 @@ starts at A250.
     and stays visible, because a reminder that silently never arrives is the failure the
     student would report as "reminders are broken".
 
-18. **A267 — `send_reminder` derives and claims; `send_push` delivers one reminder over
+18. **A287 — `send_reminder` derives and claims; `send_push` delivers one reminder over
     every enabled channel.** Two kinds, because the roadmap's § 8 list is fixed and has
     exactly those two and no third. `send_reminder` is enqueued per account by the scheduler
     with `dedupe_key = "send_reminder:<user_id>:<utc window>"` (the watermark, exactly as
@@ -551,7 +551,7 @@ starts at A250.
     `Failure::transient` only when **every** channel failed, so one bad channel cannot
     re-send the ones that worked.
 
-19. **A268 — The two Power-only chat channels are granted by the matrix and have no
+19. **A288 — The two Power-only chat channels are granted by the matrix and have no
     transport, and `channels_available` is the mechanical guard.** This phase implements
     `Web` (in-app, and the desktop shell's local notification), `Push` (APNs + FCM) and
     `Email`. `Telegram` and `Discord` stay in `config/plans.toml` (the matrix is not
@@ -570,7 +570,7 @@ starts at A250.
     HTTP/2-only and `default-features = false` turns the feature off (verified in the
     vendored `reqwest-0.13.5/Cargo.toml`).
 
-20. **A269 — The dashboard reports only what traces to a row, and it proposes nothing
+20. **A289 — The dashboard reports only what traces to a row, and it proposes nothing
     itself.** `GET /dashboard` returns time per course (from `study_sessions` joined through
     `workspaces`), review activity (from `flashcard_reviews`), the totals, and the due-card
     count — every one a count or a rate over rows the student owns, which is what the
@@ -587,7 +587,7 @@ starts at A250.
 
 ```
 migrations/0032_pending_actions_resolution.sql   # six columns on an existing +sync table
-migrations/0033_reminders.sql                    # two new tables; not +sync (A263)
+migrations/0033_reminders.sql                    # two new tables; not +sync (A283)
 crates/core/src/agent/mod.rs                     # the module: re-exports, AgentError
 crates/core/src/agent/tools.rs                   # ToolName, ToolKind, ToolArgs, specs, parse
 crates/core/src/agent/gate.rs                    # GateContext, GateDecision, gate, tool_result
@@ -603,7 +603,7 @@ crates/core/tests/reminders_purity.rs               # NEW — the no-clock/no-Ha
 crates/core/tests/tool_doubles.rs                # NEW
 crates/server/src/actions/mod.rs                 # NEW
 crates/server/src/actions/routes.rs              # NEW — the three action routes
-crates/server/src/actions/execute.rs             # NEW — the confirm executor (no DML, A256)
+crates/server/src/actions/execute.rs             # NEW — the confirm executor (no DML, A276)
 crates/server/src/chat/agent.rs                  # NEW — specs, read execution, proposal
 crates/server/src/chat/routes.rs                 # tools: agent::tool_specs; the ToolCall arm
 crates/server/src/chat/sse.rs                    # + action()
@@ -646,7 +646,7 @@ app/src/features/settings/SettingsScreen.tsx     # + channels_available
 app/src/features/billing/plans.ts                # + flashcard_batch_10, quiz_10
 app/src/router.tsx                               # + the dashboard route
 app/src/i18n/locales/{en,id}.json                # the new keys, in both files
-Cargo.toml                                       # reqwest gains "http2" (A268)
+Cargo.toml                                       # reqwest gains "http2" (A288)
 scripts/smoke-phase12.sh                         # NEW
 docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md
 ```
@@ -751,7 +751,7 @@ fn the_specs_are_filtered_by_the_plan() {
 #[test]
 fn every_spec_is_a_closed_schema() { /* … */ }
 
-/// A citation label is not an id (A260). The poisoned document's own `[1]` cannot
+/// A citation label is not an id (A280). The poisoned document's own `[1]` cannot
 /// become a `source_id`, and neither can a bare number.
 #[test]
 fn a_label_is_not_an_id() {
@@ -814,13 +814,13 @@ feat(core): the ten tools, their argument contracts, and the read/write split
 
 ```rust
 /// Three is what one screen can show before the student is dismissing instead of
-/// deciding (A258).
+/// deciding (A278).
 pub const MAX_PROPOSALS_PER_TURN: u8 = 3;
 
 pub struct GateContext {
     /// `LlmProvider::supports_tools()` — false means no call could have been legitimate.
     pub supports_tools: bool,
-    /// `Feature::AgentAction`, already decided by the engine (A252).
+    /// `Feature::AgentAction`, already decided by the engine (A272).
     pub agent_actions: bool,
     /// How many WRITE calls this turn has already proposed.
     pub proposals_so_far: u8,
@@ -838,7 +838,7 @@ pub enum Refusal {
     NotOnPlan { tool: ToolName },
     Invalid { message: String },
     ProposalLimit { max: u8 },
-    /// Constructed by the server, never by `gate`: a balance is a database fact (A251).
+    /// Constructed by the server, never by `gate`: a balance is a database fact (A271).
     InsufficientCredits { needed: i64, available: i64 },
 }
 
@@ -851,7 +851,7 @@ impl Refusal {
 pub fn gate(call: &ToolCall, ctx: &GateContext) -> GateDecision;
 
 /// The `tool_result` turn handed back to the model for one decision, so a refusal is
-/// answered rather than dropped (A251).
+/// answered rather than dropped (A271).
 pub fn tool_result(call: &ToolCall, decision: &GateDecision) -> ChatMsg;
 ```
 
@@ -878,7 +878,7 @@ fn the_fourth_proposal_is_refused_and_the_limit_is_named() { /* … */ }
 
 /// The one refusal `gate` never produces, and the reason it is still in the enum: the
 /// server constructs it when the `agent_turn` spend fails, and it has to reach the model
-/// through the same `tool_result` path as every other refusal (A251/A262).
+/// through the same `tool_result` path as every other refusal (A271/A282).
 #[test]
 fn an_insufficient_balance_is_a_refusal_the_model_can_repeat() {
     let decision = GateDecision::Refuse {
@@ -908,7 +908,7 @@ fn the_gate_is_deterministic() { /* … */ }
 
 `gate` takes the already-decided booleans and never reads config, entitlements or the
 database: it is the *shape* of the decision, and `crates/server/src/entitlements.rs` is
-where the plan question is answered (A251).
+where the plan question is answered (A271).
 
 - [ ] **Step 4: Run the tests**
 
@@ -980,7 +980,7 @@ impl ScriptedLlm {
     /// scripted tokens. `supports_tools()` is true for this instance.
     ///
     /// This is the double the injection test's anti-vacuity depends on: without it a
-    /// "no task was created" assertion passes with the gate deleted (A259).
+    /// "no task was created" assertion passes with the gate deleted (A279).
     pub fn tool_calling(calls: Vec<ToolCall>) -> Self;
 }
 ```
@@ -1043,7 +1043,7 @@ feat(core): the push trait, and a double that can actually call a tool
 - Test: `crates/server/tests/schema.rs` (no new `documented` row — the table is known)
 
 **Interfaces:**
-- Produces: the six columns A253 names, and the index the pending list needs.
+- Produces: the six columns A273 names, and the index the pending list needs.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1071,11 +1071,11 @@ async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
 - [ ] **Step 3: Write the migration**
 
 The header must state, in the migration itself, why it sits after `0017` and why the
-trigger array is untouched (A253), because the next person to read `0017`'s "MUST ALWAYS BE
+trigger array is untouched (A273), because the next person to read `0017`'s "MUST ALWAYS BE
 LAST" will otherwise wonder.
 
 ```sql
--- Resolution state for a proposed action (A253).
+-- Resolution state for a proposed action (A273).
 --
 -- `pending_actions` is an existing `+sync` table, so this is an ALTER after
 -- 0017_sync_triggers.sql and NOT a new migration inserted above it: the rule in that
@@ -1141,10 +1141,10 @@ pub struct ActionView {
 #[derive(Debug, sqlx::FromRow)]
 pub(crate) struct ActionRow { /* id, user_id, tool, args, status, expires_at, … */ }
 
-/// The lazy expiry (A254). One statement, and the caller is the caller's own rows.
+/// The lazy expiry (A274). One statement, and the caller is the caller's own rows.
 pub(crate) async fn expire_stale(pool: &PgPool, user_id: Uuid) -> AppResult<u64>;
 
-/// The single-winner claim (A255). `Ok(None)` means someone else already resolved it.
+/// The single-winner claim (A275). `Ok(None)` means someone else already resolved it.
 pub(crate) async fn claim(
     tx: &mut sqlx::PgTransaction<'_>, user_id: Uuid, id: Uuid,
     device_id: Uuid, status: Resolution,
@@ -1175,7 +1175,7 @@ caller, `expires_at = now() + interval '30 minutes'`).
 async fn the_pending_list_is_the_callers_own_rows(pool: PgPool) { /* … */ }
 
 /// Expiry is lazy and it is the server's: a row past `expires_at` reads `expired` on the
-/// next list, with no job having run (A254).
+/// next list, with no job having run (A274).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_stale_proposal_expires_on_the_next_read(pool: PgPool) { /* … */ }
 
@@ -1201,7 +1201,7 @@ async fn the_resolution_names_the_device_that_made_it(pool: PgPool) { /* … */ 
 - [ ] **Step 3: Write the module**
 
 `claim` takes a `&mut PgTransaction` rather than a pool, so the call site cannot forget to
-put the claim and the execution in one transaction (A255): the type is the reminder.
+put the claim and the execution in one transaction (A275): the type is the reminder.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1230,8 +1230,8 @@ feat(server): pending actions that expire, and a reject that cannot happen twice
 - Produces:
 
 ```rust
-/// Runs one confirmed action. Called inside the claim's transaction (A255), and it
-/// contains no DML of its own (A256): every arm calls the service function the REST
+/// Runs one confirmed action. Called inside the claim's transaction (A275), and it
+/// contains no DML of its own (A276): every arm calls the service function the REST
 /// route calls.
 pub async fn execute(
     state: &AppState,
@@ -1242,7 +1242,7 @@ pub async fn execute(
 ```
 
 The service functions, named once here and moved out of the handlers if they are still
-inline (A256). **If Phase 9 and Phases 4/5 shipped different names, theirs win and this
+inline (A276). **If Phase 9 and Phases 4/5 shipped different names, theirs win and this
 list is the bug:**
 
 ```rust
@@ -1316,7 +1316,7 @@ async fn an_edit_is_validated_by_the_same_contract(pool: PgPool) { /* … */ }
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_expired_proposal_cannot_be_confirmed(pool: PgPool) { /* … */ }
 
-/// The mechanical half of A256.
+/// The mechanical half of A276.
 #[test]
 fn the_executor_contains_no_dml() {
     let source = include_str!("../src/actions/execute.rs");
@@ -1362,11 +1362,11 @@ feat(server): a confirm runs the route's own function, inside the claim
 - Produces:
 
 ```rust
-/// The tools this plan may be offered (A252). Reads always, writes only with AgentAction.
+/// The tools this plan may be offered (A272). Reads always, writes only with AgentAction.
 pub fn tool_specs(state: &AppState, user: &AuthUser) -> Vec<ToolSpec>;
 
 /// Whether the plan grants the six WRITE tools. The only caller is `tool_specs`, so the
-/// wire's tool list and this answer cannot disagree (A252).
+/// wire's tool list and this answer cannot disagree (A272).
 pub fn agent_actions_granted(state: &AppState, user: &AuthUser) -> bool;
 
 pub enum AgentOutcome {
@@ -1389,7 +1389,7 @@ pub async fn handle(
 ) -> AppResult<AgentOutcome>;
 
 /// A READ tool's execution. One arm per read tool, each calling the query the REST route
-/// calls — no second implementation, for the same reason A256 exists.
+/// calls — no second implementation, for the same reason A276 exists.
 pub async fn run_read(
     state: &AppState, user: &AuthUser, workspace_id: Uuid, tool: ToolName, args: &ToolArgs,
 ) -> AppResult<serde_json::Value>;
@@ -1399,7 +1399,7 @@ pub async fn run_read(
 
 ```rust
 /// `event: action` for a WRITE tool's proposal. The body is the roadmap § 4 shape and
-/// nothing else (A257).
+/// nothing else (A277).
 pub fn action(pending_action_id: uuid::Uuid, tool: &str, args: &serde_json::Value) -> Event;
 ```
 
@@ -1407,9 +1407,9 @@ pub fn action(pending_action_id: uuid::Uuid, tool: &str, args: &serde_json::Valu
 
 1. `tools: agent::tool_specs(&state, &user)` replaces `Vec::new()` (`:277`).
 2. The `StreamEvent::ToolCall(_)` arm (`:330`) is replaced by `agent::handle(…)`, with the
-   `agent_turn` spend on the first handled call (A262).
+   `agent_turn` spend on the first handled call (A282).
 3. `insert_message` for the assistant turn runs when the answer is non-empty **or** at least
-   one tool call was handled (A261).
+   one tool call was handled (A281).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1428,7 +1428,7 @@ async fn a_write_tool_proposes_and_never_executes(pool: PgPool) {
     // `select count(*) from tasks` == 0; `pending_actions` has one `pending` row.
 }
 
-/// The anti-vacuity half of A259, first side: the offered tool list is what the plan
+/// The anti-vacuity half of A279, first side: the offered tool list is what the plan
 /// grants. A free account is offered four reads and no write.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_offered_tools_are_the_ones_the_plan_grants(pool: PgPool) {
@@ -1439,7 +1439,7 @@ async fn the_offered_tools_are_the_ones_the_plan_grants(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unknown_tool_name_is_refused_and_answered(pool: PgPool) { /* … */ }
 
-/// `agent_turn` is charged once, on the first call, on top of `chat_message` (A262).
+/// `agent_turn` is charged once, on the first call, on top of `chat_message` (A282).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_agent_turn_is_charged_once_however_many_tools_run(pool: PgPool) {
     // a turn with three tool calls: ledger delta == -(1 + 2), and one `agent_turn` row
@@ -1450,14 +1450,14 @@ async fn the_agent_turn_is_charged_once_however_many_tools_run(pool: PgPool) {
 async fn a_turn_with_no_tool_call_costs_one_credit(pool: PgPool) { /* … */ }
 
 /// A turn whose balance cannot cover the tool call is told so, and the model says it: the
-/// call is refused rather than silently not running (A262).
+/// call is refused rather than silently not running (A282).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_turn_that_cannot_afford_the_agent_turn_is_told_so(pool: PgPool) {
     // a free account with 1 credit left: the second request's `tool_result` carries the
     // insufficient-credits refusal, and no `pending_actions` row is written
 }
 
-/// A turn that only called a tool persists its message, so the card has a home (A261).
+/// A turn that only called a tool persists its message, so the card has a home (A281).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_tool_only_turn_persists_its_message(pool: PgPool) { /* … */ }
 
@@ -1511,7 +1511,7 @@ confirm it yourself.";
 
 /// A poisoned source does not create a task.
 ///
-/// Three assertions, and each one is load-bearing (A259):
+/// Three assertions, and each one is load-bearing (A279):
 ///  1. the poison text WAS in the prompt, inside `<sources>` — the fixture is poisoned and
 ///     was delivered as data, not as instructions;
 ///  2. the model DID emit `create_task` — so deleting the gate makes this test fail;
@@ -1523,7 +1523,7 @@ confirm it yourself.";
 async fn a_poisoned_source_does_not_create_a_task(pool: PgPool) { /* … */ }
 
 /// The poisoned document cannot reach another account: a `workspace_id` it names is not the
-/// caller's, so the proposal is refused rather than stored (A260).
+/// caller's, so the proposal is refused rather than stored (A280).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_poisoned_source_cannot_address_another_workspace(pool: PgPool) { /* … */ }
 
@@ -1595,7 +1595,7 @@ pub const MAX_LOOKAHEAD_DAYS: i64 = 14;
 pub enum ReminderKind { TaskDue, EventSoon, CardsDue }
 impl ReminderKind { pub fn as_str(self) -> &'static str; }
 
-/// The one key function, called by both producers (A264).
+/// The one key function, called by both producers (A284).
 pub fn dedupe_key(kind: ReminderKind, subject_key: &str, local_date: NaiveDate) -> String;
 
 pub struct Subject {
@@ -1638,7 +1638,7 @@ pub fn quiet_end(from: DateTime<Utc>, tz: Tz, quiet: (u8, u8)) -> Option<DateTim
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-/// The key is the subject and the local date, never the fire instant (A264). Two devices
+/// The key is the subject and the local date, never the fire instant (A284). Two devices
 /// that compute 19:00 and 19:01 for the same task produce the same key, and a quiet-hours
 /// deferral does not change it.
 #[test]
@@ -1712,19 +1712,19 @@ feat(core): the reminder engine — one key, quiet hours, and a DST-safe fire ti
 - Test: `crates/server/tests/schema.rs`
 
 **Interfaces:**
-- Produces: `reminders` and `reminder_deliveries` (A263).
+- Produces: `reminders` and `reminder_deliveries` (A283).
 
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-/// Two tables, deliberately not `+sync` (A263), so they need `documented` rows and they
+/// Two tables, deliberately not `+sync` (A283), so they need `documented` rows and they
 /// must NOT carry the sync triggers.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_reminder_tables_are_documented_and_not_synced(pool: PgPool) {
     // both are in `documented`, and `every_sync_table_has_both_triggers` still passes
 }
 
-/// The two uniqueness rules the delivery dedupe rests on (A265), asserted as constraints:
+/// The two uniqueness rules the delivery dedupe rests on (A285), asserted as constraints:
 /// one reminder per key, one delivery per (reminder, channel, device).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_dedupe_constraints_exist(pool: PgPool) { /* … */ }
@@ -1737,7 +1737,7 @@ async fn the_dedupe_constraints_exist(pool: PgPool) { /* … */ }
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- Reminders: server-owned scheduling state (A263). Deliberately NOT +sync: the client's
+-- Reminders: server-owned scheduling state (A283). Deliberately NOT +sync: the client's
 -- local notifications are computed from synced events/tasks/settings, and this table exists
 -- so a reminder still fires when no client is running. There is no `Entity` variant for it,
 -- and 0017_sync_triggers.sql must stay the last trigger-attaching migration.
@@ -1749,14 +1749,14 @@ create table reminders (
   subject_key text not null,              -- the id, or the local date for cards_due
   local_date date not null,               -- the dedupe axis, in the user's zone
   fire_at timestamptz not null,
-  dedupe_key text not null,               -- reminders::dedupe_key (A264)
+  dedupe_key text not null,               -- reminders::dedupe_key (A284)
   status text not null default 'pending', -- pending | sent | skipped
   skip_reason text,
   origin text not null default 'server',  -- server | client
   created_at timestamptz not null default now(),
   sent_at timestamptz
 );
--- The one key, so the second device's identical reminder loses (A265).
+-- The one key, so the second device's identical reminder loses (A285).
 create unique index on reminders (dedupe_key);
 create index on reminders (user_id, status, fire_at);
 
@@ -1822,7 +1822,7 @@ Routes:
 
 | Route | Notes |
 |---|---|
-| `POST /reminders` | The subject must be the caller's and its kind must match the payload's. `fire_at` must be within `[now - CLOCK_SKEW_MIN, now + MAX_LOOKAHEAD_DAYS]`. The key comes from `dedupe_key(kind, subject_id, local_date(fire_at, tz))`. `insert … on conflict (dedupe_key) do nothing returning id` → `{ applied, reminder_id }`, the Phase 9 `POST /sessions` shape (A265). |
+| `POST /reminders` | The subject must be the caller's and its kind must match the payload's. `fire_at` must be within `[now - CLOCK_SKEW_MIN, now + MAX_LOOKAHEAD_DAYS]`. The key comes from `dedupe_key(kind, subject_id, local_date(fire_at, tz))`. `insert … on conflict (dedupe_key) do nothing returning id` → `{ applied, reminder_id }`, the Phase 9 `POST /sessions` shape (A285). |
 | `GET /reminders` | The in-app channel's feed: `status = 'pending'`, `fire_at <= now()`, not yet acked **by this device**, newest first, `limit 20`. |
 | `POST /reminders/:id/ack` | Writes a `reminder_deliveries` row `(channel='web', device_id = this device, status='sent')`; `on conflict do nothing` so a double tap is a no-op. |
 
@@ -1894,7 +1894,7 @@ feat(server): a reminder that cannot be registered twice
 
 ```rust
 /// The two transports, or neither. `None` means the channel is not configured, which
-/// `channels_available` reports rather than a delivery failing later (A268).
+/// `channels_available` reports rather than a delivery failing later (A288).
 pub struct PushRouter { /* apns: Option<ApnsPush>, fcm: Option<FcmPush> */ }
 impl PushRouter {
     pub fn from_config(cfg: &PushConfig) -> Self;
@@ -1921,7 +1921,7 @@ impl FcmPush {
 }
 ```
 
-`Cargo.toml`: `reqwest`'s feature list gains `"http2"` (A268).
+`Cargo.toml`: `reqwest`'s feature list gains `"http2"` (A288).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1951,7 +1951,7 @@ fn a_dead_token_and_an_outage_are_different_errors() { /* … */ }
 fn the_fcm_assertion_names_the_token_endpoint_and_scope() { /* … */ }
 
 /// An unconfigured platform is absent, so the settings screen never offers a channel that
-/// cannot fire (A268).
+/// cannot fire (A288).
 #[test]
 fn an_unconfigured_platform_is_not_available() { /* … */ }
 ```
@@ -1995,10 +1995,10 @@ feat(server): APNs and FCM behind the push trait, and the http2 the APNs path ne
 - Produces:
 
 ```rust
-/// `send_reminder`: one account's due reminders, derived and claimed (A267).
+/// `send_reminder`: one account's due reminders, derived and claimed (A287).
 pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure>;
 
-/// `send_push`: one reminder over every enabled, available channel (A267).
+/// `send_push`: one reminder over every enabled, available channel (A287).
 pub async fn deliver(state: &AppState, job: &ClaimedJob) -> Result<(), Failure>;
 
 /// The atomic claim: `update … set status='sent' where id = $1 and status='pending'
@@ -2026,13 +2026,13 @@ pub async fn reminder_pass(state: &AppState) -> AppResult<u64>;
 
 ```rust
 /// A due reminder is delivered once, and the second run sends nothing: the claim is atomic
-/// and the job's own `dedupe_key` is a second layer (A265).
+/// and the job's own `dedupe_key` is a second layer (A285).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_due_reminder_is_delivered_once(pool: PgPool) {
     // run `send_push` twice → `ScriptedPush::sends().len() == 1`, and one delivery row
 }
 
-/// Push goes to the single most recently active device with a token (A265), which is the
+/// Push goes to the single most recently active device with a token (A285), which is the
 /// spec's "deliver to the most recently active device".
 #[sqlx::test(migrations = "../../migrations")]
 async fn push_goes_to_the_most_recently_active_device(pool: PgPool) { /* … */ }
@@ -2047,7 +2047,7 @@ async fn an_unregistered_token_is_deleted_and_the_next_device_is_tried(pool: PgP
 async fn quiet_hours_defer_rather_than_drop(pool: PgPool) { /* … */ }
 
 /// Email and in-app ride the same run, and a channel with no transport is recorded rather
-/// than silently skipped (A268).
+/// than silently skipped (A288).
 #[sqlx::test(migrations = "../../migrations")]
 async fn every_enabled_channel_is_attempted_and_recorded(pool: PgPool) { /* … */ }
 
@@ -2069,7 +2069,7 @@ fails `unknown job kind send_reminder`.
 - [ ] **Step 3: Write the handler, the two arms, and the tick**
 
 `devices.last_seen_at` is written in Phase 8's pull transaction, which is the only place a
-device proves it is alive. That is the input A265's rule reads, and it is why the column
+device proves it is alive. That is the input A285's rule reads, and it is why the column
 finally has a writer.
 
 - [ ] **Step 4: Run the tests**
@@ -2119,7 +2119,7 @@ and `GET /dashboard/topics` is `Swept` with `Feature::AdvancedAnalytics`, `403 p
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-/// Every number traces to a seeded row (A269), which is the honesty gate's requirement
+/// Every number traces to a seeded row (A289), which is the honesty gate's requirement
 /// stated as an assertion.
 #[sqlx::test(migrations = "../../migrations")]
 async fn every_number_is_the_count_the_fixture_inserted(pool: PgPool) {
@@ -2240,7 +2240,7 @@ it('locks the topic breakdown on a plan that does not grant it', () => {
 `ActionCard` reads its state from `GET /actions/pending` on the web and from the synced
 `pending_actions` rows on native, so a card confirmed on another device updates in place.
 `useLocalNotifications` writes the ids it scheduled into `Platform.localState` and skips a
-push whose `reminder_id` is already there (A265's fallback half).
+push whose `reminder_id` is already there (A285's fallback half).
 
 - [ ] **Step 4: Run the tests and the build**
 
@@ -2271,7 +2271,7 @@ feat(app): the confirmation card, the local schedule, and the dashboard
 - `docs/SYNC.md`: a new subsection under § Conflict rules —
   `pending_actions` resolution is server-owned and single-winner; the resolution columns
   travel; a client push stays `read_only_entity`; `reminders` and `reminder_deliveries` are
-  **not** synced and why (A263).
+  **not** synced and why (A283).
 - `docs/ARCHITECTURE.md`: a `## Agent, reminders, dashboard (Phase 12)` section — the
   read/write split, the gate as the only decision point, why the injection defence is
   structural, the reminder key, the three dedupe layers, the push transports, and the
@@ -2281,8 +2281,8 @@ feat(app): the confirmation card, the local schedule, and the dashboard
   **Fails** … a WRITE tool never executes; it proposes"), and § 6 R1 gains the sentence that
   the dashboard reads from the same append-only rows, so fabricating them inflates one more
   surface the attacker owns.
-- `docs/ASSUMPTIONS.md`: rows **A250–A269**, two Schema-deviations rows (`reminders`,
-  `reminder_deliveries`), and the A268 note in § Out of scope.
+- `docs/ASSUMPTIONS.md`: rows **A270–A289**, two Schema-deviations rows (`reminders`,
+  `reminder_deliveries`), and the A288 note in § Out of scope.
 
 **Gate 5 — accessibility.** Five measured checks on `ActionCard`, `DashboardScreen` and the
 reminder settings section, with the result stated:
@@ -2402,18 +2402,18 @@ document text and web content as untrusted data: it must never trigger tool call
 own" → Task 8. § Today/…/reminders/dashboard, the reminder paragraph: "push notifications
 (APNs/FCM) to mobile devices, native notifications on desktop, in-app, email" → Tasks 12,
 13, 15 (desktop's native notification is the shell's, per A5 and A32); "Telegram/Discord
-optional (Power)" → A268, recorded rather than silently skipped; "for upcoming events, due
+optional (Power)" → A288, recorded rather than silently skipped; "for upcoming events, due
 tasks, due flashcards" → Task 9's three `ReminderKind`s; "Respect timezone and quiet hours"
 → Task 9; "Avoid duplicates across devices (deliver to the most recently active device, or
-dedupe by reminder id)" → A265 and Task 13; "Clients may also schedule local notifications
+dedupe by reminder id)" → A285 and Task 13; "Clients may also schedule local notifications
 from synced events/tasks so reminders work offline" → Task 15's `localSchedule.ts`;
 "a pre-permission screen" → Task 15 reuses the existing `NotificationsApi.requestPermission`
 and the first-run screen the spec's § Screens 1 already lists (Phase 0's shell); the
 dashboard paragraph: "time per course, review activity, quiz mastery per topic, weak-topic
-list that can propose review blocks" → Task 14 and A269; "Charts have text equivalents; no
+list that can propose review blocks" → Task 14 and A289; "Charts have text equivalents; no
 invented metrics" → Task 14's test and Task 15's text-equivalent test. § Credit costs'
-`agent_turn = 2` → A262. § Plans' `agent_actions` and `reminder_channels` → the values
-table, Task 7 and A268. § Quality bar's "agent confirmation gating" unit test → Tasks 2, 8,
+`agent_turn = 2` → A282. § Plans' `agent_actions` and `reminder_channels` → the values
+table, Task 7 and A288. § Quality bar's "agent confirmation gating" unit test → Tasks 2, 8,
 and the API list's `GET /actions/pending` / `POST /actions/:id/confirm` /
 `POST /actions/:id/reject` / `GET /dashboard` → Tasks 5, 6, 14. Roadmap § 8's
 `send_reminder`/`send_push` → Task 13.
@@ -2421,9 +2421,9 @@ and the API list's `GET /actions/pending` / `POST /actions/:id/confirm` /
 **Placeholders.** None. Every type, function, test name, route, path, migration and command
 above is concrete. Four things a reader might expect and will not find are deliberate and
 are decisions rather than omissions: `reminders` and `reminder_deliveries` are not `+sync`
-(A263); `agent_turn` is charged mid-stream rather than up front (A262); the card's cost is
-not on the `action` event (A257); and Telegram/Discord are granted by the matrix and have no
-transport (A268).
+(A283); `agent_turn` is charged mid-stream rather than up front (A282); the card's cost is
+not on the `action` event (A277); and Telegram/Discord are granted by the matrix and have no
+transport (A288).
 
 **Type consistency.** `ToolName`, `ToolKind`, `ToolArgs`, `GateContext`, `GateDecision`,
 `Refusal`, `PushProvider`, `PushPlatform`, `PushMessage`, `PushError`, `ReminderKind`,
@@ -2444,7 +2444,7 @@ device". Both are stated in the file rather than discovered during execution.
 
 **The one thing this phase does not build, named rather than skipped.** The spec's § Today
 paragraph also describes the **Study hub** ("decks across workspaces with due badges, recent
-quizzes with scores, and a single 'Review all due' action"), and Phase 9's A208 defers it
+quizzes with scores, and a single 'Review all due' action"), and Phase 9's A228 defers it
 with the reason that its two cross-workspace reads are new surface for a screen Phase 9 is
 not gated on. This plan does not build it either, and `docs/API.md` reserves no route for it:
 the hub composes the per-workspace `GET /workspaces/:id/decks` and

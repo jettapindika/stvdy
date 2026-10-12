@@ -23,21 +23,21 @@ what the next one needs:
   server's job is a token lookup and a `select`; the interesting part is that a feed is a
   *cache the client owns*, so a row's `UID` must be stable and its `SEQUENCE` must move
   when the row is edited. A feed that omits `SEQUENCE` is a feed whose edits are invisible
-  forever (A210), which is why this is Task 1 and not a route detail.
+  forever (A230), which is why this is Task 1 and not a route detail.
 - **In.** `icalendar` parses, `rrule` expands, `chrono-tz` resolves. The expansion is
   **bounded twice** (a horizon and a hard occurrence cap, with `limited()` checked), because
   an unbounded recurrence iteration is a server hang rather than a wrong answer — the
   roadmap's own risk register names it. The fetch goes through the *same* SSRF guard
-  ingestion uses, as a second function on it rather than a second guard (A213), because a
+  ingestion uses, as a second function on it rather than a second guard (A233), because a
   user-supplied ICS URL is exactly the primitive `--block-private-networks` exists for.
 - **Two-way.** Google is the only place this phase writes to a remote system, and it does so
   behind a trait (`crates/core/src/traits/calendar.rs`), so the sync is testable without
   Google and the roadmap's "providers are config, not code" line holds. The consent flow is
   the **login flow's** state cipher, PKCE helper and deep-link return, extracted once and
-  called twice (A215) — not a second OAuth. The scope pair is chosen so that the conflict
+  called twice (A235) — not a second OAuth. The scope pair is chosen so that the conflict
   policy is structural: we hold `calendar.app.created` (write only to calendars we made) and
   `calendar.events.readonly` (read the rest), so "Google wins for events we didn't create"
-  is not a rule anyone has to remember (A214).
+  is not a rule anyone has to remember (A234).
 
 Phase 9 lands first and owns `events` CRUD and the four server-owned columns. This plan
 **inherits** them and re-plans none of them; § "What Phase 9 hands over" states exactly
@@ -122,13 +122,13 @@ columns, not a table.**
 - `migrations/0013_calendar_events.sql` — `calendar_connections (id, user_id, provider,
   account_email, refresh_token_enc bytea, sync_token text, ics_url text, last_synced_at)`
   with `index on (user_id, provider)`. **No `created_at`, no `updated_at`, no status/error,
-  no conditional-GET validators, no study-calendar id** — see A219/A217.
+  no conditional-GET validators, no study-calendar id** — see A239/A237.
 - `migrations/0013_calendar_events.sql` — `events (id, user_id, workspace_id, kind, title,
   starts_at, ends_at, external_id, etag, connection_id references calendar_connections on
   delete set null, source default 'app', task_id references tasks on delete set null,
   created_at, updated_at, deleted_at)`, `index on (user_id, starts_at)`, `index on
   (task_id)`, and `unique index on (connection_id, external_id) where external_id is not
-  null`. That unique index is this phase's upsert key (A211).
+  null`. That unique index is this phase's upsert key (A231).
 - `migrations/0017_sync_triggers.sql` — `events` is **already** in the `id_tables` array, so
   this phase adds no `+sync` table, appends nothing to that array, and **does not touch
   that file**. Its header comment stays true: it is still the last trigger-attaching
@@ -177,7 +177,7 @@ columns, not a table.**
 - **`ChainFetcher::fetch` ends in `extract_readable`** (`:335`), which runs readability and
   falls back to a tag stripper. An ICS body is not HTML, so that path would hand back a
   mangled document. `ChainFetcher` also tries Exa `/contents` and the `moli` CLI first,
-  which is wrong for a feed. See A213.
+  which is wrong for a feed. See A233.
 - `crates/server/tests/ssrf.rs` — the guard's suite: every private and reserved range
   (`:23`), the IPv4-mapped IPv6 case, the chain's scheme refusal (`:135`), the resolver's
   refusal of a literal private host (`:182`), and `is_citable_url` (`:212`).
@@ -191,7 +191,7 @@ columns, not a table.**
 - `crates/server/src/jobs/schedule.rs` — the scheduler as a **producer of rows**: a 900s
   ticker, a bounded `SCHEDULE_BATCH = 500`, a `dedupe_key` of
   `"<kind>:<user_id>:<local YYYY-MM>"`, and a `not exists` guard so a second pass covers the
-  rest rather than re-examining. This phase's poll is the same shape (A218).
+  rest rather than re-examining. This phase's poll is the same shape (A238).
 - `crates/server/src/jobs/mod.rs:24` — `MAX_ATTEMPTS = 5`, `POLL_INTERVAL = 5s`,
   `Failure::transient`/`permanent`, `ClaimedJob::user_id()` (a payload without one is
   **permanent**).
@@ -201,7 +201,7 @@ columns, not a table.**
   it to `cfg.google_calendar`. `google_accounts_max` already exists in the matrix
   (`config/plans.toml:47/80/109` = `0/1/unlimited`, `crates/core/src/config/plans.rs:291`)
   and is already in the entitlement *view* (`crates/server/src/entitlements.rs:665`) — but
-  **no `Feature` variant counts it and nothing enforces it** (A225).
+  **no `Feature` variant counts it and nothing enforces it** (A245).
 - `crates/server/src/routes/mod.rs` — `public_routes` (health + Google start/callback), the
   `auth_limiter` bucket on the credential-taking routes, and one `.merge(<module>::routes())`
   per feature module, so a new module registers itself.
@@ -253,7 +253,7 @@ first. This phase inherits, and adds nothing to:
   `forbidden` with a message naming the calendar, because a 404 would read as "deleted".
 - **Phase 9's A199** — a deadline is an `event` with `kind = 'deadline'` and
   `ends_at = starts_at`, there is no `all_day` column, and **date-only serialisation is this
-  phase's ICS feed's problem**. A228 is where that lands.
+  phase's ICS feed's problem**. A248 is where that lands.
 - **`migrations/0028_tasks_events_settings.sql`** (Phase 9's) and the `tasks.position`,
   `user_settings` quiet-hours/language/theme columns.
 - **The route-sweep rows** for the four events routes, and the tamper rows that assert the
@@ -269,7 +269,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
-1. **A210 — the feed's `UID` is `<events.id>@stvdy.app` and its `SEQUENCE` is derived from
+1. **A230 — the feed's `UID` is `<events.id>@stvdy.app` and its `SEQUENCE` is derived from
    `(created_at, updated_at)`, not from a clock reading.** `sequence(created_at, updated_at)
    = if updated_at > created_at { (updated_at - created_at).num_seconds().max(1) } else { 0 }`,
    and the `VEVENT` also carries `DTSTAMP` and `LAST-MODIFIED` from `updated_at`. Two
@@ -282,7 +282,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    same `LAST-MODIFIED`, because both are second-granular. Within one second there is no
    observable difference to lose; a sub-second edit history would need a counter column, and
    a counter on a synced table is a second write path for a value nobody reads.
-2. **A211 — an occurrence, not a series, is a row.** `events.external_id` holds the
+2. **A231 — an occurrence, not a series, is a row.** `events.external_id` holds the
    *occurrence* key: Google's own opaque event id verbatim, and for ICS
    `"<UID>|<recurrence-id in UTC>"`, with `"<UID>"` alone for a non-recurring one. The
    existing `unique index on (connection_id, external_id) where external_id is not null` is
@@ -291,7 +291,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    `events` rows as busy time. Storing the series and expanding on read would need a second
    recurrence engine in the planner, in the SPA's week grid and in the ICS feed, all three
    of which would drift.
-3. **A212 — expansion is bounded twice, and truncation is recorded.** `MAX_OCCURRENCES = 500`
+3. **A232 — expansion is bounded twice, and truncation is recorded.** `MAX_OCCURRENCES = 500`
    and `HORIZON_DAYS = 180`; `RRuleSet::all(MAX_OCCURRENCES as u16)` is called and
    `RRuleResult.limited` is **checked**, never assumed. A truncated expansion writes
    `calendar_connections.error = 'recurrence_truncated'` and keeps every occurrence it read.
@@ -300,7 +300,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    The horizon is what Phase 11 needs; the count is what makes even an `FREQ=SECONDLY` rule
    finite *inside* the horizon. `limited()` distinguishes "the rule ended" from "the cap cut
    it", and only the second is a truncation.
-4. **A213 — the ICS fetch is a second *function* on the SSRF guard, not a second guard.**
+4. **A233 — the ICS fetch is a second *function* on the SSRF guard, not a second guard.**
    `crates/server/src/integrations/fetch.rs` gains
    `pub async fn fetch_guarded_text(url: &str, accept: &str) -> Result<GuardedText, FetchError>`
    returning `GuardedText { final_url, body, etag: Option<String>, last_modified: Option<String> }`,
@@ -314,7 +314,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    route tests inject a fake, and the refusal is proven in `crates/server/tests/ssrf.rs`
    against `fetch_guarded_text` directly. A test that pointed at a local server and passed
    would be proving the guard *absent*.
-5. **A214 — the calendar is a second Google OAuth client with a two-scope pair, chosen so
+5. **A234 — the calendar is a second Google OAuth client with a two-scope pair, chosen so
    the conflict policy is structural.** `GOOGLE_CALENDAR_CLIENT_ID` / `_SECRET` /
    `_REDIRECT_URI`, scope = `https://www.googleapis.com/auth/calendar.app.created` **plus**
    `https://www.googleapis.com/auth/calendar.events.readonly`, with `access_type=offline`
@@ -326,7 +326,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    bug in our merge logic cannot rewrite a user's own event. Login's client is a different
    client with different scopes and a different redirect URI; sharing one client would mean
    the login screen asking for calendar write access.
-6. **A215 — the refresh token is encrypted with the login flow's own cipher, extracted once.**
+6. **A235 — the refresh token is encrypted with the login flow's own cipher, extracted once.**
    `encrypt_state`/`decrypt_state`/`cipher`/`pkce_pair`/`random_token`/`hash` move to
    `crates/server/src/auth/oauth_state.rs` (public within the crate) and `auth::google`
    calls them. The calendar's `state` carries `{verifier, nonce, exp, user_id, return_path}`
@@ -336,7 +336,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    *Rationale:* a second copy of an AES-GCM `state` codec is a second place to get the nonce
    handling wrong, and the login flow's version has the tests. The roadmap's crate-list
    deviation already accepts one `aes-gcm`; this keeps it one *use*, too.
-7. **A216 — `sync_token` is the only sync cursor, and the mode is recorded.**
+7. **A236 — `sync_token` is the only sync cursor, and the mode is recorded.**
    `calendar_connections.sync_token` holds Google's `nextSyncToken`; a response without one
    is a bug we log. `calendar_connections.last_sync_was_full boolean not null default true`
    records which mode the last pass ran in, and a `410 Gone` clears `sync_token` so the
@@ -346,14 +346,14 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    nothing errors. Recording the mode makes it a value a test can assert — pass 2 must have
    sent the stored token, and the pass after a 410 must be full and the one after that
    incremental again.
-8. **A217 — the "Study Plan" calendar is found-or-created once, at connect, and its id is
+8. **A237 — the "Study Plan" calendar is found-or-created once, at connect, and its id is
    stored.** `calendar_connections.study_calendar_id text`; the calendar is named exactly
    `Study Plan`; an app-owned event the user pushes goes there.
    *Rationale:* the spec's reason is "so they're easy to hide or delete" — a user who hides
    the calendar loses only the mirrored copy, never the `events` row. Finding-or-creating at
    connect (rather than lazily at first push) means a connect that cannot create one fails
    while the user is watching, instead of silently dropping the first study block.
-9. **A218 — the poll is a row with a windowed dedupe key, and `POST /calendar/sync` is the
+9. **A238 — the poll is a row with a windowed dedupe key, and `POST /calendar/sync` is the
    same row.** `crates/server/src/jobs/schedule.rs` gains a calendar pass:
    for each live connection with `last_synced_at is null or last_synced_at < now() -
    CALENDAR_POLL_INTERVAL` (`900s`, env `CALENDAR_POLL_INTERVAL_SECS`), enqueue
@@ -365,7 +365,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
    restart or a second instance must be a no-op rather than a double sync. The per-minute
    manual key bounds a user's own retry loop without a second rate limiter. Running the sync
    inline in the request would hold a request open across several Google round trips.
-10. **A219 — the ICS connection uses a conditional GET, and a `304` advances only
+10. **A239 — the ICS connection uses a conditional GET, and a `304` advances only
     `last_synced_at`.** `calendar_connections.ics_etag` / `ics_last_modified` hold the
     validators; the fetch sends `If-None-Match` / `If-Modified-Since`.
     *Rationale:* an academic calendar is polled every 15 minutes and changes a few times a
@@ -373,7 +373,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
     row**, and `events` is `+sync`, so every touched row writes a `change_log` entry and
     every device pulls the whole calendar every 15 minutes. The conditional GET is what
     keeps the poll cheap in the part that actually costs.
-11. **A220 — the read-only rule for an external event lives in the routes and the push
+11. **A240 — the read-only rule for an external event lives in the routes and the push
     validator, never in a trigger.** The ICS importer and the Google sync write
     `source`, `external_id`, `etag` and `connection_id` through plain SQL, so they are
     unaffected by the rule that refuses a client the same columns (A198).
@@ -382,14 +382,14 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
     distinction the two paths already make structurally. `crates/server/tests/calendar.rs`
     asserts the non-obvious half: a row the sync wrote is refused by `PATCH`, and the sync
     can still write it.
-12. **A221 — the feed carries app-owned rows only.** Included: `source = 'app'`,
+12. **A241 — the feed carries app-owned rows only.** Included: `source = 'app'`,
     `deleted_at is null`, and `kind in (class, exam, study_block, deadline)` — the spec's
     "tasks with due dates, study blocks, and exams" — plus a task with a `due_at` rendered as
     a deadline event. Excluded: `kind = 'external'` and any `source != 'app'`.
     *Rationale:* including the Google/ICS rows would echo the user's own calendar back to
     their calendar client, where every event would appear twice — once from Google and once
     from us — with different `UID`s and no way to tell them apart.
-13. **A222 — the feed token is stored in plaintext, and that is a threat-model row rather
+13. **A242 — the feed token is stored in plaintext, and that is a threat-model row rather
     than a silent choice.** 32 random bytes, URL-safe base64, in
     `users.ics_feed_token` (unique), written by `POST /calendar/ics-token/regenerate` and
     readable again by the settings screen ("copy 'your calendar feed' link with Regenerate",
@@ -400,21 +400,21 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
     What bounds it: the feed is read-only and contains only the student's own app-owned
     events (no sources, no chunks, no chat, no account data), it is revoked and replaced in
     one click, and `docs/THREAT_MODEL.md` § 2 gains the asset row and § 6 a residual risk.
-14. **A223 — `GET /cal/:token.ics` is `Exempt` in the route sweep and sits in the auth rate
+14. **A243 — `GET /cal/:token.ics` is `Exempt` in the route sweep and sits in the auth rate
     bucket.** `Class::Exempt`'s own definition covers it ("no authenticated user at all"),
     and the route is an unauthenticated database lookup, so it is rate-limited at the same
     30/min/IP as the credential routes. It logs the resolved `user_id` and the byte length,
     **never the token**.
     *Rationale:* an unauthenticated lookup keyed by a secret is a brute-force target, and a
     secret in a `tracing` field is a secret in every log aggregator the deployment has.
-15. **A224 — the calendar screen reads Phase 9's `GET /events?from=&to=` (web) or the sync
+15. **A244 — the calendar screen reads Phase 9's `GET /events?from=&to=` (web) or the sync
     cache (native), and the grid is a table.** The week and month views are pure functions of
     the rows in the window, unit-tested against a fixed clock and a fixed `Asia/Jakarta` zone.
     *Rationale:* this phase adds no events read route, because Phase 9's window query is
     exactly it. And a grid of absolutely-positioned `<div>`s is a grid a keyboard cannot
     enter and a screen reader cannot read; a table with one row per day and a text equivalent
     per event is what gate 5 and the spec's "charts have text equivalents" rule require.
-16. **A225 — the Google account cap is a counted feature through the engine.**
+16. **A245 — the Google account cap is a counted feature through the engine.**
     `Feature::GoogleAccount` joins `crates/core/src/entitlements/feature.rs` (and `ALL`, so
     the matrix test walks it), `check.rs` maps it to
     `counted(f, cfg.google_accounts_max, u.google_accounts, plan)`, and `UsageSnapshot` gains
@@ -426,14 +426,14 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
     than none, because it looks like a control (the roadmap says exactly this about the cost
     ceiling). Reading it in the connect route instead would be the second source of truth
     `route_sweep.rs::no_file_outside_the_entitlements_layer_reads_a_plan_limit` fails on.
-17. **A226 — an ICS URL is validated when it is saved *and* guarded when it is fetched.**
+17. **A246 — an ICS URL is validated when it is saved *and* guarded when it is fetched.**
     `POST /calendar/ics` runs `fetch::parse_target` on the body's URL before inserting the
     connection and answers 400 `validation` with a readable reason if it is not
-    `http`/`https` or carries credentials. The fetch path guards again (A213).
+    `http`/`https` or carries credentials. The fetch path guards again (A233).
     *Rationale:* the two checks do different jobs. Save-time validation is for the user — an
     immediate "that is not a URL we can fetch" beats a connection that silently never syncs.
     Fetch-time guarding is the protection, because DNS can change between the two.
-18. **A227 — a partial import keeps what it read.** If expansion truncates, or a `VEVENT`
+18. **A247 — a partial import keeps what it read.** If expansion truncates, or a `VEVENT`
     fails to parse, the importer stores every event it did parse, records the reason in
     `calendar_connections.error`, and the job **succeeds**. The error is cleared by the next
     clean pass.
@@ -441,14 +441,14 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
     gets nothing, and a job that failed would retry the same broken feed five times and
     record the same error. The screen shows the error beside the connection, which is gate 7
     (honesty): the app does not claim a connection is healthy while it holds an error.
-19. **A228 — a deadline is an all-day `VEVENT` in the user's IANA zone.** `DTSTART;VALUE=DATE:`
+19. **A248 — a deadline is an all-day `VEVENT` in the user's IANA zone.** `DTSTART;VALUE=DATE:`
     and `DTEND;VALUE=DATE:` set to the local date and the next local date; every other kind
     is a timed event with `DTSTART`/`DTEND` in UTC.
     *Rationale:* this is A199's handover. A deadline is `ends_at = starts_at`, and a
     zero-length timed event is either rejected or drawn as a point by most clients. A date-only
     event is what "due Friday" means. The zone comes from `users.timezone` through
     `chrono-tz`, so a Jakarta student's Friday is not a Thursday.
-20. **A229 — `GET /calendar/connections` is an addition beyond the spec's route list.** It
+20. **A249 — `GET /calendar/connections` is an addition beyond the spec's route list.** It
     returns `{ connections: [{ id, provider, account_email, status, error, last_synced_at,
     study_calendar_id }] }` — **never** a token of any kind.
     *Rationale:* the spec lists connect/callback/ics/delete/sync/regenerate/feed and no list,
@@ -597,7 +597,7 @@ fn a_feed_round_trips_and_the_sequence_moves_when_the_event_is_edited() {
     assert!(seq(&edited_again) > seq(&edited), "SEQUENCE must be monotone");
 }
 
-/// A deadline is date-only (A228): a zero-length timed event is drawn as a point
+/// A deadline is date-only (A248): a zero-length timed event is drawn as a point
 /// or dropped by most clients, and "due Friday" is a date.
 #[test]
 fn a_deadline_is_an_all_day_event_in_the_users_zone() {
@@ -640,7 +640,7 @@ icalendar = { version = "0.17.14", features = ["parser"] }
 # re-export: the crate re-exports only a *subset* of `rrule`'s types, so relying on
 # it would tie the expansion API to `icalendar`'s release cadence and could silently
 # hand back a different `rrule` version than the one this plan's bound is written
-# against. `all(limit) -> RRuleResult { dates, limited }` is the pair A212 depends on.
+# against. `all(limit) -> RRuleResult { dates, limited }` is the pair A232 depends on.
 rrule = "0.14"
 ```
 
@@ -679,7 +679,7 @@ pub struct FeedEvent {
     pub timezone: chrono_tz::Tz,
 }
 
-/// `SEQUENCE` (A210). 0 for a row that has never been edited, and the whole
+/// `SEQUENCE` (A230). 0 for a row that has never been edited, and the whole
 /// seconds between creation and the last edit after that, floored at 1 so the
 /// first edit is always an increase.
 pub fn sequence(created_at: DateTime<Utc>, updated_at: DateTime<Utc>) -> i64;
@@ -690,7 +690,7 @@ pub fn sequence(created_at: DateTime<Utc>, updated_at: DateTime<Utc>) -> i64;
 /// Infallible, because `icalendar`'s builder is: `Calendar::new().push(Event::new()
 /// .summary(..).starts(..).ends(..).append_property(Property::new("UID", ..)))` and
 /// `Display` produces the text. A deadline goes through the crate's own all-day path
-/// (`Event::all_day(NaiveDate)`), which is A228 expressed as the API rather than as a
+/// (`Event::all_day(NaiveDate)`), which is A248 expressed as the API rather than as a
 /// hand-written `VALUE=DATE` property.
 pub fn render_feed(events: &[FeedEvent]) -> String;
 
@@ -771,7 +771,7 @@ fn a_tzid_event_keeps_its_wall_clock_across_a_dst_boundary() {
 #[test]
 fn a_utc_event_is_taken_as_utc() { /* … */ }
 
-/// A malformed component is skipped and named, not fatal (A227).
+/// A malformed component is skipped and named, not fatal (A247).
 #[test]
 fn a_malformed_vevent_is_reported_and_the_rest_survive() { /* … */ }
 ```
@@ -790,7 +790,7 @@ in Task 1, so Task 1's tree compiles on its own), then write
 `crates/core/src/calendar/expand.rs`:
 
 ```rust
-/// The two bounds (A212). The count is what makes an `FREQ=SECONDLY` rule finite
+/// The two bounds (A232). The count is what makes an `FREQ=SECONDLY` rule finite
 /// even inside the horizon; the horizon is what Phase 11's planner needs.
 pub const MAX_OCCURRENCES: usize = 500;
 pub const HORIZON_DAYS: i64 = 180;
@@ -842,7 +842,7 @@ hundreds of megabytes and the parse is in a worker.
 
 **The `limited` check is the belt, and the cap is the braces.** `dates.len() == MAX_OCCURRENCES`
 does not mean the cap fired — a rule with exactly 500 remaining occurrences ends there
-naturally and is not truncated. Only `limited` distinguishes the two, which is why A212
+naturally and is not truncated. Only `limited` distinguishes the two, which is why A232
 records `error = 'recurrence_truncated'` from `limited` and never from a length comparison.
 
 - [ ] **Step 4: Run the tests**
@@ -891,17 +891,17 @@ alter table calendar_connections
   add column created_at timestamptz not null default now(),
   add column updated_at timestamptz not null default now(),
   -- `connected | error | revoked`. `error` is not a failure of the row: the events the
-  -- connection did import stay, and the screen shows the reason beside it (A227).
+  -- connection did import stay, and the screen shows the reason beside it (A247).
   add column status text not null default 'connected',
   add column error text,
-  -- The ICS conditional GET's validators (A219). Without them every 15-minute poll
+  -- The ICS conditional GET's validators (A239). Without them every 15-minute poll
   -- re-upserts every row, and because `events` is +sync that writes a change_log entry
   -- per row per poll and every device pulls the whole calendar every 15 minutes.
   add column ics_etag text,
   add column ics_last_modified text,
-  -- The dedicated "Study Plan" calendar (A217), found or created at connect.
+  -- The dedicated "Study Plan" calendar (A237), found or created at connect.
   add column study_calendar_id text,
-  -- Which mode the last pass ran in (A216): "an incremental sync that silently stopped
+  -- Which mode the last pass ran in (A236): "an incremental sync that silently stopped
   -- being incremental" is otherwise invisible, because every poll still succeeds.
   add column last_sync_was_full boolean not null default true,
   -- Reserved for the watch channels the spec allows as an optimisation. Polling is the
@@ -916,7 +916,7 @@ create index on calendar_connections (provider, last_synced_at);
 
 -- Two Google accounts for one user are two rows, which the existing
 -- `index on (user_id, provider)` already allows. The cap is `google_accounts_max`
--- through the entitlements engine (A225), not a unique index: a plan can change, and a
+-- through the entitlements engine (A245), not a unique index: a plan can change, and a
 -- constraint that refuses the row would be a second source of truth for what a plan grants.
 ```
 
@@ -1048,15 +1048,15 @@ pub fn public_routes() -> Router<AppState>;
 `crates/server/src/calendar/ics_out.rs`:
 
 ```rust
-/// `GET /cal/:token.ics`. No bearer token: the path token is the credential (A222).
-/// Logs `user_id` and `bytes`, never the token (A223).
+/// `GET /cal/:token.ics`. No bearer token: the path token is the credential (A242).
+/// Logs `user_id` and `bytes`, never the token (A243).
 pub async fn feed(State(state): State<AppState>, Path(token): Path<String>) -> AppResult<Response>;
 
 /// `POST /calendar/ics-token/regenerate`. Authenticated. Writes 32 fresh random
 /// bytes, URL-safe base64, and returns `{ "ics_feed_token": "..." }` once.
 pub async fn regenerate_token(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>>;
 
-/// The rows the feed carries (A221): `source = 'app'`, not tombstoned, and
+/// The rows the feed carries (A241): `source = 'app'`, not tombstoned, and
 /// `kind in (class, exam, study_block, deadline)`, plus one synthetic deadline per task
 /// with a `due_at`. Read in one statement with an explicit column list (A27).
 async fn feed_rows(pool: &PgPool, user_id: Uuid, timezone: chrono_tz::Tz) -> AppResult<Vec<FeedEvent>>;
@@ -1065,7 +1065,7 @@ async fn feed_rows(pool: &PgPool, user_id: Uuid, timezone: chrono_tz::Tz) -> App
 Register in `crates/server/src/routes/mod.rs`: `feed` in `public_routes` (beside
 `/health`), `regenerate_token` and the rest of `calendar::routes()` in `authenticated`.
 The feed route goes in the **auth limiter** bucket too — it is an unauthenticated database
-lookup (A223).
+lookup (A243).
 
 - [ ] **Step 4: Add the route-sweep rows**
 
@@ -1109,7 +1109,7 @@ feat(server): the ICS feed route and its revocable token
 `crates/server/tests/ssrf.rs` gains:
 
 ```rust
-/// The raw text fetch shares the guard with the page fetcher (A213). A second
+/// The raw text fetch shares the guard with the page fetcher (A233). A second
 /// implementation of the guard is the failure this asserts against.
 #[tokio::test]
 async fn the_guarded_text_fetch_refuses_a_private_host_and_a_non_http_scheme() {
@@ -1140,7 +1140,7 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
     assert_eq!(created.status(), StatusCode::CREATED);
     let id = created["connection"]["id"].as_str().unwrap();
 
-    // Eight occurrences plus the exam, each its own row keyed by the occurrence (A211).
+    // Eight occurrences plus the exam, each its own row keyed by the occurrence (A231).
     assert_eq!(app.get(&format!("/events?from=2026-01-01&to=2026-06-30")).await.count(), 9);
     // Read-only in the UI and on both write paths: the row is not the client's.
     assert_eq!(app.patch(&format!("/events/{class_id}"), json!({ "title": "x" })).await.status(), StatusCode::FORBIDDEN);
@@ -1154,7 +1154,7 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
 }
 
 /// A private host is refused at save time with a readable reason, and at fetch time by
-/// the guard (A226).
+/// the guard (A246).
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_ics_url_that_is_not_fetchable_is_refused_when_it_is_saved(pool: PgPool) {
     let app = signed_up(pool).await;
@@ -1163,7 +1163,7 @@ async fn an_ics_url_that_is_not_fetchable_is_refused_when_it_is_saved(pool: PgPo
     assert_eq!(refused["code"], "validation");
 }
 
-/// A truncated expansion keeps what it read and records the reason (A227, A212).
+/// A truncated expansion keeps what it read and records the reason (A247, A232).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_truncated_recurrence_imports_what_it_read_and_records_the_error(pool: PgPool) { /* … */ }
 ```
@@ -1189,7 +1189,7 @@ pub struct GuardedText {
 }
 
 /// A user-supplied URL fetched as text, through the **same** guard as `ReqwestFetcher`
-/// and without readability (A213): an ICS body is not HTML, and `extract_readable`
+/// and without readability (A233): an ICS body is not HTML, and `extract_readable`
 /// would hand back a tag-stripped document. `If-None-Match`/`If-Modified-Since` are
 /// sent when the caller has validators, and a `304` is `Ok` with an empty body.
 pub async fn fetch_guarded_text(
@@ -1209,7 +1209,7 @@ so there is one redirect loop and not two.
 `crates/server/src/calendar/ics_in.rs`:
 
 ```rust
-/// The fetch seam (A213): the route tests inject a fake, because the real guard is
+/// The fetch seam (A233): the route tests inject a fake, because the real guard is
 /// exactly what refuses a local stub, so a test that pointed at one would be proving
 /// the guard absent.
 #[async_trait]
@@ -1218,12 +1218,12 @@ pub trait IcsFetch: Send + Sync {
         -> Result<GuardedText, FetchError>;
 }
 
-/// `POST /calendar/ics`. Validates the URL (A226), inserts a `provider = 'ics'`
-/// connection, and enqueues the first `sync_calendar` (A218).
+/// `POST /calendar/ics`. Validates the URL (A246), inserts a `provider = 'ics'`
+/// connection, and enqueues the first `sync_calendar` (A238).
 pub async fn add(State(state): State<AppState>, user: AuthUser, Json(body): Json<AddIcsRequest>)
     -> AppResult<(StatusCode, Json<Value>)>;
 
-/// `GET /calendar/connections` (A229). Never returns a token of any kind.
+/// `GET /calendar/connections` (A249). Never returns a token of any kind.
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>>;
 
 /// `DELETE /calendar/connections/:id`. Tombstones nothing: the connection row is deleted
@@ -1237,7 +1237,7 @@ and in `crates/server/src/calendar/sync.rs` the ICS half:
 
 ```rust
 /// One pass over one ICS connection: conditional GET, parse, bounded expand, upsert on
-/// `(connection_id, external_id)`. A `304` advances `last_synced_at` only (A219).
+/// `(connection_id, external_id)`. A `304` advances `last_synced_at` only (A239).
 pub async fn sync_ics(state: &AppState, connection: &ConnectionRow) -> AppResult<SyncOutcome>;
 
 /// The upsert. `on conflict (connection_id, external_id) where external_id is not null
@@ -1275,7 +1275,7 @@ feat(server): ICS import through the same SSRF guard, with a conditional GET
 
 ```rust
 /// The consent URL asks for offline access, uses PKCE, and carries an encrypted state;
-/// the callback returns a deep link with a status and **never a token** (A214, A215).
+/// the callback returns a deep link with a status and **never a token** (A234, A235).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_consent_url_asks_for_offline_access_and_the_callback_never_returns_a_token(pool: PgPool) {
     let app = signed_up_with_google_calendar(pool).await;
@@ -1300,7 +1300,7 @@ async fn the_consent_url_asks_for_offline_access_and_the_callback_never_returns_
     let raw: Vec<u8> = /* select refresh_token_enc */;
     assert!(!String::from_utf8_lossy(&raw).contains("1//refresh"), "the token must be ciphertext");
 
-    // A free account is refused before any of it (A225, `google_accounts_max = 0`).
+    // A free account is refused before any of it (A245, `google_accounts_max = 0`).
     let free = signed_up_free(pool).await;
     let refused = free.get("/calendar/google/connect").await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
@@ -1309,7 +1309,7 @@ async fn the_consent_url_asks_for_offline_access_and_the_callback_never_returns_
     // The second account on pro hits the cap of 1.
     // …
 
-    // The connections list never carries a token (A229).
+    // The connections list never carries a token (A249).
     let list = app.get("/calendar/connections").await;
     assert!(!list.to_string().contains("refresh"));
 }
@@ -1368,14 +1368,14 @@ pub struct GoogleCalendarConfig { pub client_id: String, pub client_secret: Secr
 
 ```rust
 /// `GET /calendar/google/connect`. Requires `Feature::GoogleAccount` through
-/// `entitlements::require` (A225), then returns `{ "url": "..." }`. The SPA opens it with
+/// `entitlements::require` (A245), then returns `{ "url": "..." }`. The SPA opens it with
 /// `platform.openExternal`, i.e. the system browser, never an embedded webview.
 pub async fn connect(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>>;
 
 /// `GET /calendar/google/callback`. Public. Verifies the state, exchanges the code,
-/// encrypts and stores the refresh token, finds or creates "Study Plan" (A217), and
+/// encrypts and stores the refresh token, finds or creates "Study Plan" (A237), and
 /// redirects to `stvdy://oauth/calendar?status=connected|denied|error&reason=...`.
-/// **No token of any kind travels in the deep link** (A215/A48).
+/// **No token of any kind travels in the deep link** (A235/A48).
 pub async fn callback(State(state): State<AppState>, Query(q): Query<CallbackQuery>) -> AppResult<Redirect>;
 ```
 
@@ -1414,7 +1414,7 @@ feat(server): the calendar consent flow, on the login flow's state cipher
 `crates/core/tests/calendar.rs` gains:
 
 ```rust
-/// The conflict policy as a function, so it has a test rather than a comment (A214).
+/// The conflict policy as a function, so it has a test rather than a comment (A234).
 #[test]
 fn google_wins_for_an_event_we_did_not_create_and_we_win_for_a_study_block() {
     // source = 'google': the remote is authoritative for every field.
@@ -1433,7 +1433,7 @@ fn google_wins_for_an_event_we_did_not_create_and_we_win_for_a_study_block() {
 ```rust
 /// The two properties the roadmap's exit gate names: the sync is incremental, and a 410
 /// is a full resync. `last_sync_was_full` is what makes "silently stopped being
-/// incremental" assertable at all (A216).
+/// incremental" assertable at all (A236).
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_incremental_sync_sends_the_stored_token_and_a_410_resyncs_fully(pool: PgPool) {
     let app = signed_up_with_google_calendar_connected(pool).await;
@@ -1482,7 +1482,7 @@ Expected: `cannot find function resolve`, and `cannot find function run_sync`.
 pub trait CalendarApi: Send + Sync {
     /// A listing. `sync_token: None` is a full listing; `Some` is incremental. A token
     /// Google has expired is `CalendarError::Gone`, which the caller answers with a full
-    /// resync rather than a retry (A216).
+    /// resync rather than a retry (A236).
     async fn list_events(&self, calendar_id: &str, sync_token: Option<&str>)
         -> Result<EventPage, CalendarError>;
     async fn list_calendars(&self) -> Result<Vec<CalendarMeta>, CalendarError>;
@@ -1503,7 +1503,7 @@ pub enum CalendarError { Gone, Unauthorized(String), Transport(String), Provider
 ```rust
 pub enum Origin { App, Google }
 pub enum Winner { Local, Remote, Both }
-/// The roadmap's conflict table, as a function (A214): Google wins for an event we did
+/// The roadmap's conflict table, as a function (A234): Google wins for an event we did
 /// not create; our own study block wins and is pushed.
 pub fn resolve(origin: Origin, local: LocalState, remote: RemoteState) -> Winner;
 ```
@@ -1521,12 +1521,12 @@ pub fn resolve(origin: Origin, local: LocalState, remote: RemoteState) -> Winner
 pub struct SyncOutcome { pub inserted: u32, pub updated: u32, pub deleted: u32, pub was_full: bool }
 
 /// One pass over one Google connection. Never retries a `410`: it clears `sync_token`
-/// and returns `was_full: false`, so the next pass is full (A216). Records
+/// and returns `was_full: false`, so the next pass is full (A236). Records
 /// `last_sync_was_full` in the same transaction as the events it wrote.
 pub async fn sync_google(state: &AppState, connection: &ConnectionRow) -> AppResult<SyncOutcome>;
 
 /// A remote event we own (`source = 'app'`, mirrored) is pushed; a remote-only one is
-/// adopted read-only as `source = 'google'` (A214).
+/// adopted read-only as `source = 'google'` (A234).
 async fn reconcile(tx: &mut PgConnection, connection: &ConnectionRow, page: EventPage) -> AppResult<SyncOutcome>;
 ```
 
@@ -1556,7 +1556,7 @@ feat(server): Google two-way sync, incremental, with a 410 fallback
 - [ ] **Step 1: Write the failing test**
 
 ```rust
-/// The poll is a row with a windowed dedupe key (A218): a restart, a second instance or
+/// The poll is a row with a windowed dedupe key (A238): a restart, a second instance or
 /// a double tick is a no-op rather than a double sync. And the manual sync is the same
 /// row, so a user holding the button cannot open a sync per press.
 #[sqlx::test(migrations = "../../migrations")]
@@ -1654,7 +1654,7 @@ feat(server): the calendar poll, as rows the existing worker runs
 /// Phase 9's A198 refuses a *client* the four calendar-owned columns. This asserts the
 /// other half, which is the one that can silently break: the sync's own write is not
 /// affected by that rule, because the rule lives in the routes and the push validator
-/// and not in a trigger (A220).
+/// and not in a trigger (A240).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_calendar_sourced_event_is_read_only_to_a_client_and_writable_by_the_sync(pool: PgPool) {
     let app = signed_up_with_google_calendar_connected(pool).await;
@@ -1751,7 +1751,7 @@ Expected: `Failed to resolve import "@/features/calendar/calendar"`.
 Every zone comes from `Intl.DateTimeFormat` with an explicit `timeZone`, never the machine's.
 
 `app/src/features/calendar/CalendarScreen.tsx` — the week/month toggle, the grid, and the
-connections panel. The grid is a **table** (A224): one row per day, a caption naming the
+connections panel. The grid is a **table** (A244): one row per day, a caption naming the
 week, and each event a cell with its time as text plus a lock icon and an
 `aria-label` for an external row. Native reads the sync cache; web reads
 `GET /events?from=&to=`.
@@ -1793,11 +1793,11 @@ feat(app): the week and month calendar, and the connections panel
 - [ ] **Step 1: `docs/API.md`**
 
 Replace `## Calendar (Phase 10)`'s placeholder with the real section: the eight routes, the
-`ConnectionView` shape (A229), the feed's `Content-Type`/`Cache-Control`/`X-Robots-Tag`
-(A221/A222), the token-rotation rule, the 400 `validation` for an unfetchable ICS URL
-(A226), the 202 + `{queued}` of `POST /calendar/sync` (A218), the 410-inside-the-sync note
+`ConnectionView` shape (A249), the feed's `Content-Type`/`Cache-Control`/`X-Robots-Tag`
+(A241/A242), the token-rotation rule, the 400 `validation` for an unfetchable ICS URL
+(A246), the 202 + `{queued}` of `POST /calendar/sync` (A238), the 410-inside-the-sync note
 (never surfaced as an HTTP status to the client, because the client is not the one holding
-the token), and one paragraph naming the two-scope consent (A214).
+the token), and one paragraph naming the two-scope consent (A234).
 
 - [ ] **Step 2: `docs/SYNC.md`**
 
@@ -1805,7 +1805,7 @@ Add a row to the conflict table for calendar-sourced events: `events` whose `sou
 are **server-owned for the calendar columns** and read-only to a client on both write paths,
 while `title`/`starts_at`/`ends_at` on an app-owned event keep the existing LWW +
 field-merge rule. Note that the sync writes through plain SQL and is deliberately not
-subject to the client rule (A220), and that the ICS/Google rows carry no new `+sync` table,
+subject to the client rule (A240), and that the ICS/Google rows carry no new `+sync` table,
 so `0017_sync_triggers.sql` is unchanged.
 
 - [ ] **Step 3: `docs/ARCHITECTURE.md`**
@@ -1813,13 +1813,13 @@ so `0017_sync_triggers.sql` is unchanged.
 Add `## Calendar (Phase 10)`: the three pieces and why the split is where it is (the feed is
 a pure function of rows; the import is parse + a bounded expand + one upsert keyed on the
 occurrence; the two-way sync is a trait implementation behind a seam); the bound and the
-hang it prevents (A212); the guard shared with ingestion and why `ChainFetcher` is not the
-entry point for a feed (A213); the conditional GET and the `change_log` churn it avoids
-(A219); and the scope pair that makes the conflict policy structural (A214).
+hang it prevents (A232); the guard shared with ingestion and why `ChainFetcher` is not the
+entry point for a feed (A233); the conditional GET and the `change_log` churn it avoids
+(A239); and the scope pair that makes the conflict policy structural (A234).
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
-Append A210–A229 as rows in the pinned-decisions table. Add to "Schema deviations" one row
+Append A230–A249 as rows in the pinned-decisions table. Add to "Schema deviations" one row
 for `0029_calendar.sql`'s nine columns on `calendar_connections`. Note under "Crate-list
 deviations" that `icalendar`/`rrule` are now **pinned in `Cargo.toml`**, not only recorded
 here — the deviation row was aspirational until this phase — and that `icalendar` needs its
@@ -1829,10 +1829,10 @@ non-default `parser` feature for the import half.
 
 - § 2 Assets: add `ICS feed tokens` — "read the user's own calendar feed; a capability URL",
   living in `users.ics_feed_token` (plaintext, because the settings screen must be able to
-  show the link again, A222).
+  show the link again, A242).
 - § 5: add "Reach a private address through an ICS URL" → **Fails.** `fetch_guarded_text`
   shares `parse_target`/`resolve_public` with ingestion, and every redirect hop is
-  re-checked (A213).
+  re-checked (A233).
 - § 6: add **R7 — the feed token is a capability URL.** A leaked token reads the student's
   app-owned events (never sources, chunks, chat or account data), and it is revoked and
   replaced in one click. *Revisit if:* the feed ever carries anything beyond the user's own
@@ -1975,21 +1975,21 @@ after a long idle period), **watch channels** (the columns exist, the channel do
 
 - "Google Calendar stays SERVER-SIDE: one connection per account works on every device" →
   Tasks 6, 7, 8; the connection row is not synced (Task 3's schema assertion), and the SPA
-  never holds a token (A215/A229).
+  never holds a token (A235/A249).
 - "OAuth2 with offline access, minimal scopes, PKCE + state parameter; refresh tokens
-  encrypted (aes-gcm)" → Task 6 (`access_type=offline`, the two-scope pair A214, `S256`, the
+  encrypted (aes-gcm)" → Task 6 (`access_type=offline`, the two-scope pair A234, `S256`, the
   encrypted state and the aes-gcm `refresh_token_enc`).
 - "Incremental sync via syncToken; on 410 do a full resync" → Task 7, with `last_sync_was_full`
-  making "incremental" an asserted value rather than an assumption (A216).
+  making "incremental" an asserted value rather than an assumption (A236).
 - "Optionally register watch channels (webhook) with polling via jobs as fallback" → the
-  columns exist (Task 3); **polling is the implemented path** (A218), and the optional half
+  columns exist (Task 3); **polling is the implemented path** (A238), and the optional half
   is recorded as not built rather than implied.
 - "Maintain our own `events` rows with external_id + etag" → Task 5's and Task 7's upsert on
   `(connection_id, external_id)`, with `etag` stored for the conditional logic.
 - "Conflict policy: Google wins for events we didn't create" → Task 7's `policy.rs` plus the
-  scope pair that makes it structural (A214).
+  scope pair that makes it structural (A234).
 - "our study blocks go to a dedicated 'Study Plan' calendar so they're easy to hide or
-  delete" → Task 6's find-or-create and `study_calendar_id` (A217).
+  delete" → Task 6's find-or-create and `study_calendar_id` (A237).
 - "Google/ICS events are read-only in the UI (lock icon)" → Task 10's lock + `aria-label`,
   and Task 9's assertion on both write paths.
 - "Native OAuth flow: open the system browser (never an embedded webview), return via deep
@@ -1997,26 +1997,26 @@ after a long idle period), **watch channels** (the columns exist, the channel do
   `stvdy://oauth/calendar` classifier (`src-tauri/src/deeplink.rs:109`) and the shared
   `decrypt_state` with a `purpose` check.
 - "ICS feed: `GET /cal/:token.ics` outputs tasks with due dates, study blocks, and exams.
-  Token is per-user, revocable, regenerable" → Task 4 (A221/A222/A228).
+  Token is per-user, revocable, regenerable" → Task 4 (A241/A242/A248).
 - "ICS import/subscribe: user adds an external ICS URL … poll periodically; treat events as
   busy time. Support recurring events (rrule) and timezones correctly" → Tasks 2, 5, 8;
   "busy time" is what `kind = 'external'` means to Phase 11's planner, and this plan says so
   rather than adding a column.
 - `docs/SPEC.md` § Routes, Calendar → the eight routes; the addition (`GET /calendar/connections`)
-  is A229, and `DELETE /calendar/connections/:id` is the spec's own disconnect.
+  is A249, and `DELETE /calendar/connections/:id` is the spec's own disconnect.
 - `docs/SPEC.md` § Screens item 13, "Calendar connections (Google status, add ICS URL, copy
   'your calendar feed' link with Regenerate)" → Task 10's `ConnectionsPanel`.
 
 **Placeholders:** none. The choices the spec and the roadmap leave open are pinned rather
-than waved at: the feed's UID and SEQUENCE (A210), the occurrence key (A211), the two bounds
-and the `limited()` check (A212), the fetch seam and why it is a second function on the guard
-(A213), the scope pair (A214), the cipher's home (A215), the sync cursor and the recorded
-mode (A216), the Study Plan calendar (A217), the poll as a row (A218), the conditional GET
-(A219), where the read-only rule lives (A220), what the feed excludes (A221), the token's
-storage and its threat-model row (A222), the feed's classification and rate bucket (A223),
-the grid as a table (A224), the account cap through the engine (A225), the two validation
-points (A226), partial-import behaviour (A227), the all-day deadline (A228), and the one
-route added beyond the spec (A229).
+than waved at: the feed's UID and SEQUENCE (A230), the occurrence key (A231), the two bounds
+and the `limited()` check (A232), the fetch seam and why it is a second function on the guard
+(A233), the scope pair (A234), the cipher's home (A235), the sync cursor and the recorded
+mode (A236), the Study Plan calendar (A237), the poll as a row (A238), the conditional GET
+(A239), where the read-only rule lives (A240), what the feed excludes (A241), the token's
+storage and its threat-model row (A242), the feed's classification and rate bucket (A243),
+the grid as a table (A244), the account cap through the engine (A245), the two validation
+points (A246), partial-import behaviour (A247), the all-day deadline (A248), and the one
+route added beyond the spec (A249).
 
 **Type consistency:** `FeedEvent`, `FeedKind`, `Occurrence`, `Expansion`, `Window`,
 `ExpandError`, `GuardedText`, `IcsFetch`, `CalendarApi`, `EventPage`, `RemoteEvent`,
@@ -2039,17 +2039,17 @@ Three of them, each with a defence that fails loudly:
   count) **plus** the horizon, and Task 2's first test is an endless rule that must return.
 - **The feed token is a capability URL** — a token in a share sheet, a screenshot or a
   referrer is a token someone else has. The defence is `Cache-Control: no-store` +
-  `X-Robots-Tag: noindex`, the token never entering a log line (A223), one-click revocation
+  `X-Robots-Tag: noindex`, the token never entering a log line (A243), one-click revocation
   with the old token asserted dead (Task 4), a feed that carries nothing but the user's own
-  app-owned events (A221), and a threat-model row that says so out loud instead of leaving it
-  to be discovered (A222).
+  app-owned events (A241), and a threat-model row that says so out loud instead of leaving it
+  to be discovered (A242).
 - **An incremental sync that silently stops being incremental** — every poll succeeds, the
   events stop changing, and nothing errors. The defence is `last_sync_was_full` recorded per
   pass and a test that asserts pass 2 sent the stored token, that a `410` produced exactly
   one full pass, and that the pass after it was incremental again (Task 7).
 
-Two more, closed the same way: a second OAuth implementation (A215 — the cipher is extracted,
-so there is one) and a second SSRF guard (A213 — the guard is shared and the refusal is
+Two more, closed the same way: a second OAuth implementation (A235 — the cipher is extracted,
+so there is one) and a second SSRF guard (A233 — the guard is shared and the refusal is
 tested against `fetch_guarded_text` itself, in `ssrf.rs`, because a route test cannot point
 the real guard at a local stub).
 

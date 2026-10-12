@@ -229,7 +229,7 @@ after reconnect; the Today view and focus timer work offline.
 sections), `docs/SYNC.md` (the pushable entities' payload rules change — see A198, A200,
 A201, A204), `docs/ARCHITECTURE.md` (the offline write path as exercised, the timer's local
 state, the one asymmetry between native and web reads), `docs/ASSUMPTIONS.md`
-(A190–A209) and `docs/THREAT_MODEL.md` § 6 R1 (an addendum: the plausibility bound R1 names
+(A190–A229) and `docs/THREAT_MODEL.md` § 6 R1 (an addendum: the plausibility bound R1 names
 now exists, and why it arrived in this phase).
 
 ---
@@ -255,9 +255,12 @@ file is the bug.
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A190–A209** in the same commits as the code. Phase 6 wrote
-A119–A131 (reserved to A139), Phase 7 holds A140–A163 and Phase 8 holds A164–A189, so this
-block starts at A190.
+`docs/ASSUMPTIONS.md` as rows **A190–A229** in the same commits as the code — a 40-wide block,
+because the pure contracts in Tasks 1-4 found three decisions the plan had not anticipated
+(an out-of-range priority falling back while an out-of-range estimate clamps; `due_on`
+excluding completed rows as well as tombstones; and `due_on` taking a `YYYY-MM-DD` key rather
+than an instant). Phase 6 wrote A119–A131 (reserved to A139), Phase 7 holds A140–A163, Phase 8
+holds A164–A189, and Phase 10 onward starts at A230.
 
 1. **A190 — quick capture is priced as `task_breakdown` (2), not with a new key.**
    `config/plans.toml [credits]` has no `quick_capture` entry and
@@ -383,6 +386,23 @@ block starts at A190.
     `ReadOnly` with a reason that names the per-channel check, plus a real test in
     `crates/server/tests/settings.rs` that a free account's `telegram` is 403
     `plan_required`.
+21. **A210 — An out-of-range priority falls back to the documented default; an out-of-range
+    estimate clamps to the nearest bound.** The two are treated differently on purpose: a
+    priority outside 1..=3 is a value the model had no business producing and the default (2)
+    is the documented meaning of "unset", while an estimate is a quantity whose nearest legal
+    value is the closest thing to what the model meant. An estimate of zero or less becomes
+    `None` rather than `0`, because a subtask with no estimate and a subtask estimated at zero
+    minutes are different claims. Each case warns.
+22. **A211 — `due_on` and `subtasks_of` exclude `status = 'done'` as well as tombstones.**
+    The function answers "what must I do today", the Today view is computed on the client from
+    rows the device already has (A205), so nothing downstream re-filters — and a completed
+    task that stays in that list forever is a plausible consumer-visible bug.
+23. **A212 — `due_on` takes a `YYYY-MM-DD` key, not an instant, and an unparseable key yields
+    an empty list rather than an error.** The key is the one the client computes through
+    `Intl` with an explicit `timeZone` (`app/src/lib/time.ts::localDateKey`), so the two sides
+    cannot disagree about which day a task is on. `TaskError`'s messages embed the bound
+    constants (`MAX_TITLE`, `MIN_PRIORITY`, …) so the push rejection's reason and the 400 the
+    student sees are one string.
 
 ---
 
@@ -2197,7 +2217,7 @@ read for the streak), and the timer's single-log design (the id minted at start)
 
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
-Append A190–A209 as rows, and one line in the "Schema deviations" table for
+Append A190–A229 as rows, and one line in the "Schema deviations" table for
 `tasks.position`, the `user_settings` columns and the five new `check` constraints.
 
 - [ ] **Step 5: `docs/THREAT_MODEL.md`**

@@ -99,7 +99,7 @@ free-tier utilization and conversion derived from it**.
 > denominator — and conversion months are the ones the report is about. The tree cannot
 > do better from `users.plan_id` alone because it holds only the *current* plan. So the
 > plan adds `usage_events.plan_id` and `credit_ledger.plan_id`, written at write time from
-> the effective plan the spend already has in hand (A283), and the split reads those with
+> the effective plan the spend already has in hand (A303), and the split reads those with
 > a documented fallback for pre-existing rows. The defence is a test that seeds a user who
 > was free in June and paid in July and asserts June's cost stays in the free column.
 
@@ -190,7 +190,7 @@ would silently corrupt the margin report.
   `refund_in`, `record_usage`, `latest_usage_event`, `RefundTarget` (+ `refund_pending`),
   `costs`, `month_provider_cost`, `ceiling_paused`, `search_cost`, `chat_message_cost`,
   `daily_chat_cap`, `daily_search_cap`, `record_search`. **What is missing for this phase
-  is one function: a grant into the `purchased` bucket** (A277) — `grant` writes the
+  is one function: a grant into the `purchased` bucket** (A297) — `grant` writes the
   monthly bucket only.
 - `crates/server/src/entitlements.rs` has `snapshot`, `snapshot_for`, `snapshot_in`,
   `require`, `require_for`, `reserve_in`, `recompute_read_only`, `effective_plan`,
@@ -217,7 +217,7 @@ would silently corrupt the margin report.
   `mailer`, `clock`, `documents` and `Providers::build`, which performs the boot
   assertions. `crates/server/src/integrations/llm.rs` is the [OI]-compatible client
   (`base_url` + `api_key` + `default_model`), and `ChatRequest` **carries no per-request
-  key** — so BYOK needs a seam this phase adds (A282).
+  key** — so BYOK needs a seam this phase adds (A302).
 - `crates/core/src/config/plans.rs` has `PlanConfig { price_idr_monthly, price_idr_yearly,
   student_percent_off, … }`, `Credits`, `PlanId`, `PlansFile::get`, `PlansFile::validate`.
   `crates/core/src/config/billing_policy.rs` has `BillingPolicy`, `Platform`,
@@ -276,9 +276,9 @@ would silently corrupt the margin report.
 ## Decisions this plan pins (so parallel work cannot diverge)
 
 Each is a place the spec, the roadmap and the tree leave a choice. They are appended to
-`docs/ASSUMPTIONS.md` as rows **A270–A289** in the same commits as the code.
+`docs/ASSUMPTIONS.md` as rows **A290–A309** in the same commits as the code.
 
-1. **A270 — `PaymentProvider` lives in `crates/core/src/traits/payment.rs`, its DTOs are
+1. **A290 — `PaymentProvider` lives in `crates/core/src/traits/payment.rs`, its DTOs are
    `InvoiceRequest`/`Invoice`/`GatewayStatus`/`WebhookEvent`/`WebhookKind`/`PaymentError`,
    and `crates/core` gains the `http` dependency for the contract's own `HeaderMap`
    parameter.** Contract § 1 writes the signature as `parse_and_verify_webhook(&self,
@@ -289,23 +289,23 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    NotConfigured }` — `Signature` and `UnknownOrder` are separate variants because the
    webhook route maps them to different responses (401 vs 404) and collapsing them would
    make that mapping a string match.
-2. **A271 — The gateway's field mapping is one file, and it is the only file B1 changes.**
+2. **A291 — The gateway's field mapping is one file, and it is the only file B1 changes.**
    `crates/server/src/integrations/payment/mapping.rs` holds the request body we send, the
    response fields we read and the fee field, each as a named function with a test. The
    rest of the adapter (`qris.rs`) is transport and the trait's shape. **When B1's docs
    arrive, the diff is `mapping.rs`, one arm of `signature.rs` if the scheme is new, and
    the env values — no test outside those two files changes, because every behavioural
    test in this phase runs against the trait's mock.**
-3. **A272 — `QRIS_SIGNATURE_SCHEME` is a closed set of three schemes, an unknown value
+3. **A292 — `QRIS_SIGNATURE_SCHEME` is a closed set of three schemes, an unknown value
    fails startup, and a failed verification is 401 `unauthorized` that never says which
-   check failed.** `hmac_sha256_hex` (HMAC-SHA259 over the raw body, hex, in
+   check failed.** `hmac_sha256_hex` (HMAC-SHA279 over the raw body, hex, in
    `QRIS_SIGNATURE_HEADER`, default `X-Callback-Signature`), `hmac_sha256_base64` (the
    same, base64), `shared_token` (a constant-time compare of the header against
    `QRIS_CALLBACK_TOKEN`, for a gateway with no signature at all). The comparison is
    `hmac`'s `verify_slice`/`subtle`-style constant time in every arm; a scheme the code
    does not know is a **startup** error, because a default would be a scheme that verifies
    everything. `QRIS_WEBHOOK_IPS`, when set, is an allowlist checked before the signature.
-4. **A273 — Idempotency is the `webhook_events` unique key *and* a guarded state
+4. **A293 — Idempotency is the `webhook_events` unique key *and* a guarded state
    transition, because they defend different replays.** `insert into webhook_events
    (provider, event_id, payload) values (…) on conflict (provider, event_id) do nothing
    returning id` — no row returned means this exact event was already handled, so the
@@ -315,7 +315,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    id updates zero rows, and the handler takes the same no-op path. The second is what
    happens when a real gateway retries; the first is what happens when it does not change
    the id.
-5. **A274 — The amount check is equality against `payments.amount_idr` in IDR, and any
+5. **A294 — The amount check is equality against `payments.amount_idr` in IDR, and any
    mismatch is `review`, never an activation.** `paid > amount` and `paid < amount` are the
    same outcome (over- and under-payment both need a human), the row goes to `status =
    'review'` with a `review_reason` naming the two numbers, the raw payload is kept in
@@ -323,14 +323,14 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    `admin::margin_report`'s payment list surfaces it. A currency that is not `IDR` is a
    mismatch for the same reason. This is the one place the spec's "never activate
    automatically" is a hard rule and not a preference.
-6. **A275 — A payment confirmed after its invoice expiry is honoured when the gateway
+6. **A295 — A payment confirmed after its invoice expiry is honoured when the gateway
    says it was paid *before* the expiry, and otherwise goes to `review`.** The spec leaves
    it "configurable"; `QRIS_HONOR_LATE_PAYMENT` (default `true`) decides the first case
    only. The distinction matters because the two cases are different facts: "the student
    paid in time and our webhook was late" is our problem and must not cost the student
    their plan; "the student paid after the code expired" is a gateway-side race that a
    human should look at. `paid_at < expires_at` is the test, and both branches are tested.
-7. **A276 — The period rules are: extend from `current_period_end` when the subscription is
+7. **A296 — The period rules are: extend from `current_period_end` when the subscription is
    `active`/`grace`, start at `paid_at` when it is not, upgrade immediately with the
    prorated difference, downgrade at period end.** The extension rule is what makes paying
    early not lose days; the upgrade is `upgrade_delta()` in `crates/core/src/billing`
@@ -339,7 +339,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    `pending_billing_period` and the rollover applies it, so **a downgrade never shortens a
    paid period** and never deletes anything (`recompute_read_only` then flags what the new
    plan puts over its limit, which is Phase 7's existing path).
-8. **A277 — A credit pack is a `payments` row with `kind = 'credit_pack'` and a grant into
+8. **A297 — A credit pack is a `payments` row with `kind = 'credit_pack'` and a grant into
    the `purchased` bucket with `reason = 'credit_pack'` and `ref_id = payments.id`.** The
    webhook's credit step branches on `kind`: a subscription grants the plan's
    `credits_per_month` through the **existing** `grant()` with the period key
@@ -347,14 +347,14 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
    Phase 7's `monthly_grant` already established), and a credit pack calls the new
    `credits::grant_purchased(pool, user_id, credits, ref_id)`. `ref_id` is what makes a
    double-credit-pack bug visible in the ledger instead of looking like an ordinary grant.
-9. **A278 — Discounts do not stack: the student promo and a discount code are applied
+9. **A298 — Discounts do not stack: the student promo and a discount code are applied
    with `max(percent)`, and a code is once per user and bounded by `max_redemptions`
    atomically.** `discount_codes.redeemed` is incremented in the same transaction that
    writes the payment, guarded by `and (max_redemptions is null or redeemed <
    max_redemptions)`, and a new `discount_redemptions (code, user_id, payment_id,
    created_at, unique (code, user_id))` row is what makes it once per user. Stacking two
    percentages is the kind of generosity nobody notices until the margin report does.
-10. **A279 — Student verification is `users.student_email` plus a purpose-scoped token, and
+10. **A299 — Student verification is `users.student_email` plus a purpose-scoped token, and
     the suffix list is `STUDENT_EMAIL_SUFFIXES` (default `.ac.id`).** `POST
     /billing/student/verify` mails a link to the supplied address (rate-limited, and only
     for a suffix in the list — otherwise the endpoint is a mail amplifier), and `POST
@@ -363,7 +363,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     with a `purpose` column (`email_verify | student_verify`) so one table serves both and
     a token minted for one purpose cannot be spent on the other. The discount then applies
     at checkout from `plans.<id>.student_percent_off`, which is already in the config.
-11. **A280 — Renewal reminders are four enqueues at 7/3/1/0 days before
+11. **A300 — Renewal reminders are four enqueues at 7/3/1/0 days before
     `current_period_end`, deduped by `dedupe_key = "renewal_reminder:<user_id>:<period_end
     date>:<days>"`.** The producer is the existing per-account scheduler pass (extended
     with the four boundaries), and delivery is **Phase 12's** `send_reminder`/`send_push`
@@ -371,7 +371,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     period. On `ios`/`android` the copy is `reminder.planEnding` ("Your plan ends on
     {{date}}.") with **no price and no link** — `billing_policy` decides that, the same
     flag `LockedFeature` reads.
-12. **A281 — `poll_payment` and `reconcile_payments` are separate kinds with separate
+12. **A301 — `poll_payment` and `reconcile_payments` are separate kinds with separate
     schedules.** `poll_payment` runs every 5 minutes over pending payments inside their
     expiry window (the partial index exists for exactly this), asks `get_status`, and
     applies the *same* handler the webhook calls when the gateway says paid — one code
@@ -380,7 +380,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     48) and flags two mismatches: a gateway payment we have no row for, and one of ours the
     gateway does not know. Both are `review` rows with a `review_reason`, never silent
     edits.
-13. **A282 — BYOK is a per-user key plus optional `base_url`/`model`, and the seam is a
+13. **A302 — BYOK is a per-user key plus optional `base_url`/`model`, and the seam is a
     provider the chat path builds for one request.** `user_api_keys` gains `base_url text`
     and `model text` (nullable); `PUT /settings/api-key` encrypts with the same
     `aes-gcm` key and the same `ENCRYPTION_KEY_HEX` the Google refresh token uses,
@@ -391,7 +391,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     writes `usage_events.byok = true` and its provider cost, consumes **no credits**, and is
     excluded from the ceiling (A156). Power only (`Feature::Byok`), web/desktop only
     (a mobile device cannot set one, the same `billing_policy` rule that refuses checkout).
-14. **A283 — `usage_events.plan_id` and `credit_ledger.plan_id` are written at write time,
+14. **A303 — `usage_events.plan_id` and `credit_ledger.plan_id` are written at write time,
     and the margin split reads them with a documented fallback.** This is the deviation the
     roadmap's own sketch needs: "join `usage_events` → `users.plan_id`" attributes a
     converted user's earlier same-month spend to the paid tier, which is wrong in exactly
@@ -400,7 +400,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     nullable (rows written before this phase), and the query uses
     `coalesce(<table>.plan_id, users.plan_id)` so the report is never wrong-by-crash, only
     wrong-by-approximation on pre-Phase-13 history, which it labels.
-15. **A284 — The margin report's definitions are explicit and printed, and its tripwires
+15. **A304 — The margin report's definitions are explicit and printed, and its tripwires
     are computed booleans.** Per month, per plan: `revenue_idr` (sum of `payments.amount_idr`
     where `status='paid'` and `paid_at` in the month), `provider_cost_usd` split
     `free`/`pro`/`power` and, inside each, `byok` vs ours (A156), `gateway_fee_idr`, and
@@ -414,31 +414,31 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
     `free_spend_over_quarter_of_revenue`, `plan_loss_two_months_running` (the last is `null`
     when the range has no previous month, because "two months running" cannot be computed
     from one).
-16. **A285 — `GET /plans` is authenticated and platform-aware, and it omits prices where
+16. **A305 — `GET /plans` is authenticated and platform-aware, and it omits prices where
     `show_prices` is false.** The platform is the device row (A144), so a phone gets the
     plan names, the limits and the features and **no prices**, and the SPA's
     `policy.ts` `showPrices` is a second reading of the same file rather than a second
     decision. The pricing page itself renders on web/desktop only.
-17. **A286 — The checkout screen polls `GET /billing/payments/:id` and renders five
+17. **A306 — The checkout screen polls `GET /billing/payments/:id` and renders five
     states, and the countdown is the server's `expires_at` rendered against the client's
     clock.** The states are the spec's: `waiting`, `paid`, `expired` (with "new QR"), a
     mismatch (`review` → "under review"), `failed`, and offline. A `paid` state never
     renders a QR again, and the poll stops on any terminal status. The server re-checks
     expiry on every poll, so a client whose clock is wrong cannot extend its own invoice.
-18. **A287 — Checkout requires a verified email (A43) and is rate-limited, and a second
+18. **A307 — Checkout requires a verified email (A43) and is rate-limited, and a second
     checkout for the same plan and period reuses the pending invoice instead of minting a
     second QR.** "User paying twice for the same period" is one of the spec's edge cases;
     the reuse rule is `where user_id = $1 and kind = $2 and plan_id = $3 and billing_period
     = $4 and status = 'pending' and expires_at > now()`, and a second *payment* of the same
-    period is handled by the extension rule (A276), not by refusing the money.
-19. **A288 — Every admin payment action is idempotent and audited, and none of them
+    period is handled by the extension rule (A296), not by refusing the money.
+19. **A308 — Every admin payment action is idempotent and audited, and none of them
     deletes anything.** `POST /admin/payments/:id/mark-paid` runs the **same** handler the
-    webhook runs (one code path, A281's rule) with `provider = 'manual'` recorded;
+    webhook runs (one code path, A301's rule) with `provider = 'manual'` recorded;
     `POST /admin/payments/:id/refund` sets `status = 'refunded'` and writes the gateway fee
     as `0` rather than deleting the row; `PATCH /admin/subscriptions/:user_id` extends
     `current_period_end` and calls `recompute_read_only`; `GET /admin/payments?status=review`
-    is the queue A274/A281 feed. Each is a second call that changes nothing.
-20. **A289 — A forged webhook is a `docs/THREAT_MODEL.md` §5 row and the phase's residual
+    is the queue A294/A301 feed. Each is a second call that changes nothing.
+20. **A309 — A forged webhook is a `docs/THREAT_MODEL.md` §5 row and the phase's residual
     risk is `R7`.** §5 gains three rows ("Forge a webhook to activate a plan without
     paying" → Fails: signature + amount + idempotency; "Replay a webhook to double-activate"
     → Fails: the unique key *and* the guarded transition; "Confirm another account's order"
@@ -481,7 +481,7 @@ crates/server/src/billing/mod.rs           # Phase 7's checkout_allowed() + this
 crates/server/src/billing/checkout.rs      # NEW — POST /billing/checkout, the invoice, reuse
 crates/server/src/billing/webhook.rs       # NEW — the verified, idempotent, amount-checked apply
 crates/server/src/billing/apply.rs         # NEW — the ONE transaction both the webhook and
-                                           #       the poller call (A273/A281)
+                                           #       the poller call (A293/A301)
 crates/server/src/billing/student.rs       # NEW — the .ac.id verification flow
 crates/server/src/billing/byok.rs          # NEW — provider_for(), key encrypt/decrypt
 crates/server/src/billing/routes.rs        # NEW — /plans, /billing/*, the public webhook
@@ -501,7 +501,7 @@ crates/server/tests/billing_jakarta.rs     # NEW — gate 6 for this phase's cop
 app/src/api/queries/billing.ts             # NEW
 app/src/features/billing/{PricingScreen,BillingScreen,CheckoutScreen,CheckoutStatus}.tsx # NEW
 app/src/features/billing/{checkout.ts,checkout.test.ts}   # NEW — the pure half
-app/src/features/billing/PlanUsageScreen.tsx              # read-only on mobile (A285)
+app/src/features/billing/PlanUsageScreen.tsx              # read-only on mobile (A305)
 app/src/features/billing/plans.ts          # + prices, credit packs, student price
 app/src/router.tsx                         # /pricing, /billing, /billing/checkout/:id
 app/src/i18n/locales/{en,id}.json          # + pricing.*, billing.*, checkout.*, reminder.*
@@ -606,7 +606,7 @@ fn the_mock_verifies_its_own_signature_and_rejects_a_forged_one() {
 - [ ] **Step 3: Implement**
 
 The trait exactly as contract § 1 writes it, with the DTOs above. `MockPayment`'s
-`parse_and_verify_webhook` verifies `HMAC-SHA259(secret, raw_body)` against
+`parse_and_verify_webhook` verifies `HMAC-SHA279(secret, raw_body)` against
 `x-mock-signature` (hex), then deserialises the body into the `WebhookEvent` fields; a
 body that does not parse is `PaymentError::Invalid`, not a panic.
 
@@ -653,7 +653,7 @@ pub struct QrisConfig {
     pub fee_percent: f64,                    // default 0.0 = "unknown, record nothing"
     pub fee_fixed_idr: i64,
     pub invoice_ttl_minutes: i64,            // default 15 (docs/SPEC.md)
-    pub honor_late_payment: bool,            // default true (A275)
+    pub honor_late_payment: bool,            // default true (A295)
     pub reconcile_hours: i64,                // default 48
 }
 pub enum SignatureScheme { HmacSha256Hex, HmacSha256Base64, SharedToken }
@@ -747,14 +747,14 @@ pub struct PriceBreakdown { pub list_idr: i64, pub percent_off: u8, pub discount
                             pub code_applied: Option<String> }
 
 /// The one function that computes what a student owes. `code` and `student` do not
-/// stack (A278): the larger percentage wins.
+/// stack (A298): the larger percentage wins.
 pub fn price(plan: &PlanConfig, period: BillingPeriod, student: bool,
              code: Option<&DiscountCode>) -> PriceBreakdown;
 
 pub struct PeriodChange { pub start: DateTime<Utc>, pub end: DateTime<Utc>, pub extends: bool }
 
 /// Extension from `current_period_end` when there is live paid time, a fresh
-/// period at `paid_at` otherwise (A276).
+/// period at `paid_at` otherwise (A296).
 pub fn apply_payment(active_end: Option<DateTime<Utc>>, paid_at: DateTime<Utc>,
                      period: BillingPeriod) -> PeriodChange;
 
@@ -862,7 +862,7 @@ async fn checkout_requires_a_verified_email(pool: PgPool) { … }
 async fn checkout_writes_one_pending_payment_with_the_quoted_amount(pool: PgPool) { … }
 
 /// Asking twice for the same plan and period reuses the invoice instead of
-/// minting a second QR (A287) — the spec's "paying twice" case, half of it.
+/// minting a second QR (A307) — the spec's "paying twice" case, half of it.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_second_checkout_for_the_same_period_reuses_the_pending_invoice(pool: PgPool) { … }
 
@@ -924,7 +924,7 @@ git commit -m "feat(server): checkout with the student price, discounts, and one
   grant_purchased}`, `jobs::enqueue`.
 - Produces: `webhook::handle(state, headers, body) -> AppResult<WebhookOutcome>` and
   `apply::apply_paid(state, payment_id, event) -> AppResult<Applied>` — **the one function
-  the webhook and `poll_payment` both call** (A281).
+  the webhook and `poll_payment` both call** (A301).
 
 ```rust
 pub struct WebhookOutcome { pub duplicate: bool, pub status: String }
@@ -946,18 +946,18 @@ pub enum Applied { Activated { plan: PlanId, period_end: DateTime<Utc> },
 async fn a_signed_paid_webhook_activates_the_plan_and_the_second_device_sees_it(pool: PgPool) { … }
 
 /// The same event id twice: one activation, one credit grant, and the second
-/// answer says `duplicate` (A273, the `webhook_events` half).
+/// answer says `duplicate` (A293, the `webhook_events` half).
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_same_event_id_twice_activates_once(pool: PgPool) { … }
 
-/// The same payment under a NEW event id: still one activation (A273, the guarded
+/// The same payment under a NEW event id: still one activation (A293, the guarded
 /// transition half). This is the case a real gateway produces on retry, and the
 /// one a unique-key-only defence misses.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_same_payment_under_a_new_event_id_still_activates_once(pool: PgPool) { … }
 
 /// Over- and under-payment both land in `review` with the two numbers recorded,
-/// and the subscription is untouched (A274).
+/// and the subscription is untouched (A294).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_mismatched_amount_lands_in_review_and_activates_nothing(pool: PgPool) { … }
 
@@ -965,7 +965,7 @@ async fn a_mismatched_amount_lands_in_review_and_activates_nothing(pool: PgPool)
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_payment_made_before_expiry_is_honoured_after_it(pool: PgPool) { … }
 
-/// Paid after expiry: `review`, never automatic (A275).
+/// Paid after expiry: `review`, never automatic (A295).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_payment_made_after_expiry_goes_to_review(pool: PgPool) { … }
 
@@ -975,7 +975,7 @@ async fn a_payment_made_after_expiry_goes_to_review(pool: PgPool) { … }
 async fn an_unknown_order_id_is_not_found_and_writes_nothing(pool: PgPool) { … }
 
 /// A bad signature is 401 `unauthorized`, writes no `webhook_events` row and
-/// touches no payment — the §5 "forge a webhook" row, as a case (A289).
+/// touches no payment — the §5 "forge a webhook" row, as a case (A309).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_forged_signature_is_unauthorized_and_changes_nothing(pool: PgPool) { … }
 
@@ -1116,12 +1116,12 @@ async fn paying_after_expiry_starts_a_fresh_period_at_paid_at(pool: PgPool) { �
 async fn an_upgrade_switches_immediately_and_charges_the_prorated_difference(pool: PgPool) { … }
 
 /// A downgrade is recorded, not applied: the plan changes at the period end and
-/// the paid time is never shortened (A276).
+/// the paid time is never shortened (A296).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_downgrade_waits_for_the_period_end_and_never_shortens_paid_time(pool: PgPool) { … }
 
 /// The purchased bucket: a credit pack lands there, is never expired by the
-/// rollover, and is spent after the monthly bucket (A9/A277).
+/// rollover, and is spent after the monthly bucket (A9/A297).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_credit_pack_lands_in_the_purchased_bucket_and_survives_the_rollover(pool: PgPool) { … }
 
@@ -1183,7 +1183,7 @@ git commit -m "feat(server): extension, prorated upgrade, period-end downgrade a
 async fn the_seven_three_one_and_zero_day_reminders_each_fire_once(pool: PgPool) { … }
 
 /// A second scheduler pass in the same day enqueues nothing: the dedupe key is
-/// the watermark (A280), exactly as the grant's period key is (A152).
+/// the watermark (A300), exactly as the grant's period key is (A152).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_second_pass_sends_nothing(pool: PgPool) { … }
 
@@ -1263,7 +1263,7 @@ async fn a_free_or_pro_account_cannot_store_a_key(pool: PgPool) { … }   // 403
 async fn the_key_is_encrypted_at_rest_and_never_returned(pool: PgPool) { … }
 
 /// A BYOK call spends no credits and is recorded with `byok = true` and its
-/// provider cost, so the margin report can exclude it (A156/A282).
+/// provider cost, so the margin report can exclude it (A156/A302).
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_byok_call_consumes_no_credits_and_is_recorded_as_byok(pool: PgPool) { … }
 
@@ -1311,11 +1311,11 @@ git commit -m "feat(server): BYOK for Power, with no credits spent and the cost 
 **Files:**
 - Create: `crates/server/tests/admin_margin.rs`
 - Modify: `crates/server/src/admin.rs` (Phase 7's file), `crates/server/src/routes/mod.rs`,
-  `crates/server/src/credits.rs` (write `plan_id` on spend and grant — A283),
+  `crates/server/src/credits.rs` (write `plan_id` on spend and grant — A303),
   `crates/server/src/billing/apply.rs` (write `usage_events.plan_id`)
 
 **Interfaces:**
-- Consumes: `AdminUser`, `billing::apply::apply_paid` (**the same function**, A288),
+- Consumes: `AdminUser`, `billing::apply::apply_paid` (**the same function**, A308),
   `entitlements::recompute_read_only`, `credits::grant`.
 - Produces: the completed `MarginReport` and the four admin routes.
 
@@ -1344,13 +1344,13 @@ pub struct Tripwires { pub free_utilization_over_30: Option<bool>,
 async fn the_margin_report_splits_free_and_paid_provider_cost_per_plan_and_month(pool: PgPool) { … }
 
 /// **The attribution case.** A user who was free in June and paid in July keeps
-/// June's cost in the free column (A283). Seeded with `usage_events.plan_id`, this
+/// June's cost in the free column (A303). Seeded with `usage_events.plan_id`, this
 /// is the test that fails if the query falls back to `users.plan_id`.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_user_who_converted_in_july_keeps_junes_cost_in_the_free_column(pool: PgPool) { … }
 
 /// Utilization and conversion are derived from that split, and the two conversion
-/// ratios are both present because A46's 4% is one of them (A284).
+/// ratios are both present because A46's 4% is one of them (A304).
 #[sqlx::test(migrations = "../../migrations")]
 async fn free_tier_utilization_and_conversion_are_derived_from_the_split(pool: PgPool) { … }
 
@@ -1369,7 +1369,7 @@ async fn byok_cost_is_its_own_column(pool: PgPool) { … }
 async fn the_tripwires_are_computed_and_the_two_month_one_is_null_without_a_previous(pool: PgPool) { … }
 
 /// Marking paid runs the webhook's own apply, so it activates once and a second
-/// call changes nothing (A288).
+/// call changes nothing (A308).
 #[sqlx::test(migrations = "../../migrations")]
 async fn marking_a_payment_paid_activates_once(pool: PgPool) { … }
 
@@ -1580,7 +1580,7 @@ exist, which is why it is written here.
       `## Quiz (Phase 5)`: the trait-first design and exactly what B1 changes; the
       documented internal contract and the one mapping file; the two idempotency defences
       and why one is not enough; the single-transaction apply; polling and reconciliation
-      as one code path; the period rules; and the margin split with A283's attribution and
+      as one code path; the period rules; and the margin split with A303's attribution and
       why the roadmap's literal join is wrong in the conversion month.
 
 - [ ] **Step 4: `docs/RELEASE.md`.** The store-policy section ("read before Phase 13/14")
@@ -1591,13 +1591,13 @@ exist, which is why it is written here.
       the OAuth redirect URI and the updater manifests all need a host with the product's
       lifetime.
 
-- [ ] **Step 5: `docs/THREAT_MODEL.md`.** §5 gains the three rows A289 names, each with its
+- [ ] **Step 5: `docs/THREAT_MODEL.md`.** §5 gains the three rows A309 names, each with its
       enforcement; §6 gains **R7** (the gateway's own claim of payment is unverifiable by
       us: a signature proves provenance, not settlement; revisit if the gateway exposes a
       settlement API or if a mismatch rate above `X` appears in reconciliation); §9's
       Phase 13 row names `crates/server/tests/webhooks.rs`.
 
-- [ ] **Step 6: `docs/ASSUMPTIONS.md`.** A270–A289 in the "Pinned decisions" table; the
+- [ ] **Step 6: `docs/ASSUMPTIONS.md`.** A290–A309 in the "Pinned decisions" table; the
       schema-deviation rows for `0034` (the `plan_id` columns with their rationale, the
       payment breakdown columns, `discount_redemptions`, `email_verification_tokens.purpose`,
       `user_api_keys.base_url`/`model`); the B1 row updated to record that the trait-first
@@ -1701,7 +1701,7 @@ yearly toggle (default yearly), one-time credit packs, discount codes, student d
 (auto-apply when `.ac.id` is verified), admin tools, require verified email before
 checkout" → Tasks 3, 4, 11 and 10; "Never trust client-reported payment status … gateway
 secrets only in env … restrict the webhook endpoint (signature verification, plus IP
-allowlist)" → A272 and Task 5; "`config/billing_policy.toml` … mobile builds must contain
+allowlist)" → A292 and Task 5; "`config/billing_policy.toml` … mobile builds must contain
 no checkout screen, no purchase buttons, and no links or text directing users to buy
 elsewhere" → Task 12; § Plans' prices and `student_percent_off` → Task 3 and the values
 table; § Entitlements engine's "admin margin report (revenue minus provider cost minus
@@ -1711,13 +1711,13 @@ idempotent duplicate webhooks, amount mismatch → review, late payment after ex
 extension stacking vs fresh start, prorated upgrade, polling fallback activates a payment
 when the webhook is missing, billing_policy hides purchase UI/endpoints on ios/android" →
 the exit checklist rows 10–12 and 14–19, one test each. Roadmap Phase 13's paragraph and
-its margin-report paragraph → the whole plan, with A283 correcting the attribution and A284
+its margin-report paragraph → the whole plan, with A303 correcting the attribution and A304
 naming every definition.
 
 **Placeholders.** None. Every task names its files, its exact test, its run command and its
 commit. The four genuine unknowns the spec leaves open are pinned rather than waved at:
-the credit-pack amounts (a config table, A21), the signature scheme (a closed set, A272),
-the late-payment rule (config, A275), and the conversion definition (both ratios, A284).
+the credit-pack amounts (a config table, A21), the signature scheme (a closed set, A292),
+the late-payment rule (config, A295), and the conversion definition (both ratios, A304).
 **B1 is not a placeholder** — it is the phase's stated risk, with the exact blast radius
 written down.
 
@@ -1738,12 +1738,12 @@ webhook checks** come from one function (`stvdy_core::billing::price`) and one c
 charged one number and activated against another, and nothing about it looks wrong in
 review.
 
-**Deviations from the contract, each recorded:** A270 (`crates/core` takes `http` for the
-contract's own `HeaderMap`), A272 (three signature schemes rather than the spec's unnamed
-one), A275 (the late-payment rule made configurable with a stated default), A280 (renewal
-reminders are a *producer* into Phase 12's delivery, not a second delivery path), A282
-(BYOK's `base_url`/`model` columns beyond the spec's `provider`), **A283 (the `plan_id`
-columns, which correct the roadmap's literal `users.plan_id` join)**, and A284 (the
+**Deviations from the contract, each recorded:** A290 (`crates/core` takes `http` for the
+contract's own `HeaderMap`), A292 (three signature schemes rather than the spec's unnamed
+one), A295 (the late-payment rule made configurable with a stated default), A300 (renewal
+reminders are a *producer* into Phase 12's delivery, not a second delivery path), A302
+(BYOK's `base_url`/`model` columns beyond the spec's `provider`), **A303 (the `plan_id`
+columns, which correct the roadmap's literal `users.plan_id` join)**, and A304 (the
 conversion definition given twice because A46's figure is the `paying ÷ free` one).
 
 **Open items.**

@@ -313,9 +313,9 @@ prerequisite)", and `docs/superpowers/plans/2026-10-11-phase-6-reports-cheatshee
   manifests, or any user data behind it"), A47 (Supabase is never the production
   database), A15 (production object storage = **Cloudflare R2**; the client is unchanged,
   only the backend).
-- The highest written row is **A131**. Phase 11's block is A230-A249; the rows are
-  allocated per phase and this plan takes **A310** upward (the next free number after the
-  A290-A309 block Phase 14 owns), because the reserved-block scheme collides with the
+- The highest written row is **A131**. Phase 11's block is A250-A269; the rows are
+  allocated per phase and this plan takes **A330** upward (the next free number after the
+  A310-A329 block Phase 14 owns), because the reserved-block scheme collides with the
   numbered rows from A100 onward — the same reason Phases 9-11 ignored their reserved
   blocks and continued the sequence.
 
@@ -363,7 +363,7 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
 
 ## Decisions this plan pins (so parallel work cannot diverge)
 
-1. **A310 — Production host: a Linux VPS with a lifetime that matches the product, in an
+1. **A330 — Production host: a Linux VPS with a lifetime that matches the product, in an
    Indonesian region, with a managed Postgres.** A45 forbids production on the
    `168.110.202.106` trial host and A47 forbids Supabase's free tier as the production
    database. The decision this plan pins is the *shape*, because the specific vendor is
@@ -373,20 +373,20 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
    **the container is deployed as one process** (API + worker + scheduler, per
    `main.rs`). The user names the vendor; `docs/OPERATIONS.md` carries the checklist that
    a candidate must satisfy before it is accepted.
-2. **A311 — Cloudflare R2 is the production object store, and the client does not
+2. **A331 — Cloudflare R2 is the production object store, and the client does not
    change.** A15 already decided this; what this plan pins is the configuration:
    `STORAGE_BACKEND=s3`, `S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com`,
    `S3_REGION=auto`, `S3_FORCE_PATH_STYLE=false`, an R2 API token scoped to one bucket,
    and **no public bucket** — reads are presigned only (`PRESIGN_TTL_SECS`), because
    `GET /sources/:id/file` already hands out short-lived scoped URLs.
-3. **A312 — The updater's private key never enters the repository and is used in exactly
+3. **A332 — The updater's private key never enters the repository and is used in exactly
    one workflow.** `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are
    Actions secrets; the public key is committed in `tauri.conf.json`'s
    `plugins.updater.pubkey`; `scripts/verify-release-artifacts.sh` **refuses to run** if
    the private key is present in its environment, so the key cannot leak onto a developer
    machine by habit. Rotation is documented, and rotating it requires a release, because
    installed apps verify against the compiled-in public key.
-4. **A313 — The macOS build is a universal binary, signed with a Developer ID
+4. **A333 — The macOS build is a universal binary, signed with a Developer ID
    Application certificate, notarized with `notarytool`, and stapled.** Hardened runtime
    on, `minimumSystemVersion` 11.0 (already set), the two entitlements the shell actually
    needs and no others, and the notarization ticket stapled into the `.app` and the `.dmg`
@@ -394,25 +394,25 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
    membership, the certificate and the notarytool credentials are the user's**; without
    them the build still produces an unsigned universal `.app`/`.dmg` that runs on the
    operator's machine, and `docs/RELEASE.md` says plainly that it must not be distributed.
-5. **A314 — Windows ships an NSIS `perMachine` installer signed with an Authenticode
+5. **A334 — Windows ships an NSIS `perMachine` installer signed with an Authenticode
    certificate, SHA-256, with an RFC 3161 timestamp.** `installMode: "perMachine"` is
    already pinned in the config; the signature comes from a certificate thumbprint on the
    `windows-2025` runner (or Tauri's `signCommand` for a cloud signer). Without a
    certificate the installer builds unsigned; SmartScreen then warns on every install,
    and `docs/RELEASE.md` records that as a known degraded state rather than a defect.
-6. **A315 — `createUpdaterArtifacts: true` and the `updater` capability arrive
+6. **A335 — `createUpdaterArtifacts: true` and the `updater` capability arrive
    together, and mobile is excluded by construction.** The plugin's own platform matrix is
    `ios: none, android: none`, so a mobile build that enabled the capability would fail to
    compile rather than silently expose an API that does nothing. The capability goes in
    `capabilities/desktop.json` (the file already exists and already carries the comment
    saying the updater arrives here) rather than a fourth capability file — the permission
    is desktop-only, and one file that says so is better than two that agree.
-7. **A316 — The update is offered, never automatic, and the panel shows only what the
+7. **A336 — The update is offered, never automatic, and the panel shows only what the
    manifest said.** No silent download, no auto-restart, no "security update" wording
    unless the manifest is signed and verified. The panel renders the version string and
    the notes the manifest carried; it never computes a size or a percentage it did not
    receive. This is gate 7(a) applied to the one screen this phase adds.
-8. **A317 — The container is `debian:bookworm-slim`, multi-stage, and the image carries
+8. **A337 — The container is `debian:bookworm-slim`, multi-stage, and the image carries
    the *test* binaries too.** Chromium is installed from a **pinned Debian package
    version** (`ARG CHROMIUM_VERSION`, no `apt-get upgrade`, no `chromium` meta-package
    that tracks `stable`) and `CHROME_PATH` names it. `debian:bookworm-slim` rather than
@@ -423,14 +423,14 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
    `target/release/` directory is copied in so `cargo test --test pdf` can run inside the
    image (Risk 2's defence); the image is therefore larger than a minimal runtime, and
    that is a deliberate trade.
-9. **A318 — Chromium runs with its sandbox, and the container is not privileged.** The
+9. **A338 — Chromium runs with its sandbox, and the container is not privileged.** The
    renderer refuses an unsandboxed render outside dev
    (`crates/server/src/render/chrome.rs:96-101`), so the image must provide what the
    sandbox needs: a non-root user, a writable `/tmp` with the right mount options
    (documented as `--tmpfs /tmp` or a volume), and `--shm-size` guidance. Running as root
    with `--no-sandbox` is explicitly **not** the answer, and the image's `pdf` acceptance
    run is what proves the sandbox works there.
-10. **A319 — The print assets are served by the server from an `assets/` directory, and
+10. **A339 — The print assets are served by the server from an `assets/` directory, and
     the template's CDN URLs are rewritten to it.** `rust-embed` embeds `assets/` into the
     binary and a `GET /assets/{*path}` route serves it with explicit content types and
     `Cache-Control: public, max-age=31536000, immutable`; the renderer rewrites the
@@ -441,19 +441,19 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     does and is exactly the failure `docs/RELEASE.md` describes. **Serving them over the
     server's own loopback origin is deliberate:** `document.write` gives the page no base
     URL, so a relative or `file://` reference would not resolve.
-11. **A320 — The `data-math-ready` guard is the asset check, and it stays the gate.** The
+11. **A340 — The `data-math-ready` guard is the asset check, and it stays the gate.** The
     rewrite does not weaken it: a missing or 404 asset leaves
     `window.renderMathInElement` undefined, the template marks `unavailable`, and
     `render_within` fails the job with `RenderError::MathNotReady`. No new "did the
     assets load" assertion is added, because that would be a second check of the same
     fact and the first one already fails the render.
-12. **A321 — pdfium is baked in at a pinned version with a verified checksum.** The pin
+12. **A341 — pdfium is baked in at a pinned version with a verified checksum.** The pin
     is the `pdfium-binaries` release this repo's own test already names
     (`chromium/8086`, `crates/server/tests/pdfium.rs:41`), downloaded in the build stage,
     **checksum-verified**, installed at `/opt/pdfium/libpdfium.so`, with
     `PDFIUM_LIB_PATH` set. A51's policy is unchanged: a set-but-unloadable path fails
-    boot. `libpdfium` is a glibc build, which is the second reason for A317's base image.
-13. **A322 — The embedding model is pre-baked into the image and
+    boot. `libpdfium` is a glibc build, which is the second reason for A337's base image.
+13. **A342 — The embedding model is pre-baked into the image and
     `FASTEMBED_CACHE_DIR` is absolute.** A2 says 1.06 GB fp32 and "pre-baked into the
     server image". The default in `config.rs:293` is the **relative** `.fastembed_cache`,
     which in a container means "relative to the working directory" — so a deployment that
@@ -463,7 +463,7 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     build-time population is verified by a check that the cache directory is non-empty and
     that the boot-time dimension assertion (`EMBEDDING_DIM` vs `chunks.embedding`, A2)
     still passes inside the image.
-14. **A323 — LibreOffice is in the image, for the PPTX/DOCX preview, behind
+14. **A343 — LibreOffice is in the image, for the PPTX/DOCX preview, behind
     `SOFFICE_BIN`.** `docs/SPEC.md:99` and the Phase 15 line both name it, and A158
     defines the policy: an unset or unloadable `SOFFICE_BIN` leaves the source ingested
     with no preview rather than failing. The image installs `libreoffice-core` +
@@ -472,14 +472,14 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     ingestion lands** (`grep -rn SOFFICE crates/` finds nothing today), so the image
     carries a capability the code does not yet use — stated here rather than discovered
     later.
-15. **A324 — SearXNG is a separate service on the production host, not a service in the
+15. **A344 — SearXNG is a separate service on the production host, not a service in the
     server image.** A3's tier 2 is a self-hosted compose service at `SEARXNG_URL`; A45
     names it among what the trial host is for. Bundling it into the app image would
     couple a Python service's upgrade cadence to the Rust server's, and the composite
     search already treats a dead tier as `unresponsive` rather than fatal. `SEARXNG_URL`
     points at the service's internal address; `docs/OPERATIONS.md` carries the deploy
     note and the `SEARXNG_SECRET` handling.
-16. **A325 — The release workflow runs only after CI is green on the tagged commit, and
+16. **A345 — The release workflow runs only after CI is green on the tagged commit, and
     it is the only place a signing secret is used.** `release.yml` is triggered by a
     `v*` tag, re-runs the same checks as `ci.yml` as a gate job, then builds: macOS
     universal (signed + notarized + stapled), Windows NSIS (signed), the updater
@@ -489,27 +489,27 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     `https://updates.stvdy.app/{{target}}/{{arch}}/{{current_version}}` (or the
     operator's equivalent), a value the user supplies, because a manifest endpoint on a
     trial host is exactly what A45 forbids.
-17. **A326 — `--migrate-only` is the deployment's migration step.** `main.rs` migrates on
+17. **A346 — `--migrate-only` is the deployment's migration step.** `main.rs` migrates on
     every boot with no lock, so two replicas starting together race. A new
     `--migrate-only` flag runs `connect` → `migrate` → `seed_plans` → exit, and the deploy
     procedure runs it once before the app container starts. `docs/OPERATIONS.md` carries
     the two commands. This is a **code** change, small and testable, and it is the one
     place this phase touches `main.rs`.
-18. **A327 — Backups are Postgres PITR plus R2 versioning, with a restore drill that
+18. **A347 — Backups are Postgres PITR plus R2 versioning, with a restore drill that
     runs.** RPO 15 minutes / RTO 4 hours, both stated because "we have backups" is not a
     claim a restore can fail. `scripts/restore-drill.sh` restores the newest dump into a
     scratch database, runs `sqlx migrate info` and a row-count comparison, and prints
     `=== PASS`; it is run before launch and quarterly after, and its output is recorded in
     `docs/OPERATIONS.md`. **A backup that has never been restored is a hope**, so the
     drill is a documented, repeatable command and not a paragraph.
-19. **A328 — Monitoring is four signals with thresholds, and one of them is money.**
+19. **A348 — Monitoring is four signals with thresholds, and one of them is money.**
     Liveness (`/health`), job backlog age (`jobs` where `status='queued'`), provider spend
     against `provider_cost_ceiling_usd` (A41 — the ceiling is enforced in code, but
     nobody is told when it trips), and 5xx rate. Alert routing is the operator's (a mail
     address and a chat webhook), and the alerting source is an external uptime check
     against `/health` plus a daily job-backlog query, because a server that is down
     cannot report that it is down.
-20. **A329 — The breach runbook is a written sequence with the two facts a runbook needs
+20. **A349 — The breach runbook is a written sequence with the two facts a runbook needs
     to be useful: who decides, and how long we have.** UU PDP's notification window, the
     data inventory (what is actually stored, per table, from `docs/ARCHITECTURE.md` and
     the schema), the containment steps in order (revoke sessions, rotate
@@ -517,7 +517,7 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     preservation rule, and the notification template. Retention: `change_log` 90 days
     (A19), deleted accounts purged by `purge_deleted_accounts`, `var/mail` dev sink never
     used in prod, object storage lifecycle rules on R2.
-21. **A330 — Licensing artifacts: the EULA/ToS is a new `docs/EULA.md`, and the notices
+21. **A350 — Licensing artifacts: the EULA/ToS is a new `docs/EULA.md`, and the notices
     file is corrected rather than replaced.** `LICENSE` (A44) already does the
     rights-reserved work; what is missing is the terms a *service* is offered under and a
     privacy notice, both of which are legal drafts the user must review. The plan produces
@@ -527,7 +527,7 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     review**, and fixes `THIRD_PARTY_NOTICES.md`'s font list (Plus Jakarta Sans / Inter /
     JetBrains Mono, not IBM Plex) and adds the image's bundled components. No legal advice
     is offered and none is implied.
-22. **A331 — Store submission checklists are per store, per artifact, with the evidence
+22. **A351 — Store submission checklists are per store, per artifact, with the evidence
     named.** Apple (privacy labels, in-app account deletion, review notes explaining
     QRIS-only and the absence of purchase UI, TestFlight build numbers) and Google (Data
     Safety form, deletion URL, review notes, Play internal testing then production). The
@@ -535,19 +535,19 @@ route that serves `assets/`; `assets/` itself (KaTeX, fonts) and the fetch scrip
     `scripts/check-mobile-no-purchase.sh` over the built mobile bundle plus the
     server-side refusal (`platform in (ios, android)` → 403). A checklist row without a
     command is a wish; every row here names one or names the user action it needs.
-23. **A332 — The Android direct-APK channel is a signed release APK published to the
+23. **A352 — The Android direct-APK channel is a signed release APK published to the
     website, and it is not the Play build.** The same version string, a different signing
     key (the APK key is the operator's; Play App Signing holds its own), and the same
     `billing_policy` — the direct APK must not contain purchase UI either, because the
     policy is a config compile-time read and not a store rule. `docs/RELEASE.md` records
     which key signs which artifact, because confusing them is how an upgrade fails to
     install.
-24. **A333 — The server and the shell are versioned independently and the release tag
+24. **A353 — The server and the shell are versioned independently and the release tag
     names both.** `tauri.conf.json`'s `version` stays the shell's; the server's is
     `CARGO_PKG_VERSION` and is what `/health` reports. A server-only hotfix ships without
     a client release (clients are not recallable, and an update prompt for a fix that does
     not touch the client is noise). `docs/RELEASE.md` § Versioning carries the table.
-25. **A334 — `docs/RELEASE.md` is normative and `docs/OPERATIONS.md` is its runbook
+25. **A354 — `docs/RELEASE.md` is normative and `docs/OPERATIONS.md` is its runbook
     appendix.** Every operational procedure lives in one of the two; the plan does not
     create a third. `docs/RELEASE.md` keeps the sections it already has (distribution,
     policy, the image prerequisite, tax, versioning) and gains the release process, the
@@ -576,8 +576,8 @@ while it is outstanding.
 | **Tax / PPN determination and privacy-label text** (B2) | Tasks 12, 14 | **User** (a tax professional and a lawyer) | Invoices carry no tax line items and the privacy notice is a marked draft. Both are launch blockers and neither is a code change. |
 | **QRIS gateway identity, API docs and the PJP identification** (B1) | Task 13 (as a blocker row) | **User** | No revenue path exists. Phase 13 is implemented against an internal contract; the gateway's field mapping and signature scheme are the only open items. **Lead-time work, not code.** |
 | **SMTP credentials and a From address** (B3) | Task 13 (as a blocker row) | **User** | No account can verify its email, and A43 makes verification a precondition for spending, so **no user can use the product**. The dev sink (`var/mail`) is not a production path. |
-| **A production host** (A310) and the domain(s) | Tasks 6, 9, 15 | **User** (the purchase) | Everything in this plan can be built, tested and published to a release page; nothing can be *deployed*. A45 forbids the trial VPS, and putting the updater manifest or the QRIS webhook behind it is the specific mistake the row names. |
-| **Cloudflare R2** account, bucket and API token (A15/A311) | Task 6 | **User** | `STORAGE_BACKEND=local` works on a single host's disk and is not durable or shareable; `docs/RELEASE.md` records the R2 configuration as the production value. |
+| **A production host** (A330) and the domain(s) | Tasks 6, 9, 15 | **User** (the purchase) | Everything in this plan can be built, tested and published to a release page; nothing can be *deployed*. A45 forbids the trial VPS, and putting the updater manifest or the QRIS webhook behind it is the specific mistake the row names. |
+| **Cloudflare R2** account, bucket and API token (A15/A331) | Task 6 | **User** | `STORAGE_BACKEND=local` works on a single host's disk and is not durable or shareable; `docs/RELEASE.md` records the R2 configuration as the production value. |
 
 ---
 
@@ -619,7 +619,7 @@ docs/RELEASE.md                              # the normative document: release p
 docs/OPERATIONS.md                           # NEW — backups, restore drill, monitoring, breach, retention, host checklist
 docs/EULA.md                                 # NEW — draft terms + privacy notice, marked for review
 docs/ARCHITECTURE.md                         # + the image's contents and the asset-serving decision
-docs/ASSUMPTIONS.md                          # + A310-A334, and B1/B2/B3 status
+docs/ASSUMPTIONS.md                          # + A330-A354, and B1/B2/B3 status
 docs/THREAT_MODEL.md                         # + the update channel as an asset and its row in § 5/§ 6
 THIRD_PARTY_NOTICES.md                       # corrected fonts + the image's components
 README.md                                    # + deployment, release and mobile sections
@@ -635,7 +635,7 @@ README.md                                    # + deployment, release and mobile 
 - Create: `crates/server/tests/release.rs`
 
 **Interfaces:**
-- Consumes: A35 (the plugin arrives here), A312, A315.
+- Consumes: A35 (the plugin arrives here), A332, A335.
 - Produces: `plugins.updater` in the config with `endpoints` and `pubkey`;
   `createUpdaterArtifacts: true`; `updater:default` in the desktop capability; the
   plugin registered under `#[cfg(desktop)]`.
@@ -724,7 +724,7 @@ contributor's build is unsigned rather than failing on a missing identity.
 
 ```toml
 # Desktop-only: the plugin declares `ios: none, android: none`, and mobile updates
-# ship through TestFlight/Play (A35, A315). Registered here rather than in Phase 0
+# ship through TestFlight/Play (A35, A335). Registered here rather than in Phase 0
 # because it panics at startup without a signing keypair and a release endpoint.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.13.3"
@@ -742,7 +742,7 @@ own platform matrix — a mobile build cannot see the permission.
 ```rust
 // The updater is desktop-only, and it is the one plugin whose absence from mobile is
 // enforced by the plugin rather than by us: its own platform matrix is
-// `ios: none, android: none`, so this block is cfg'd to match (A315).
+// `ios: none, android: none`, so this block is cfg'd to match (A335).
 #[cfg(desktop)]
 let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 ```
@@ -765,7 +765,7 @@ fn the_windows_installer_is_per_machine_and_sha256_timestamped() { … }
 fn the_version_is_the_workspace_version() { … }   // tauri.conf.json version == Cargo.toml [workspace.package] version
 ```
 
-The last one is the version-drift guard A333 needs: two files that must agree and a test
+The last one is the version-drift guard A353 needs: two files that must agree and a test
 that says so beats a release that ships 0.1.0 twice.
 
 - [ ] **Step 7: Run the tests**
@@ -812,7 +812,7 @@ constraint that makes the panel safe:
   Settings section is absent rather than disabled — a disabled "Check for updates" on a
   phone is a promise the platform cannot keep).
 - `available` renders the version and the notes **exactly as the manifest carried them**,
-  and renders **no** percentage, no size and no "security update" label (A316).
+  and renders **no** percentage, no size and no "security update" label (A336).
 - `error` renders a message and a retry, and does **not** render "you are up to date".
   A failed check that reads as success is the one bug this panel can have that a user
   cannot detect.
@@ -867,7 +867,7 @@ install action is labelled as an update, not as a "fix" or a "security patch".
   job), `docs/RELEASE.md`
 
 **Interfaces:**
-- Consumes: A313, the `macos-15` runner, `tauri build --target universal-apple-darwin`.
+- Consumes: A333, the `macos-15` runner, `tauri build --target universal-apple-darwin`.
 - Produces: a `.dmg` and a `.app` that pass `codesign --verify --deep --strict`,
   `spctl -a -vvv`, and `xcrun stapler validate`.
 
@@ -887,7 +887,7 @@ hardened runtime blocks JIT and unsigned executable memory, so an entitlement ad
 in case" is a hole that survives review:
 
 ```xml
-<!-- The hardened runtime is on (A313). These two are the ones the shell needs:
+<!-- The hardened runtime is on (A333). These two are the ones the shell needs:
      the webview's JavaScript engine requires the JIT allowance on macOS, and the
      app writes its SQLite cache and outbox under the app data directory. Anything
      else here is a hole that a reviewer would have to find. -->
@@ -949,7 +949,7 @@ they ran on, so the claim "signed and notarized" is a transcript rather than an 
 - Modify: `.github/workflows/release.yml`, `docs/RELEASE.md`
 
 **Interfaces:**
-- Consumes: A314, the `windows-2025` runner, the `nsis` bundle target already in
+- Consumes: A334, the `windows-2025` runner, the `nsis` bundle target already in
   `tauri.conf.json`.
 - Produces: a signed `Stvdy_<version>_x64-setup.exe` that passes
   `osslsigncode verify`.
@@ -994,7 +994,7 @@ not a release failure; a release that did not say so is.
 - Modify: `docs/RELEASE.md` (§ Versioning, § Release process)
 
 **Interfaces:**
-- Consumes: Tasks 1, 3, 4; A325, A333; the `v*` tag.
+- Consumes: Tasks 1, 3, 4; A345, A353; the `v*` tag.
 - Produces: a GitHub Release with the macOS dmg, the Windows installer, the Android APK,
   the updater artifacts (`*.app.tar.gz`, `*.nsis.zip`, and their `.sig` files) and
   `latest.json`.
@@ -1010,7 +1010,7 @@ because tags are not commits.
 
 Three jobs, each producing its own artifacts: `macos` (Task 3, universal, signed,
 notarized, stapled), `windows` (Task 4, NSIS, signed), `android` (the release APK for the
-direct channel, A332). Each uploads its artifacts and its `.sig` files. `createUpdaterArtifacts:
+direct channel, A352). Each uploads its artifacts and its `.sig` files. `createUpdaterArtifacts:
 true` makes Tauri emit the `.sig` next to each updater archive; a job that produced the
 archive and not the signature is a failure, and the workflow asserts the `.sig` exists
 rather than trusting the bundler's exit code.
@@ -1020,7 +1020,7 @@ rather than trusting the bundler's exit code.
 `latest.json` is generated from the artifacts, with one entry per
 `{{target}}/{{arch}}` pair, each carrying `signature` (the contents of the `.sig`) and
 `url` (the release asset URL). It is **signed with the same minisign key** and published
-to the static endpoint `plugins.updater.endpoints` names (A325). The manifest is the
+to the static endpoint `plugins.updater.endpoints` names (A345). The manifest is the
 artifact whose integrity the whole channel rests on, so the workflow verifies its own
 output: it downloads the published manifest back over HTTPS, verifies the signature
 against the committed public key, and fails if that round trip does not hold.
@@ -1029,7 +1029,7 @@ against the committed public key, and fails if that round trip does not hold.
 
 A step asserts `Cargo.toml [workspace.package] version`, `src-tauri/tauri.conf.json
 version`, and the tag (without its `v`) agree, and fails with the three values printed.
-A333's rule — the server and the shell are versioned independently — means the *tag* names
+A353's rule — the server and the shell are versioned independently — means the *tag* names
 the shell, and a server-only hotfix is tagged `server-v…` and skips the client jobs. The
 table in `docs/RELEASE.md` § Versioning is what makes that a procedure rather than a
 guess.
@@ -1052,7 +1052,7 @@ installer or an unstapled dmg fails here, before the artifact is published.
 - Modify: `docs/ARCHITECTURE.md` (§ Container image), `docs/RELEASE.md`
 
 **Interfaces:**
-- Consumes: A317-A323, the config keys `CHROME_PATH` / `PDFIUM_LIB_PATH` /
+- Consumes: A337-A343, the config keys `CHROME_PATH` / `PDFIUM_LIB_PATH` /
   `FASTEMBED_CACHE_DIR` / `SOFFICE_BIN`, `docs/RELEASE.md:66-112`.
 - Produces: an image whose `/usr/bin/google-chrome --version` equals
   `ARG CHROMIUM_VERSION`, whose `/opt/pdfium/libpdfium.so` exists, whose
@@ -1082,7 +1082,7 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release --workspace --locked
 ```
 
-The whole `target/release/` directory is what the runtime stage copies (A317), so the
+The whole `target/release/` directory is what the runtime stage copies (A337), so the
 acceptance test binaries come with it. `--locked` so the image builds the lockfile that
 CI tested.
 
@@ -1116,10 +1116,10 @@ ARG PDFIUM_RELEASE=chromium/8086
 # checksum is committed here rather than fetched-and-trusted: an unpinned download
 # from a release URL is a supply-chain hole in the one dependency that parses
 # attacker-supplied files.
-ARG PDFIUM_SHA259=<sha256 of pdfium-linux-x64.tgz for that release>
+ARG PDFIUM_SHA279=<sha256 of pdfium-linux-x64.tgz for that release>
 RUN curl -sSL -o /tmp/pdfium.tgz \
       "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_RELEASE}/pdfium-linux-x64.tgz" \
-    && echo "${PDFIUM_SHA259}  /tmp/pdfium.tgz" | sha256sum -c - \
+    && echo "${PDFIUM_SHA279}  /tmp/pdfium.tgz" | sha256sum -c - \
     && mkdir -p /opt/pdfium && tar xz -C /opt/pdfium --strip-components=1 -f /tmp/pdfium.tgz \
     && rm /tmp/pdfium.tgz
 ENV PDFIUM_LIB_PATH=/opt/pdfium/lib/libpdfium.so
@@ -1134,13 +1134,13 @@ layout cannot differ between the image and the running process:
 # `FASTEMBED_CACHE_DIR` is RELATIVE in config.rs (`.fastembed_cache`), which in a
 # container means "relative to the working directory" — so a deployment that changed
 # WORKDIR would silently re-download 1.06 GB at first ingest, on a host that may have
-# no egress (A322). The image sets an absolute path and populates it here, so the
+# no egress (A342). The image sets an absolute path and populates it here, so the
 # first ingest never touches the network.
 ENV FASTEMBED_CACHE_DIR=/opt/models/fastembed
 RUN cargo run --release -p stvdy-server --fetch-embedder-model
 ```
 
-`--fetch-embedder-model` is a second small flag alongside A326's `--migrate-only`: it
+`--fetch-embedder-model` is a second small flag alongside A346's `--migrate-only`: it
 builds the embedder (which downloads into `FASTEMBED_CACHE_DIR`) and exits. It is the
 honest way to populate the cache, because it uses `fastembed`'s own layout rather than a
 hand-copied directory that a version bump would invalidate.
@@ -1167,11 +1167,11 @@ mistaken for a mistake.
 ```dockerfile
 # A non-root user, because Chromium's sandbox is what the renderer requires outside
 # dev (crates/server/src/render/chrome.rs:96-101) and running as root with
-# --no-sandbox is explicitly not the answer (A318). The UID is fixed so a mounted
+# --no-sandbox is explicitly not the answer (A338). The UID is fixed so a mounted
 # volume has predictable ownership.
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin stvdy
 COPY --from=build /src/target/release/stvdy-server /usr/local/bin/stvdy-server
-COPY --from=build /src/target/release/ /opt/tests/          # the acceptance binaries (A317)
+COPY --from=build /src/target/release/ /opt/tests/          # the acceptance binaries (A337)
 USER stvdy
 WORKDIR /app
 ENV APP_ENV=prod BIND_ADDR=0.0.0.0:8080 SOFFICE_BIN=/usr/bin/soffice
@@ -1179,7 +1179,7 @@ EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/stvdy-server"]
 ```
 
-`--migrate-only` (A326) is the same entrypoint with the flag. **The container needs a
+`--migrate-only` (A346) is the same entrypoint with the flag. **The container needs a
 `--shm-size` and a writable `/tmp`** for Chromium; both are recorded in
 `docs/OPERATIONS.md` with the exact `docker run` / compose stanza, because a missing
 `/dev/shm` is the classic "Chromium crashes with a memory error that looks like a code
@@ -1211,7 +1211,7 @@ it is the reference for the next person who adds a native dependency.
   `templates/cheatsheet.v1.html`, `docs/ARCHITECTURE.md`
 
 **Interfaces:**
-- Consumes: A319, A320; the template's `ASSET_BASE` comment and its literal CDN URLs.
+- Consumes: A339, A340; the template's `ASSET_BASE` comment and its literal CDN URLs.
 - Produces: `GET /assets/{*path}`; `chrome::rewrite_asset_base(html, base) -> String`;
   `AppConfig.assets_base_url`.
 
@@ -1284,7 +1284,7 @@ row for the new path (Task 11 covers the sweep).
 /// comment, `templates/cheatsheet.v1.html:48`). The base is the server's loopback
 /// origin because `document.write` gives the page no base URL: a relative reference
 /// would not resolve, and `file://` would need a scheme the browser refuses for a
-/// written document (A319).
+/// written document (A339).
 pub fn rewrite_asset_base(html: &str, base: &str) -> String { … }
 ```
 
@@ -1304,7 +1304,7 @@ records the variable and the two cases.
 
 - [ ] **Step 7: Keep the guard as the gate**
 
-`data-math-ready` is unchanged (A320). The render still fails when the assets do not
+`data-math-ready` is unchanged (A340). The render still fails when the assets do not
 load, and `crates/server/tests/pdf.rs`'s "no raw `$` delimiters" assertion is what proves
 it inside the image (Task 9). No second assertion is added.
 
@@ -1320,7 +1320,7 @@ Indonesian-capable and this task changes URLs, not text). 7 — no UI change.
   `docs/OPERATIONS.md`
 
 **Interfaces:**
-- Consumes: A322, A326; `main.rs`'s existing boot order.
+- Consumes: A342, A346; `main.rs`'s existing boot order.
 - Produces: `stvdy-server --migrate-only` (connect → migrate → seed → exit) and
   `stvdy-server --fetch-embedder-model` (build the embedder, which populates the cache,
   then exit).
@@ -1334,7 +1334,7 @@ A process-level test is the honest shape here, and `std::process::Command` again
 /// `--migrate-only` migrates and exits without binding a port.
 ///
 /// The race it prevents is real: main.rs migrates on every boot with no lock, so two
-/// replicas starting together both run `sqlx::migrate!` against one database (A326).
+/// replicas starting together both run `sqlx::migrate!` against one database (A346).
 #[sqlx::test(migrations = "../../migrations")]
 async fn migrate_only_exits_zero_without_binding(pool: PgPool) { … }
 ```
@@ -1381,7 +1381,7 @@ cargo test -p stvdy-server --test release
 - Modify: `docs/OPERATIONS.md`
 
 **Interfaces:**
-- Consumes: Risk 2's defence, A317, the existing `pdf` job's command.
+- Consumes: Risk 2's defence, A337, the existing `pdf` job's command.
 - Produces: a `docker` job that builds the image, starts Postgres, and runs the PDF
   acceptance test **inside** the container.
 
@@ -1458,7 +1458,7 @@ The phase summary quotes the job's output, per roadmap verification gate 3.
 - [ ] **Step 1: The refusals, first**
 
 ```bash
-# The private key is used by exactly one workflow (A312). This script must never
+# The private key is used by exactly one workflow (A332). This script must never
 # have it: a verification tool that can sign is a signing tool, and a signing tool
 # on a developer's machine is how the key leaks.
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
@@ -1476,7 +1476,7 @@ fi
 - **Manifest:** the committed `pubkey` verifies the published `latest.json`, and **a
   one-byte mutation of it does not** — the negative case is what makes the positive one
   meaningful.
-- **Version:** the tag, `Cargo.toml` and `tauri.conf.json` agree (A333).
+- **Version:** the tag, `Cargo.toml` and `tauri.conf.json` agree (A353).
 - **Presence:** every artifact the manifest names exists at the URL it names (a manifest
   pointing at a 404 is a channel that reports "up to date" forever).
 
@@ -1494,8 +1494,8 @@ and specific on failure, because the person reading it is mid-release.
   `docs/THREAT_MODEL.md`, `crates/server/tests/route_sweep.rs`
 
 **Interfaces:**
-- Consumes: A334; the roadmap's docs obligation (verification gate 4).
-- Produces: the normative release document; the image section; A310-A334; the update
+- Consumes: A354; the roadmap's docs obligation (verification gate 4).
+- Produces: the normative release document; the image section; A330-A354; the update
   channel in the threat model; the `/assets` route row.
 
 - [ ] **Step 1: `docs/RELEASE.md`, restructured but not rewritten**
@@ -1506,18 +1506,18 @@ Versioning) and gains: **Release process** (the tag → gate → build → verif
 sequence, with the commands), **Store submission checklists** (Task 14), **Launch
 checklist** (Task 13), **Server deployment** (the image, `--migrate-only`, the environment,
 the reverse proxy, R2), and a pointer to `docs/OPERATIONS.md` for day-two procedures
-(A334). The versioning section gains A333's two-binary table.
+(A354). The versioning section gains A353's two-binary table.
 
 - [ ] **Step 2: `docs/ARCHITECTURE.md`**
 
 The image's contents (Task 6 Step 8) and a short `### The print assets are served, not
-fetched` subsection recording A319's reason — `document.write` gives the page no base URL
+fetched` subsection recording A339's reason — `document.write` gives the page no base URL
 — because that is the kind of fact a future reader would otherwise "simplify" back into a
 CDN reference.
 
 - [ ] **Step 3: `docs/ASSUMPTIONS.md`**
 
-A310-A334 as rows, in the house format (area | decision | rationale), appended after A131.
+A330-A354 as rows, in the house format (area | decision | rationale), appended after A131.
 B1/B2/B3's status cells are updated with the workaround that is live (the dev mail sink,
 the internal payment contract, the draft legal text) — **their "Blocks public launch?"
 values stay `Yes`**, because none of them has been resolved by this phase.
@@ -1558,7 +1558,7 @@ cargo test -p stvdy-server --test release
 - Modify: `THIRD_PARTY_NOTICES.md`, `LICENSE`, `docs/RELEASE.md`, `docs/ASSUMPTIONS.md`
 
 **Interfaces:**
-- Consumes: A44, A330, B2.
+- Consumes: A44, A350, B2.
 - Produces: a terms/privacy draft, a notices file that names the fonts it actually ships,
   and the image's components listed.
 
@@ -1601,29 +1601,29 @@ and the privacy text.
 - Modify: `docs/RELEASE.md`, `docs/ASSUMPTIONS.md`, `.env.example`
 
 **Interfaces:**
-- Consumes: A310, A311, A324, A327-A329; B1/B2/B3.
+- Consumes: A330, A331, A344, A347-A349; B1/B2/B3.
 - Produces: the day-two runbook and the one place the launch decision is made.
 
-- [ ] **Step 1: The production host checklist (A310)**
+- [ ] **Step 1: The production host checklist (A330)**
 
 A section an operator reads before buying anything: region (Indonesia, for UU PDP
 residency and the latency the Batam trial demonstrated), managed Postgres 16 + pgvector
 with the extensions the migrations create, a lifetime that matches the product (**A45's
 trial host is named here as disqualified**), egress, a static IP or DNS, the ability to
-run one container with `--shm-size` and a writable `/tmp` (A318), and TLS termination.
+run one container with `--shm-size` and a writable `/tmp` (A338), and TLS termination.
 Each row has a pass condition, so "is this host suitable" has an answer.
 
 - [ ] **Step 2: Deployment, step by step**
 
 The exact sequence: pull the image, run `--migrate-only` once, start the container with
 the environment from `.env.example`'s production subset, point `WEB_ORIGIN` at the web
-build's origin, set `STORAGE_BACKEND=s3` with the R2 values (A311), set `SEARXNG_URL` at
-the separate service (A324), verify `/health`, and run `scripts/release-image.sh` on the
+build's origin, set `STORAGE_BACKEND=s3` with the R2 values (A331), set `SEARXNG_URL` at
+the separate service (A344), verify `/health`, and run `scripts/release-image.sh` on the
 host. Then the reverse proxy's rules: TLS, the SSE route needs buffering off (the
 heartbeat exists precisely because proxies close idle streams), and the `GET /assets/`
 route is public.
 
-- [ ] **Step 3: Backups and the restore drill (A327)**
+- [ ] **Step 3: Backups and the restore drill (A347)**
 
 RPO 15 minutes, RTO 4 hours. Postgres: managed PITR if the host offers it, otherwise a
 `pg_dump` on a timer to R2 with a 30-day retention and a daily verification that the dump
@@ -1633,7 +1633,7 @@ dump into a scratch database, runs `sqlx migrate info`, compares row counts for 
 `+sync` tables, and prints `=== PASS`. Its output goes in this section, dated, because a
 backup that has never been restored is a hope.
 
-- [ ] **Step 4: Monitoring and alerting (A328)**
+- [ ] **Step 4: Monitoring and alerting (A348)**
 
 Four signals with thresholds and an owner: `/health` from an external uptime check
 (60 s interval, alert after two failures); the oldest `queued` job's age (alert above 15
@@ -1642,7 +1642,7 @@ minutes — a stuck worker is invisible otherwise); provider spend against
 nobody is told when it trips); and the 5xx rate over five minutes. Alert routing is a
 placeholder the user fills in, and the section says so.
 
-- [ ] **Step 5: The breach runbook (A329)**
+- [ ] **Step 5: The breach runbook (A349)**
 
 Numbered, in the order to do them: contain (rotate `JWT_SECRET` and
 `ENCRYPTION_KEY_HEX`, revoke all sessions, disable signups), preserve (snapshot the
@@ -1651,7 +1651,7 @@ from the data inventory), notify (UU PDP's window; the template is here), and re
 two facts a runbook needs — who decides, and how long we have — are stated as blanks the
 user fills, because inventing them would be worse than leaving them visible.
 
-- [ ] **Step 6: Retention (A329)**
+- [ ] **Step 6: Retention (A349)**
 
 `change_log` 90 days (A19), deleted accounts purged by `purge_deleted_accounts`, R2
 lifecycle rules, `var/mail` never used in production, and the log retention the operator
@@ -1675,11 +1675,11 @@ In `docs/RELEASE.md`, a table whose every row is **code**, **user** or **blocked
 | 9 | Tax/PPN treatment settled, invoices carry the line items | **user** | B2 |
 | 10 | SMTP credentials set; a real verification email arrives | **user** | B3 |
 | 11 | QRIS gateway integrated against its real docs | **blocked** | B1 |
-| 12 | Production host provisioned and `/health` green there | **user** | A310, A45 |
-| 13 | R2 bucket live and a presigned URL works | **user** | A15/A311 |
+| 12 | Production host provisioned and `/health` green there | **user** | A330, A45 |
+| 13 | R2 bucket live and a presigned URL works | **user** | A15/A331 |
 | 14 | Restore drill run against the production backup | code + user | `scripts/restore-drill.sh` output |
-| 15 | Uptime check and alert routing live | **user** | A328 |
-| 16 | Breach runbook's two blanks filled in | **user** | A329 |
+| 15 | Uptime check and alert routing live | **user** | A348 |
+| 16 | Breach runbook's two blanks filled in | **user** | A349 |
 
 **The checklist is the phase's honest boundary.** Rows 1-7 are this plan's; rows 8-16 are
 not, and a plan that marked them done would be lying about the only thing that matters at
@@ -1696,7 +1696,7 @@ launch (Risk 3).
 - Modify: `docs/RELEASE.md` (§ Store submission checklists, § Mobile distribution)
 
 **Interfaces:**
-- Consumes: A24, A331, Phase 14's builds; the existing enforcement in
+- Consumes: A24, A351, Phase 14's builds; the existing enforcement in
   `config/billing_policy.toml`, `BillingPolicy::validate`, `GET /plans` and
   `POST /billing/checkout`.
 - Produces: two per-store checklists and the command that proves the mobile claim.
@@ -1724,7 +1724,7 @@ numbers bump per submission, `macOS.bundleVersion`'s iOS sibling).
 
 Data Safety form (the same inventory, mapped to Google's categories), the account-deletion
 URL, review notes, the internal-testing track before production, and the Play signing key
-vs the direct-APK key (A332).
+vs the direct-APK key (A352).
 
 - [ ] **Step 4: The policy-risk note, kept current**
 
@@ -1868,13 +1868,13 @@ so the executor does not treat them as surprises:)*
 
 - **Spec coverage:** the roadmap's Phase 15 row asks for macOS signing + notarization +
   universal binary (Task 3), Windows code signing (Task 4), a Tauri updater with signed
-  manifests (Tasks 1, 2, 5, 10), an Android direct-APK channel (Task 5, A332), store
+  manifests (Tasks 1, 2, 5, 10), an Android direct-APK channel (Task 5, A352), store
   submission checklists (Task 14), README + deployment notes + server Docker image
   (Tasks 6-9, 15). The Launch-prerequisites risk-register row asks for licensing artifacts
   (Task 12), abuse controls (Phase 7's, recorded in Task 13's checklist), backups,
-  monitoring, a breach runbook and retention (Task 13), the hosting decision (A310, Task
-  13) and the R2 production storage (A311, Task 6/13). `docs/SPEC.md`'s Phase 15 line adds
-  LibreOffice in the image (Task 6, A323). Every one is a task above.
+  monitoring, a breach runbook and retention (Task 13), the hosting decision (A330, Task
+  13) and the R2 production storage (A331, Task 6/13). `docs/SPEC.md`'s Phase 15 line adds
+  LibreOffice in the image (Task 6, A343). Every one is a task above.
 - **The three things this plan refuses to pretend:** that a certificate can be generated
   (the prerequisite table names the user, the artifact and the degraded path); that an
   image that works on a laptop works on a host (the acceptance test runs inside the
