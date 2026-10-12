@@ -29,6 +29,15 @@ on:
         description: The version to build. It must equal the tree's, in all four places.
         required: true
         default: 0.1.2
+      api_base_url:
+        description: >-
+          The API origin baked into the SPA at build time (`VITE_API_BASE_URL`). It is a
+          build-time value, not a runtime setting, so an artifact built with the wrong one
+          cannot reach the server it was meant for — and the fallback is
+          `http://localhost:8080`, which is why this is a required input rather than a
+          default nobody looks at. It must also be in the server's `WEB_ORIGIN` allowlist.
+        required: true
+        default: http://168.110.202.106:8080
       visibility:
         description: What to do with the GitHub Release once the artifacts are built.
         type: choice
@@ -51,6 +60,12 @@ env:
   CARGO_TERM_COLOR: always
   # The one place the "no updater artifacts" override lives, so no job can forget it.
   UNSIGNED: '{"bundle":{"createUpdaterArtifacts":false}}'
+  # Read by `vite build`, which inlines it into every `import.meta.env.VITE_API_BASE_URL`.
+  # Job-level rather than step-level on purpose: `tauri build` runs `beforeBuildCommand`
+  # (`npm run build`) itself, and the Android job builds the SPA twice — once explicitly for
+  # the purchase-UI check and once through the CLI. A step-scoped value would be absent from
+  # the one that packages the bundle, which is exactly the artifact that ships.
+  VITE_API_BASE_URL: ${{ inputs.api_base_url }}
 
 jobs:
   # -------------------------------------------------------------------------
@@ -90,6 +105,41 @@ jobs:
             fi
           done
           echo "version=$WANT" >> "$GITHUB_OUTPUT"
+
+      - name: The API origin is the one that will be baked in, and it is not the fallback
+        # The build's fallback is `http://localhost:8080` (`app/src/api/client.ts`), which is
+        # correct only for a developer's own machine. An artifact built against it installs,
+        # launches, and fails every request — so this asserts the value before anything is
+        # built, rather than leaving it to be discovered on a user's laptop.
+        #
+        # `WEB_ORIGIN` is the server's allowlist and is a **pair** with this value: the browser
+        # refuses the response otherwise, with nothing but a console error. It cannot be read
+        # from here (it is the server's environment), so it is named in the run summary.
+        env:
+          API_BASE: ${{ inputs.api_base_url }}
+        run: |
+          set -euo pipefail
+          case "$API_BASE" in
+            http://localhost*|http://127.0.0.1*)
+              echo "::error::api_base_url is '$API_BASE', the development fallback. Artifacts built against it cannot reach any deployed server."
+              exit 1
+              ;;
+            https://*|http://*)
+              echo "VITE_API_BASE_URL will be: $API_BASE"
+              ;;
+            *)
+              echo "::error::api_base_url '$API_BASE' is not an absolute http(s) origin"
+              exit 1
+              ;;
+          esac
+          {
+            echo "### the API origin baked into these artifacts"
+            echo
+            echo "\`$API_BASE\`"
+            echo
+            echo "The server's \`WEB_ORIGIN\` must allow the origin these installers run from, or every"
+            echo "request fails CORS. The two are a pair; changing one alone is the failure mode."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------
   # macOS: universal, unsigned, unnotarized (the A333 refusal, overridden on purpose).

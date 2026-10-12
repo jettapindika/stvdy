@@ -19,7 +19,13 @@
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
-FROM rust:1.94.1-bookworm AS build
+# Trixie, not bookworm, and the floor is `ort-sys`'s prebuilt ONNX Runtime: it is linked
+# against glibc ≥ 2.38 (`__isoc23_strtoll`, `__isoc23_strtoull`, `_M_replace_cold`) while
+# bookworm carries 2.36, and `ort-sys` 2.0.0-rc.13's `build/download/dist.tsv` carries
+# exactly one distribution per target — so there is no lower-glibc build to switch to and
+# the base image is what has to move. The runtime stage moves with it: a binary linked
+# against trixie's glibc does not load on bookworm.
+FROM rust:1.94.1-trixie AS build
 WORKDIR /src
 
 # The workspace manifests and the lockfile first, so a source-only change does not
@@ -59,12 +65,16 @@ RUN cargo build --release --workspace --locked \
 # a hand-copied directory would be invalidated by a `fastembed` version bump with no
 # error until ingest.
 ENV FASTEMBED_CACHE_DIR=/opt/models/fastembed
-RUN cargo run --release -p stvdy-server --fetch-embedder-model
+# The `--` is load-bearing: without it cargo claims `--fetch-embedder-model` as its own
+# argument and refuses the command outright ("unexpected argument … found"), which is what
+# the image build on the staging host died on. Everything after `--` is passed through to
+# the binary, and the binary parses `argv[1]` itself (`main.rs`).
+RUN cargo run --release -p stvdy-server -- --fetch-embedder-model
 
 # ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 # The Chromium pin. `chromium` alone tracks Debian's `stable` and the renderer's output
 # is the document a student prints — the acceptance test asserts a page count and a
@@ -74,11 +84,13 @@ FROM debian:bookworm-slim AS runtime
 # `chromium-common` is pinned with it because the two are built from one source and
 # Debian's dependency is unversioned: pinning only the binary would let the pair drift.
 #
-# The value is read from `apt-cache policy chromium` in the bookworm archive at the time
-# of writing, and `.github/workflows/ci.yml`'s `image` job asserts that the version the
-# running image reports equals this string. A base-image change that silently moves
-# Chromium therefore fails the build rather than changing every PDF.
-ARG CHROMIUM_VERSION=154.0.8037.92-1~deb12u1
+# The value is read from `apt-cache policy chromium` in the trixie archive at the time of
+# writing — it lives in `trixie-security`, which is where a browser's current version is,
+# while trixie's main archive carries an older one — and `.github/workflows/ci.yml`'s
+# `image` job asserts that the version the running image reports equals this string. A
+# base-image change that silently moves Chromium therefore fails the build rather than
+# changing every PDF.
+ARG CHROMIUM_VERSION=154.0.8037.92-1~deb13u1
 
 # LibreOffice is for the PPTX/DOCX preview (A158, A343). The three packages rather than
 # the whole suite: `--convert-to pdf` needs the writer and the impress filters.
