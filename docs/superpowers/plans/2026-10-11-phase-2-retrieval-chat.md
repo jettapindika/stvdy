@@ -113,17 +113,17 @@ scripts/smoke-phase2.sh                 # stub LLM + real server, end to end
 
 **Files:** `crates/core/src/traits/{llm.rs,testing.rs}`, `crates/core/tests/llm.rs`.
 
-- [ ] **Step 1: The trait**, per roadmap § 1: `complete` and `stream`, with
+- [x] **Step 1: The trait**, per roadmap § 1: `complete` and `stream`, with
   `ChatRequest { model, messages, tools, temperature, max_tokens, json_mode }`,
   `ChatMsg { role, content }`, `ToolSpec`, `ChatResponse { text, tool_calls, usage }`,
   and `StreamEvent::Token(String) | ToolCall(..) | Usage { in_tokens, out_tokens,
   provider_cost_usd } | Done`. `ChatStream` is an `mpsc::Receiver<StreamEvent>`.
-- [ ] **Step 2: `ScriptedLlm`** in `testing.rs`: given a list of scripted
+- [x] **Step 2: `ScriptedLlm`** in `testing.rs`: given a list of scripted
   responses, it yields the tokens of the next one per call, records the request it
   received (so a test can assert the prompt contains the labels it should), and
   can be told to fail with `LlmError::Provider`. This is what makes the chat
   suite run without a network.
-- [ ] **Step 3: Tests**: `complete` returns the scripted text; `stream` yields
+- [x] **Step 3: Tests**: `complete` returns the scripted text; `stream` yields
   tokens in order then `Done`; a request is recorded verbatim; a scripted failure
   surfaces as `LlmError::Provider`.
 
@@ -133,11 +133,11 @@ scripts/smoke-phase2.sh                 # stub LLM + real server, end to end
 
 **Files:** `crates/core/src/retrieval.rs`, `crates/core/tests/retrieval.rs`.
 
-- [ ] **Step 1: The merge.** `rrf_merge(arms: &[Vec<RankedChunk>], k: u32, limit: usize)
+- [x] **Step 1: The merge.** `rrf_merge(arms: &[Vec<RankedChunk>], k: u32, limit: usize)
   -> Vec<ScoredChunk>` where `RankedChunk { chunk_id, source_id, page, score }`.
   Score is `Σ 1/(k + rank)` over the arms a chunk appears in, `rank` 1-based
   within its arm. Ties break by `chunk_id` ascending so the order is total.
-- [ ] **Step 2: Tests.** A chunk in both arms outranks one in a single arm; a
+- [x] **Step 2: Tests.** A chunk in both arms outranks one in a single arm; a
   chunk only in the weaker arm still appears (that is the point of hybrid); the
   same input twice gives the same output; `limit` truncates after scoring, never
   before; an empty arm is not an error; a duplicate id inside one arm is counted
@@ -149,13 +149,13 @@ scripts/smoke-phase2.sh                 # stub LLM + real server, end to end
 
 **Files:** `crates/core/src/citations.rs`, `crates/core/tests/citations.rs`.
 
-- [ ] **Step 1: The resolver.** `ContextLabels` maps `[1]`..`[n]` to a chunk and
+- [x] **Step 1: The resolver.** `ContextLabels` maps `[1]`..`[n]` to a chunk and
   `[W1]`.. to a web hit (Phase 3 fills that side). `resolve(text, &labels) ->
   Vec<Citation>` returns the structured citations in first-appearance order, with
   **unknown labels dropped** and each label counted once. `strip_unknown(text,
   &labels) -> String` removes the unknown markers from the text so a reply cannot
   show a citation the user cannot click.
-- [ ] **Step 2: Tests**, including the golden one the roadmap asks for: a reply
+- [x] **Step 2: Tests**, including the golden one the roadmap asks for: a reply
   citing `[1]` and `[7]` against a context of three chunks yields exactly one
   citation, and `[7]` is absent from both the citations and the stripped text. A
   label repeated three times yields one citation. `[10]` against a context of two
@@ -170,23 +170,23 @@ failure message.
 **Files:** `crates/core/src/prompts/{mod.rs,registry.rs}`,
 `crates/core/tests/prompts.rs`.
 
-- [ ] **Step 1: The registry** compiles `base.v1.md` with `include_str!` and
+- [x] **Step 1: The registry** compiles `base.v1.md` with `include_str!` and
   exposes its version string (`base.v1`) for `usage_events.prompt_version`.
-- [ ] **Step 2: The variable contract**, exactly as `prompts/README.md` states it:
+- [x] **Step 2: The variable contract**, exactly as `prompts/README.md` states it:
   caller-supplied variables must be provided (an unfilled one is an **error**, not
   an empty string); optional variables take their declared default; derived
   variables are computed, never supplied. `plan_gate_instruction_derived` is
   derived from `allow_upgrade_hint` (true gives the permissive sentence, false the
   restrictive one) so a mobile build cannot be handed a contradictory pair.
-- [ ] **Step 3: The untrusted wrapper.** `user_name` and `workspace_name` are
+- [x] **Step 3: The untrusted wrapper.** `user_name` and `workspace_name` are
   written into the `<user_context_data>` block that `base.v1.md` already declares,
   never interpolated bare. A value containing `</user_context_data>` must not be
   able to close the block: escape it.
-- [ ] **Step 4: The chat composition.** `compose_chat(vars, sources: &[PromptChunk],
+- [x] **Step 4: The chat composition.** `compose_chat(vars, sources: &[PromptChunk],
   web: &[PromptWebHit]) -> Composed { text, labels }` renders the `<sources>` block
   as `[1] "Title" p.12` followed by the chunk text, returns the label map for
   Task 3, and **asserts no `{{...}}` survives** in the result.
-- [ ] **Step 5: Tests.** Every declared variable is required or defaulted; a
+- [x] **Step 5: Tests.** Every declared variable is required or defaulted; a
   missing one errors with the variable's name; a derived variable cannot be
   supplied; no leftover `{{`; the escaped display name cannot break out of the
   block; a source block with zero chunks still composes (the model is told the
@@ -199,25 +199,25 @@ extends it to every module.
 
 **Files:** `crates/server/src/chat/{retrieve.rs,prompt.rs}`, `crates/server/src/credits.rs`.
 
-- [ ] **Step 1: `retrieve.rs`.** Two queries, both joined through `sources` and
+- [x] **Step 1: `retrieve.rs`.** Two queries, both joined through `sources` and
   scoped by `user_id` and `deleted_at is null`:
   vector: `order by embedding <=> $1 limit $2` with the query embedded through
   `Embedder` with the `query: ` prefix (A2);
   keyword: `order by ts_rank(tsv, websearch_to_tsquery('simple', $1)) desc limit $2`.
   Then `rrf_merge`. An optional `source_ids` filter narrows both arms. Top-k is
   20 per arm, 12 merged.
-- [ ] **Step 2: `prompt.rs`.** Builds the `ComposeChat` inputs from the user row
+- [x] **Step 2: `prompt.rs`.** Builds the `ComposeChat` inputs from the user row
   (name, timezone, plan), the workspace name, and the platform, then calls the
   core composer. `now` comes from `Clock`, not `Utc::now`, so a test can pin it.
-- [ ] **Step 3: `credits.rs`.** `spend(pool, user_id, action, credits) ->
+- [x] **Step 3: `credits.rs`.** `spend(pool, user_id, action, credits) ->
   Result<i64 /* remaining */>` in one transaction: advisory lock, sum each bucket,
   reject with `AppError::Entitlement { code: "insufficient_credits" }` (402) when
   the total is short, insert the ledger row (monthly first, then purchased) and
   the `usage_events` row. `record_usage` adds the provider cost, token counts and
   `prompt_version` to the same row.
-- [ ] **Step 4: `daily_chat_count`** from `usage_events` for the user's local day,
+- [x] **Step 4: `daily_chat_count`** from `usage_events` for the user's local day,
   compared against `plans.get(plan).chat_msgs_per_day` through the Phase 1 shim.
-- [ ] **Step 5: Tests** for credits: two concurrent spends of the whole balance
+- [x] **Step 5: Tests** for credits: two concurrent spends of the whole balance
   result in one success and one 402 (the advisory lock is the point); a monthly
   balance of 1 spends the monthly bucket, not the purchased one; the ledger sum
   equals the reported remaining.
@@ -227,25 +227,25 @@ extends it to every module.
 **Files:** `crates/server/src/chat/{mod.rs,routes.rs,sse.rs}`,
 `crates/server/src/integrations/llm.rs`, `crates/server/src/routes/mod.rs`.
 
-- [ ] **Step 1: `integrations/llm.rs`**, the `openai_compat` impl (A1): POST
+- [x] **Step 1: `integrations/llm.rs`**, the `openai_compat` impl (A1): POST
   `{LLM_BASE_URL}/chat/completions` with `stream: true`, parse `data:` frames,
   stop at `[DONE]`, map a provider error to `LlmError::Provider` (502) and a
   malformed frame to a logged skip rather than a panic. `model` comes from
   `LLM_MODEL`.
-- [ ] **Step 2: The route.** `POST /workspaces/:id/chat` body
+- [x] **Step 2: The route.** `POST /workspaces/:id/chat` body
   `{message, source_ids?, use_web?}`. Order: verified user, owned workspace,
   daily cap, credit spend, persist the user message, retrieve, compose, stream.
   Emits the roadmap § 4 events in order: `token`* then `citations`, `usage`,
   `done`; `error` instead of the rest on failure. `use_web` is accepted and
   recorded but Phase 3 implements the search (answering honestly rather than
   pretending).
-- [ ] **Step 3: Persistence.** The assistant message is written **after** the
+- [x] **Step 3: Persistence.** The assistant message is written **after** the
   stream completes, with the resolved citations and `used_web`, so a client that
   disconnects mid-stream leaves a user message and no half-answer. The `done`
   event carries the message id.
-- [ ] **Step 4: `GET /workspaces/:id/messages`**, scoped and ordered, so the
+- [x] **Step 4: `GET /workspaces/:id/messages`**, scoped and ordered, so the
   second-device half of the exit gate is observable.
-- [ ] **Step 5: Tests** (`crates/server/tests/chat.rs`) with `ScriptedLlm`:
+- [x] **Step 5: Tests** (`crates/server/tests/chat.rs`) with `ScriptedLlm`:
   a scripted answer citing `[1]` and `[9]` yields a `citations` event with exactly
   the chunk for `[1]`; the persisted assistant message has that citation and not
   `[9]`; the prompt the model received contains the label block (asserted on the
@@ -261,20 +261,20 @@ extends it to every module.
 
 **Files:** `crates/server/tests/indonesian.rs`.
 
-- [ ] **Step 1: The fixture.** An Indonesian document about a real subject (not
+- [x] **Step 1: The fixture.** An Indonesian document about a real subject (not
   lorem ipsum), ingested through the real pipeline, plus an Indonesian question
   whose answer is in exactly one chunk.
-- [ ] **Step 2: Two assertions, because the gate names two failure modes.**
+- [x] **Step 2: Two assertions, because the gate names two failure modes.**
   (a) The **keyword** arm alone retrieves that chunk: this is what catches a
   `tsvector` config mistake, and it runs with no model, so it always runs.
   (b) With the **real embedder** (skipped with a printed reason when the model is
   not cached, like the Phase 1 tokenizer test), the vector arm retrieves it too:
   this is what catches an embedding-prefix mistake. A prefix bug moves the query
   into a different region of the space and the wrong chunk wins.
-- [ ] **Step 3: The citation resolves.** Run the scripted chat over the retrieved
+- [x] **Step 3: The citation resolves.** Run the scripted chat over the retrieved
   context and assert the resolved citation points at the Indonesian chunk with its
   page.
-- [ ] **Step 4: Assert the tsvector config explicitly** by reading the column
+- [x] **Step 4: Assert the tsvector config explicitly** by reading the column
   definition, so a later migration that switched it to `english` fails here rather
   than in production.
 
@@ -289,57 +289,57 @@ panel rendering `NotBuiltYet`, and its roving-tabindex keyboard contract is
 tested. Making the panel URL-driven would turn `active` into a route param, which
 is a bigger change than this phase needs. "Wire the route" below means that panel.
 
-- [ ] **Step 1: `api/sse.ts`**: `fetch` with the bearer header, a
+- [x] **Step 1: `api/sse.ts`**: `fetch` with the bearer header, a
   `ReadableStream` reader, and a parser for the named events (using
   `eventsource-parser`, already a dependency). Cancellation via `AbortController`.
-- [ ] **Step 2: `useChatStream`**: sends a message, appends streamed tokens to the
+- [x] **Step 2: `useChatStream`**: sends a message, appends streamed tokens to the
   in-flight assistant turn, resolves citations on the `citations` event, and
   refetches the thread on `done`. A stream error leaves the partial text visible
   with a retry affordance rather than discarding it.
-- [ ] **Step 3: The screen**: message list (user/assistant, Markdown-lite),
+- [x] **Step 3: The screen**: message list (user/assistant, Markdown-lite),
   citation chips that resolve to the chunk's source and page, a source-selection
   control for the `source_ids` filter, and a `use_web` toggle that says web search
   arrives in Phase 3 rather than pretending.
-- [ ] **Step 4: Gate 5, accessibility**, on this screen: keyboard-only walk with a
+- [x] **Step 4: Gate 5, accessibility**, on this screen: keyboard-only walk with a
   measured focus ring, contrast in both themes, 44px targets at phone width, no
   state by colour alone, 200% text scale. Also: the streamed answer must not move
   focus, and a screen reader must be told the answer arrived (`aria-live` on the
   message list, `aria-busy` while streaming).
-- [ ] **Step 5: Gate 6's UI half**: the Indonesian fixture question typed into the
+- [x] **Step 5: Gate 6's UI half**: the Indonesian fixture question typed into the
   real screen against the real server, with the answer and its citation observed.
 
 ## Task 9: Docs and the phase gate
 
-- [ ] **Step 1: `docs/API.md`**: the chat route with its request body and the full
+- [x] **Step 1: `docs/API.md`**: the chat route with its request body and the full
   SSE event list, and `GET /messages`.
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**: the retrieval pipeline (two arms, RRF,
+- [x] **Step 2: `docs/ARCHITECTURE.md`**: the retrieval pipeline (two arms, RRF,
   why hybrid), the citation label contract and why labels rather than UUIDs, the
   prompt composition shape for chat, and the credit spend's transaction order.
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`**: the Phase 2 decisions that are not
+- [x] **Step 3: `docs/ASSUMPTIONS.md`**: the Phase 2 decisions that are not
   already rows (RRF constant, top-k values, the composer landing in Phase 2
   rather than 6, the credits shim, the `use_web` deferral to Phase 3).
-- [ ] **Step 4: Run the gate**: fmt, clippy, `cargo test --workspace`,
+- [x] **Step 4: Run the gate**: fmt, clippy, `cargo test --workspace`,
   `npm --prefix app test`, `npm run build`, the `src-tauri` trio,
   `cargo sqlx prepare --workspace --check`, and `scripts/smoke-phase2.sh`.
-- [ ] **Step 5: Phase summary**, with both roadmap gates (5 and 6) stated as
+- [x] **Step 5: Phase summary**, with both roadmap gates (5 and 6) stated as
   performed checks and results, not as assertions.
 
 ## Phase 2 exit checklist
 
-- [ ] `cargo fmt --all -- --check` clean; clippy clean; `cargo test --workspace` green.
-- [ ] `npm --prefix app test` and `npm run build` green; `src-tauri` trio green.
-- [ ] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
-- [ ] A cited answer streams end to end (smoke output quoted).
-- [ ] A fabricated citation label is dropped, with the golden test named.
-- [ ] The assistant message is persisted with its resolved citations and is
+- [x] `cargo fmt --all -- --check` clean; clippy clean; `cargo test --workspace` green.
+- [x] `npm --prefix app test` and `npm run build` green; `src-tauri` trio green.
+- [x] `cargo sqlx prepare --workspace --check` exits 0 with `SQLX_OFFLINE=true`.
+- [x] A cited answer streams end to end (smoke output quoted).
+- [x] A fabricated citation label is dropped, with the golden test named.
+- [x] The assistant message is persisted with its resolved citations and is
   visible from a second device of the same account.
-- [ ] An unverified account is 403; a spent-out account is 402 with nothing
+- [x] An unverified account is 403; a spent-out account is 402 with nothing
   persisted; another user's workspace is 404.
-- [ ] **Gate 6**: the Indonesian fixture is retrieved by the keyword arm (no
+- [x] **Gate 6**: the Indonesian fixture is retrieved by the keyword arm (no
   model needed), by the vector arm (real embedder), and its citation resolves.
-- [ ] **Gate 5**: the chat screen's keyboard, contrast, target-size, colour-only
+- [x] **Gate 5**: the chat screen's keyboard, contrast, target-size, colour-only
   and 200% text checks are stated with their results.
-- [ ] Phase summary posted; wait for "continue".
+- [x] Phase summary posted; wait for "continue".
 
 ## Execution notes (Phase 2, as built)
 
