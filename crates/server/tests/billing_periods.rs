@@ -33,8 +33,6 @@ use uuid::Uuid;
 mod common;
 use common::signed_up;
 
-const PASSWORD: &str = "correct horse battery";
-
 fn router(harness: &TestState) -> axum::Router {
     stvdy_server::routes::router(harness.state.clone()).expect("the router builds")
 }

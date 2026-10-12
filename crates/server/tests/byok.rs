@@ -13,6 +13,14 @@
 //!  * a BYOK turn that spends credits, which charges a student twice for one answer;
 //!  * a BYOK turn that the provider-cost ceiling pauses, which pauses an account for spending
 //!    someone else's money (A156).
+//!
+//! **A refusal is read with [`chat_json`], never with `sse_events`.** The route opens the stream
+//! only after every check that can refuse, so a refusal is the documented `{code, message,
+//! min_plan, limit, used}` envelope with a non-2xx status — not an SSE frame. Parsing one as a
+//! frame list yields an empty vector, and the three refusal assertions below would then panic on
+//! `events[0]` instead of asserting the refusal. That is a test that is green only while nothing
+//! runs it, which is the same failure as a parser that silently produces nothing: do not
+//! "simplify" those calls back to `sse_events`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
