@@ -26,6 +26,24 @@ thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
+# The sync engine, its wire DTOs and the local-first store's two traits. The root
+# `Cargo.toml` has claimed this dependency since Phase 1 while the shell did not have it;
+# Phase 8's shell slice is what makes the claim true. `rusqlite` and `reqwest` stay on
+# this side of the boundary (A182): the server's test binaries must never link a C SQLite.
+stvdy-sync = { path = "../crates/sync" }
+# `bundled` is deliberate (`docs/ARCHITECTURE.md` § Local cache): it removes a system
+# SQLite from the platform matrix.
+rusqlite = { version = "0.37", features = ["bundled"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+tokio = { version = "1.53.2", features = ["rt", "macros", "time", "sync"] }
+uuid = { version = "1.28.0", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+base64 = "0.23.1"
+# `stvdy_sync::client::Transport` is declared with `#[async_trait]`, and the shell
+# implements it twice (HTTP and the double a test drives a pass with), so the attribute
+# has to be the same version the trait was expanded with.
+async-trait = "0.1.92"
+
 # Secure storage: keyring-core plus a per-platform store. The `keyring` crate's
 # default feature set is desktop-only (Entry::new returns NoDefaultStore on
 # iOS/Android), so each target wires its own store explicitly.

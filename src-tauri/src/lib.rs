@@ -1,8 +1,15 @@
+pub mod cache;
 pub mod commands;
 pub mod deeplink;
 pub mod keychain;
+pub mod sync;
 
 use tauri::Manager;
+
+/// The SQLite cache's file name inside the app's data directory. The file holds one
+/// account's synced rows and its outbox, never a token (the keychain is the only place a
+/// token may live).
+const CACHE_FILE: &str = "sync-cache.sqlite3";
 
 /// Emitted to the frontend with a `Vec<DeepLinkIntent>` payload whenever the OS
 /// hands the shell one or more `stvdy://` URLs while the app is running.
@@ -52,6 +59,15 @@ pub fn run() {
             commands::secret_set,
             commands::secret_get,
             commands::secret_delete,
+            sync::commands::sync_configure,
+            sync::commands::sync_status,
+            sync::commands::sync_now,
+            sync::commands::sync_read,
+            sync::commands::sync_write,
+            sync::commands::sync_tombstone,
+            sync::commands::sync_reset,
+            sync::commands::local_state_get,
+            sync::commands::local_state_set,
         ]);
 
     #[cfg(desktop)]
@@ -111,6 +127,40 @@ pub fn run() {
                         log_deep_link(&deeplink::classify(url.as_str()), "launch");
                     }
                 }
+            }
+
+            // The local cache, and the sync shell that keeps it in step. A failure here is
+            // not fatal: the app still runs online through the REST routes, so it is logged
+            // and the sync commands report that they have no cache rather than the app
+            // refusing to start. The cache is opened on every launch, which is why
+            // `cache::open` is idempotent.
+            {
+                let notifier: sync::Notifier = {
+                    let handle = app.handle().clone();
+                    std::sync::Arc::new(move |notice| sync::commands::emit(&handle, notice))
+                };
+                let shell = match app.path().app_data_dir() {
+                    Ok(directory) => match cache::open(&directory.join(CACHE_FILE)) {
+                        Ok(connection) => match cache::SqliteStore::new(connection) {
+                            Ok(store) => Some(std::sync::Arc::new(sync::SyncShell::new(
+                                store, notifier,
+                            ))),
+                            Err(error) => {
+                                tracing::warn!(%error, "the local cache is unusable; sync will not run");
+                                None
+                            }
+                        },
+                        Err(error) => {
+                            tracing::warn!(%error, "the local cache could not be opened; sync will not run");
+                            None
+                        }
+                    },
+                    Err(error) => {
+                        tracing::warn!(%error, "there is no app data directory; sync will not run");
+                        None
+                    }
+                };
+                app.manage(sync::commands::ShellState { shell });
             }
 
             Ok(())
