@@ -77,7 +77,7 @@ username, and there is no `postgres` role). The symptom is
 ```bash
 just server                        # or: cargo run -p stvdy-server
 curl localhost:8080/health
-# {"env":"dev","plans":3,"status":"ok","version":"0.1.0"}
+# {"env":"dev","plans":3,"status":"ok","version":"0.1.1"}
 ```
 
 Migrations and plan seeding happen at boot, so a fresh database needs no extra
