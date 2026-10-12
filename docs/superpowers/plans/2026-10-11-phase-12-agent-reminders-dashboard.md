@@ -2346,7 +2346,11 @@ until the confirm, the confirm creates one, the second confirm is a 409, and a r
 `POST /reminders` answers `applied: false`.
 
 - [x] **Step 1: Write the docs and the script**
-- [ ] **Step 2: Run the full gate** — **NOT RUN**: see the execution notes below.
+- [ ] **Step 2: Run the full gate** — **PARTIAL**: the three gates (5, 6's UI half, 7) and the
+  smoke run were performed and are recorded below; the Rust commands in this list were not, because
+  `crates/**` was being edited by other slices for the whole of this slice's run, so their result
+  would describe someone else's working tree. The rows that could not be run are left blank in the
+  checklist rather than filled with a guess. See the execution notes below.
 
 ```bash
 cargo fmt --all -- --check
@@ -2392,9 +2396,9 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 | 20 | The two doubles | `cargo test -p stvdy-core --test tool_doubles` | |
 | 21 | Route sweep (8 new rows, 2 drivers) | `cargo test -p stvdy-server --test route_sweep` | |
 | 22 | Schema (2 new `documented` rows, 6 new columns) | `cargo test -p stvdy-server --test schema` | |
-| 23 | Gate 5 — accessibility | `node scripts/measure-mobile.mjs` at 390×844 | **PASS with a defect fixed** — 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast **4.97:1**, 0 under 44px, 0 clipped, 0 overlapped. The dashboard scrolled sideways **at 100% text** (423 > 390, 15 elements past the edge) before `f38305c`. **Desktop width not measured** — phone viewport only |
-| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **server half NOT RUN** (another slice's). UI half measured in a real browser with `navigator.languages = id-ID`: **PASS**, no locale key rendered — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat") |
-| 25 | Gate 7 — honesty | the five statements in Task 16 | **(a)–(e) all checked.** (c) re-asserted by grepping the shipped bundle, not by reading the component: `AI can make mistakes. Check the citations.` → `app/dist/assets/index-CBDbwWge.js`, and `AI bisa salah` in the same bundle |
+| 23 | Gate 5 — accessibility | `node scripts/measure-mobile.mjs` at 390×844 | **PASS at 390×844 with a defect fixed** — 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast **4.97:1**, 0 under 44px, 0 clipped, 0 overlapped. The dashboard scrolled sideways **at 100% text** (423 > 390, 15 elements past the edge) before `f38305c`. **At 1365×900: PASS on both Phase 12 surfaces** — 8 combinations, 168 targets, 496 text pairs, 0 contrast failures, 0 page overflow, 0 overlap. Three findings, all outside this phase's screens and all named below rather than fixed here |
+| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **server half NOT RUN** (another slice's). UI half driven in a real browser with `navigator.languages = ['id-ID','id']` set before boot: **PASS**, `<html lang="id">`, no locale key rendered on either screen — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat"). The rendered sentences are quoted in the execution notes |
+| 25 | Gate 7 — honesty | the five statements in Task 16 | **(a)–(e) all checked.** (c) re-asserted by grepping the shipped bundle, not by reading the component: `AI can make mistakes. Check the citations.` → **1 match** in `app/dist/assets/index-Eov9DdnN.js` (the single entry chunk), and `AI bisa salah. Periksa kutipannya.` → **1 match** in the same file |
 | 26 | Smoke | `bash scripts/smoke-phase12.sh` | **PASS** — six scenarios, incl. the ten-tool wire schema read out of the stub's log and two devices producing one reminder whose `fire_at` is the first. Push degrades to in-app + email (no APNs/FCM credentials) and says so |
 
 ## Execution notes
@@ -2511,8 +2515,22 @@ stub's `--tool-calls` mode and its fixture.
    the plan grants writes, or whose entries carry no `parameters` object, is a 400. That is the
    wire-format mistake the trait-level double cannot see, which is the same reason Phase 2's stub
    exists.
+4. **The smoke run's first execution found a defect in the check, and the fix is a fact about the
+   wire.** It failed immediately with `no action event in the stream:
+   {"code":"provider_error",…,"message":"provider error: 400 Bad Request: … Message: a tool entry
+   carries no name."}`. The server was sending a **correct** request; the stub was rejecting it.
+   `stub-llm.py`'s `validate_tools` read `tool["name"]` and `tool["parameters"]` at the top level —
+   the **trait's** `ToolSpec { name, description, parameters }` shape — while the shape on the wire
+   is the [OI]-compatible `{"type":"function","function":{…}}`, which is what
+   `crates/server/src/integrations/llm.rs` serialises, what `parse_tool_calls` reads back
+   (`call["function"]["name"]`), and what the same stub file's *own* emitted frames nest under
+   `function`. The smoke script's assertion had the same flat assumption (`{t['name'] for t in
+   tools}`), so both halves of the check would have read a correct request as a missing one. Fixed
+   in `97865eb`; the stub now checks `tool["function"]["name"]` and the script reads the same path.
+   **This is exactly the class of mistake the script exists to catch, caught on itself** — which is
+   the argument for running a smoke script rather than syntax-checking it.
 
-**The smoke run executed and passes.** `BASE=http://localhost:8098 STUB_PORT=8102 bash
+**The smoke run executed and passes, exit 0.** `BASE=http://127.0.0.1:8131 STUB_PORT=8140 bash
 scripts/smoke-phase12.sh`, against a freshly built server with the stub in tool-call mode, six
 scenarios green:
 
@@ -2535,7 +2553,7 @@ trait-level double cannot make. The last scenario is the phase's cross-device de
 **exercised** rather than asserted: two registrations an hour apart, one row, and the stored
 `fire_at` is the first — which a fire-time key fails.
 
-### Roadmap gate 5 — accessibility. Measured, and it found the largest defect in the project so far
+### Roadmap gate 5 — accessibility. Measured, and it found a horizontal overflow at normal text size
 
 Measured in a real headless Chromium against the built bundle served by `vite preview` on :4173,
 at **390×844** (the harness's viewport), both themes, at 100% and 200% text, with `dashboard`
@@ -2565,18 +2583,74 @@ requirement; 0 clipped; 0 overlapped; page 390/390`.
 targets, 41 pairs), `workspace-chat` and `workspace-chat-proposal` (22 targets, 55 pairs),
 `settings` (25 targets, 53 pairs), `plan` (8 targets, 79 pairs). Every target carries `min-h-11`,
 and the card's Confirm/Edit/Dismiss are asserted as real tab stops in order with the state
-carried by an icon **and** a word. **Desktop width was not measured** — the harness is a phone
-viewport and no desktop leg was added.
+carried by an icon **and** a word.
+
+**Desktop width, 1365×900, both themes, 100% and 200%: PASS on both Phase 12 surfaces.** 8
+combinations, 168 targets, 496 text pairs. `dashboard` at all four: `7 targets, 42 text pairs, 0
+below requirement, 0 clipped, 0 overlapped, page 1365/1365`. `workspace-chat-proposal` at all
+four: `35 targets, 82 text pairs, 0 below requirement, 0 overlapped, page 1365/1365`.
+
+**The desktop leg cannot be taken with `scripts/measure-mobile.mjs`, and that is a finding of its
+own.** Its `SURFACES` steps name the phone tab bar's labels, but the two layouts do not share
+them: the tab bar is `md:hidden` and reads `nav.work` ("Work"), while the desktop sidebar is
+`hidden md:flex` and reads `nav.workspaces` ("Workspaces"). At `VIEWPORT_WIDTH=1365` the walk dies
+on `FAIL: no nav a labelled "Work"` after the first surface — so the desktop leg of gate 5 has
+never actually run through the shared harness, for any phase. The numbers above were taken with a
+throwaway probe using the same arithmetic (44px targets, WCAG AA on effective colours, page
+overflow, clipped content, paint past the edge) and the desktop labels; the harness's fix — a
+per-breakpoint label, or a `nav` selector that is not the tab bar's — belongs to that file's
+owner.
+
+**Three findings at desktop width, none of them on this phase's screens, each named rather than
+silently fixed:**
+
+1. **The sidebar's five nav items are 215×40** — under 44px in the *height* axis, in both themes,
+   at both scales. That is `components/layout/Sidebar.tsx`'s `nav-item`, house-wide chrome every
+   phase renders, and the only undersized targets on either of my surfaces at 100% text.
+2. **`button.cite` is 36.4×15.2 at 100% and 72.8×30.4 at 200%** — a citation chip is a real
+   target on a phone because `styles.css`'s `a.cite, button.cite { min-height: 2.75rem }` sits
+   inside `@media (max-width: 767px)`. That is a **documented, deliberate** decision rather than
+   an oversight (the comment above it explains why the alternative — an absolutely-positioned
+   pseudo-element hit area — was rejected), so this is a WCAG 2.2 SC 2.5.8 reading to settle
+   once, house-wide, and not a Phase 12 regression: the chip is Phase 2's component and this
+   phase did not touch it.
+3. **Two `p.text-xs.text-muted` paragraphs overflow their box at 200% text** — the Sources
+   panel's `workspaces.sourcePicker.emptyHint` (client 106px, scroll 144px) and the Studio
+   panel's deck-cost hint (client 107px, scroll 123px). Both sit inside
+   `div.min-h-0.flex-1.overflow-y-auto`, whose **computed `overflow-x` is `auto`**, so the text is
+   reachable by horizontal scroll rather than lost — which is the same class as the tab bar's
+   fifth item, and the shared harness excludes that class from its `pastEdge` check via
+   `inScroller` but not from its `clipped` check. So this is a **harness gap** as much as a
+   product smell: a check that fires on a sanctioned pattern is the check that gets deleted. Both
+   paragraphs are in the workspace panels (Phase 6's screens, house-wide), not on the dashboard or
+   the card.
 
 ### Roadmap gate 6 — Indonesian end to end
 
-- **UI, in a real browser.** A render of the two new surfaces with `navigator.languages` set to
-  `id-ID`, reading the body text and failing on any dotted identifier: **PASS, no locale key
-  rendered**. The dashboard reads "Kemajuan", "Menit belajar", "510 menit belajar dan 95 ulangan
-  kartu di rentang ini.", "Waktu per mata kuliah", "Penguasaan kuis". The card reads "Saran Buat
-  kartu", "Judul / Jumlah / Sumber", **"Butuh 4 kredit saat kamu konfirmasi."** and **"Tidak ada
-  yang ditambahkan sampai kamu konfirmasi."** — the honesty copy in Indonesian, with the price
-  before the action.
+- **UI, in a real browser.** `navigator.languages = ['id-ID','id']` set through
+  `evaluateOnNewDocument` **before boot** (the module resolves the language once at load, so
+  setting it after the app loads would leave the first render English and the measurement a
+  lie), a real sign-in, then a chat turn typed and sent in the workspace. `<html lang>` is `id`
+  and **no dotted identifier renders on either screen**. Quoted from the rendered DOM, not from
+  the locale files:
+
+  **The card's state**, both rows: `Saran Buat kartu` and `Saran Tambah tugas`
+  (`honesty.suggested` = `Saran {{what}}`, with `agent.tool.create_flashcards` = `Buat kartu`).
+  **Its fields:** `Judul` / `Jumlah` / `Sumber` for the flashcard proposal, and
+  `Judul` / `Catatan` / `Tenggat` / `Prioritas` for the task one — `Tenggat 16 Oct 2026, 23:59`,
+  the due instant rendered in `Asia/Jakarta`.
+  **Its cost line:** `Butuh 4 kredit saat kamu konfirmasi.` for the priced tool and
+  `Tidak ada kredit yang dikenakan untuk tindakan ini.` for the unpriced one — the two arms of
+  gate 7(d), in Indonesian.
+  **Its buttons:** `Konfirmasi`, `Ubah`, `Abaikan` (`actions.confirm`/`edit`/`dismiss`).
+  **The honesty sentence, on both cards:** `Tidak ada yang ditambahkan sampai kamu konfirmasi.`
+  **The composer:** label `Tanya tentang ruang belajar ini`, hint `AI bisa salah. Periksa
+  kutipannya.`
+  **The dashboard, same session:** title `Kemajuan`, window `2026-09-28 sampai 2026-10-12`,
+  sections `Total` / `Waktu per mata kuliah` / `Aktivitas ulangan` / `Penguasaan kuis`, totals
+  `Menit belajar` / `Ulangan kartu` / `Kartu jatuh tempo` / `Percobaan kuis`, and the summary
+  sentences `510 menit belajar dan 95 ulangan kartu di rentang ini.`, `1 mata kuliah dipelajari,
+  total 510 menit.`, `1 hari ada ulangan, total 34 ulangan.`
 - **The defect this gate exists for, and it is real.** The card shipped resolving its field
   labels as `` t(`agent.field.${arg}`) `` against the *argument* names, so five of its twelve
   labels rendered **the key itself** (`agent.field.due_at` where a reader expects "Tenggat").
@@ -2597,9 +2671,13 @@ viewport and no desktop leg was added.
 - **(b) the number traces to something the app computes.** Every figure is the route's own count
   or sum; `dashboard.rs`'s suite asserts each equals a seeded count.
 - **(c) the composer hint, re-asserted by grepping the shipped bundle** rather than by reading the
-  component: `grep -ro "AI can make mistakes\. Check the citations\." app/dist/` →
-  `app/dist/assets/index-CBDbwWge.js`, one occurrence; and `AI bisa salah` (the Indonesian) is in
-  the same bundle, so the hint ships in both languages.
+  component. On the tree as it stands: `npm --prefix app run build` green, then
+  `grep -ro "AI can make mistakes\. Check the citations\." app/dist/` → **1 match**, in
+  `app/dist/assets/index-Eov9DdnN.js`; and `grep -ro "AI bisa salah\. Periksa kutipannya\." app/dist/`
+  → **1 match** in the same file. So the hint ships, in both languages, in the single entry
+  chunk. The filename is a content hash and therefore changes with every build — an earlier run of
+  this same check read `index-CBDbwWge.js` — so the durable fact is the count and the fact that
+  there is exactly one shipped JS file, not the hash.
 - **(d) the cost before the action runs.** `ActionCard.test.tsx` asserts the card shows
   `Costs {AGENT_CREDITS.flashcards} credits when you confirm.`, quoting the exported table read
   from `config/plans.toml` rather than a literal — and the Indonesian browser run reads the same
@@ -2607,4 +2685,98 @@ viewport and no desktop leg was added.
 - **(e) the "Suggested …" label.** Asserted rendered, with `honesty.nothingAddedYet` beside it,
   and a case that a pending card never reads as done; on a confirmed card the controls are gone
   and the created row is named instead.
+
+### The audit, three parts, each verdict quoted
+
+**1. Deliverables — every Task 15/16 item exists and behaves as the plan says. PASS, with three
+deviations already recorded above.**
+
+Every file Task 15 names exists: `api/queries/{actions,reminders,dashboard}.ts`,
+`features/chat/ActionCard.tsx` + `.test.tsx`, `features/reminders/localSchedule.ts` + `.test.ts`
+and `useLocalNotifications.ts` + `.test.ts`, `features/dashboard/DashboardScreen.tsx` +
+`.test.tsx`, and the modifications to `sse.ts`, `SettingsScreen.tsx`, `plans.ts`, `router.tsx` and
+both locale files. Task 16's five docs are in `HEAD` and `scripts/smoke-phase12.sh` is committed
+**and now executed**.
+
+Three behaviours the plan specifies, checked rather than assumed:
+
+- **The local schedule mirrors the server's rule, and the mirror is asserted against the server
+  file.** `localSchedule.ts` exports `LEAD_TASK_MIN = 60` / `LEAD_EVENT_MIN = 30`, and
+  `localSchedule.test.ts` reads `crates/core/src/reminders.rs` off disk, extracts
+  `LEAD_TASK_MIN`/`LEAD_EVENT_MIN` and asserts equality — so the client cannot drift to a lead
+  time the server does not consider the reminder's time. The file's own values are `60` and `30`,
+  and `reminders.rs:39,42` are `60` and `30`. **This is the one assertion in either suite that
+  would catch that divergence**, and it is why the constants are exported rather than inlined.
+- **`useLocalNotifications` writes the ids it scheduled into `Platform.localState`** under
+  `SEEN_KEY = 'reminder_seen'`, and skips a reminder whose id is already there — A285's
+  cross-device fallback half.
+- **`ActionCard` reads `GET /actions/pending` and never the stream's `action` event for its
+  state**, which is what makes a card confirmed on another device show as confirmed here; the
+  stream's event only invalidates the query.
+
+**2. Test quality — no test that cannot fail. PASS, and the model is `app/src/api/sse.test.ts`.**
+
+The rewritten case is the one to name, because it is how a contract change ships silently
+otherwise. Before this phase the file carried a case called *"ignores an event name the contract
+does not define"* that fed an `action` frame and asserted it produced **no error and no
+callback** — which was true while `action` was not one of the roadmap § 4 names, and false the
+moment it became one. Left alone, it would have kept passing against a parser that dropped every
+proposal on the floor. It was rewritten into three cases that each pin a different contract:
+
+- `parses an action frame into onAction, mid-answer` — the frame arrives between two tokens and
+  the answer keeps streaming around it;
+- `reports an action frame that names no tool` and `...whose arguments are not an object` — the
+  two malformed frames, each asserted to produce **one error and no callback**, because a card
+  rendered from a payload that was not a proposal is worse than a missing one;
+- `ignores an event name the contract does not define` — now carrying a genuinely unknown name
+  (`future_thing`), which is the forward-compatibility assertion the old case was really about.
+
+**A test that encodes the previous contract is the mechanism by which a contract change goes
+unnoticed**, and this phase's rewrite is the shape to copy: the old case's *intent* was kept and
+re-pointed at a name that is still undefined, rather than deleted.
+
+Two other quality facts worth recording. `ActionCard.test.tsx` gained the case that **would have
+caught the raw-key defect** (`labels every field it shows…`, asserting English copy for all four
+field-bearing tools and that no rendered label contains `agent.field.`); it was verified to **fail
+against the pre-fix component** by reverting the one-line change and re-running
+(`Tests 1 failed | 10 passed`). And the tests that *cannot* fail in jsdom are labelled as such
+rather than counted: the 44px target assertions read a class (`min-h-11`) because jsdom has no
+layout engine, which is why the browser measurement is the gate and the class assertion is only a
+tripwire.
+
+**3. Verification coverage — what ran, what did not, and what has no test.**
+
+- **Ran, and the numbers are from this tree:** `npm --prefix app test` → **585 passed, 0 failed**
+  (63 files). The brief's "187 in your directories" **reproduces**, and it is a wider set than the
+  three feature directories: `src/i18n`, `src/features/{reminders,chat,dashboard}`,
+  `src/api`, `src/features/settings` and `src/features/billing/plans.test.ts` → **188 passed
+  across 13 files** (`i18n.test.ts` gained one case since the brief was written, which is the
+  +1). Scoped to the three feature directories plus `src/api` alone → **145 passed across 9
+  files**. Both numbers are quoted with their glob because the count is meaningless without it.
+  `npm --prefix app run build` → **green** (`tsc --noEmit && vite build`), which is what makes
+  gate 7(c) a grep of a real bundle rather than of a stale one.
+- **Ran, and it is the evidence this phase was missing:** `bash scripts/smoke-phase12.sh` →
+  **PASS, exit 0**, six scenarios. Its first execution **found a defect** (see deviation 4 below),
+  which is the strongest thing that can be said for it.
+- **Moved out of the "did not run" column, and how:** the browser measurement (gate 5, both
+  viewports, both themes, both scales), the Indonesian UI run (gate 6) and gate 7(c)'s bundle grep
+  all **ran**; their numbers are above.
+- **Still did not run, and why:** gate 6's **server half** (`crates/server/tests/indonesian.rs`,
+  another slice's file, and this slice holds no write to `crates/**`); the whole-workspace Rust
+  suite, `cargo fmt`/`clippy`, `just check-shell` and `cargo sqlx prepare --check` (peers were
+  mid-edit in `crates/**` throughout this slice, so a result would have been a statement about
+  their working tree, not about this phase); and the **push delivery path end to end**, because no
+  APNs/FCM credentials exist in this environment — the smoke run prints that explicitly and
+  `channels_available` answers `["web","email"]`, which is A288's documented degraded state and
+  **not** a pass.
+- **Behaviours with no test, named rather than implied:** the desktop-width leg of gate 5 has no
+  committed harness (the shared walk cannot run at a desktop width at all, per the finding above),
+  so those numbers rest on a probe that was not committed; the local-notification **delivery** on a
+  real phone is exercised only through the platform double, since this machine runs no simulator;
+  and the `agent_turn` charge landing mid-stream is asserted by the server suite but has no
+  browser-level assertion that the client renders the post-spend usage frame.
+- **What a check could not be:** the browser at a viewport is not a device (no iOS/Android
+  notification permission flow, no real dynamic-type setting — the text scale is `font-size` on
+  `<html>`), and the smoke run's gateway is a stub speaking the real wire format rather than a
+  provider.
 
