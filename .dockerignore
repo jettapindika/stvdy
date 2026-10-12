@@ -1,0 +1,65 @@
+# The build context. Without this it is gigabytes, and a stale `var/` or a developer's
+# `.env` would leak into the image.
+#
+# What must **not** be excluded is the set the `build` stage copies: `Cargo.toml`,
+# `Cargo.lock`, `rust-toolchain.toml`, `crates/`, `migrations/`, `prompts/`,
+# `templates/`, `config/`, `.sqlx/` and `assets/`. A pattern here that swallowed one of
+# those would fail the build with a missing file rather than with a useful message, so the
+# list below is only things no stage reads.
+
+# Rust build output, both the workspace's and the native shell's.
+target/
+**/target/
+
+# Node. The server image has no frontend in it: the SPA is bundled into the desktop shell
+# and served by the operator's web host, not by this container.
+node_modules/
+app/node_modules/
+app/dist/
+app/coverage/
+app/.vitest/
+
+# The native shell. It is a separate workspace with its own lockfile, and `tauri_build`
+# panics when the bundle icons are absent — neither belongs in a server build.
+src-tauri/
+
+# VCS and editor state.
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Local environment and scratch. A `.env` in the image would be a secret in a layer, and
+# `var/` holds local object storage, mail files and a downloaded pdfium.
+.env*
+!.env.example
+var/
+.fastembed_cache/
+
+# Local development services and their rendered configuration.
+supabase/
+searxng/
+
+# Documentation and the planning record. They are read by people, not by the build, and
+# the plan documents are large.
+docs/
+.superpowers/
+
+# Local tooling that the image does not run: the fetch scripts have already been run and
+# their output is committed under `assets/`, and the smoke scripts drive a *running* host.
+# The test fixtures under `crates/server/tests/fixtures/` are deliberately **not** excluded:
+# the integration-test binaries copied into `/opt/tests` read them at run time.
+scripts/
+justfile
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Documentation at the repository root and under `docs/`. Deliberately **not** a bare
+# `*.md`: `prompts/` is a directory of Markdown files that the build compiles in with
+# `include_str!`, so a global rule would remove the prompts and fail the build.
+/README.md
+/THIRD_PARTY_NOTICES.md
+/LICENSE
+docs/
