@@ -52,6 +52,23 @@ These need **you**, not code, and they block a public launch rather than a phase
 | 15 (release) | An Apple Developer ID certificate for notarization, a Windows code-signing certificate, and a **production host** (A45: the current VPS is a 1-month trial and must never be production). Also a Cloudflare R2 bucket + credentials for production object storage (A15) |
 | 15 (release) | A decision on the updater signing key: where it lives and who holds it. A signed manifest whose key sits on a laptop means an update can be forged |
 
+## The one capability nobody has verified, and it is the one that decides the mobile approach
+
+**Every native probe in Phase 1's capability spike is recorded as NOT ATTEMPTED, and Phase 14 built on top of it anyway.** The roadmap's own Phase 1 text says this explicitly — *"do not defer to Phase 14 … Discover that in Phase 1, not after 13 phases"* — and the reason is that the answer can force a different plugin, a hand-written Swift/Kotlin shim, or a framework change that would have to be asked about before more is built on it.
+
+The probes and their recorded state (`docs/ARCHITECTURE.md:344`, `docs/superpowers/plans/2026-10-11-phase-1-auth-devices-ingest.md:622`):
+
+| Probe | State | What it decides |
+|---|---|---|
+| APNs token registration (iOS) | **NOT ATTEMPTED** | Whether the pinned community plugin (`tauri-plugin-notifications`, A310) is enough or a custom Swift plugin is needed |
+| FCM token registration (Android) | **NOT ATTEMPTED** | The Kotlin equivalent, plus whether the Gradle plugin and `google-services.json` wiring is right |
+| Foreground push receipt + tap-to-open, including cold start | **NOT ATTEMPTED** | Tap-to-open is the only guaranteed JS surface (A316), so this is the whole of the reliable push UX |
+| iOS "Open in…" document intake | **NOT ATTEMPTED** | Whether `RunEvent::Opened` delivers on a **cold** start under the scene lifecycle, which the capability matrix flags as unverified |
+| iOS share-sheet row | **NOT ATTEMPTED** | Whether the Share Extension + App Group path (A312) works, and whether the entitlement is obtainable |
+| Android `content://` share/import | **NOT ATTEMPTED** | Whether a concrete `mimeType` in `fileAssociations` delivers a URI the fs plugin can read |
+
+**What this means for you.** The code for all of it is written and its pure halves are asserted, but **none of the six has ever run on a device**. The Phase 0 finding already on record is the warning shot: the official `tauri-plugin-notification` **provably cannot receive remote push** (its iOS delegate skips `UNPushNotificationTrigger` and its Android manifest registers no FCM service), which is exactly the kind of discovery the spike existed to make early. So the honest state is: **the mobile native work is unverified, and a failure here is a design change rather than a bug fix.** Do the spike before building anything further on it — an Apple Developer account and one physical device answer all six rows, and a simulator answers four of them.
+
 ## Verified green so far
 
 Every phase's exit gate is recorded in its own plan file under "Execution notes", and each
