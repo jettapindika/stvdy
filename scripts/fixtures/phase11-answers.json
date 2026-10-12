@@ -1,0 +1,10 @@
+[
+  {
+    "contains": "Extract schedule information from the provided syllabus text",
+    "answer": "{\"course\":{\"name\":\"Jaringan Komputer\",\"code\":\"IF2230\",\"instructor\":\"Dr. Sari\"},\"meetings\":[{\"title\":\"Kuliah Jaringan\",\"rrule\":\"FREQ=WEEKLY;BYDAY=MO;COUNT=8\",\"start_time\":\"08:00\",\"end_time\":\"09:40\",\"location\":\"Ruang 3\",\"evidence\":\"Kuliah Senin 08:00 ruang 3\",\"confidence\":0.95},{\"title\":\"Praktikum Jaringan\",\"rrule\":\"FREQ=WEEKLY;BYDAY=WE;COUNT=8\",\"start_time\":\"13:00\",\"end_time\":\"15:30\",\"location\":null,\"evidence\":\"Praktikum Rabu 13:00\",\"confidence\":0.55}],\"deadlines\":[{\"title\":\"Tugas 1\",\"due\":\"2026-11-12T23:59:00+07:00\",\"weight_percent\":15.0,\"evidence\":\"Tugas 1 dikumpulkan 12 Nov\",\"confidence\":0.4},{\"title\":\"Tugas 2\",\"due\":\"2026-12-03T23:59:00+07:00\",\"weight_percent\":20.0,\"evidence\":\"Tugas 2 dikumpulkan 3 Des\",\"confidence\":0.9}],\"exams\":[{\"title\":\"UAS Jaringan\",\"starts_at\":\"2026-12-15T06:00:00+07:00\",\"ends_at\":null,\"topics\":[\"Topologi\",\"Routing\"],\"evidence\":\"UAS 15 Desember pukul 06:00\",\"confidence\":0.85}],\"notes\":[\"Materi UAS kumulatif\"]}"
+  },
+  {
+    "contains": "Estimate study effort for an exam goal",
+    "answer": "{\"topics\":[{\"topic\":\"Silabus Jaringan\",\"estimate_min\":510,\"reason\":\"one whole-semester source with no quiz attempts yet\"}],\"total_estimate_min\":510}"
+  }
+]

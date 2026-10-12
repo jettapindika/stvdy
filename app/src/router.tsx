@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter, useParams } from 'react-router'
 
 import { App } from './App'
 import { NotBuiltYet } from './components/ui/States'
@@ -9,17 +9,22 @@ import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
+import { CheckoutScreen } from './features/billing/CheckoutScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
+import { PricingScreen } from './features/billing/PricingScreen'
 import { CalendarScreen } from './features/calendar/CalendarScreen'
-import { DashboardScreen } from './features/dashboard/DashboardScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
+import { DashboardScreen } from './features/dashboard/DashboardScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { SettingsScreen } from './features/settings/SettingsScreen'
 import { TasksScreen } from './features/tasks/TasksScreen'
 import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
 import { ReportScreen } from './features/reports/ReportScreen'
 import { QuizScreen } from './features/quiz/QuizScreen'
+import { PlannerScreen } from './features/planner/PlannerScreen'
 import { StudyScreen } from './features/study/StudyScreen'
+import { SyllabusReviewScreen } from './features/syllabus/SyllabusReviewScreen'
+import { SyllabusScreen } from './features/syllabus/SyllabusPanel'
 import { TodayScreen } from './features/today/TodayScreen'
 import { WorkspaceListScreen } from './features/workspaces/WorkspaceListScreen'
 import { WorkspaceScreen } from './features/workspaces/WorkspaceScreen'
@@ -65,6 +70,30 @@ function BillingRoute() {
 function NotBuiltRoute({ titleKey, whatKey }: { titleKey: string; whatKey: string }) {
   const { t } = useTranslation()
   return <NotBuiltYet title={t(titleKey)} what={t(whatKey)} />
+}
+
+/**
+ * `/syllabus/:draftId`, with the id read from the path.
+ *
+ * The route table is evaluated at module scope, so the param cannot be read there:
+ * this wrapper is what turns the path segment into the prop the review screen
+ * takes, the same shape `BillingRoute` uses for the platform.
+ */
+function SyllabusReviewRoute() {
+  const { draftId } = useParams()
+  return <SyllabusReviewScreen draftId={draftId ?? ''} />
+}
+
+/**
+ * `/billing/checkout/:paymentId`, with the id read from the path.
+ *
+ * The route table is evaluated at module scope, so the param cannot be read there:
+ * this wrapper is what turns the path segment into the prop the screen takes, the
+ * same shape `SyllabusReviewRoute` and `BillingRoute` use.
+ */
+function CheckoutRoute() {
+  const { paymentId } = useParams()
+  return <CheckoutScreen paymentId={paymentId ?? ''} />
 }
 
 /**
@@ -132,6 +161,22 @@ export const router = createBrowserRouter([
             path: 'dashboard',
             element: <DashboardScreen />,
           },
+          // The planner and the syllabus import (Phase 11). The review screen is a
+          // route rather than a panel because it is the phase's honesty gate: the
+          // student reads the extraction, edits it, and confirms — and a URL they
+          // can come back to is what makes a long review survivable.
+          {
+            path: 'planner',
+            element: <PlannerScreen />,
+          },
+          {
+            path: 'syllabus',
+            element: <SyllabusScreen />,
+          },
+          {
+            path: 'syllabus/:draftId',
+            element: <SyllabusReviewRoute />,
+          },
           {
             path: 'settings',
             element: <SettingsScreen />,
@@ -139,6 +184,23 @@ export const router = createBrowserRouter([
           {
             path: 'billing',
             element: <BillingRoute />,
+          },
+          // The pricing page (A305). It renders on web and desktop only, and it
+          // says so itself rather than being hidden: on a phone the policy forbids
+          // purchase UI, and a route that vanished would be a dead link from
+          // whatever named it. What a phone gets is the honest sentence and no
+          // price, no button and no link — the same rule `MobilePlanScreen` states.
+          {
+            path: 'pricing',
+            element: <PricingScreen />,
+          },
+          // The QRIS checkout screen, keyed by the payment it is about. A route
+          // rather than a panel, because a student who reloads, or opens the link
+          // on another device, must land back on the same live invoice — and the
+          // poll is what recovers a webhook the gateway never delivered (A301).
+          {
+            path: 'billing/checkout/:paymentId',
+            element: <CheckoutRoute />,
           },
           // Reached from the sync status control rather than from the nav (A189):
           // the sidebar and the phone tab bar are both built from the same five
