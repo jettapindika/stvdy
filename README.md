@@ -263,8 +263,11 @@ Two things are contracts rather than conveniences:
 
 The container needs `--shm-size` and a writable `/tmp` for Chromium's sandbox
 (A338), and the exact `docker run` stanza is in `docs/OPERATIONS.md`. So are the
-day-two procedures: backups and the restore drill (`just restore-drill`),
-monitoring with thresholds, the breach runbook, and retention.
+day-two procedures: backups and the restore drill (`just restore-drill
+/var/backups/stvdy postgres://…/stvdy_drill`), monitoring with thresholds, the
+breach runbook, and retention. The drill takes the dump and a **scratch**
+database — never production — and `--source-url` is the optional third argument
+that adds the row-count comparison against the live database.
 
 ## Releasing
 
