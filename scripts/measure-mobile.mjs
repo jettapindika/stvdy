@@ -912,7 +912,7 @@ function fail(message) {
  * nearest one reports the ratio against a colour nobody sees.
  */
 function measureInPage(options) {
-  const { minTarget, minText, minLarge } = options
+  const { minTarget, minText, minLarge, desktopFloor } = options
 
   const RGBA = /rgba?\(([^)]+)\)/
   const parseColor = (value) => {
@@ -1008,6 +1008,21 @@ function measureInPage(options) {
     // A skip link is `sr-only` until focused: it is 1x1 by design, and what makes
     // it usable is that focusing it expands it. Measured focused, below.
     if (el.classList.contains('sr-only') && document.activeElement !== el) continue
+    // **A citation chip inside a sentence is not a pointer target, and SC 2.5.8 says
+    // so.** `button.cite` is 72.8x30.4 at 200% text and 36.4x15.2 at 100% -- at 100%
+    // its height is the line-height of the prose it sits in (15.2 against 15.225), so
+    // it is a mark between two words rather than a control beside them. The success
+    // criterion's own exception list covers a target "in a sentence or block of
+    // text", and the 8px-gap clause cannot be satisfied by something set inside a
+    // line. Measuring it here would make the desktop leg permanently red on a
+    // deliberate decision, which is the failure mode this exemption exists to stop:
+    // the count would be ignored rather than read. **The phone rule is untouched** --
+    // `button.cite` carries a 44px box inside `@media (max-width: 767px)` for exactly
+    // this reason, so at phone width it measures as a target and passes.
+    //
+    // Recorded in A323 (Phase 14's gate-5 decision) and beside `.cite` in
+    // `app/src/styles.css`, so the next phase finds the reason where the rule is.
+    if (el.classList.contains('cite') && desktopFloor === true) continue
     const box = rect(hitArea(el))
     const ok = box.w >= minTarget && box.h >= minTarget
     targets.push({
@@ -1431,6 +1446,12 @@ async function main() {
 
         const measured = await page.evaluate(measureInPage, {
           minTarget: MIN_TARGET,
+          // The inline-citation exemption below is a **desktop** one (see its comment):
+          // it applies only when the floor is the spec's 32px desktop value, never when
+          // it is the 44px touch value. Passed as a flag rather than compared against a
+          // constant, because `measureInPage` runs inside the page and cannot see this
+          // module's bindings.
+          desktopFloor: MIN_TARGET === DESKTOP_TARGET,
           minText: MIN_TEXT,
           minLarge: MIN_LARGE,
         })
@@ -1530,7 +1551,14 @@ async function main() {
     process.exit(1)
   }
 
-  console.log('gate 5 on a phone viewport: PASS')
+  // The verdict names the viewport, because this walk has two legs now and the
+  // sentence it printed before was wrong on the desktop one: it said "on a phone
+  // viewport" at 1365px, which is the same defect class as a Result column that
+  // holds a claim the run did not make.
+  const leg = MIN_TARGET === DESKTOP_TARGET ? 'desktop' : 'phone'
+  console.log(
+    `gate 5 on a ${leg} viewport: PASS (${String(VIEWPORT.width)}x${String(VIEWPORT.height)}, ${String(SCALES.length)} scale(s), both themes)`,
+  )
 }
 
 await main()
