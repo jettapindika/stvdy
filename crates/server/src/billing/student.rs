@@ -84,12 +84,16 @@ pub async fn request(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("invalidating old tokens: {error}")))?;
 
     sqlx::query(
-        "insert into email_verification_tokens (user_id, token_hash, expires_at, purpose)
-         values ($1, $2, $3, 'student_verify')",
+        "insert into email_verification_tokens
+             (user_id, token_hash, expires_at, purpose, target_email)
+         values ($1, $2, $3, 'student_verify', $4)",
     )
     .bind(user.user_id)
     .bind(hash_token(&token))
     .bind(expires_at)
+    // The address the link went to, so `confirm` stores the address that was actually
+    // proved rather than the account's own.
+    .bind(&email)
     .execute(&mut *tx)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("recording a token: {error}")))?;
@@ -155,12 +159,16 @@ pub async fn confirm(
         AppError::Internal(anyhow::anyhow!("beginning a confirmation: {error}"))
     })?;
 
-    let row: Option<(uuid::Uuid, String)> = sqlx::query_as(
+    // The address comes off the token row — the one the link was mailed to — and never from
+    // the body or from `users.email`. That is what makes the suffix rule mean something: the
+    // student proved control of *that* campus address, and storing the account's own address
+    // instead would record the discount against an address the rule never accepted.
+    let row: Option<(uuid::Uuid, Option<String>)> = sqlx::query_as(
         "update email_verification_tokens
             set used_at = now()
           where token_hash = $1 and purpose = 'student_verify'
             and user_id = $2 and used_at is null and expires_at > now()
-      returning user_id, (select email from users where id = $2)",
+      returning user_id, target_email",
     )
     .bind(hash_token(&body.token))
     .bind(user.user_id)
@@ -168,17 +176,23 @@ pub async fn confirm(
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("consuming a token: {error}")))?;
 
-    let Some((user_id, _email)) = row else {
+    let Some((user_id, target_email)) = row else {
+        return Err(AppError::Validation(
+            "this verification link is invalid or has expired".to_string(),
+        ));
+    };
+    let Some(target_email) = target_email else {
+        // A `student_verify` token with no target is one this code could not have minted.
+        // Refusing is the safe direction: the alternative is recording whatever address the
+        // account happens to hold and calling it proved.
         return Err(AppError::Validation(
             "this verification link is invalid or has expired".to_string(),
         ));
     };
 
-    // The address proved is the one the link was mailed to, which is the caller's own
-    // address: there is no body field to set it from, so a client cannot claim a campus
-    // address it did not receive mail at.
-    sqlx::query("update users set student_verified = true, student_email = email where id = $1")
+    sqlx::query("update users set student_verified = true, student_email = $2 where id = $1")
         .bind(user_id)
+        .bind(&target_email)
         .execute(&mut *tx)
         .await
         .map_err(|error| {

@@ -61,9 +61,19 @@ pub struct PaymentView {
 /// every caller concatenates at compile time.
 macro_rules! payment_select {
     () => {
+        // The `::bigint` casts are load-bearing. `payments.amount_idr` and
+        // `amount_before_discount_idr` are `int` (INT4), and sqlx decodes a column by its
+        // SQL type: an `i64` field against an INT4 column is a runtime
+        // "mismatched types; Rust type `i64` is not compatible with SQL type `INT4`" on
+        // **every** read, which is a 500 on every checkout. Money is `i64` in Rust (whole
+        // rupiah, and a yearly power plan is 250000 — well inside INT4, but the arithmetic
+        // in `billing::price` is i64 throughout), so the cast belongs here rather than
+        // narrowing the field. The cast is *outside* the `coalesce`: `coalesce(int, int)` is
+        // INT4 and would decode exactly as badly.
         "select id, order_id, kind, plan_id, billing_period, credits,
-                amount_idr,
-                coalesce(amount_before_discount_idr, amount_idr) as amount_before_discount_idr,
+                amount_idr::bigint as amount_idr,
+                coalesce(amount_before_discount_idr, amount_idr)::bigint
+                    as amount_before_discount_idr,
                 discount_percent, discount_code, student_discount, qr_string, expires_at,
                 status, paid_at
            from payments"
@@ -183,7 +193,12 @@ pub async fn create(
                 .as_ref()
                 .map(|b| b.list_idr)
                 .unwrap_or(amount_idr),
-            discount: code.as_ref(),
+            // **The code is consumed only when it determined the price** (A298). Passing the
+            // loaded code unconditionally would spend a once-per-user code on a checkout
+            // where the student promo won the tie: the code buys nothing, and the *next*
+            // checkout with it is then refused as "already used on this account". The tie
+            // rule and the redemption rule have to agree, and this is where they do.
+            discount: applied_code(breakdown.as_ref(), code.as_ref()),
         },
         qris.invoice_ttl_minutes,
     )
@@ -194,6 +209,25 @@ pub async fn create(
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a checkout: {error}")))?;
 
     Ok(view)
+}
+
+/// The code that actually determined the price, or `None`.
+///
+/// `billing::price` already decided (A298: the larger percentage wins, and a tie goes to the
+/// student promo); this is the one place that decision is turned into "was the code spent".
+/// A code the promo beat must not be redeemed: it bought nothing, and spending it would
+/// refuse the student's *next* checkout for a discount they never received.
+fn applied_code<'a>(
+    breakdown: Option<&stvdy_core::billing::PriceBreakdown>,
+    code: Option<&'a DiscountCode>,
+) -> Option<&'a DiscountCode> {
+    let code = code?;
+    match breakdown {
+        Some(breakdown) if breakdown.code_applied.as_deref() == Some(code.code.as_str()) => {
+            Some(code)
+        }
+        _ => None,
+    }
 }
 
 /// The fields of a payment to open, as the two callers that open one supply them.
@@ -236,11 +270,19 @@ pub(crate) async fn open_invoice(
 
     // A307: reuse rather than mint. `subscription_id` is deliberately not part of the
     // key — two renewals of one plan and period are one invoice.
+    // The reuse key is every field that decides **what is being bought**: the user, the
+    // kind, the plan, the period and the credit amount. `credits` is in it because a pack's
+    // identity *is* the credits it grants (`CreditPack`'s own doc), and a credit-pack row
+    // has `plan_id` and `billing_period` NULL — `is not distinct from` treats NULL as equal
+    // to NULL, so without `credits` a student asking for a 500-credit pack would be handed
+    // back the 100-credit invoice they already have open, and charged 3,000 IDR for 100
+    // credits. That is the reuse rule silently selling the wrong product.
     let existing: Option<PaymentView> = sqlx::query_as(concat!(
         payment_select!(),
         " where user_id = $1 and kind = $2
             and plan_id is not distinct from $3
             and billing_period is not distinct from $4
+            and credits is not distinct from $5
             and status = 'pending' and expires_at > now()
           order by created_at desc
           limit 1"
@@ -249,6 +291,7 @@ pub(crate) async fn open_invoice(
     .bind(new.kind)
     .bind(new.plan_id)
     .bind(new.billing_period)
+    .bind(new.credits)
     .fetch_optional(&mut *conn)
     .await
     .map_err(|error| {
@@ -288,13 +331,19 @@ pub(crate) async fn open_invoice(
     let order_id = new_order_id();
     let expires_at = state.clock.now() + Duration::minutes(ttl_minutes);
 
+    // The provider recorded on the row is the gateway that minted the invoice, never a
+    // literal. `payments` is unique on `(provider, order_id)` and the webhook resolves an
+    // order with the same `gateway.name()`, so a hardcoded `'qris_gateway'` would be a
+    // lookup that cannot match the moment a second provider exists — and every callback for
+    // it would answer 404 while the payment sat pending.
+    let provider = gateway.name();
+
     let payment_id: Uuid = sqlx::query_scalar(
         "insert into payments
              (user_id, subscription_id, kind, plan_id, billing_period, credits, provider,
               order_id, amount_idr, amount_before_discount_idr, discount_percent,
               student_discount, discount_code, platform, expires_at, status)
-         values ($1, $2, $3, $4, $5, $6, 'qris_gateway', $7, $8, $9, $10, $11, $12, $13,
-                 $14, 'pending')
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending')
          returning id",
     )
     .bind(user.user_id)
@@ -303,6 +352,7 @@ pub(crate) async fn open_invoice(
     .bind(new.plan_id)
     .bind(new.billing_period)
     .bind(new.credits)
+    .bind(provider)
     .bind(&order_id)
     .bind(new.amount_idr)
     .bind(new.amount_before_discount_idr)
@@ -440,6 +490,30 @@ pub async fn show(state: &AppState, user: &AuthUser, payment_id: Uuid) -> AppRes
     .ok_or(AppError::NotFound)?;
 
     Ok(view)
+}
+
+/// `GET /billing/invoices` — the caller's own payment history.
+///
+/// The billing screen's history panel has no client-side substitute: `payments` is
+/// deliberately not synced (`docs/SPEC.md` line 137), so there is no device copy to read.
+/// It is the same `select` as [`show`], scoped by `user_id` and bounded — a student with
+/// years of history does not need it all on one screen, and the newest 50 is what a
+/// payment-history panel renders.
+///
+/// Expiry is **not** re-checked here, unlike [`show`]: this is a read of what happened, and
+/// a list that quietly rewrote rows while the student was looking at their history would be
+/// a surprise. The screen's live invoice is the one it polls by id.
+pub async fn list(state: &AppState, user: &AuthUser) -> AppResult<Vec<PaymentView>> {
+    let invoices: Vec<PaymentView> = sqlx::query_as(concat!(
+        payment_select!(),
+        " where user_id = $1 order by created_at desc limit 50"
+    ))
+    .bind(user.user_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing the invoices: {error}")))?;
+
+    Ok(invoices)
 }
 
 /// The payment row, or `NotFound`.

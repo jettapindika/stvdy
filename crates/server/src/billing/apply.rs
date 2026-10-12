@@ -98,7 +98,10 @@ pub async fn apply_paid(
     event: &WebhookEvent,
 ) -> AppResult<Applied> {
     let payment: Option<PaymentRow> = sqlx::query_as(
-        "select id, user_id, kind, plan_id, billing_period, credits, amount_idr, expires_at
+        // `amount_idr::bigint`: the column is INT4 and the field is `i64`, and sqlx decodes
+        // by SQL type — without the cast every read of this row fails at runtime.
+        "select id, user_id, kind, plan_id, billing_period, credits,
+                amount_idr::bigint as amount_idr, expires_at
            from payments
           where id = $1
           for update",
@@ -308,6 +311,11 @@ async fn activate_subscription(
         .await;
     };
     let plan = PlanId::parse(plan_id);
+    // The provider recorded on the subscription is the gateway that took the money, from the
+    // same `name()` the webhook resolves orders with — never a literal. One string for "who
+    // was paid" is what keeps `payments.provider` and `subscriptions.provider` comparable.
+    let provider = state.payment()?.name();
+
     let Some(period) = payment
         .billing_period
         .as_deref()
@@ -320,6 +328,27 @@ async fn activate_subscription(
         )
         .await;
     };
+
+    // **The plan the student can feel is `users.plan_id`**, and this is the one write that
+    // makes it live. `entitlements::effective_plan` reads `users.plan_id` gated by the
+    // subscription's status (A146), so writing only `subscriptions.plan_id` below would
+    // leave a student who just paid for Power on Pro limits for the whole period they paid
+    // for — the exact failure this phase exists to prevent. `admin::set_plan` and
+    // `periods::apply_pending_plan` both move it for the same reason; this was the only
+    // writer of `subscriptions.plan_id` that did not.
+    //
+    // Written here, before the branch, so all three outcomes — upgrade, extension and fresh
+    // period — set it exactly once and none of them can forget.
+    sqlx::query("update users set plan_id = $2 where id = $1 and deleted_at is null")
+        .bind(payment.user_id)
+        .bind(plan.as_str())
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!(
+                "activating the plan on the account: {error}"
+            ))
+        })?;
 
     // The live subscription, taken under the same transaction as the update below.
     let live: Option<SubscriptionRow> = sqlx::query_as(
@@ -339,16 +368,15 @@ async fn activate_subscription(
     // for the time being switched.
     if let Some(live) = &live {
         if live.current_period_end > paid_at && live.plan_id != plan.as_str() {
-            sqlx::query(
-                "update subscriptions set plan_id = $2, provider = 'qris_gateway' where id = $1",
-            )
-            .bind(live.id)
-            .bind(plan.as_str())
-            .execute(&mut *conn)
-            .await
-            .map_err(|error| {
-                AppError::Internal(anyhow::anyhow!("switching the subscription plan: {error}"))
-            })?;
+            sqlx::query("update subscriptions set plan_id = $2, provider = $3 where id = $1")
+                .bind(live.id)
+                .bind(plan.as_str())
+                .bind(provider)
+                .execute(&mut *conn)
+                .await
+                .map_err(|error| {
+                    AppError::Internal(anyhow::anyhow!("switching the subscription plan: {error}"))
+                })?;
 
             sqlx::query("update payments set subscription_id = $2 where id = $1")
                 .bind(payment.id)
@@ -376,7 +404,7 @@ async fn activate_subscription(
                 "update subscriptions
                     set plan_id = $2, status = 'active', billing_period = $3,
                         current_period_start = $4, current_period_end = $5,
-                        provider = 'qris_gateway'
+                        provider = $6
                   where id = $1",
             )
             .bind(live.id)
@@ -384,6 +412,7 @@ async fn activate_subscription(
             .bind(period.as_str())
             .bind(change.start)
             .bind(change.end)
+            .bind(provider)
             .execute(&mut *conn)
             .await
             .map_err(|error| {
@@ -399,7 +428,7 @@ async fn activate_subscription(
                 "insert into subscriptions
                      (user_id, plan_id, status, billing_period,
                       current_period_start, current_period_end, provider)
-                 values ($1, $2, 'active', $3, $4, $5, 'qris_gateway')
+                 values ($1, $2, 'active', $3, $4, $5, $6)
                  returning id",
             )
             .bind(payment.user_id)
@@ -407,6 +436,7 @@ async fn activate_subscription(
             .bind(period.as_str())
             .bind(change.start)
             .bind(change.end)
+            .bind(provider)
             .fetch_one(&mut *conn)
             .await
             .map_err(|error| {
@@ -579,10 +609,11 @@ pub async fn payment_summary(
     conn: &mut PgConnection,
     payment_id: Uuid,
 ) -> AppResult<Option<(i64, String)>> {
-    let row = sqlx::query("select amount_idr, status from payments where id = $1")
-        .bind(payment_id)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the payment: {error}")))?;
+    let row =
+        sqlx::query("select amount_idr::bigint as amount_idr, status from payments where id = $1")
+            .bind(payment_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the payment: {error}")))?;
     Ok(row.map(|row| (row.get("amount_idr"), row.get("status"))))
 }

@@ -138,12 +138,13 @@ async fn checkout_writes_one_pending_payment_with_the_quoted_amount(pool: PgPool
     assert_eq!(asked[0].order_id, body["order_id"].as_str().unwrap());
 
     // One row, pending, with the QR written back.
-    let row: (i64, String, Option<String>) =
-        sqlx::query_as("select amount_idr, status, qr_string from payments where order_id = $1")
-            .bind(body["order_id"].as_str().unwrap())
-            .fetch_one(&harness.state.pool)
-            .await
-            .unwrap();
+    let row: (i64, String, Option<String>) = sqlx::query_as(
+        "select amount_idr::bigint, status, qr_string from payments where order_id = $1",
+    )
+    .bind(body["order_id"].as_str().unwrap())
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
     assert_eq!(row.0, expected);
     assert_eq!(row.1, "pending");
     assert!(row.2.is_some(), "the QR was not written back to the row");
@@ -250,7 +251,7 @@ async fn a_verified_student_gets_the_student_price_and_a_code_does_not_stack(poo
 
     // The code was redeemed exactly once — for the checkout that actually used it.
     let redeemed: i64 =
-        sqlx::query_scalar("select redeemed from discount_codes where code = 'STUDY30'")
+        sqlx::query_scalar("select redeemed::bigint from discount_codes where code = 'STUDY30'")
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
@@ -311,7 +312,7 @@ async fn an_exhausted_or_reused_discount_code_is_refused(pool: PgPool) {
     // The count is not left inflated by the refused attempt, and no row was written for
     // it: one redemption, two payments (monthly and yearly), the yearly one without a code.
     let redeemed: i64 =
-        sqlx::query_scalar("select redeemed from discount_codes where code = 'ONCE'")
+        sqlx::query_scalar("select redeemed::bigint from discount_codes where code = 'ONCE'")
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
@@ -320,7 +321,8 @@ async fn an_exhausted_or_reused_discount_code_is_refused(pool: PgPool) {
         .fetch_one(&harness.state.pool)
         .await
         .unwrap();
-    assert_eq!(payments, 2, "a refused checkout wrote a payment");
+    // One row: the monthly checkout succeeded, and both refusals wrote nothing.
+    assert_eq!(payments, 1, "a refused checkout wrote a payment");
 }
 
 /// The amount the client is shown is the amount in the row, from the one pricing function
@@ -345,11 +347,12 @@ async fn the_quoted_amount_is_the_stored_amount(pool: PgPool) {
     assert_eq!(polled["amount_idr"], quoted["amount_idr"]);
     assert_eq!(polled["status"], "pending");
 
-    let stored: i64 = sqlx::query_scalar("select amount_idr from payments where id = $1::uuid")
-        .bind(id)
-        .fetch_one(&harness.state.pool)
-        .await
-        .unwrap();
+    let stored: i64 =
+        sqlx::query_scalar("select amount_idr::bigint from payments where id = $1::uuid")
+            .bind(id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
     assert_eq!(
         quoted["amount_idr"].as_i64().unwrap(),
         stored,
@@ -377,6 +380,125 @@ async fn the_quoted_amount_is_the_stored_amount(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+}
+
+/// The history panel's route: the caller's own payments, newest first, and nobody else's.
+#[sqlx::test(migrations = "../../migrations")]
+async fn invoices_lists_the_callers_own_payments_newest_first(pool: PgPool) {
+    let (harness, app, token) = harness(pool, "web").await;
+
+    let (_, first) = json(&app, "POST", "/billing/checkout", &token, checkout_body()).await;
+    let (_, second) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "plan_id": "pro", "billing_period": "yearly" }),
+    )
+    .await;
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/billing/invoices",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list = body["invoices"].as_array().expect("an invoices array");
+    assert_eq!(list.len(), 2, "{body}");
+    // Newest first, so the panel does not have to sort.
+    assert_eq!(list[0]["id"], second["id"], "{body}");
+    assert_eq!(list[1]["id"], first["id"], "{body}");
+    // The same DTO the checkout screen polls, so the panel renders it with no second shape.
+    assert!(list[0]["amount_idr"].is_i64(), "{body}");
+    assert!(list[0]["qr_string"].is_string(), "{body}");
+
+    // Another account's payment is not in the list: the scope is in the statement.
+    sqlx::query("insert into users (id, email, password_hash) values ($1, $2, 'x')")
+        .bind(Uuid::now_v7())
+        .bind(format!("stranger-{}@example.test", Uuid::now_v7()))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    let (status, stranger) = json(
+        &app,
+        "GET",
+        "/billing/invoices",
+        &signed_up(&app, &harness, "stranger2@example.test").await,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stranger}");
+    assert_eq!(
+        stranger["invoices"].as_array().map(Vec::len),
+        Some(0),
+        "an account saw another account's payments: {stranger}"
+    );
+}
+
+/// Two credit packs of **different sizes** are two invoices. This is the case the reuse rule
+/// gets wrong if its key omits the credit amount: a credit-pack row has `plan_id` and
+/// `billing_period` NULL, `is not distinct from` treats NULL as equal to NULL, so a
+/// 500-credit pack would be answered with the open 100-credit invoice — 3,000 IDR for 100
+/// credits, and the wrong product sold silently.
+#[sqlx::test(migrations = "../../migrations")]
+async fn two_credit_packs_of_different_sizes_are_two_invoices(pool: PgPool) {
+    let (harness, app, token) = harness(pool, "web").await;
+    let packs = harness.state.config.plans.credit_packs.packs.clone();
+    assert!(packs.len() >= 2, "the config must sell at least two packs");
+
+    let (status, small) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "credit_pack": packs[0].credits }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{small}");
+    assert_eq!(small["amount_idr"], packs[0].price_idr, "{small}");
+    assert_eq!(small["credits"], packs[0].credits, "{small}");
+
+    let (status, large) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "credit_pack": packs[1].credits }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{large}");
+    assert_ne!(
+        small["id"], large["id"],
+        "a second, larger pack reused the first pack's invoice"
+    );
+    assert_eq!(
+        large["credits"], packs[1].credits,
+        "the larger pack was answered with the smaller one: {large}"
+    );
+    assert_eq!(large["amount_idr"], packs[1].price_idr, "{large}");
+    assert_eq!(
+        harness.gateway.invoices().len(),
+        2,
+        "one QR for two products"
+    );
+
+    // And asking for the *same* pack again does reuse it, which is the rule A307 wants.
+    let (_, again) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "credit_pack": packs[0].credits }),
+    )
+    .await;
+    assert_eq!(
+        again["id"], small["id"],
+        "the same pack minted a second invoice"
+    );
+    assert_eq!(harness.gateway.invoices().len(), 2);
 }
 
 /// A deployment with no gateway refuses checkout with 502 `provider_error` and writes
@@ -435,6 +557,9 @@ async fn plans_hides_prices_from_a_phone(pool: PgPool) {
 async fn the_student_verification_flow_sets_the_flag_only_from_a_campus_link(pool: PgPool) {
     let (harness, app, token) = harness(pool, "web").await;
 
+    // Signup itself sent a verification mail, so "no mail at all" would be the wrong
+    // assertion; what matters is that the lookalike added none.
+    let before = harness.mailer.sent().len();
     let (status, refused) = json(
         &app,
         "POST",
@@ -448,8 +573,9 @@ async fn the_student_verification_flow_sets_the_flag_only_from_a_campus_link(poo
         refused["sent"], false,
         "a lookalike domain was accepted as a campus address: {refused}"
     );
-    assert!(
-        harness.mailer.sent().is_empty(),
+    assert_eq!(
+        harness.mailer.sent().len(),
+        before,
         "mail was sent for a lookalike address"
     );
 

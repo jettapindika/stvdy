@@ -279,7 +279,7 @@ pub async fn reconcile(state: &AppState) -> AppResult<u64> {
         "select id, order_id
            from payments
           where status in ('pending', 'paid')
-            and created_at >= now() - make_interval(hours => $1)
+            and created_at >= now() - make_interval(hours => $1::int)
             and created_at < now() - interval '10 minutes'",
     )
     .bind(hours)

@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/plans", get(plans))
         .route("/billing/checkout", post(checkout_route))
         .route("/billing/payments/{id}", get(payment))
+        .route("/billing/invoices", get(invoices))
         // An upgrade and a downgrade both move money or move a period end, so both take
         // `VerifiedUser` (A43). `periods::upgrade` calls `checkout_allowed` itself as its
         // first statement, so the platform rule is not repeated here.
@@ -159,6 +160,18 @@ async fn payment(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<PaymentView>> {
     Ok(Json(checkout::show(&state, &user, id).await?))
+}
+
+/// `GET /billing/invoices` — the caller's own payment history.
+///
+/// The response is an object rather than a bare array, so a field can be added later (a
+/// cursor, a total) without breaking a client that already parses it.
+async fn invoices(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let invoices = checkout::list(&state, &user).await?;
+    Ok(Json(serde_json::json!({ "invoices": invoices })))
 }
 
 /// `POST /billing/student/verify`

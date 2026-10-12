@@ -82,8 +82,22 @@ async fn post_webhook(
     (status, value)
 }
 
+/// The **subscription period's** grant, not every positive ledger row: signup writes the
+/// free allowance, so counting all of them would make every activation look like a double
+/// grant.
 async fn ledger_rows(harness: &TestState) -> i64 {
-    sqlx::query_scalar("select count(*) from credit_ledger where delta > 0")
+    sqlx::query_scalar(
+        "select count(*) from credit_ledger where delta > 0 and period_key like 'sub:%'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap()
+}
+
+/// The account's id, so a test can assert on a column the response does not carry.
+async fn user_id_of(harness: &TestState, email: &str) -> Uuid {
+    sqlx::query_scalar("select id from users where email = $1")
+        .bind(email)
         .fetch_one(&harness.state.pool)
         .await
         .unwrap()
@@ -130,6 +144,20 @@ async fn a_signed_paid_webhook_activates_the_plan_and_the_second_device_sees_it(
 
     // The period's allowance was granted exactly once.
     assert_eq!(ledger_rows(&harness).await, 1);
+
+    // The plan the student can feel is `users.plan_id`, because `effective_plan` reads that
+    // column gated by the subscription's status (A146). Writing only `subscriptions.plan_id`
+    // would leave a paying student on free limits — the failure this phase exists to
+    // prevent — so this asserts the column, not just the subscription row.
+    let account_plan: String = sqlx::query_scalar("select plan_id from users where id = $1")
+        .bind(user_id_of(&harness, "payer@example.test").await)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        account_plan, "pro",
+        "the subscription is live but the account's own plan never moved"
+    );
 
     // The second device: a token minted after the webhook sees the paid plan, because
     // entitlements are loaded per request rather than carried in the token.

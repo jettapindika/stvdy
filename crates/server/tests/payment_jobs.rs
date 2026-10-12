@@ -45,11 +45,16 @@ async fn live_subscriptions(harness: &TestState) -> i64 {
         .unwrap()
 }
 
+/// The **subscription period's** grant, not every positive ledger row: signup writes the
+/// free allowance, so counting all of them would make every activation look like a double
+/// grant.
 async fn ledger_rows(harness: &TestState) -> i64 {
-    sqlx::query_scalar("select count(*) from credit_ledger where delta > 0")
-        .fetch_one(&harness.state.pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        "select count(*) from credit_ledger where delta > 0 and period_key like 'sub:%'",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap()
 }
 
 async fn payment_status(harness: &TestState, id: &str) -> String {
@@ -87,9 +92,10 @@ async fn poll_payment_activates_a_payment_whose_webhook_was_lost(pool: PgPool) {
     assert_eq!(ledger_rows(&harness).await, 1);
 
     // The fee the gateway reported is on the row, and the poll's event is recorded so the
-    // audit says where the activation came from.
+    // audit says where the activation came from. `gateway_fee_idr` is INT4, so the read is
+    // `Option<i32>` and the cast keeps sqlx from decoding it as anything else.
     let fee: Option<i32> =
-        sqlx::query_scalar("select gateway_fee_idr from payments where id = $1::uuid")
+        sqlx::query_scalar("select gateway_fee_idr::int from payments where id = $1::uuid")
             .bind(payment["id"].as_str().unwrap())
             .fetch_one(&harness.state.pool)
             .await
@@ -124,11 +130,14 @@ async fn poll_payment_expires_an_invoice_the_gateway_says_is_dead(pool: PgPool) 
 
     // A payment that is still pending at the gateway stays pending — it is not expired by
     // our clock alone, because the gateway's expiry is the authoritative one.
+    // One account, one token: signing the same email up twice is a 409, which is what the
+    // first version of this test did.
+    let second_token = signed_up_on(&_app, &harness, "second@example.test", "web").await;
     let (_, second) = json(
         &_app,
         "POST",
         "/billing/checkout",
-        &signed_up_on(&_app, &harness, "second@example.test", "web").await,
+        &second_token,
         serde_json::json!({ "plan_id": "pro", "billing_period": "monthly" }),
     )
     .await;
@@ -148,12 +157,11 @@ async fn poll_payment_expires_an_invoice_the_gateway_says_is_dead(pool: PgPool) 
         .execute(&harness.state.pool)
         .await
         .unwrap();
-    let token = signed_up_on(&_app, &harness, "second@example.test", "web").await;
     let (status, polled) = json(
         &_app,
         "GET",
         &format!("/billing/payments/{}", second["id"].as_str().unwrap()),
-        &token,
+        &second_token,
         serde_json::Value::Null,
     )
     .await;

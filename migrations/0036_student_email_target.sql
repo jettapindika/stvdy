@@ -1,0 +1,14 @@
+-- Phase 13: the address a student verification link was mailed to.
+--
+-- `POST /billing/student/confirm` must set `users.student_email` to the address the link
+-- was sent to — that is what proves control of a campus address (A299). Without a column
+-- for it the route could only store `users.email`, which is the account's *own* address and
+-- proves nothing about the campus one: a student whose account is `ana@gmail.com` and who
+-- verified `ana@ui.ac.id` would have the discount recorded against the gmail address, so
+-- the audit trail would name an address the suffix rule never accepted.
+--
+-- Nullable, because an `email_verify` token has no target beyond the account's own address
+-- and the existing rows have none. Additive and **not `+sync`**: a token store is a
+-- server-side credential, so `0017_sync_triggers.sql` stays the last trigger-attaching
+-- migration and its array is untouched.
+alter table email_verification_tokens add column target_email text;
