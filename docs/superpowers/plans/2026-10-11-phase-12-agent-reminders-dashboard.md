@@ -2397,7 +2397,7 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 | 21 | Route sweep (8 new rows, 2 drivers) | `cargo test -p stvdy-server --test route_sweep` | |
 | 22 | Schema (2 new `documented` rows, 6 new columns) | `cargo test -p stvdy-server --test schema` | |
 | 23 | Gate 5 — accessibility | `node scripts/measure-mobile.mjs` at 390×844 | **PASS at 390×844 with a defect fixed** — 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast **4.97:1**, 0 under 44px, 0 clipped, 0 overlapped. The dashboard scrolled sideways **at 100% text** (423 > 390, 15 elements past the edge) before `f38305c`. **At 1365×900: PASS on both Phase 12 surfaces** — 8 combinations, 168 targets, 496 text pairs, 0 contrast failures, 0 page overflow, 0 overlap. Three findings, all outside this phase's screens and all named below rather than fixed here |
-| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **server half NOT RUN** (another slice's). UI half driven in a real browser with `navigator.languages = ['id-ID','id']` set before boot: **PASS**, `<html lang="id">`, no locale key rendered on either screen — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat"). The rendered sentences are quoted in the execution notes |
+| 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **PASS, both halves.** Server half **4 passed / 0 failed, 0 ignored** (measured by Main on the current tree; the vector arm uses the real embedder and the mechanism is asserted separately, so neither is vacuous). UI half driven in a real browser with `navigator.languages = ['id-ID','id']` set before boot: `<html lang="id">`, no locale key rendered on either screen — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat"). The rendered sentences are quoted in the execution notes |
 | 25 | Gate 7 — honesty | the five statements in Task 16 | **(a)–(e) all checked.** (c) re-asserted by grepping the shipped bundle, not by reading the component: `AI can make mistakes. Check the citations.` → **1 match** in `app/dist/assets/index-Eov9DdnN.js` (the single entry chunk), and `AI bisa salah. Periksa kutipannya.` → **1 match** in the same file |
 | 26 | Smoke | `bash scripts/smoke-phase12.sh` | **PASS** — six scenarios, incl. the ten-tool wire schema read out of the stub's log and two devices producing one reminder whose `fire_at` is the first. Push degrades to in-app + email (no APNs/FCM credentials) and says so |
 
@@ -2687,7 +2687,22 @@ silently fixed:**
   took a browser reading the screen in Indonesian to catch it. Fixed in `f4bfecf`, with a case
   that drives all four field-bearing tools and asserts no rendered label is the key it resolved
   from.
-- **Server half** is `crates/server/tests/indonesian.rs`, which is not this slice's.
+- **Server half — measured, by Main, and it is the half the gate is really about.**
+  `cargo test -p stvdy-server --test indonesian` → **4 passed / 0 failed, 0 ignored** on the current
+  tree (`the_tsvector_column_uses_the_simple_config`,
+  `retrieval_embeds_the_query_with_the_query_convention`,
+  `the_keyword_arm_retrieves_the_indonesian_chunk`,
+  `an_indonesian_question_is_answered_with_a_resolved_citation`). Two properties of that file are
+  why it is a gate rather than a smoke test, and both are worth inheriting:
+  - **The vector arm uses the real embedder, not the harness's `HashEmbedder`.** The harness
+    embedder ignores the `query: ` prefix E5 requires, so an assertion against it would be
+    **vacuous** — a missing prefix would pass. The suite builds the real model and **skips loudly**
+    when it is not cached, because a gate that silently skips is not a gate.
+  - **`retrieval_embeds_the_query_with_the_query_convention` asserts the mechanism, not the
+    outcome**, through a `ConventionRecorder` embedder, so it needs no model, runs everywhere, and
+    fails the moment the call site regresses. That is the silent degradation this gate exists for:
+    a wrong prefix puts the query in a different region of the space, so the wrong chunk wins and
+    the answer is **plausible but ungrounded** — the one failure mode no English test sees.
 
 ### Roadmap gate 7 — honesty
 
@@ -2788,18 +2803,21 @@ tripwire.
 - **Moved out of the "did not run" column, and how:** the browser measurement (gate 5, both
   viewports, both themes, both scales), the Indonesian UI run (gate 6) and gate 7(c)'s bundle grep
   all **ran**; their numbers are above.
-- **Still did not run, and why:** gate 6's **server half** (`crates/server/tests/indonesian.rs`,
-  another slice's file, and this slice holds no write to `crates/**`); the whole-workspace Rust
-  suite, `cargo fmt`/`clippy`, `just check-shell` and `cargo sqlx prepare --check` (peers were
-  mid-edit in `crates/**` throughout this slice, so a result would have been a statement about
-  their working tree, not about this phase); and the **push delivery path end to end**, because no
-  APNs/FCM credentials exist in this environment — the smoke run prints that explicitly and
-  `channels_available` answers `["web","email"]`, which is A288's documented degraded state and
-  **not** a pass.
-- **Behaviours with no test, named rather than implied:** the desktop-width leg of gate 5 has no
-  committed harness (the shared walk cannot run at a desktop width at all, per the finding above),
-  so those numbers rest on a probe that was not committed; the local-notification **delivery** on a
-  real phone is exercised only through the platform double, since this machine runs no simulator;
+- **Still did not run, and why:** the whole-workspace Rust suite, `cargo fmt`/`clippy`,
+  `just check-shell` and `cargo sqlx prepare --check` (peers were mid-edit in `crates/**` throughout
+  this slice, so a result would have been a statement about their working tree, not about this
+  phase); and the **push delivery path end to end**, because no APNs/FCM credentials exist in this
+  environment — the smoke run prints that explicitly and `channels_available` answers
+  `["web","email"]`, which is A288's documented degraded state and **not** a pass.
+  **Gate 6's server half was in this list and is now measured**: `cargo test -p stvdy-server --test
+  indonesian` → 4 passed / 0 failed / 0 ignored, run by Main on the current tree (see gate 6 above).
+  It was the one row of this phase's evidence that a peer could close and this slice could not, and
+  it is closed.
+- **Behaviours with no test, named rather than implied:** the desktop-width leg of gate 5 had no
+  working harness when this slice ran (the shared walk could not run at that width at all — fixed in
+  `bc7eed8` afterwards), so those numbers rest on a probe that was not committed; the
+  local-notification **delivery** on a real phone is exercised only through the platform double,
+  since this machine runs no simulator;
   and the `agent_turn` charge landing mid-stream is asserted by the server suite but has no
   browser-level assertion that the client renders the post-spend usage frame.
 - **What a check could not be:** the browser at a viewport is not a device (no iOS/Android
