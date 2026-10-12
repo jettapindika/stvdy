@@ -21,17 +21,26 @@ The gap was a product-scope decision rather than a task: it needed the retention
 
 ## One environment note worth acting on
 
-**The machine is out of disk, and it is now blocking verification rather than merely threatening it.** `/System/Volumes/Data` has **11 GB free of 460 GB (98% full)** and the repository's `target/` is **86 GB** (78 GB of it `target/debug/deps`, 10 GB `target/debug/incremental`). Four things have already died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, the Docker daemon itself (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB), and a second build. **I reclaimed 2.7 GB by deleting `target/release/`**, which nothing has touched since yesterday evening — no `cargo` invocation in this session builds the release profile except the image build, which needs Docker anyway.
+**The machine is nearly out of disk, and it has already cost verification.** `/System/Volumes/Data` had **105 MB free at its worst** and sits around **7 GB free** now; the repository's `target/` is about **80 GB** and `src-tauri/target/` another **16 GB**. Four things died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, the Docker daemon itself (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB), and a `cargo test` link step with `ld: write() failed, errno=28`. A failed link is the disk, not the source — the signature is the library compiling clean while the test binary fails to link.
 
-**What is left to reclaim, in the order I would do it:**
+**What I have already reclaimed, and what is left:**
 
-1. **`target/debug/incremental/` — 10 GB, and it is pure query cache.** rustc rebuilds it; deleting it costs time and nothing else. I have **not** deleted it because two `cargo` processes are running against that tree right now and removing the directory under a live build turns a slow build into a confusing failure. Delete it once nothing is compiling.
-2. **`target/debug/deps/` — 78 GB.** This is the real one, and the only safe way to take it back is `cargo clean`, which forces a full rebuild that competes for the `target/` lock with everything else. **Do it after the remaining slices stop, then run `cargo test --workspace` once** — that run is exit-checklist item 1 for every phase and it has never completed in this project's history.
-3. `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB) are outside the repo and yours to judge; the HuggingFace cache is not this project's (the embedder uses `FASTEMBED_CACHE_DIR`), but I would not delete another tool's cache unasked.
+| Freed | How | Cost |
+|---|---|---|
+| 2.7 GB | `rm -rf target/release` | none — nothing in this session builds the release profile except the image build, which needs Docker |
+| 1.2 GB | `rm -rf src-tauri/target/release` | none, same reason |
+| 14 GB + 2 GB | `rm -rf target/debug/incremental src-tauri/target/debug/incremental` | rebuild time only; rustc regenerates it. **It regrows** — I have cleared it twice — so expect to do it again |
 
-Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the evidence for anyway — and that is now a hard fact rather than a preference, since the daemon will not start. What the critical path does need is enough room for `cargo test --workspace` and `npm --prefix app test` to finish, and at 11 GB it is not comfortable.
+**What is left to take, and it is the big one:** `target/debug/deps` is **~78 GB** and `src-tauri/target/debug/deps` **~7 GB**. The only safe way to take them back is `cargo clean`, which forces a full rebuild.
 
-**The exact order, if you want the space back:** let the remaining slices stop, then `rm -rf target/debug/incremental` (free, costs a rebuild of the query cache only), then `cargo clean` if you want the other 78 GB, then **one** `cargo test --workspace` — which is exit-checklist item 1 for every phase and has never completed in this project's history. Do it in that order and the cost is one long build; do `cargo clean` while slices are running and every live `cargo` invocation fails on the `target/` lock, which reads as a code failure rather than a disk one.
+**Note the two target directories — a `cargo clean` in the repo root does not touch the shell's.** `src-tauri` is its own workspace root (deliberately: `tauri_build::build()` must not run during `cargo clippy --workspace`), so its 16 GB survives a root `cargo clean` and needs its own:
+
+```bash
+cd /Users/mac/Documents/Coding/project/Stvdy && cargo clean
+cd /Users/mac/Documents/Coding/project/Stvdy/src-tauri && cargo clean
+```
+
+**The order that costs only time:** stop every slice, then the two `cargo clean`s, then one `cargo test --workspace` — exit-checklist item 1 for every phase, and it took this session's whole afternoon to get it green once. Do a `cargo clean` while slices are building and every live invocation fails on the `target/` lock, which reads as a code failure rather than a disk one. Two more things outside the repo are yours to judge: `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB, not this project's — the embedder uses `FASTEMBED_CACHE_DIR`).
 
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 
