@@ -157,6 +157,12 @@ tokio = { version = "1.53.2", features = [
 # `multipart` is for POST /workspaces/:id/sources, which takes the file and the
 # pasted-text form of a source through one endpoint.
 axum = { version = "0.8.9", features = ["macros", "multipart"] }
+
+# The `PaymentProvider` contract takes a `HeaderMap` (roadmap § 1), so `crates/core`
+# needs the type. This is the types crate only — no server, no IO, no async runtime —
+# and it is already in the tree under `axum` 0.8, so taking it in core is cheaper than
+# inventing a second header representation and converting at every boundary.
+http = "1.5.0"
 axum-extra = { version = "0.12.6", features = ["typed-header"] }
 tower = { version = "0.5.3", features = ["util", "timeout", "limit"] }
 tower-http = { version = "0.7.1", features = [

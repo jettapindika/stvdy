@@ -21,6 +21,11 @@ bytes.workspace = true
 unicode-segmentation.workspace = true
 sha2.workspace = true
 hex.workspace = true
+# The webhook contract's own signature is `(&HeaderMap, &[u8])`, so core carries the
+# header types crate; and the mock gateway computes a real HMAC over the raw body, so
+# a tampered body is rejected by something that actually verifies.
+http.workspace = true
+hmac.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]

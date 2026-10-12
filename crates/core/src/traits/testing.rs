@@ -6,12 +6,16 @@
 //! bucket. They must behave like the real thing for the properties a test
 //! asserts (unit norm, real 768 dims, NotFound on a missing key).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use hmac::digest::KeyInit;
+use hmac::{Hmac, Mac};
+use http::HeaderMap;
+use sha2::Sha256;
 use tokio::sync::mpsc;
 
 use super::clock::Clock;
@@ -20,6 +24,10 @@ use super::llm::{
     ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, StreamEvent, Usage,
 };
 use super::mailer::{Email, MailError, Mailer};
+use super::payment::{
+    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
+    WebhookKind,
+};
 use super::storage::{Storage, StorageError};
 
 /// The dimension the hash embedder reports, matching `chunks.embedding`.
@@ -344,5 +352,205 @@ impl LlmProvider for ScriptedLlm {
         }
         let _ = sender.try_send(StreamEvent::Done);
         Ok(receiver)
+    }
+}
+
+/// The header `MockPayment` signs with.
+pub const MOCK_SIGNATURE_HEADER: &str = "x-mock-signature";
+
+/// The secret [`MockPayment::new`] signs with.
+pub const MOCK_SECRET: &[u8] = b"mock-secret";
+
+/// The body of a callback, as a gateway would send it.
+///
+/// A separate type from [`WebhookEvent`] on purpose: `raw` is not a field a gateway
+/// sends, it is the parsed body itself. Deriving `Deserialize` on the event would
+/// have made `raw` a required key of the wire format.
+#[derive(Debug, serde::Deserialize)]
+struct CallbackBody {
+    event_id: String,
+    kind: WebhookKind,
+    order_id: String,
+    amount_idr: i64,
+    currency: String,
+    #[serde(default)]
+    paid_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    provider_payment_id: Option<String>,
+    #[serde(default)]
+    fee_idr: Option<i64>,
+}
+
+/// A gateway that signs bodies the way a real one would.
+///
+/// The HMAC is real, and that is the point. The webhook suite asserts that a
+/// tampered body is rejected; a double that returned a canned event could not fail,
+/// so the assertion would hold no matter what the route did — a vacuous test in the
+/// same class as a determinism fixture whose inputs were all distinguishable.
+///
+/// It is scripted rather than smart: `get_status` pops the next queued status, so a
+/// test says what the gateway will report and in what order.
+#[derive(Debug)]
+pub struct MockPayment {
+    secret: Vec<u8>,
+    statuses: Mutex<VecDeque<GatewayStatus>>,
+    invoices: Mutex<Vec<InvoiceRequest>>,
+    refunds: Mutex<Vec<(String, i64)>>,
+}
+
+impl MockPayment {
+    /// A gateway signing with [`MOCK_SECRET`].
+    pub fn new() -> Self {
+        Self::with_secret(MOCK_SECRET)
+    }
+
+    /// A gateway with its own secret, for the "another gateway cannot sign for this
+    /// one" case.
+    pub fn with_secret(secret: &[u8]) -> Self {
+        Self {
+            secret: secret.to_vec(),
+            statuses: Mutex::new(VecDeque::new()),
+            invoices: Mutex::new(Vec::new()),
+            refunds: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The headers a real gateway would send for this body, so a test signs the
+    /// same bytes it posts and the route's verification is exercised for real.
+    pub fn sign(&self, body: &[u8]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        // `from_str` cannot fail for hex, which is ASCII by construction; if it ever
+        // did, the header would be absent and verification would fail closed rather
+        // than pass with an empty signature.
+        if let Ok(value) = http::HeaderValue::from_str(&hex::encode(self.tag(body))) {
+            headers.insert(MOCK_SIGNATURE_HEADER, value);
+        }
+        headers
+    }
+
+    /// The next status `get_status` will report.
+    pub fn push_status(&self, status: GatewayStatus) {
+        if let Ok(mut statuses) = self.statuses.lock() {
+            statuses.push_back(status);
+        }
+    }
+
+    /// Every invoice request this double was handed, in order.
+    pub fn invoices(&self) -> Vec<InvoiceRequest> {
+        self.invoices
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// Every refund note it was handed, in order.
+    pub fn refund_notes(&self) -> Vec<(String, i64)> {
+        self.refunds
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn tag(&self, body: &[u8]) -> Vec<u8> {
+        // HMAC accepts a key of any length, so this cannot fail; the empty tag keeps
+        // the function total without a panic, and an empty tag never verifies.
+        let Ok(mut mac) = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.secret) else {
+            return Vec::new();
+        };
+        mac.update(body);
+        mac.finalize().into_bytes().to_vec()
+    }
+}
+
+impl Default for MockPayment {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl PaymentProvider for MockPayment {
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
+    async fn create_invoice(&self, req: InvoiceRequest) -> Result<Invoice, PaymentError> {
+        let invoice = Invoice {
+            order_id: req.order_id.clone(),
+            // Deterministic and derived from the request, so a test can assert the
+            // client was handed *this* invoice rather than merely a non-empty string.
+            qr_string: format!("MOCKQRIS:{}:{}", req.order_id, req.amount_idr),
+            expires_at: req.expires_at,
+            provider_payment_id: Some(format!("mock-{}", req.order_id)),
+        };
+        let mut invoices = self
+            .invoices
+            .lock()
+            .map_err(|_| PaymentError::Provider("mock payment lock poisoned".into()))?;
+        invoices.push(req);
+        Ok(invoice)
+    }
+
+    async fn get_status(&self, _order_id: &str) -> Result<GatewayStatus, PaymentError> {
+        let mut statuses = self
+            .statuses
+            .lock()
+            .map_err(|_| PaymentError::Provider("mock payment lock poisoned".into()))?;
+        // An empty queue is an error, not a default `Pending`: a poller test that
+        // forgot to script a status must fail, not silently assert that nothing
+        // happened.
+        statuses
+            .pop_front()
+            .ok_or_else(|| PaymentError::Provider("mock payment has no queued status left".into()))
+    }
+
+    fn parse_and_verify_webhook(
+        &self,
+        headers: &HeaderMap,
+        raw_body: &[u8],
+    ) -> Result<WebhookEvent, PaymentError> {
+        // Signature first, parse second. The other order would let a tampered body
+        // decide which failure the route reports.
+        let presented = headers
+            .get(MOCK_SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|hex_tag| hex::decode(hex_tag).ok())
+            .ok_or(PaymentError::Signature)?;
+        let Ok(mut mac) = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.secret) else {
+            return Err(PaymentError::NotConfigured);
+        };
+        mac.update(raw_body);
+        // `verify_slice` is the constant-time comparison; `==` on the tag would leak
+        // the prefix that matched.
+        mac.verify_slice(&presented)
+            .map_err(|_| PaymentError::Signature)?;
+
+        let raw: serde_json::Value = serde_json::from_slice(raw_body).map_err(|error| {
+            PaymentError::Invalid(format!("callback body is not JSON: {error}"))
+        })?;
+        let body: CallbackBody = serde_json::from_value(raw.clone()).map_err(|error| {
+            PaymentError::Invalid(format!("callback body is not an event: {error}"))
+        })?;
+
+        Ok(WebhookEvent {
+            event_id: body.event_id,
+            kind: body.kind,
+            order_id: body.order_id,
+            amount_idr: body.amount_idr,
+            currency: body.currency,
+            paid_at: body.paid_at,
+            provider_payment_id: body.provider_payment_id,
+            fee_idr: body.fee_idr,
+            raw,
+        })
+    }
+
+    async fn refund_note(&self, order_id: &str, amount_idr: i64) -> Result<(), PaymentError> {
+        let mut refunds = self
+            .refunds
+            .lock()
+            .map_err(|_| PaymentError::Provider("mock payment lock poisoned".into()))?;
+        refunds.push((order_id.to_string(), amount_idr));
+        Ok(())
     }
 }

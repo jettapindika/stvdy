@@ -5051,6 +5051,8 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "hex",
+ "hmac 0.13.0",
+ "http 1.5.0",
  "icalendar",
  "rrule",
  "serde",
