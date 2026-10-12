@@ -116,6 +116,29 @@ pub async fn accept(
     let now = state.clock.now();
     let tz = crate::syllabus::zone(&user.timezone);
 
+    // The proposal's state is decided **before** the blocks are validated. A second accept
+    // of the same proposal must be a 409, not a 400 about the calendar the first accept just
+    // wrote: the blocks now overlap their own committed rows, so validating first would
+    // report the plan as invalid rather than as already accepted.
+    let status: Option<String> =
+        sqlx::query_scalar("select status from plan_proposals where id = $1 and user_id = $2")
+            .bind(proposal_id)
+            .bind(user.user_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!("reading the proposal: {error}"))
+            })?;
+    match status.as_deref() {
+        None => return Err(AppError::NotFound),
+        Some("ready") => {}
+        Some(other) => {
+            return Err(AppError::Conflict(format!(
+                "this proposal is {other} and cannot be accepted again"
+            )));
+        }
+    }
+
     let settings = crate::planner::settings_for(state, user.user_id).await?;
     let tunables = state.config.plans.planner_tunables;
     let mode = state.config.plans.get(user.effective_plan()).planner;
@@ -253,24 +276,11 @@ pub async fn accept(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("claiming the proposal: {error}")))?;
 
     let Some(_) = claimed else {
-        // Either it is another account's, it does not exist, or it is not `ready` — a second
-        // accept of the same plan lands here, which is the idempotence the endpoint promises.
-        // Distinguished below so the client is told which.
-        let status: Option<String> =
-            sqlx::query_scalar("select status from plan_proposals where id = $1 and user_id = $2")
-                .bind(proposal_id)
-                .bind(user.user_id)
-                .fetch_optional(&state.pool)
-                .await
-                .map_err(|error| {
-                    AppError::Internal(anyhow::anyhow!("reading the proposal: {error}"))
-                })?;
-        return match status {
-            None => Err(AppError::NotFound),
-            Some(status) => Err(AppError::Conflict(format!(
-                "this proposal is {status} and cannot be accepted again"
-            ))),
-        };
+        // The status was `ready` when this call read it and is not now, so another request
+        // accepted it between the read and this claim. Same answer as the read: a conflict.
+        return Err(AppError::Conflict(
+            "this proposal was accepted by another request".to_string(),
+        ));
     };
 
     let mut event_ids: Vec<Uuid> = Vec::with_capacity(resolved.len());

@@ -415,20 +415,21 @@ async fn fail_draft_and_refund(state: &AppState, source_id: Uuid, message: &str)
         }
     };
 
-    let claimed: Option<(Uuid, i32)> = sqlx::query_as(
-        "update syllabus_drafts
-            set status = 'failed', error = $2, credits_spent = 0, updated_at = now()
+    // The charge is read **before** the claim zeroes it: `returning credits_spent` on an
+    // update yields the new value, which is 0, and a refund of 0 is no refund at all. The
+    // row is locked so two passes cannot both read the same charge.
+    let pending: Option<(Uuid, i32)> = sqlx::query_as(
+        "select user_id, credits_spent from syllabus_drafts
           where source_id = $1 and credits_spent > 0 and status <> 'confirmed'
-         returning user_id, credits_spent",
+            for update skip locked",
     )
     .bind(source_id)
-    .bind(message)
     .fetch_optional(&mut *tx)
     .await
     .ok()
     .flatten();
 
-    let Some((user_id, credits)) = claimed else {
+    let Some((user_id, credits)) = pending else {
         // Either the draft was already failed, it never had a charge, or it has been
         // confirmed — a confirmed draft's rows are the student's and must not be touched.
         // Make sure the status is right, then stop.
@@ -449,6 +450,20 @@ async fn fail_draft_and_refund(state: &AppState, source_id: Uuid, message: &str)
         }
         return;
     };
+
+    if let Err(error) = sqlx::query(
+        "update syllabus_drafts
+            set status = 'failed', error = $2, credits_spent = 0, updated_at = now()
+          where source_id = $1",
+    )
+    .bind(source_id)
+    .bind(message)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %source_id, "could not mark the draft failed");
+        return;
+    }
 
     // The ledger row is issued inside the same transaction as the claim that zeroed
     // `credits_spent`, so a crash between the two cannot charge a student for an extraction
