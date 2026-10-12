@@ -2681,10 +2681,15 @@ silently fixed:**
 - **The defect this gate exists for, and it is real.** The card shipped resolving its field
   labels as `` t(`agent.field.${arg}`) `` against the *argument* names, so five of its twelve
   labels rendered **the key itself** (`agent.field.due_at` where a reader expects "Tenggat").
-  Neither existing check could see it: `i18n.test.ts`'s dynamic-prefix rule marks every key
-  beneath the prefix as used, so a reachable key and an unreachable one are the same thing to it,
-  and the component's own test asserted the *value* rendered without asserting the label did. It
-  took a browser reading the screen in Indonesian to catch it. Fixed in `f4bfecf`, with a case
+  **Three checks could not see it, and they fail for three different reasons — this is a class, not
+  one defect.** `tsc` cannot: **a raw i18n key rendering as visible text is not a type error**, so
+  `npx tsc --noEmit` exits 0 on the broken component. `i18n.test.ts`'s dynamic-prefix rule cannot:
+  it marks **every** key beneath `agent.field.` as used, so a key that is referenced but absent and
+  a key that exists but is unreachable are the same thing to it. And the component's own test cannot:
+  it asserted the *value* rendered (`16 Oct 2026`) without ever asserting the label did. A check that
+  asserts a rendered **value** says nothing about the **copy** beside it, and the two are written by
+  different authors in different files. The instrument that closed it was reading the rendered
+  Indonesian in a browser — the same reason gate 6 exists. Fixed in `f4bfecf`, with a case
   that drives all four field-bearing tools and asserts no rendered label is the key it resolved
   from.
 - **Server half — measured, by Main, and it is the half the gate is really about.**
