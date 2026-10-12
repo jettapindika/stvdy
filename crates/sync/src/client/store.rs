@@ -61,7 +61,18 @@ pub trait LocalStore: Send {
     /// retried — and a retry never overwrites a newer version of the row it names.
     ///
     /// A `delete` change removes the row: the cache holds the rows the account still has,
-    /// and a tombstone carries no row to store.
+    /// and a tombstone carries no row to store. It removes **the descendants of that row
+    /// that this store holds as well**, for any entity whose rows nest — a parent's
+    /// tombstone reaches its children on the server (A197), and the page that carries the
+    /// parent's delete does not carry theirs, so a store that removed only the named row
+    /// would show orphaned children until the next page or pass. The obligation is on the
+    /// store rather than on the caller because the rows it needs are the ones already in
+    /// the cache, which the caller's page does not have.
+    ///
+    /// A nested delete is a **local** act: it marks the rows this device holds and queues
+    /// nothing. The children's own tombstones come from the server, which is the only side
+    /// that knows the tree's current shape — a client that queued them would be
+    /// re-deriving a tree another device may have changed since this one last pulled.
     fn apply_page(&mut self, changes: &[Change]) -> Result<ApplyReport, StoreError>;
 
     /// Queues a mutation for the next pass, in enqueue order.

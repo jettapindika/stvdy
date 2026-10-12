@@ -197,6 +197,31 @@ impl InMemoryStore {
         self.rows.insert(key, (seq, row));
     }
 
+    /// Removes a row and every descendant of it this store holds.
+    ///
+    /// The `delete` change carries the parent and not its children, and the children it has
+    /// to take with it are the ones already in the cache — so the tree is read from the
+    /// store rather than from the page. The relation is [`parents_of`]'s, the same one
+    /// `linked` defers on, so the store cannot disagree with the apply about what nests
+    /// inside what, and an entity that does not nest (an event, whose `parents_of` names no
+    /// row of its own kind) is a single removal.
+    fn remove_nested(&mut self, key: (Entity, Uuid)) {
+        self.rows.remove(&key);
+        let (entity, id) = key;
+        let children: Vec<(Entity, Uuid)> = self
+            .rows
+            .iter()
+            .filter(|((child_entity, _), (_, row))| {
+                *child_entity == entity
+                    && parents_of(*child_entity, Some(row)).contains(&(entity, id))
+            })
+            .map(|(key, _)| *key)
+            .collect();
+        for child in children {
+            self.remove_nested(child);
+        }
+    }
+
     /// Splits a queue into the rows this page can write and the rows still missing a
     /// parent, to a fixed point: a child whose parent is itself deferred is deferred too.
     fn settle(&self, queue: Vec<Change>) -> (Vec<Change>, Vec<Change>) {
@@ -324,7 +349,7 @@ impl LocalStore for InMemoryStore {
                 },
                 Op::Delete => {
                     if !newer {
-                        self.rows.remove(&key);
+                        self.remove_nested(key);
                     }
                 }
             }

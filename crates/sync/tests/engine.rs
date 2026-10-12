@@ -672,6 +672,82 @@ async fn a_delete_change_removes_the_row() {
     assert!(engine.store().row(Entity::Task, task).is_none());
 }
 
+/// A `delete` change for a parent takes the descendants the store holds with it, so the
+/// cache does not show orphaned children between the parent's tombstone and theirs (A197).
+///
+/// The page carries the parent's delete and not the children's, which is the whole reason
+/// the store does the walk: the rows it must remove are the ones already in the cache. Two
+/// levels are used because the relation is recursive, and a non-nesting entity (an event) is
+/// asserted to be untouched by the rule.
+#[tokio::test]
+async fn a_delete_change_removes_the_descendants_the_store_holds() {
+    let parent = Uuid::now_v7();
+    let child = Uuid::now_v7();
+    let grandchild = Uuid::now_v7();
+    let unrelated = Uuid::now_v7();
+    let event = Uuid::now_v7();
+    let transport = ScriptedTransport::new();
+    transport.answer_pull(page(
+        vec![
+            upsert(
+                Entity::Task,
+                parent,
+                1,
+                json!({ "id": parent, "title": "Induk" }),
+            ),
+            upsert(
+                Entity::Task,
+                child,
+                2,
+                json!({ "id": child, "parent_id": parent, "title": "Anak" }),
+            ),
+            upsert(
+                Entity::Task,
+                grandchild,
+                3,
+                json!({ "id": grandchild, "parent_id": child, "title": "Cucu" }),
+            ),
+            upsert(
+                Entity::Task,
+                unrelated,
+                4,
+                json!({ "id": unrelated, "title": "Tugas lain" }),
+            ),
+            upsert(
+                Entity::Event,
+                event,
+                5,
+                json!({ "id": event, "title": "Kelas" }),
+            ),
+        ],
+        5,
+        false,
+    ));
+    // The parent's tombstone, and nothing about its descendants.
+    transport.answer_pull(page(vec![delete(Entity::Task, parent, 6)], 6, false));
+
+    let mut engine = engine_over(&transport);
+    engine.sync_once().await.unwrap();
+    assert_eq!(engine.store().dump().len(), 5, "the subtree is cached");
+
+    engine.sync_once().await.unwrap();
+    for (entity, id) in [
+        (Entity::Task, parent),
+        (Entity::Task, child),
+        (Entity::Task, grandchild),
+    ] {
+        assert!(
+            engine.store().row(entity, id).is_none(),
+            "{id} must leave the cache with its parent: {:?}",
+            engine.store().dump()
+        );
+    }
+    // Not a blanket wipe: a task that was never in the subtree, and the event, stay.
+    assert!(engine.store().row(Entity::Task, unrelated).is_some());
+    assert!(engine.store().row(Entity::Event, event).is_some());
+    assert_eq!(engine.store().dump().len(), 2);
+}
+
 /// The local-first write path: a row written locally is readable before it is pushed, and
 /// the queued mutation survives until the server answers.
 #[tokio::test]
