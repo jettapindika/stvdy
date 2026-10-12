@@ -103,6 +103,15 @@ async fn insert_task(pool: &PgPool, user_id: Uuid, title: &str) -> Uuid {
     id
 }
 
+/// The row as JSON, which is the `base` a client sends with a patch.
+async fn task_row(pool: &PgPool, id: Uuid) -> serde_json::Value {
+    sqlx::query_scalar("select to_jsonb(t) from tasks t where t.id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("the task row")
+}
+
 /// A card to review: a deck, then a card in it.
 async fn insert_card(pool: &PgPool, user_id: Uuid) -> Uuid {
     let workspace = Uuid::now_v7();
@@ -736,4 +745,297 @@ async fn a_push_records_the_device_and_the_origin(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(origin, Some(device_id), "the change must name its origin");
+}
+
+/// Two devices edit disjoint fields of one task and both edits survive — the
+/// field-level merge the conflict table promises, computed from the patch and the base
+/// the client sent (A176/A177).
+#[sqlx::test(migrations = "../../migrations")]
+async fn disjoint_task_edits_both_survive(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "disjoint@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Judul asli").await;
+    let base = task_row(&harness.state.pool, task).await;
+
+    // Device A edits the notes.
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            serde_json::json!({ "patch": { "notes": "catatan A" }, "base": base }),
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+
+    // Device B edits the title, from the same stale base.
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            serde_json::json!({ "patch": { "title": "Judul B" }, "base": base }),
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+
+    let row = task_row(&harness.state.pool, task).await;
+    assert_eq!(row["title"], "Judul B", "B's edit must survive: {row}");
+    assert_eq!(row["notes"], "catatan A", "A's edit must survive: {row}");
+}
+
+/// Two devices edit the same field: the incoming patch wins whole, because a
+/// per-field tie-break would need a per-field clock the schema does not have.
+#[sqlx::test(migrations = "../../migrations")]
+async fn overlapping_task_edits_resolve_by_server_receive_time(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "overlap@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Judul asli").await;
+    let base = task_row(&harness.state.pool, task).await;
+
+    for title in ["Judul A", "Judul B"] {
+        let (status, body) = push(
+            &app,
+            &token,
+            device_id,
+            serde_json::json!([mutation(
+                Uuid::now_v7(),
+                "task",
+                "upsert",
+                task,
+                serde_json::json!({ "patch": { "title": title }, "base": base }),
+            )]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["results"][0]["status"], "applied", "{body}");
+    }
+
+    let row = task_row(&harness.state.pool, task).await;
+    assert_eq!(
+        row["title"], "Judul B",
+        "the last patch to arrive wins whole: {row}"
+    );
+}
+
+/// The exit gate's "tombstone vs edit": a patch against a tombstoned task is a
+/// `conflict` whose `winner` is the tombstone, so the editing device is told rather
+/// than silently reverted.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_tombstone_beats_a_concurrent_edit(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) =
+        account(&app, &harness, "tombstone-vs-edit@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Judul asli").await;
+    let base = task_row(&harness.state.pool, task).await;
+
+    // One device tombstones it.
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "delete",
+            task,
+            serde_json::Value::Null,
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+
+    // The other edits it, from the pre-tombstone base.
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            serde_json::json!({ "patch": { "title": "Judul baru" }, "base": base }),
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "conflict", "{body}");
+    assert!(
+        !body["results"][0]["winner"]["deleted_at"].is_null(),
+        "the winner must be the tombstone: {body}"
+    );
+
+    let row = task_row(&harness.state.pool, task).await;
+    assert!(
+        !row["deleted_at"].is_null(),
+        "the tombstone must stand: {row}"
+    );
+    assert_eq!(row["title"], "Judul asli", "the edit must not apply: {row}");
+}
+
+/// The one exception the contract names: an explicit restore (`deleted_at: null`) wins
+/// and logs an upsert.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_explicit_restore_wins_and_logs_an_upsert(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "restore@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Judul asli").await;
+    sqlx::query("update tasks set deleted_at = now() where id = $1")
+        .bind(task)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            serde_json::json!({
+                "patch": { "deleted_at": serde_json::Value::Null, "title": "Dipulihkan" },
+                "base": serde_json::Value::Null,
+            }),
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+
+    let row = task_row(&harness.state.pool, task).await;
+    assert!(
+        row["deleted_at"].is_null(),
+        "the row must be restored: {row}"
+    );
+    assert_eq!(row["title"], "Dipulihkan", "{row}");
+
+    let op: String = sqlx::query_scalar(
+        "select op from change_log
+          where user_id = $1 and entity = 'tasks' and entity_id = $2
+          order by seq desc limit 1",
+    )
+    .bind(user_id)
+    .bind(task)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(op, "upsert", "a restore logs an upsert");
+}
+
+/// A patch that omits `deleted_at` does not resurrect a tombstone (A178).
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_patch_that_omits_deleted_at_does_not_resurrect(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "zombie@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Judul asli").await;
+    sqlx::query("update tasks set deleted_at = now() where id = $1")
+        .bind(task)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let (status, body) = push(
+        &app,
+        &token,
+        device_id,
+        serde_json::json!([mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            serde_json::json!({ "patch": { "title": "Zombie" }, "base": serde_json::Value::Null }),
+        )]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "conflict", "{body}");
+
+    let row = task_row(&harness.state.pool, task).await;
+    assert!(
+        !row["deleted_at"].is_null(),
+        "the row must stay deleted: {row}"
+    );
+    assert_eq!(row["title"], "Judul asli", "{row}");
+}
+
+/// A settings push upserts the caller's single row and keys the change by the user id,
+/// matching what `log_change_by_user` writes (A179).
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_settings_push_upserts_the_callers_row(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "settings-push@example.test").await;
+
+    for hour in [7, 9] {
+        let (status, body) = push(
+            &app,
+            &token,
+            device_id,
+            serde_json::json!([mutation(
+                Uuid::now_v7(),
+                "user_settings",
+                "upsert",
+                Uuid::now_v7(),
+                serde_json::json!({ "study_start_hour": hour }),
+            )]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["results"][0]["status"], "applied", "{body}");
+
+        let stored: i32 =
+            sqlx::query_scalar("select study_start_hour from user_settings where user_id = $1")
+                .bind(user_id)
+                .fetch_one(&harness.state.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, hour, "the caller's row must hold the pushed value");
+    }
+
+    let entity_id: Uuid = sqlx::query_scalar(
+        "select entity_id from change_log
+          where user_id = $1 and entity = 'user_settings'
+          order by seq desc limit 1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        entity_id, user_id,
+        "a settings change is keyed by the user id (A179)"
+    );
 }

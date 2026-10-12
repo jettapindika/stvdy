@@ -4,4 +4,5 @@
 //! Tauri shell deserialises them, so a change to this crate is a protocol
 //! change and needs a matching change on both sides.
 
+pub mod client;
 pub mod proto;

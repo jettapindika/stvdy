@@ -11,8 +11,11 @@
 //! payload actually carries are written, so a column the client did not send keeps its
 //! stored value (or its table default on an insert).
 
-use serde_json::{Value, json};
+use std::collections::BTreeSet;
+
+use serde_json::{Map, Value, json};
 use sqlx::PgConnection;
+use stvdy_sync::client::{Rule, rule_for};
 use stvdy_sync::proto::{Entity, ErrorCode, Mutation, MutationResult, Op, PayloadShape};
 use uuid::Uuid;
 
@@ -43,23 +46,25 @@ impl Outcome {
 
 /// Applies one mutation that `decide` has already allowed.
 ///
-/// Dispatch is by the entity's write rule: an append-only row is inserted and never
-/// updated; `user_settings` is keyed by the caller's user id; everything else is an
-/// insert-or-update by id, with a delete setting the tombstone.
+/// Dispatch is by the conflict table (A175), so the server and the client cannot disagree
+/// about which rule an entity follows: an append-only row is inserted and never updated; a
+/// `Task`/`Event` gets the field-level merge; a `user_settings` row is keyed by the caller's
+/// user id.
 pub async fn apply_one(
     conn: &mut PgConnection,
     user_id: Uuid,
     mutation: &Mutation,
 ) -> AppResult<Outcome> {
-    if mutation.entity == Entity::UserSettings {
-        return apply_settings(conn, user_id, mutation).await;
-    }
-    if mutation.entity.is_append_only() {
-        return apply_append_only(conn, user_id, mutation).await;
-    }
-    match mutation.op {
-        Op::Upsert => apply_upsert(conn, user_id, mutation).await,
-        Op::Delete => apply_delete(conn, user_id, mutation).await,
+    match rule_for(mutation.entity) {
+        Rule::AppendOnly => apply_append_only(conn, user_id, mutation).await,
+        Rule::LwwWithFieldMerge => apply_patch(conn, user_id, mutation).await,
+        Rule::Lww if mutation.entity == Entity::UserSettings => {
+            apply_settings(conn, user_id, mutation).await
+        }
+        // A server-owned entity never reaches the apply: `decide` refuses it first. The arm
+        // exists so the match is exhaustive, and a plain record-level write is the answer
+        // that changes nothing if one ever did.
+        Rule::Lww => apply_upsert(conn, user_id, mutation).await,
     }
 }
 
@@ -74,6 +79,38 @@ fn row_of(mutation: &Mutation) -> Value {
         PayloadShape::PatchWithBase => payload.get("patch").cloned().unwrap_or(payload),
         PayloadShape::Row => payload,
     }
+}
+
+/// The stored row as JSON, or `None` when this account has no such row.
+///
+/// Scoped by `user_id` in the statement, which is what makes an id belonging to another
+/// account indistinguishable from a missing one (A173).
+async fn stored_row(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    entity: Entity,
+    id: Uuid,
+) -> AppResult<Option<Value>> {
+    let table = entity.table_name();
+    let sql = if entity == Entity::UserSettings {
+        format!("select to_jsonb(t) from {table} t where t.user_id = $1")
+    } else {
+        format!("select to_jsonb(t) from {table} t where t.id = $1 and t.user_id = $2")
+    };
+    let row: Option<Value> = if entity == Entity::UserSettings {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(user_id)
+            .fetch_optional(&mut *conn)
+            .await
+    } else {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .bind(id)
+            .bind(user_id)
+            .fetch_optional(&mut *conn)
+            .await
+    }
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading a stored row: {error}")))?;
+    Ok(row)
 }
 
 /// The columns a statement will write: the identity, then the allowlisted columns the
@@ -217,7 +254,139 @@ fn empty_payload() -> Outcome {
     }
 }
 
-/// Insert-or-update a mutable, id-keyed entity.
+/// How a patch and the row it was edited from combine with what the server now holds.
+#[derive(Debug)]
+pub enum Merge {
+    /// The other writer's changed set and this patch's are disjoint: the merged row.
+    Disjoint(Value),
+    /// They overlap, or there is no base to compare against: the patch wins whole.
+    Overlap,
+    /// The stored row is tombstoned and this patch does not restore it.
+    Tombstone,
+}
+
+/// The merge rule for `tasks` and `events` (A177).
+///
+/// The other writer's changed set is `{k : stored[k] != base[k]}` and the client's is
+/// `keys(patch)`. Disjoint sets mean the two edits touched different fields, so both
+/// survive; an overlap means they touched the same field, and the incoming patch wins whole
+/// because a per-field tie-break would need a per-field clock the schema does not have.
+///
+/// A tombstoned row wins over an edit, unless the patch explicitly restores it with
+/// `deleted_at: null` (A178) — the one exception the contract names.
+pub fn merge_patch(stored: &Value, base: Option<&Value>, patch: &Value) -> Merge {
+    let tombstoned = stored
+        .get("deleted_at")
+        .is_some_and(|value| !value.is_null());
+    let restores = patch.get("deleted_at").is_some_and(Value::is_null);
+    if tombstoned && !restores {
+        return Merge::Tombstone;
+    }
+
+    // No base (a create, or a client that did not send one) or an explicit restore: there
+    // is nothing to compare against, so the patch wins whole.
+    let (Some(base), Some(stored), Some(patch)) = (
+        base.and_then(Value::as_object),
+        stored.as_object(),
+        patch.as_object(),
+    ) else {
+        return Merge::Overlap;
+    };
+    if restores {
+        return Merge::Overlap;
+    }
+
+    // `updated_at` is excluded: the trigger moves it on every write, so comparing it would
+    // read as a change on every mutation and force every edit to look like an overlap.
+    let other: BTreeSet<&str> = stored
+        .iter()
+        .filter(|(key, value)| {
+            key.as_str() != "updated_at" && base.get(key.as_str()).is_none_or(|base| base != *value)
+        })
+        .map(|(key, _)| key.as_str())
+        .collect();
+
+    if patch.keys().all(|key| !other.contains(key.as_str())) {
+        Merge::Disjoint(over(stored, patch))
+    } else {
+        Merge::Overlap
+    }
+}
+
+/// The stored row with the patch's keys applied over it.
+fn over(stored: &Map<String, Value>, patch: &Map<String, Value>) -> Value {
+    let mut merged = stored.clone();
+    for (key, value) in patch {
+        merged.insert(key.clone(), value.clone());
+    }
+    Value::Object(merged)
+}
+
+/// A `Task`/`Event` mutation: a patch plus the base it was edited from (A176).
+async fn apply_patch(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    mutation: &Mutation,
+) -> AppResult<Outcome> {
+    if mutation.op == Op::Delete {
+        return apply_delete(conn, user_id, mutation).await;
+    }
+
+    let entity = mutation.entity;
+    let payload = mutation.payload.clone().unwrap_or(Value::Null);
+    let patch = payload.get("patch").cloned().unwrap_or(payload.clone());
+    let base = payload.get("base").filter(|value| !value.is_null());
+    if !patch.is_object() {
+        return Ok(empty_payload());
+    }
+
+    let stored = stored_row(conn, user_id, entity, mutation.id).await?;
+    let mut row = match &stored {
+        // A create: there is nothing to merge against, so the patch is the row.
+        None => patch.clone(),
+        Some(stored) => match merge_patch(stored, base, &patch) {
+            Merge::Tombstone => {
+                return Ok(Outcome::Conflict {
+                    winner: stored.clone(),
+                });
+            }
+            Merge::Disjoint(merged) => merged,
+            // The patch wins whole: apply its keys over the stored row, so a field the
+            // patch does not name keeps its stored value.
+            Merge::Overlap => match (stored.as_object(), patch.as_object()) {
+                (Some(stored), Some(patch)) => over(stored, patch),
+                _ => patch.clone(),
+            },
+        },
+    };
+    if let Some(object) = row.as_object_mut() {
+        object.insert("id".to_string(), json!(mutation.id));
+        object.insert("user_id".to_string(), json!(user_id));
+    }
+    if write_columns(entity, &row).len() <= 2 {
+        return Ok(empty_payload());
+    }
+
+    let result = match as_outcome(write_row(conn, entity, &row).await)? {
+        Ok(result) => result,
+        Err(outcome) => return Ok(outcome),
+    };
+    if result.rows_affected() == 0 {
+        // The id exists and belongs to another account: the conflict guard refused it.
+        return Ok(Outcome::Rejected {
+            code: ErrorCode::NotFound,
+            message: "no such row for this account".to_string(),
+        });
+    }
+    Ok(Outcome::Applied {
+        seq: seq_after(conn, user_id, entity, mutation.id).await?,
+    })
+}
+
+/// Insert-or-update a mutable, id-keyed entity that carries its whole row.
+///
+/// The plain path: an entity whose `Rule` is `Lww` without a patch shape. Today that is
+/// only a server-owned entity reaching the apply's fallback arm.
 async fn apply_upsert(
     conn: &mut PgConnection,
     user_id: Uuid,
