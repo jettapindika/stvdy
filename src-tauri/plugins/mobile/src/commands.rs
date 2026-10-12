@@ -11,7 +11,7 @@
 
 use tauri::Runtime;
 
-use crate::{intake, scheduler};
+use crate::scheduler;
 
 /// Asks the native scheduler to run a background sync every `interval_minutes`.
 ///
@@ -68,17 +68,5 @@ pub async fn mobile_background_sync<R: Runtime>(
     };
     scheduler::run_background_sync(&app, window)
         .await
-        .map_err(|error| error.to_string())
-}
-
-/// Files a shared file into the inbox. The Android intake's last hop (A313, A314).
-#[tauri::command]
-pub async fn mobile_share_intake<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    path: String,
-    name: String,
-    mime: Option<String>,
-) -> Result<intake::SharedFile, String> {
-    intake::accept(&app, std::path::Path::new(&path), &name, mime.as_deref())
         .map_err(|error| error.to_string())
 }

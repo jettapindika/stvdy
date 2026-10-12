@@ -9,11 +9,7 @@
 //! `try_build` rather than `build` so a docs.rs build of this crate does not need a
 //! native project to exist — the same reason the pinned push plugin does it.
 
-const COMMANDS: &[&str] = &[
-    "mobile_scheduler_register",
-    "mobile_background_sync",
-    "mobile_share_intake",
-];
+const COMMANDS: &[&str] = &["mobile_scheduler_register", "mobile_background_sync"];
 
 fn main() {
     // `expect` is denied in this crate: the shell's lint block reaches it through

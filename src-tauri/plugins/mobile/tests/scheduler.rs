@@ -47,15 +47,22 @@ fn the_scheduler_seam_never_references_the_webview() {
 /// applies to it: a share arrives while the app is not running, so an intake that
 /// reached for the frontend would be reaching for a window that does not exist.
 ///
+/// It is a Kotlin file and it is *not* a command — it writes the inbox directly,
+/// because a cold-start share arrives before any plugin command is in flight. The
+/// test that used to read `src/intake.rs` here went with the module: the shell's
+/// `share.rs` is the only reader, and `src-tauri/tests/share_android.rs` pins the
+/// layout the two sides share.
+///
 /// The Kotlin half is asserted at the same time because it is the *other* entry
 /// point the OS calls with no app process (`FirebaseMessagingService`,
 /// `WorkManager`); a Kotlin file that posted to a webview would be the same defect
 /// one language over.
 #[test]
 fn the_android_intake_never_references_the_webview() {
-    let intake = include_str!("../src/intake.rs");
-    let intake = code(intake);
-    for forbidden in ["WebviewWindow", "emit(", "eval(", "get_webview"] {
+    let intake = code(include_str!(
+        "../android/src/main/java/app/stvdy/mobile/ShareIntake.kt"
+    ));
+    for forbidden in ["WebView", "evaluateJavascript", "loadUrl", "emit(", "eval("] {
         assert!(
             !intake.contains(forbidden),
             "the intake must not touch the frontend: found {forbidden}"
@@ -65,13 +72,15 @@ fn the_android_intake_never_references_the_webview() {
 
 /// The Kotlin sources are read as text and held to the same rule, so the native
 /// half cannot quietly become the place the frontend is reached from.
+///
+/// `MobilePlugin.kt` is not in this list and has its own case below, for the same
+/// reason `MobilePlugin.swift` has one: it overrides Tauri's own
+/// `load(webView: WebView)` signature, which is the hook that must exist for the
+/// cold-start share and the `WorkManager` registration to happen at all. The *seam* —
+/// the files the background and share paths live in — is the one held to the rule.
 #[test]
 fn the_kotlin_sources_do_not_post_to_a_webview() {
     for (name, source) in [
-        (
-            "MobilePlugin.kt",
-            include_str!("../android/src/main/java/app/stvdy/mobile/MobilePlugin.kt"),
-        ),
         (
             "BackgroundSyncWorker.kt",
             include_str!("../android/src/main/java/app/stvdy/mobile/BackgroundSyncWorker.kt"),
@@ -81,8 +90,12 @@ fn the_kotlin_sources_do_not_post_to_a_webview() {
             include_str!("../android/src/main/java/app/stvdy/mobile/StvdyMessagingService.kt"),
         ),
         (
-            "ShareIntakeActivity.kt",
-            include_str!("../android/src/main/java/app/stvdy/mobile/ShareIntakeActivity.kt"),
+            "ShareIntake.kt",
+            include_str!("../android/src/main/java/app/stvdy/mobile/ShareIntake.kt"),
+        ),
+        (
+            "StvdySyncSeam.kt",
+            include_str!("../android/src/main/java/app/stvdy/mobile/StvdySyncSeam.kt"),
         ),
     ] {
         let source = code(source);
@@ -93,6 +106,28 @@ fn the_kotlin_sources_do_not_post_to_a_webview() {
             );
         }
     }
+}
+
+/// The plugin class may hold Tauri's webview hook, but it must not evaluate anything in
+/// it — the hook exists to file a cold-start share, nothing else.
+#[test]
+fn the_kotlin_plugin_class_only_holds_the_webview_for_its_lifecycle_hook() {
+    let plugin = code(include_str!(
+        "../android/src/main/java/app/stvdy/mobile/MobilePlugin.kt"
+    ));
+    for forbidden in ["evaluateJavascript", "loadUrl"] {
+        assert!(
+            !plugin.contains(forbidden),
+            "the plugin class must not evaluate anything in the webview: found {forbidden}"
+        );
+    }
+    // The hook has one job, and the test says which: a cold-start share arrives on the
+    // launch intent and nowhere else, so if this call goes the cold half of A313 goes
+    // with it and half of all shares are silently dropped.
+    assert!(
+        plugin.contains("ShareIntake.handle(activity, activity.intent)"),
+        "the webview hook's one job is to file a cold-start share"
+    );
 }
 
 /// The Swift seam, for the same reason: `BGTaskScheduler` runs an app that may have

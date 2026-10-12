@@ -21,14 +21,12 @@ import java.util.concurrent.TimeUnit
 /**
  * The Android half of the mobile plugin (A311).
  *
- * Three jobs and nothing else: it registers the periodic `WorkManager` request, it
- * asks the OS for the notification permission, and it hands a share intent's
- * already-copied path to the intake. **It never touches a webview** — a worker and an
- * FCM message can both arrive with no window at all (A315), and `tests/scheduler.rs`
- * asserts that from the Rust side.
- *
- * The background pass itself is [StvdySyncSeam]'s, and that file documents the one
- * hop Android cannot make today.
+ * Two jobs and nothing else: it registers the periodic `WorkManager` request, and it
+ * asks the OS for the notification permission. The share intake is [ShareIntake]'s and
+ * the background pass is [StvdySyncSeam]'s, which documents the one hop Android cannot
+ * make today. **Nothing here touches a webview** — a worker, an FCM message and a
+ * share can all arrive with no window at all (A315), and `tests/scheduler.rs` asserts
+ * that from the Rust side.
  */
 @TauriPlugin(
     permissions = [
@@ -54,6 +52,31 @@ class MobilePlugin(private val activity: Activity) : Plugin(activity) {
          * side clamps before it gets here.
          */
         const val MIN_INTERVAL_MINUTES = StvdySyncWork.MIN_INTERVAL_MINUTES
+    }
+
+    /**
+     * The **cold-start** half of the share intake.
+     *
+     * `load` runs while the activity is being created, and `activity.intent` is the
+     * intent that created it — so a share that *launched* the app is filed here. This
+     * is the only seam that sees it: Tauri's plugin lifecycle has `onNewIntent` and no
+     * `onCreate(intent)`, so a warm share and a cold one arrive by different routes and
+     * both must be handled, or half of all shares are silently dropped.
+     */
+    override fun load(webView: android.webkit.WebView) {
+        if (ShareIntake.handle(activity, activity.intent)) {
+            // Consume it, so a later configuration change that recreates the activity
+            // does not file the same file a second time.
+            activity.intent = null
+        }
+    }
+
+    /**
+     * A share that arrived while the activity was alive (`launchMode="singleTask"`
+     * means the running activity is reused rather than a second one started).
+     */
+    override fun onNewIntent(intent: Intent) {
+        ShareIntake.handle(activity, intent)
     }
 
     /**
@@ -128,28 +151,6 @@ class MobilePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(result)
     }
 
-    /**
-     * Files a shared file whose bytes are already in app storage.
-     *
-     * The Kotlin side copies a `content://` URI into the staging directory before it
-     * calls this (A314: the read grant dies with the receiving activity, so the copy
-     * has to happen first). What arrives here is an ordinary path.
-     */
-    @Command
-    fun mobileShareIntake(invoke: Invoke) {
-        val args = invoke.parseArgs(IntakeArgs::class.java)
-        ShareIntakeActivity.file(activity, args.path, args.name, args.mime, invoke)
-    }
-
-    /**
-     * A share that arrived while the activity was alive. The cold-start path is
-     * [ShareIntakeActivity], which `MainActivity` starts for `ACTION_SEND` /
-     * `ACTION_VIEW`; a warm one lands here.
-     */
-    override fun onNewIntent(intent: Intent) {
-        ShareIntakeActivity.dispatch(activity, intent)
-    }
-
     /** `mobile_scheduler_register`'s argument. */
     @InvokeArg
     internal class SchedulerArgs {
@@ -160,13 +161,5 @@ class MobilePlugin(private val activity: Activity) : Plugin(activity) {
     @InvokeArg
     internal class WindowArgs {
         var window: String? = null
-    }
-
-    /** `mobile_share_intake`'s argument. */
-    @InvokeArg
-    internal class IntakeArgs {
-        var path: String = ""
-        var name: String = ""
-        var mime: String? = null
     }
 }

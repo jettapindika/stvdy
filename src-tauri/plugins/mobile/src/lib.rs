@@ -11,13 +11,18 @@
 //! copies of the same lifecycle code.
 //!
 //! **The seam never touches the frontend (A315).** [`scheduler::run_background_sync`]
-//! calls the shell's own pass and nothing else; [`intake`] writes a file and returns.
-//! `tests/scheduler.rs` asserts that structurally, in this crate and in the Kotlin
-//! and Swift halves, because a background launch has no window to assert against at
-//! runtime.
+//! calls the shell's own pass and nothing else. `tests/scheduler.rs` asserts that
+//! structurally, in this crate and in the Kotlin and Swift halves, because a
+//! background launch has no window to assert against at runtime.
+//!
+//! **The Android share intake is not a command, and deliberately so.** A share can
+//! arrive on a cold start, before any plugin command is in flight, and the only
+//! Kotlin→Rust direction the generated bridge provides answers a command Rust started.
+//! So `ShareIntake.kt` writes the inbox itself, in the layout the shell's reader
+//! (`stvdy_shell_lib::share`) owns, and this crate has no part in it — the layout is
+//! pinned by `tests/share_android.rs` instead of by a call.
 
 pub mod commands;
-pub mod intake;
 pub mod scheduler;
 
 use tauri::{
@@ -25,10 +30,7 @@ use tauri::{
     plugin::{Builder, TauriPlugin},
 };
 
-pub use commands::{
-    ScheduleAck, mobile_background_sync, mobile_scheduler_register, mobile_share_intake,
-};
-pub use intake::{INBOX_DIR, IntakeError, SharedFile};
+pub use commands::{ScheduleAck, mobile_background_sync, mobile_scheduler_register};
 pub use scheduler::{
     BackgroundReport, BackgroundSync, MIN_INTERVAL_MINUTES, PROCESSING_TASK_ID, PassOutcome,
     REFRESH_TASK_ID, SYNC_WORK_NAME, SchedulerError, SyncPass,
@@ -53,7 +55,6 @@ pub fn init<R: Runtime>(pass: SyncPass) -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             commands::mobile_scheduler_register,
             commands::mobile_background_sync,
-            commands::mobile_share_intake,
         ])
         .setup(move |app, _api| {
             // The pass is managed *here*, not by the shell: it is this plugin's state

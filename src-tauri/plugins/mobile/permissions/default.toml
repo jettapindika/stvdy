@@ -7,16 +7,15 @@
 # written here. Without it `stvdy-mobile:default` in `capabilities/mobile.json` is an
 # unknown permission and the capability fails to resolve at build time.
 #
-# All three commands are granted: this capability is mobile-only
-# (`"platforms": ["iOS", "android"]`), and on mobile all three are the plugin's
-# purpose rather than an optional extra.
+# All commands are granted: this capability is mobile-only
+# (`"platforms": ["iOS", "android"]`), and on mobile both are the plugin's purpose
+# rather than an optional extra. The share intake is deliberately not here: it is not a
+# command (see `src/lib.rs`), so there is nothing for a caller to invoke.
 [default]
 description = """
-The mobile plugin's commands: scheduling the background sync, running one pass, and
-filing a shared file.
+The mobile plugin's commands: scheduling the background sync and running one pass.
 """
 permissions = [
   "allow-mobile-scheduler-register",
   "allow-mobile-background-sync",
-  "allow-mobile-share-intake",
 ]

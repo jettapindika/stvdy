@@ -319,22 +319,10 @@
           "markdownDescription": "Denies the mobile_scheduler_register command without any pre-configured scope."
         },
         {
-          "description": "Enables the mobile_share_intake command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-mobile-share-intake",
-          "markdownDescription": "Enables the mobile_share_intake command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the mobile_share_intake command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-mobile-share-intake",
-          "markdownDescription": "Denies the mobile_share_intake command without any pre-configured scope."
-        },
-        {
-          "description": "The mobile plugin's commands: scheduling the background sync, running one pass, and\nfiling a shared file.\n\n#### This default permission set includes:\n\n- `allow-mobile-scheduler-register`\n- `allow-mobile-background-sync`\n- `allow-mobile-share-intake`",
+          "description": "The mobile plugin's commands: scheduling the background sync and running one pass.\n\n#### This default permission set includes:\n\n- `allow-mobile-scheduler-register`\n- `allow-mobile-background-sync`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "The mobile plugin's commands: scheduling the background sync, running one pass, and\nfiling a shared file.\n\n#### This default permission set includes:\n\n- `allow-mobile-scheduler-register`\n- `allow-mobile-background-sync`\n- `allow-mobile-share-intake`"
+          "markdownDescription": "The mobile plugin's commands: scheduling the background sync and running one pass.\n\n#### This default permission set includes:\n\n- `allow-mobile-scheduler-register`\n- `allow-mobile-background-sync`"
         }
       ]
     }

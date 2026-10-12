@@ -35,7 +35,12 @@ pub const APP_GROUP: &str = "group.app.stvdy";
 
 /// The inbox inside the App Group container. The extension writes here; the app reads
 /// here and deletes what it has taken.
-pub const INBOX: &str = "Inbox";
+pub const GROUP_INBOX: &str = "Inbox";
+
+/// The Android inbox, inside the app's own data directory. **`ShareIntake.kt`'s
+/// `INBOX` is the same string**, asserted by `tests/share_android.rs`: a second
+/// spelling on either side is an inbox that reads empty and nothing fails.
+pub const ANDROID_INBOX: &str = "share-inbox";
 
 /// Where iOS keeps App Group containers inside the app's own sandbox. The container is
 /// created by the OS from the entitlement, so this path exists exactly when the
@@ -54,7 +59,7 @@ pub fn group_container(home: &Path) -> PathBuf {
 
 /// The inbox inside an app's sandbox.
 pub fn inbox_dir(home: &Path) -> PathBuf {
-    group_container(home).join(INBOX)
+    group_container(home).join(GROUP_INBOX)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -193,7 +198,7 @@ pub fn inbox<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Result<PathBuf, S
 pub fn inbox<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, ShareError> {
     use tauri::Manager;
     let data_dir = app.path().app_data_dir().map_err(|_| ShareError::NoInbox)?;
-    Ok(data_dir.join(tauri_plugin_stvdy_mobile::INBOX_DIR))
+    Ok(data_dir.join(ANDROID_INBOX))
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

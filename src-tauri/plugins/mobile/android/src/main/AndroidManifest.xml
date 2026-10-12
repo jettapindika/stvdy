@@ -33,5 +33,43 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!--
+          The share sheet and "open with" (A313). These intent filters are declared
+          *here*, on the app's main activity, because the Tauri CLI does not generate
+          them: `bundle.fileAssociations` documents that `mimeType` becomes
+          `android:mimeType` in an `<intent-filter>`, but CLI 2.12.2's Android manifest
+          template emits only MAIN/LAUNCHER (read out of the shipped binary). A
+          library's manifest is merged into the app's at build time, so an
+          `<activity>` entry naming the same class contributes these filters to it.
+
+          `android:name="${applicationId}.MainActivity"` rather than a literal: the
+          app's own manifest declares `.MainActivity`, which resolves to exactly this,
+          and the merger matches on the resolved name. A hard-coded `app.stvdy` here
+          would silently stop matching if the identifier ever changed.
+
+          The MIME types are concrete and are the same three `bundle.fileAssociations`
+          carries; `*/*` never matches a concrete intent, and
+          `tests/share_android.rs` reads both files and compares them.
+        -->
+        <activity
+            android:name="${applicationId}.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
