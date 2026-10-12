@@ -1929,24 +1929,24 @@ exist, which is why it is written here rather than with the server tests.
 
 | # | Gate | Command | Result |
 |---|---|---|---|
-| 1 | Formatting | `cargo fmt --all -- --check` | |
-| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | |
-| 3 | Rust tests | `cargo test --workspace` | |
+| 1 | Formatting | `cargo fmt --all -- --check` | **PASS** — clean, exit 0 |
+| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **PASS** — clean, exit 0 |
+| 3 | Rust tests | `cargo test --workspace` | **NOT MEASURED** — not run: the tree is mid-edit by six slices and currently fails to compile (`could not find account in the crate root`), so a workspace run cannot be quoted as green even though it was green on a cleaner tree an hour earlier. The Phase 11 suites are counted individually in rows 9–15 |
 | 4 | Web tests | `npm --prefix app test` | **570 passed / 62 files, 0 failed** (`.superpowers/sdd/2026-10-11-phase-11-syllabus-planner/task-D-report.md`) |
 | 5 | Web build | `npm --prefix app run build` | `tsc --noEmit` clean, `vite build` ok. |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)`. |
-| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | |
-| 8 | Shell trio | `just check-shell` | |
-| 9 | **Exit gate, part 1** — syllabus → review → events/tasks/goals | `cargo test -p stvdy-server --test syllabus` | |
-| 10 | **Exit gate, part 2** — the proposal respects busy time, the daily max, study hours, the buffer | `cargo test -p stvdy-server --test planner -- --nocapture` | |
-| 11 | Contract § 6's ten unit tests | `cargo test -p stvdy-core --test planner` | |
-| 12 | The purity sweep | `cargo test -p stvdy-core --test planner_purity` | |
-| 13 | Prompt contract | `cargo test -p stvdy-core --test prompts` | |
-| 14 | Route sweep (13 new rows) | `cargo test -p stvdy-server --test route_sweep` | |
-| 15 | Schema deviations | `cargo test -p stvdy-server --test schema` | |
-| 16 | Gate 5 — accessibility | the five measured checks in Task 15 Step 7 | |
+| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **NOT MEASURED** — not run: several slices were mid-write in `crates/**` throughout, so the offline cache would have described their half-finished SQL rather than this phase's |
+| 8 | Shell trio | `just check-shell` | **NOT MEASURED** — not run, for the same reason (the workspace was mid-write) |
+| 9 | **Exit gate, part 1** — syllabus → review → events/tasks/goals | `cargo test -p stvdy-server --test syllabus` | **PASS** — 19 passed / 0 failed (`cargo test -p stvdy-server --test syllabus`). This is the first time the suite has been green: it was **14 passed / 5 failed on committed code** until `9f1d6ae` fixed it. Four of the five were the suite's own premise (it read `item.index` as the position in the confidence-**sorted** review list, while the contract defines it as the item's position in the **reply**); the fifth was the harness's `drain_jobs` asserting an empty queue for a deliberately failing retryable job |
+| 10 | **Exit gate, part 2** — the proposal respects busy time, the daily max, study hours, the buffer | `cargo test -p stvdy-server --test planner -- --nocapture` | **PASS** — 8 passed / 0 failed (`cargo test -p stvdy-server --test planner`) |
+| 11 | Contract § 6's ten unit tests | `cargo test -p stvdy-core --test planner` | **PASS** — 18 passed / 0 failed (`cargo test -p stvdy-core --test planner`) |
+| 12 | The purity sweep | `cargo test -p stvdy-core --test planner_purity` | **PASS** — 1 passed / 0 failed (`cargo test -p stvdy-core --test planner_purity`) |
+| 13 | Prompt contract | `cargo test -p stvdy-core --test prompts` | **PASS** — 47 passed / 0 failed (`cargo test -p stvdy-core --test prompts`) |
+| 14 | Route sweep (13 new rows) | `cargo test -p stvdy-server --test route_sweep` | **PASS** — 4 passed / 0 failed (`cargo test -p stvdy-server --test route_sweep`) |
+| 15 | Schema deviations | `cargo test -p stvdy-server --test schema` | **PASS** — 27 passed / 0 failed (`cargo test -p stvdy-server --test schema`) |
+| 16 | Gate 5 — accessibility | the five measured checks in Task 15 Step 7 | **PARTIAL** — (b) contrast **MEASURED**: `contrast.test.ts` + `invariants.test.ts`, **62 passed / 0 failed**, walking every `.ts`/`.tsx` under `src`, so this phase's eight new files are in scope (no raw colour, every `var(--x)` declared, `outline-ring` the only focus utility). (a) keyboard reach and (c) ≥44px are **structural**, not measured on this phase's screens: real `<button>`/`<a>`/`<input>` controls with the global `:focus-visible` ring and `min-h-11`, and the fields are `.field` at 44px. (d) never colour alone is **asserted by construction** (a word plus an icon). (e) 200% text — **NOT MEASURED**: `scripts/measure-mobile.mjs`'s `ROUTES` table has no entry for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so it would measure the 404 notice. The phase was measured at phone width only; the desktop leg and the viewport-keyed target floor are `bc7eed8`/`c206729`, later than any number here |
 | 17 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test planner_jakarta` | **PASS** — 2 passed, 0 failed. The quoted pair is in the Execution notes. |
-| 18 | Gate 7 — honesty | the five statements in Task 15 Step 8 | |
+| 18 | Gate 7 — honesty | the five statements in Task 15 Step 8 | **PASS** — the five statements are recorded in the phase's own notes, each with what backs it: the "Suggested plan" label with accepting a separate act; no confidence number anywhere (A261, the review screen asserts the rendered text carries neither `0.4` nor `0.85` nor the word "confidence" while the fixture carries both); the credit cost shown before both generative actions (`syllabus_import` 8, `plan_generation` 2 from `config/plans.toml`); every number tracing to `prep_progress` or `day_load`; and no composite readiness or grade |
 | 19 | Smoke | `scripts/smoke-phase11.sh` | **PASS** end to end against a live server and the Phase 11 stub. |
 
 ## Execution notes
