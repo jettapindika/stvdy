@@ -388,12 +388,25 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     conveyed by colour alone** is measured on **the six checkout states only**, because
     those are the surfaces that declare the words their state must show (`words` in
     `SURFACES`) — every other surface's colour-alone behaviour, and any state that is not
-    a checkout state, is still unmeasured by any committed command. And **(a) is measured
-    for these 20 surfaces and no others**: the study screen (`/study/:deckId`) and the
-    auth routes are not walked (they are in the "not measured" list above), so their
-    keyboard reach is still unmeasured — which is why the three unticked accessibility
-    boxes in Phases 0, 1 and 4 can be closed for (b), (c) and (e), and for (a) only on
-    the surfaces this walk reaches.
+    a checkout state, is still unmeasured by any committed command, **and no phase has
+    ever measured (d) by a check at all**: the per-phase rows for it are readings
+    (`docs/ARCHITECTURE.md` § Accessibility gate records Phase 1's that way, from
+    `aria-invalid` + `aria-describedby` being present in the source). It is left that way
+    deliberately: the only way to test (d) on a surface whose state is not in the fixture
+    is to infer "state from colour alone" from a computed-colour difference between
+    siblings, which is a heuristic that produces findings nobody can act on — worse than
+    recording it as unmeasured. And **(a) is measured for these 20 surfaces and no
+    others**: the study screen (`/study/:deckId`) is not walked, so its keyboard reach
+    has no committed check. The auth routes are not walked either, though Phase 1's own
+    private walk covered them and recorded the result; `var/gate5-keyboard.json` is the
+    other private one, three report screens, **(a)-only** and not reproducible from any
+    committed command — this leg supersedes it for the surfaces above. The unticked
+    accessibility boxes in Phases 0 and 4 can therefore be closed for (b), (c) and (e),
+    and for (a) only on the surfaces this walk reaches; Phase 1 is not one of them — its
+    gate is recorded in full in `docs/ARCHITECTURE.md` and includes **two interaction
+    checks this leg does not reproduce**: the destructive confirm moving focus to the
+    confirming button, and cancel restoring focus to the trigger. Both need a component
+    driven, not a surface walked, so they stay per-phase checks.
     **The desktop leg did not actually work until `bc7eed8`, and the failure was
     silent until someone ran it:** a `nav` step names the phone tab bar's label, and
     the tab bar is `md:hidden` with "Work"/"More" while the desktop sidebar is
