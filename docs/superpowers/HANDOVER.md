@@ -151,9 +151,14 @@ history.** `cargo test --workspace --no-fail-fast` exits **0** with every target
 blocker was Phase 11's own exit-gate suite, which had been written, committed and left unrun at
 14 passed / 5 failed until `9f1d6ae` fixed it. The shell's trio is green too, and it is run with
 `--workspace` now, because `src-tauri/plugins/mobile` is a workspace member that clippy and test
-were silently skipping. **The counts, measured 2026-10-12:** core **382 tests** across 35 suites,
-`stvdy-server` **563** across 58, `stvdy-sync` **33** across 3, the shell **71** (test and
-doc-tests), the SPA **604** across 66 files — about **1,650 assertions that pass**, of which
+were silently skipping. **The counts, re-measured 2026-10-12 after the workspace grew:** core
+**396**, `stvdy-server` **706**, `stvdy-sync` **33**, the shell **71** (test and doc-tests), the SPA
+**632** across 69 files — **workspace total 1,135** (396 + 706 + 33), with the shell's 71 as a
+separate command because `src-tauri` is outside the workspace. The earlier figures (382 / 563 / 33 /
+71 / 604) were right when written and have moved with the phases. **Two arithmetic traps the older
+line had, both worth not repeating:** its "about 1,650 assertions" mixed the workspace and the shell
+legs into one number, and a later note in this session read a workspace+shell total of 1,205 as if it
+were the workspace alone. Keep the two legs apart. Of which
 roughly a third need a live Postgres and create their own scratch database per case. The short
 version:
 
