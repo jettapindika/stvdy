@@ -25,6 +25,7 @@ use crate::chat;
 use crate::cheatsheets;
 use crate::chunks;
 use crate::config::AppConfig;
+use crate::dashboard;
 use crate::devices;
 use crate::events;
 use crate::flashcards;
@@ -168,6 +169,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(calendar::routes())
         .merge(study::routes())
         .merge(reminders::routes())
+        .merge(dashboard::routes())
         .merge(settings::routes())
         .merge(crate::actions::routes())
         .merge(usage::routes())

@@ -298,12 +298,58 @@ fn read_only_rows() -> Vec<Row> {
         ro("GET", "/sessions", "reads the caller's own sessions"),
         ro("POST", "/sessions", "a session is free (R1), like a review"),
         ro("GET", "/activity", "reads the caller's own activity"),
+        // The dashboard's ungated half (A289). Every figure is a count or a sum over the
+        // caller's own rows, so there is nothing a plan could refuse. The *advanced* half is
+        // `Swept` below, which is why the dashboard is two routes rather than one: the screen
+        // renders the free part and a locked card for the rest.
+        ro(
+            "GET",
+            "/dashboard",
+            "reads the caller's own sessions, reviews and due count",
+        ),
         ro("GET", "/settings", "reads the caller's own settings"),
+        // Phase 12's action surface. Both of these are reads in the sweep's sense: the list
+        // reads the caller's own proposals, and a rejection spends nothing and frees the
+        // student from a card. Reject is deliberately **not** plan-gated — a downgraded
+        // account that can no longer confirm a proposal must still be able to dismiss it, or
+        // the card is stuck on screen forever. The confirm is `Swept` below, because that is
+        // the one that acts.
+        ro(
+            "GET",
+            "/actions/pending",
+            "reads the caller's own proposals, and expires its own stale ones",
+        ),
+        ro(
+            "POST",
+            "/actions/{id}/reject",
+            "rejecting spends nothing and is the remedy a stuck card needs",
+        ),
         ro(
             "PUT",
             "/settings",
             "a channel the plan does not grant is refused per channel by the engine, which \
              crates/server/tests/settings.rs asserts with a body (A209)",
+        ),
+        // Phase 12's reminder surface. All three are `ReadOnly` in the sweep's sense, and the
+        // reason they can be is A201: the *channel* grant is checked once, on `PUT /settings`,
+        // and every plan grants at least one channel — so there is no request here that an
+        // exhausted account could be refused on. A `Swept` row would need a refusal to assert,
+        // and inventing one would be inventing a policy the matrix does not have.
+        ro(
+            "GET",
+            "/reminders",
+            "reads the caller's own due reminders, filtered by this device's acks",
+        ),
+        ro(
+            "POST",
+            "/reminders",
+            "registers a reminder for the caller's own subject; the key makes a retry a no-op \
+             and no credit is spent",
+        ),
+        ro(
+            "POST",
+            "/reminders/{id}/ack",
+            "one delivery row for the calling device, `on conflict do nothing`",
         ),
         // BYOK (A302). `GET` and `DELETE` are read-only in the sweep's sense: removing a key
         // is the remedy a refusal names, and a read of one's own key description must work for
@@ -346,6 +392,12 @@ fn read_only_rows() -> Vec<Row> {
             "GET",
             "/billing/payments/{id}",
             "reads the caller's own payment row, scoped by user_id in the statement",
+        ),
+        ro(
+            "GET",
+            "/billing/invoices",
+            "reads the caller's own payment history; `payments` is not synced, so there is \
+             no client-side substitute for it (docs/SPEC.md line 137)",
         ),
         ro(
             "POST",
@@ -403,6 +455,17 @@ fn swept_rows() -> Vec<Row> {
             "ChatMessage; WebSearch too when the turn ran a chargeable search",
             422,
             "limit_reached",
+        ),
+        // Phase 12. The confirm is the only thing in the product that turns a proposal into a
+        // row (A271), so it is the action the sweep must cover. The plan check runs **before**
+        // the row is looked up (A272), which is why the driver arm needs no per-row body: a
+        // free account meets the matrix's `plan_required` whatever the id names.
+        swept(
+            "POST",
+            "/actions/{id}/confirm",
+            "AgentAction",
+            403,
+            "plan_required",
         ),
         swept(
             "POST",
@@ -512,6 +575,17 @@ fn swept_rows() -> Vec<Row> {
             "POST",
             "/plan/replan",
             "PlanGeneration",
+            403,
+            "plan_required",
+        ),
+        // The dashboard's advanced half (A289). `AdvancedAnalytics` is Power-only, so a free
+        // account meets `plan_required` — which is the refusal the screen renders as a locked
+        // card rather than hiding the section, and it is why the dashboard is two routes: the
+        // ungated one above keeps working while this one is refused.
+        swept(
+            "GET",
+            "/dashboard/topics",
+            "AdvancedAnalytics",
             403,
             "plan_required",
         ),
@@ -1084,6 +1158,7 @@ struct Fixture {
     cheatsheet_id: Uuid,
     task_id: Uuid,
     goal_id: Uuid,
+    action_id: Uuid,
     user_id: Uuid,
 }
 
@@ -1310,6 +1385,21 @@ impl Fixture {
         .await
         .unwrap();
 
+        // The proposal the confirm row addresses. Its own row is enough for the same reason
+        // the task's is: `Feature::AgentAction` is decided before the id is looked up (A272),
+        // so an exhausted free account meets the refusal whatever this id names.
+        let action_id = Uuid::now_v7();
+        sqlx::query(
+            "insert into pending_actions (id, user_id, tool, args, status, expires_at)
+             values ($1, $2, 'create_task', '{\"title\": \"Tugas\"}'::jsonb, 'pending',
+                     now() + interval '30 minutes')",
+        )
+        .bind(action_id)
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
         Self {
             pool: harness.state.pool.clone(),
             workspace_id,
@@ -1318,6 +1408,7 @@ impl Fixture {
             cheatsheet_id,
             task_id,
             goal_id,
+            action_id,
             user_id,
         }
     }
@@ -1343,6 +1434,7 @@ impl Fixture {
         let cheatsheet = self.cheatsheet_id.to_string();
         let source = self.source_id.to_string();
         let task = self.task_id.to_string();
+        let action = self.action_id.to_string();
 
         match (method, path) {
             ("POST", "/workspaces") => {
@@ -1487,6 +1579,21 @@ impl Fixture {
                 )
                 .await
             }
+            // Phase 12. Refused before the proposal is read, which is the order A272 pins:
+            // `Feature::AgentAction` is free's `agent_actions = false`, so an exhausted free
+            // account meets `plan_required` whatever this id names. The id is a real row the
+            // fixture wrote, so a route that read it before deciding would still get past that
+            // read rather than 404 first.
+            ("POST", "/actions/{id}/confirm") => {
+                json(
+                    app,
+                    "POST",
+                    &format!("/actions/{action}/confirm"),
+                    token,
+                    serde_json::json!({}),
+                )
+                .await
+            }
             // Phase 11. Both are refused before the goal is read: the refusal is the plan
             // matrix's, which is what an exhausted free account meets. The goal id is a
             // real one the fixture wrote, so a route that read it before deciding would
@@ -1510,6 +1617,19 @@ impl Fixture {
                     "/plan/replan",
                     token,
                     serde_json::json!({ "goal_id": goal }),
+                )
+                .await
+            }
+            // The dashboard's advanced half. A plain authenticated GET: the refusal is the
+            // plan matrix's, and it fires before any row is read, so there is no body and no
+            // fixture id to thread through (A289).
+            ("GET", "/dashboard/topics") => {
+                json(
+                    app,
+                    "GET",
+                    "/dashboard/topics",
+                    token,
+                    serde_json::Value::Null,
                 )
                 .await
             }

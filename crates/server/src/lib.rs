@@ -11,6 +11,7 @@ pub mod cheatsheets;
 pub mod chunks;
 pub mod config;
 pub mod credits;
+pub mod dashboard;
 pub mod db;
 pub mod devices;
 pub mod entitlements;

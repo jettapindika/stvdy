@@ -87,6 +87,11 @@ impl ReminderKind {
 
     /// The inverse of [`as_str`](Self::as_str). `None` for anything else, so a client's typo
     /// is a validation error rather than a fourth kind.
+    ///
+    /// The `allow` is the same price the tool registry pays for the same signature: `Option`
+    /// rather than the trait's `Result`, because an unknown name is a validation refusal the
+    /// caller renders, not an error it propagates (A271's precedent in `agent/tools.rs`).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(name: &str) -> Option<ReminderKind> {
         Self::ALL.into_iter().find(|kind| kind.as_str() == name)
     }
@@ -232,7 +237,10 @@ pub fn plan(
         if at <= now {
             reminder.skip = Some(SkipReason::AlreadyPast);
         } else {
-            defer_for_quiet_hours(&mut reminder, settings, at);
+            let deferral = defer_for_quiet_hours(fire_at, at, settings.tz, settings.quiet);
+            reminder.fire_at = deferral.fire_at;
+            reminder.deferred = deferral.deferred;
+            reminder.skip = deferral.skip;
         }
         planned.push(reminder);
     }
@@ -253,6 +261,63 @@ pub fn plan(
     let mut seen = BTreeSet::new();
     planned.retain(|reminder| seen.insert(reminder.dedupe_key.clone()));
     planned
+}
+
+/// The quiet-hours rule for one reminder: where it moves to, whether it moved, and whether
+/// the move makes it worthless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deferral {
+    pub fire_at: DateTime<Utc>,
+    /// True when quiet hours moved it.
+    pub deferred: bool,
+    pub skip: Option<SkipReason>,
+}
+
+/// Moves a fire time out of the quiet window, or says the move makes it worthless.
+///
+/// Public because there are two callers and they must not disagree: [`plan`] derives a
+/// reminder and `POST /reminders` accepts one a client computed, and both have to apply the
+/// same rule to the same instant. A second implementation in the server would be a second
+/// answer to "where does this land", and the two would diverge the first time one was edited
+/// — which is the failure mode the whole module exists to avoid, one layer up.
+///
+/// `subject_at` is the instant the reminder is *about* — the task's due time, the event's
+/// start, or the start of the day a card reminder belongs to — and it is what
+/// [`STALE_AFTER_MIN`] is measured against.
+pub fn defer_for_quiet_hours(
+    fire_at: DateTime<Utc>,
+    subject_at: DateTime<Utc>,
+    tz: Tz,
+    quiet: Option<(u8, u8)>,
+) -> Deferral {
+    let Some(quiet) = quiet else {
+        return Deferral {
+            fire_at,
+            deferred: false,
+            skip: None,
+        };
+    };
+    if !in_quiet_hours(local_hour_of(fire_at, tz), Some(quiet)) {
+        return Deferral {
+            fire_at,
+            deferred: false,
+            skip: None,
+        };
+    }
+    let Some(end) = quiet_end(fire_at, tz, quiet) else {
+        return Deferral {
+            fire_at,
+            deferred: false,
+            skip: None,
+        };
+    };
+
+    Deferral {
+        fire_at: end,
+        deferred: true,
+        skip: (end > subject_at + Duration::minutes(STALE_AFTER_MIN))
+            .then_some(SkipReason::QuietHours),
+    }
 }
 
 /// The day's card reminder: one per local day, at the student's study start hour.
@@ -294,7 +359,10 @@ fn cards_due_reminder(now: DateTime<Utc>, settings: &ReminderSettings) -> Option
             .and_hms_opt(0, 0, 0)
             .and_then(|midnight| local_instant(settings.tz, midnight))
             .unwrap_or(fire_at);
-        defer_for_quiet_hours(&mut reminder, settings, day_start);
+        let deferral = defer_for_quiet_hours(fire_at, day_start, settings.tz, settings.quiet);
+        reminder.fire_at = deferral.fire_at;
+        reminder.deferred = deferral.deferred;
+        reminder.skip = deferral.skip;
     }
 
     Some(reminder)
@@ -349,29 +417,6 @@ pub fn quiet_end(from: DateTime<Utc>, tz: Tz, quiet: (u8, u8)) -> Option<DateTim
         }
     }
     None
-}
-
-/// Moves a reminder out of the quiet window, or marks it skipped when the move is too late.
-fn defer_for_quiet_hours(
-    reminder: &mut PlannedReminder,
-    settings: &ReminderSettings,
-    subject_at: DateTime<Utc>,
-) {
-    let Some(quiet) = settings.quiet else {
-        return;
-    };
-    if !in_quiet_hours(local_hour_of(reminder.fire_at, settings.tz), Some(quiet)) {
-        return;
-    }
-    let Some(end) = quiet_end(reminder.fire_at, settings.tz, quiet) else {
-        return;
-    };
-
-    reminder.fire_at = end;
-    reminder.deferred = true;
-    if end > subject_at + Duration::minutes(STALE_AFTER_MIN) {
-        reminder.skip = Some(SkipReason::QuietHours);
-    }
 }
 
 /// The local date an instant falls on, in the user's zone.

@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use stvdy_core::config::ReminderChannel;
 use stvdy_core::reminders::{
     MAX_LOOKAHEAD_DAYS, PlannedReminder, ReminderKind, ReminderSettings, SkipReason, Subject,
-    dedupe_key, in_quiet_hours, plan, quiet_end,
+    dedupe_key, defer_for_quiet_hours, in_quiet_hours, plan, quiet_end,
 };
 use uuid::Uuid;
 
@@ -172,6 +172,88 @@ fn quiet_hours_wrap_past_midnight() {
         quiet_end(utc(2026, 10, 11, 15, 30), jakarta(), (20, 21)),
         None
     );
+}
+
+/// The window's edges at **minute** granularity, through the deferral the producers call.
+///
+/// `quiet_hours_wrap_past_midnight` asserts the hour predicate, and the hour predicate is the
+/// half of it a naive implementation gets wrong. This is the other half: the four instants
+/// one minute either side of each edge, because a mid-window hour (01:00) is not where the
+/// bug lives. `22:00` and `06:59` are inside a 22:00→07:00 window and a naive
+/// `start <= hour && hour < end` says they are outside; `21:59` and `07:00` are outside and it
+/// says the same, so only the two inside cases can fail — and they are the ones asserted with
+/// their deferral target, not merely with a boolean.
+#[test]
+fn the_quiet_window_edges_are_minute_exact() {
+    let quiet = Some((22, 7));
+    // Jakarta is UTC+7 with no DST, so each local edge is a fixed instant and the expected
+    // `fire_at` is written as UTC rather than as an offset arithmetic the test could get wrong
+    // in the same direction as the code.
+    let before_the_window = utc(2026, 10, 11, 14, 59); // 21:59 local
+    let window_opens = utc(2026, 10, 11, 15, 0); // 22:00 local
+    let window_closes_soon = utc(2026, 10, 11, 23, 59); // 06:59 local on the 12th
+    let window_closed = utc(2026, 10, 12, 0, 0); // 07:00 local on the 12th
+
+    // 21:59 is one minute early: the reminder keeps its instant and says it did not move.
+    let deferral =
+        defer_for_quiet_hours(before_the_window, utc(2026, 10, 12, 3, 0), jakarta(), quiet);
+    assert!(!deferral.deferred, "21:59 is outside 22:00→07:00");
+    assert_eq!(deferral.fire_at, before_the_window);
+    assert_eq!(deferral.skip, None);
+
+    // 22:00 is the first quiet minute, and the deferral lands on the window's close the next
+    // morning — 07:00 local on the 12th, which is midnight UTC.
+    let deferral = defer_for_quiet_hours(window_opens, utc(2026, 10, 12, 3, 0), jakarta(), quiet);
+    assert!(deferral.deferred, "22:00 is the first minute of the window");
+    assert_eq!(
+        deferral.fire_at,
+        utc(2026, 10, 12, 0, 0),
+        "it moves to 07:00 local, not to the next hour"
+    );
+    assert_eq!(deferral.skip, None, "the subject is still ahead of it");
+
+    // 06:59 is the last quiet minute: it moves to 07:00 the same morning, not to the following
+    // night, which is the direction a naive walk gets wrong.
+    let deferral = defer_for_quiet_hours(
+        window_closes_soon,
+        utc(2026, 10, 12, 3, 0),
+        jakarta(),
+        quiet,
+    );
+    assert!(deferral.deferred, "06:59 is the last minute of the window");
+    assert_eq!(deferral.fire_at, utc(2026, 10, 12, 0, 0));
+
+    // 07:00 is the first minute after it.
+    let deferral = defer_for_quiet_hours(window_closed, utc(2026, 10, 12, 3, 0), jakarta(), quiet);
+    assert!(!deferral.deferred, "07:00 is outside the window");
+    assert_eq!(deferral.fire_at, window_closed);
+
+    // And the naive comparison the whole case exists for is asserted to disagree, so this test
+    // cannot be satisfied by an implementation that shares the naive rule. The bounds are
+    // `let`-bound rather than literals inside the closure: with literals, `22 <= h && h < 7`
+    // is a constant `false` that rustc's `impossible_comparisons` rejects, and the closure
+    // would be asserting something about the compiler rather than about the two rules.
+    let naive = |start: u8, end: u8, hour: u8| start <= hour && hour < end;
+    assert!(
+        !naive(22, 7, 22),
+        "the naive rule is false for 22:00, the window's first hour"
+    );
+    assert!(in_quiet_hours(22, quiet), "the real rule is true for it");
+    assert!(
+        !naive(22, 7, 6),
+        "and false for 06:59, its last one — so a mid-window hour is no better"
+    );
+    assert!(in_quiet_hours(6, quiet), "which the real rule covers");
+
+    // A fire time that is exactly the window's close is not deferred again, which is what stops
+    // a deferred reminder from walking a whole window per sweep.
+    let deferral = defer_for_quiet_hours(
+        utc(2026, 10, 12, 0, 0),
+        utc(2026, 10, 12, 3, 0),
+        jakarta(),
+        quiet,
+    );
+    assert!(!deferral.deferred, "the window's own close is outside it");
 }
 
 /// Past the stale window it is skipped with a reason, and it is still in the output —

@@ -38,46 +38,111 @@ const FORBIDDEN: [&str; 7] = [
     "partial_cmp",
 ];
 
-#[test]
-fn the_reminder_module_has_no_clock_and_no_hash_ordered_container() {
-    let source = include_str!("../src/reminders.rs");
-    for forbidden in FORBIDDEN {
-        assert!(
-            !source.contains(forbidden),
-            "crates/core/src/reminders.rs contains {forbidden}"
-        );
-    }
+/// The module's own source, as the compiler sees it.
+const SOURCE: &str = include_str!("../src/reminders.rs");
+
+/// The sweep itself: the first forbidden name the source contains, or `None`.
+///
+/// A function rather than an inline loop so the planted-defect case below runs *the same
+/// predicate* the real case does. A sweep that only ever sees the real file cannot be shown to
+/// fail, and a sweep that is written twice can have its two copies disagree.
+fn forbidden_in(source: &str) -> Option<&'static str> {
+    FORBIDDEN.iter().copied().find(|name| source.contains(name))
 }
 
-/// The sweep is only worth anything if it can fail, so it is run against a planted defect.
+#[test]
+fn the_reminder_module_has_no_clock_and_no_hash_ordered_container() {
+    assert_eq!(
+        forbidden_in(SOURCE),
+        None,
+        "crates/core/src/reminders.rs contains a name that makes the plan impure"
+    );
+}
+
+/// One real defect per forbidden name, written as the code that would contain it.
 ///
-/// Without this, a typo in a name — `"Hashmap"`, `"sort_unstable "` — would leave the sweep
-/// green forever while the module did the thing it forbids. The mutation is a real one: a
-/// key that folds the fire instant in is exactly the defect A284 names, and it is the defect
-/// the whole file exists to catch.
+/// Deliberately **not** built from [`FORBIDDEN`]: a mutation derived from the list proves only
+/// that the list is a list, and a typo in a name — `"Hashmap"`, `"sort_unstable "` — would
+/// leave the sweep green forever while the module did the thing it forbids. Each string here
+/// is the construct itself, so a misspelled entry fails this case instead of hiding behind it.
+const DEFECTS: [(&str, &str); 7] = [
+    ("Utc::now", "let _ = Utc::now();"),
+    ("Local::now", "let _ = Local::now();"),
+    ("SystemTime", "let _ = SystemTime::now();"),
+    ("HashMap", "let mut seen = HashMap::new();"),
+    ("HashSet", "let mut seen = HashSet::new();"),
+    ("sort_unstable", "planned.sort_unstable();"),
+    ("partial_cmp", "let _ = left.partial_cmp(&right);"),
+];
+
+/// The sweep is only worth anything if it can fail, so it is run against planted defects.
+///
+/// The mutation is a real one: a plan ordered by an unstable sort or keyed through a
+/// `HashMap` is the defect the whole file exists to catch, and it is invisible in a
+/// behavioural test that runs once on one machine.
+///
+/// The assertion is `FORBIDDEN.iter().any(|name| defect.contains(name))` rather than
+/// `forbidden_in(planted) == Some(name)`: the latter compares against the *first* match in
+/// list order, so it fails whenever an earlier entry also matches — which is not a property of
+/// the sweep. This form is the one that catches a misspelled entry: with `"Hashmap"` in the
+/// list, the planted `HashMap::new()` contains no forbidden name and this case fails, which is
+/// exactly the silent hole the case exists to close.
 #[test]
 fn the_sweep_fails_on_a_planted_defect() {
-    let source = include_str!("../src/reminders.rs");
-    for forbidden in FORBIDDEN {
-        let planted = format!("{source}\nfn planted() {{ let _ = {forbidden}; }}");
+    for (name, defect) in DEFECTS {
         assert!(
-            planted.contains(forbidden),
-            "a source containing {forbidden} must trip the sweep"
+            FORBIDDEN.contains(&name),
+            "`{name}` must be a name the sweep looks for"
         );
         assert!(
-            !source.contains(forbidden),
-            "the real module must not contain {forbidden}"
+            FORBIDDEN.iter().any(|forbidden| defect.contains(forbidden)),
+            "a source containing `{defect}` must trip the sweep"
+        );
+        assert!(
+            forbidden_in(defect).is_some(),
+            "the planted code itself contains `{name}`"
         );
     }
+    assert_eq!(
+        forbidden_in(SOURCE),
+        None,
+        "the real module must be clean for the planted case to mean anything"
+    );
+}
 
-    // And the shape the sweep exists for: the key must not be built from `fire_at`.
-    let defect = "format!(\"{}:{}:{}\", kind.as_str(), subject_key, fire_at)";
+/// The key is the subject and the user's local date, and the fire instant is **absent** from
+/// it — which is the defect A284 names, and the one a single-device behavioural test cannot
+/// see.
+///
+/// The signature is the first half of the argument: `dedupe_key` takes no instant, so the
+/// value cannot depend on one. The second half is that the key's *callers* pass the local
+/// date and not `fire_at`, so the source is asserted to name the three arguments and the
+/// format string, and to contain no key built from the fire instant.
+#[test]
+fn the_key_is_the_subject_and_the_local_date() {
+    let key_body = SOURCE
+        .split("pub fn dedupe_key")
+        .nth(1)
+        .expect("the module has one key function");
+    // The body runs to the end of the function, which is the first `}` at column zero.
+    let key_body = key_body
+        .split("\n}\n")
+        .next()
+        .expect("a function body ends somewhere");
+
     assert!(
-        !source.contains(defect),
-        "the key must not fold in the fire instant"
+        key_body.contains("format!(\"{}:{}:{}\", kind.as_str(), subject_key, local_date)"),
+        "the key is the kind, the subject and the local date: {key_body}"
     );
     assert!(
-        source.contains("format!(\"{}:{}:{}\", kind.as_str(), subject_key, local_date)"),
-        "the key is the subject and the local date"
+        !key_body.contains("fire_at"),
+        "the key must not be built from the fire instant: {key_body}"
+    );
+
+    // And the deferred case, which is the shape the defect takes in the wild: a deferral moves
+    // `fire_at` and must leave the key alone.
+    assert!(
+        !SOURCE.contains("format!(\"{}:{}:{}\", kind.as_str(), subject_key, fire_at)"),
+        "a key folding in the fire instant fires once per device"
     );
 }
