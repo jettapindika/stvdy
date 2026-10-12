@@ -38,7 +38,7 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
 
     // The source may have been deleted between enqueue and claim.
     let row = sqlx::query(
-        "select id, user_id, kind, file_key, url, title, deleted_at
+        "select id, user_id, kind, file_key, url, title, mime, deleted_at
            from sources where id = $1",
     )
     .bind(source_id)
@@ -61,6 +61,7 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
     let file_key: Option<String> = row.get("file_key");
     let url: Option<String> = row.get("url");
     let title: String = row.get("title");
+    let mime: String = row.get("mime");
 
     // The user may have downgraded between the request and the claim: the upload
     // checked `UploadSource` against the plan that existed then, and a source the
@@ -85,10 +86,26 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
         file_key.as_deref(),
         url.as_deref(),
         &title,
+        &mime,
     )
     .await
     {
         Ok(chunk_count) => {
+            // A syllabus adds one step after the chunks exist (A250): the extraction. It
+            // rides this job rather than a second kind because the roadmap's § 8 job list is
+            // fixed and has no syllabus kind, and it runs here rather than in the route
+            // because a whole document is not a route-sized call — the contrast is
+            // `create_outline`, which is one short call over selected chunks.
+            if kind == SYLLABUS_KIND
+                && let Err(failure) = extract_syllabus(state, source_id, user_id).await
+            {
+                // The draft says what went wrong even while the job is going to be retried,
+                // for the same reason the source does: the client is polling it.
+                mark_draft_failed(&state.pool, source_id, &failure.message).await;
+                set_status(&state.pool, source_id, "failed", Some(&failure.message)).await?;
+                return Err(failure);
+            }
+
             set_status(&state.pool, source_id, "ready", None).await?;
             tracing::info!(%source_id, chunk_count, "source ingested");
             Ok(())
@@ -98,8 +115,258 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
             // went wrong even while the job is going to be retried, and the final
             // failure has to leave the same readable text.
             set_status(&state.pool, source_id, "failed", Some(&failure.message)).await?;
+            mark_draft_failed(&state.pool, source_id, &failure.message).await;
             Err(failure)
         }
+    }
+}
+
+/// The source kind that carries an extraction step (A250).
+pub const SYLLABUS_KIND: &str = "syllabus";
+
+/// The prompt version of the extraction, for `syllabus_drafts.prompt_version`.
+const EXTRACTION_MODULE: stvdy_core::prompts::ModuleId = stvdy_core::prompts::ModuleId::SyllabusV1;
+
+/// The model temperature for an extraction: low, because a timetable is a reading of a
+/// document rather than a piece of writing.
+const EXTRACTION_TEMPERATURE: f32 = 0.1;
+
+/// Generous, because a whole syllabus's meetings, deadlines and exams have to fit in one
+/// object. The contract's own bounds (`MAX_MEETINGS` and friends) are what keep the reply
+/// finite; this is what keeps the *call* finite.
+const EXTRACTION_MAX_TOKENS: u32 = 4000;
+
+/// What the model is told when its first reply was not usable.
+const EXTRACTION_CORRECTION: &str = "Your previous reply was not a valid JSON object matching the schema. Reply with only \
+     the JSON object, with no prose before or after it and no markdown fences.";
+
+/// The extraction step, for `kind = 'syllabus'` only (A250).
+///
+/// It rides `ingest_source` because the roadmap's job-kind list is fixed and has no syllabus
+/// kind, and it runs here rather than in the route because a whole document is not a
+/// route-sized call.
+///
+/// **Idempotent**: the draft is keyed uniquely on `source_id` (migration `0031`), so a retry
+/// `update`s the same row rather than appending a second draft. A reply that does not parse
+/// is transient — one retry with a corrective message is worth making — while a missing
+/// provider is permanent, because no retry invents one.
+///
+/// The chunks are read back from the database rather than threaded through from [`ingest`]:
+/// the extraction is a separate step with its own failure modes, and passing the text along
+/// would make the two inseparable — a syllabus's extraction would then only be testable
+/// through the whole parse-and-embed pipeline.
+async fn extract_syllabus(state: &AppState, source_id: Uuid, user_id: Uuid) -> Result<(), Failure> {
+    let Some(provider) = state.llm.clone() else {
+        return Err(Failure::permanent(
+            "no model provider is configured on this server (LLM_BASE_URL is unset)",
+        ));
+    };
+
+    let chunks = crate::chunks::select_for_generation(&state.pool, &[source_id], user_id)
+        .await
+        .map_err(|error| Failure::transient(format!("loading the syllabus's chunks: {error}")))?;
+    if chunks.is_empty() {
+        return Err(Failure::permanent(
+            "the syllabus has no indexed text to read",
+        ));
+    }
+
+    let row = sqlx::query("select email, timezone, plan_id from users where id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|error| Failure::transient(format!("loading the syllabus's owner: {error}")))?
+        .ok_or_else(|| Failure::permanent("the syllabus's owner no longer exists"))?;
+
+    let base: stvdy_core::prompts::ChatVars = crate::chat::prompt::base_vars(
+        state,
+        row.get("email"),
+        row.get("timezone"),
+        stvdy_core::config::PlanId::parse(row.get("plan_id")),
+        false,
+        false,
+        // A syllabus extraction is always drawn from the student's own document, so the
+        // grounding toggle is `true`; it is never read, because task modules compose on v1's
+        // trimmed base, which has no `{{sources_only}}`.
+        true,
+        // A syllabus belongs to a workspace, but the extraction prompt never names one: the
+        // document is the context, and the base's `<user_context_data>` block is filled by
+        // the module's own values.
+        "not set",
+    );
+
+    // `semester_context` is deliberately absent: the module declares it optional and its
+    // default sentence is the honest value until the upload carries one (A254).
+    let composed = stvdy_core::prompts::compose_task(
+        EXTRACTION_MODULE,
+        &base,
+        &std::collections::BTreeMap::new(),
+        &chunks,
+    )
+    .map_err(|error| Failure::permanent(format!("composing the prompt: {error}")))?;
+
+    let request = stvdy_core::traits::llm::ChatRequest {
+        model: String::new(),
+        messages: vec![stvdy_core::traits::llm::ChatMsg {
+            role: stvdy_core::traits::llm::Role::System,
+            content: composed.text.clone(),
+        }],
+        tools: Vec::new(),
+        temperature: EXTRACTION_TEMPERATURE,
+        max_tokens: EXTRACTION_MAX_TOKENS,
+        json_mode: true,
+    };
+
+    let first = provider
+        .complete(request.clone())
+        .await
+        .map_err(|error| Failure::transient(format!("calling the model: {error}")))?;
+    let mut usage = first.usage.clone();
+
+    let (file, reply) = match crate::syllabus::parse_extraction(&first.text) {
+        Ok(file) => (file, first),
+        Err(error) if stvdy_core::generation::is_retryable(&error) => {
+            let mut retry = request;
+            retry.messages.push(stvdy_core::traits::llm::ChatMsg {
+                role: stvdy_core::traits::llm::Role::Assistant,
+                content: first.text.clone(),
+            });
+            retry.messages.push(stvdy_core::traits::llm::ChatMsg {
+                role: stvdy_core::traits::llm::Role::User,
+                content: EXTRACTION_CORRECTION.to_string(),
+            });
+            let second = provider
+                .complete(retry)
+                .await
+                .map_err(|error| Failure::transient(format!("retrying the model call: {error}")))?;
+            usage.in_tokens += second.usage.in_tokens;
+            usage.out_tokens += second.usage.out_tokens;
+            usage.provider_cost_usd =
+                match (usage.provider_cost_usd, second.usage.provider_cost_usd) {
+                    (Some(first), Some(second)) => Some(first + second),
+                    (Some(only), None) | (None, Some(only)) => Some(only),
+                    (None, None) => None,
+                };
+            let file = crate::syllabus::parse_extraction(&second.text).map_err(|error| {
+                // The model was handed its own reply and told what was wrong with it, and it
+                // failed the same way: a third attempt would be the same call with the same
+                // result, so this is permanent. The retry loop would otherwise leave the
+                // student's draft `extracting` for the length of the backoff for nothing.
+                Failure::permanent(format!(
+                    "the model did not return a usable extraction after a retry: {error}"
+                ))
+            })?;
+            (file, second)
+        }
+        Err(error) => {
+            // A parse failure that is not worth retrying (`Empty`, or a `Json`/`Schema` the
+            // corrective turn cannot fix) fails the extraction outright. The one retry above
+            // is the whole of the retry policy for a reply.
+            return Err(Failure::permanent(format!(
+                "the model did not return a usable extraction: {error}"
+            )));
+        }
+    };
+
+    let extraction = serde_json::to_value(&file).map_err(|error| {
+        Failure::permanent(format!("the extraction is not serialisable: {error}"))
+    })?;
+
+    // The `update` is what makes a retry overwrite rather than append, and the unique index
+    // on `source_id` is what makes the two statements one row either way.
+    sqlx::query(
+        "insert into syllabus_drafts
+            (user_id, workspace_id, source_id, status, extraction, prompt_version, error)
+         select $1, s.workspace_id, s.id, 'ready', $2, $3, null
+           from sources s where s.id = $4
+         on conflict (source_id) do update
+            set status = 'ready', extraction = excluded.extraction,
+                prompt_version = excluded.prompt_version, error = null, updated_at = now()",
+    )
+    .bind(user_id)
+    .bind(&extraction)
+    .bind(EXTRACTION_MODULE.version())
+    .bind(source_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|error| Failure::transient(format!("storing the extraction: {error}")))?;
+
+    // The provider's tokens and cost are attached to the import's own `usage_events` row.
+    // The id is found rather than carried: the upload's transaction committed before this
+    // job was claimed, and a `None` here is a reporting gap rather than a failed import.
+    attach_extraction_usage(state, user_id, &usage, EXTRACTION_MODULE.version()).await;
+
+    tracing::info!(
+        %source_id,
+        meetings = file.meetings.len(),
+        deadlines = file.deadlines.len(),
+        exams = file.exams.len(),
+        reply_chars = reply.text.len(),
+        "syllabus extracted"
+    );
+    Ok(())
+}
+
+/// Attaches the extraction's provider usage to the import's `usage_events` row.
+///
+/// The spend is the upload's and committed minutes at most before this job is claimed, so a
+/// short lookback finds it — the same fallback `flashcards::generate::find_usage_event_id`
+/// uses for a row that does not carry the id. A miss is logged and the extraction still
+/// succeeds: the rows the student paid for are stored, and an accounting gap must not turn
+/// into a failed import.
+async fn attach_extraction_usage(
+    state: &AppState,
+    user_id: Uuid,
+    usage: &stvdy_core::traits::llm::Usage,
+    prompt_version: &str,
+) {
+    let since = state.clock.now() - chrono::Duration::minutes(5);
+    let found = crate::credits::latest_usage_event(
+        &state.pool,
+        user_id,
+        crate::syllabus::SYLLABUS_ACTION,
+        since,
+    )
+    .await;
+
+    let usage_event_id = match found {
+        Ok(id) => id,
+        Err(error) => {
+            tracing::error!(%error, "could not find the syllabus import's usage event");
+            return;
+        }
+    };
+
+    if let Err(error) = crate::credits::record_usage(
+        &state.pool,
+        usage_event_id,
+        Some(usage.in_tokens),
+        Some(usage.out_tokens),
+        usage.provider_cost_usd,
+        prompt_version,
+    )
+    .await
+    {
+        tracing::error!(%error, "could not attach the extraction's provider usage");
+    }
+}
+
+/// Marks a source's draft `failed`, when it has one.
+///
+/// Best-effort by design: a source that is not a syllabus has no draft, and a failure to
+/// record the reason must not replace the reason the job is already failing with.
+async fn mark_draft_failed(pool: &sqlx::PgPool, source_id: Uuid, error: &str) {
+    if let Err(record_error) = sqlx::query(
+        "update syllabus_drafts
+            set status = 'failed', error = $2, updated_at = now()
+          where source_id = $1 and status <> 'confirmed'",
+    )
+    .bind(source_id)
+    .bind(error)
+    .execute(pool)
+    .await
+    {
+        tracing::error!(%source_id, %record_error, "could not record the draft's failure");
     }
 }
 
@@ -127,8 +394,34 @@ async fn ingest(
     file_key: Option<&str>,
     url: Option<&str>,
     title: &str,
+    mime: &str,
 ) -> Result<usize, Failure> {
     let pages = match kind {
+        // A syllabus is stored as either a PDF or pasted text — the upload decides which and
+        // records it in `sources.mime` — so its parse is the one it was uploaded as. The
+        // `kind` alone cannot say which: `syllabus` is one kind with two shapes, exactly as
+        // `text` and `web` share a body shape here.
+        "syllabus" => {
+            let key =
+                file_key.ok_or_else(|| Failure::permanent("a syllabus source has no body"))?;
+            let bytes =
+                state.storage.get(key).await.map_err(|error| {
+                    Failure::transient(format!("reading the syllabus: {error}"))
+                })?;
+            if mime == "application/pdf" {
+                let pdfium = crate::integrations::documents::handle().ok_or_else(|| {
+                    Failure::permanent(
+                        "PDF ingestion is not configured on this server (PDFIUM_LIB_PATH is unset)",
+                    )
+                })?;
+                parse::pdf_pages(&pdfium, &bytes, title).map_err(Failure::permanent)?
+            } else {
+                let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
+                    Failure::permanent("the stored syllabus text is not valid UTF-8")
+                })?;
+                vec![(None, text)]
+            }
+        }
         // Pasted text is stored as an object, so both kinds read from storage
         // and there is one path to test. A `web` source is the same shape: the
         // route fetched the page and stored what it read, so the job's job is

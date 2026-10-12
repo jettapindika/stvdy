@@ -494,7 +494,7 @@ pub async fn create(
     row.entry("position".to_string())
         .or_insert_with(|| json!(0));
 
-    let created = insert_task(&state, &row).await?;
+    let created = insert_task(&state.pool, Value::Object(row)).await?;
     Ok((StatusCode::CREATED, Json(json!({ "task": created }))))
 }
 
@@ -1000,7 +1000,14 @@ fn sum_costs(first: Option<f64>, second: Option<f64>) -> Option<f64> {
 }
 
 /// Inserts a task from a full field map, returning the stored row.
-async fn insert_task(state: &AppState, row: &Map<String, Value>) -> AppResult<TaskView> {
+///
+/// `POST /tasks` and the syllabus confirm both write a task, and they must agree about what a
+/// task row is: one statement, two callers. The confirm passes its own connection so the
+/// whole confirm is one transaction.
+pub(crate) async fn insert_task<'e, E>(executor: E, row: Value) -> AppResult<TaskView>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let sql = format!(
         "insert into tasks
             (id, user_id, workspace_id, parent_id, title, notes, due_at, estimate_min,
@@ -1012,8 +1019,8 @@ async fn insert_task(state: &AppState, row: &Map<String, Value>) -> AppResult<Ta
         task_columns(None)
     );
     sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(Value::Object(row.clone()))
-        .fetch_one(&state.pool)
+        .bind(row)
+        .fetch_one(executor)
         .await
         .map_err(|error| {
             // A dangling `parent_id` or `workspace_id` is the body's fault, not a server

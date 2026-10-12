@@ -18,6 +18,7 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::trace::TraceLayer;
 
+use crate::assets;
 use crate::auth;
 use crate::calendar;
 use crate::chat;
@@ -33,6 +34,7 @@ use crate::settings;
 use crate::sources;
 use crate::state::AppState;
 use crate::study;
+use crate::syllabus;
 use crate::sync;
 use crate::tasks;
 use crate::workspaces;
@@ -107,7 +109,13 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
     let public_routes = Router::new()
         .route("/health", get(health::health))
         .route("/auth/google/start", get(auth::routes::google_start))
-        .route("/auth/google/callback", get(auth::routes::google_callback));
+        .route("/auth/google/callback", get(auth::routes::google_callback))
+        // The print assets. Public because the browser that fetches them is headless
+        // Chromium rendering a document with no credentials, and because every file is a
+        // vendored upstream release with no user data in it (A339). The renderer rewrites
+        // the template's CDN references to this path before printing, so a PDF never
+        // depends on a third-party origin being reachable.
+        .merge(assets::routes());
 
     // The feed carries no bearer token, so it is not an authenticated route — but it *is*
     // an unauthenticated database lookup keyed by a secret, which makes it a brute-force
@@ -147,6 +155,13 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .merge(usage::routes())
         .merge(admin::routes())
         .merge(sources::routes(sources::max_upload_bytes(
+            &state.config.plans,
+        )))
+        // The same body limit the generic upload gets, for the same reason: the plan check is
+        // what produces the precise refusal, and this only stops a body no plan could accept
+        // from being read at all. A syllabus is a PDF or pasted text, so the ceiling is the
+        // upload's.
+        .merge(syllabus::routes(sources::max_upload_bytes(
             &state.config.plans,
         )))
         // The sync routes carry their own per-account cap (A185), so they are merged

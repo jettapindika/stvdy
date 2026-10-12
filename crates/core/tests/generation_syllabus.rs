@@ -10,11 +10,11 @@
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
-use stvdy_core::generation::GenerationError;
 use stvdy_core::generation::syllabus::{
-    MAX_EVIDENCE_WORDS, MAX_MEETINGS, REVIEW_FLAG_CONFIDENCE, ReviewKind, parse_syllabus,
-    review_items,
+    parse_syllabus, review_items, ReviewKind, MAX_EVIDENCE_WORDS, MAX_MEETINGS,
+    REVIEW_FLAG_CONFIDENCE,
 };
+use stvdy_core::generation::GenerationError;
 
 fn jakarta() -> Tz {
     "Asia/Jakarta".parse().unwrap()
@@ -318,4 +318,118 @@ fn an_empty_extraction_is_a_valid_reply() {
     let raw = r#"{"course":{},"meetings":[],"deadlines":[],"exams":[],"notes":[]}"#;
     let items = review_items(&parse_syllabus(raw).unwrap(), jakarta()).unwrap();
     assert!(items.is_empty());
+}
+
+/// The confirm mapping's pure half (A269): a kept meeting's rule becomes rows through
+/// Phase 10's expander, anchored at the day the student confirmed.
+///
+/// The anchor is the whole reason an extraction with no date can still be written: the
+/// module gives a rule and a clock time, and "the next matching weekday from today" is what
+/// that means. Jakarta is deliberate — it has no DST, so the times below are the times the
+/// student typed and a failure here is a failure of the anchor rather than of a zone.
+#[test]
+fn a_kept_meeting_expands_into_class_occurrences_from_the_anchor() {
+    use chrono::TimeZone as _;
+    use stvdy_core::generation::syllabus::expand_meeting;
+
+    let uid = uuid::Uuid::from_u128(7);
+    // Wednesday 2026-10-14 09:00 local, so the Monday 08:00 rule's first occurrence is
+    // 2026-10-19.
+    let from = jakarta()
+        .with_ymd_and_hms(2026, 10, 14, 9, 0, 0)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let occurrences = expand_meeting(
+        uid,
+        "Lecture",
+        "FREQ=WEEKLY;BYDAY=MO;COUNT=3",
+        (8, 0),
+        (9, 40),
+        jakarta(),
+        from,
+        180,
+    )
+    .unwrap();
+
+    assert_eq!(occurrences.len(), 3, "COUNT=3 is three occurrences");
+    assert_eq!(
+        occurrences[0].starts_at,
+        "2026-10-19T01:00:00Z".parse::<DateTime<Utc>>().unwrap(),
+        "Monday 08:00 in Jakarta is 01:00Z"
+    );
+    assert_eq!(
+        occurrences[0].ends_at,
+        "2026-10-19T02:40:00Z".parse::<DateTime<Utc>>().unwrap(),
+        "the class is 100 minutes long"
+    );
+    // Every occurrence is a Monday, and consecutive ones are a week apart: the rule is
+    // expanded by Phase 10's engine, not by a second one that could disagree about BYDAY.
+    for pair in occurrences.windows(2) {
+        assert_eq!(
+            (pair[1].starts_at - pair[0].starts_at).num_days(),
+            7,
+            "a weekly rule is a week between occurrences"
+        );
+    }
+}
+
+#[test]
+fn a_meeting_that_crosses_midnight_ends_the_next_day() {
+    use chrono::TimeZone as _;
+    use stvdy_core::generation::syllabus::expand_meeting;
+
+    let from = jakarta()
+        .with_ymd_and_hms(2026, 10, 12, 0, 0, 0)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+    let occurrences = expand_meeting(
+        uuid::Uuid::from_u128(8),
+        "Lab",
+        "FREQ=WEEKLY;BYDAY=MO;COUNT=1",
+        (22, 0),
+        (1, 0),
+        jakarta(),
+        from,
+        180,
+    )
+    .unwrap();
+
+    // 22:00 Monday to 01:00 Tuesday is three hours, not minus twenty-one.
+    assert_eq!(
+        (occurrences[0].ends_at - occurrences[0].starts_at).num_minutes(),
+        180
+    );
+}
+
+#[test]
+fn a_rule_that_wants_more_than_a_semester_holds_is_refused() {
+    use chrono::TimeZone as _;
+    use stvdy_core::generation::syllabus::{expand_meeting, MAX_OCCURRENCES};
+
+    // A daily rule over a 180-day horizon wants ~180 rows, well past the semester cap: the
+    // student would have to delete them by hand, so the confirm refuses and the item is
+    // theirs to fix rather than the calendar's to absorb.
+    let from = jakarta()
+        .with_ymd_and_hms(2026, 10, 12, 0, 0, 0)
+        .single()
+        .unwrap()
+        .with_timezone(&Utc);
+    let error = expand_meeting(
+        uuid::Uuid::from_u128(9),
+        "Every day",
+        "FREQ=DAILY",
+        (8, 0),
+        (9, 0),
+        jakarta(),
+        from,
+        180,
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains(&MAX_OCCURRENCES.to_string()),
+        "{error}"
+    );
 }

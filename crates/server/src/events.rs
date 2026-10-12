@@ -347,6 +347,25 @@ pub async fn create(
     row.entry("source".to_string())
         .or_insert_with(|| json!(APP_SOURCE));
 
+    let created = insert_event(&state.pool, Value::Object(row)).await?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "event": created }))))
+}
+
+/// Inserts one event row and returns it, in whatever executor the caller has.
+///
+/// `POST /events` and the syllabus confirm both write an event, and they must agree about
+/// what an event row is: one statement, two callers, which is the same shape
+/// [`crate::tasks::tombstone_subtree`] uses for the two delete paths. The confirm passes its
+/// own connection so the whole confirm is one transaction — a class series half-written and
+/// a draft still `ready` is a retry that doubles the student's calendar.
+///
+/// The field rules stay with the caller, because the caller is where the payload came from:
+/// `validate_event` for the REST route, and the syllabus mapping for the confirm.
+pub(crate) async fn insert_event<'e, E>(executor: E, row: Value) -> AppResult<EventView>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let sql = format!(
         "insert into events
             (id, user_id, workspace_id, kind, title, starts_at, ends_at, source, task_id)
@@ -355,9 +374,9 @@ pub async fn create(
          returning {}",
         event_columns()
     );
-    let created: EventView = sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(Value::Object(row))
-        .fetch_one(&state.pool)
+    sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(row)
+        .fetch_one(executor)
         .await
         .map_err(|error| {
             if crate::sync::apply::client_error(&error).is_some() {
@@ -365,9 +384,7 @@ pub async fn create(
             } else {
                 AppError::Internal(anyhow::anyhow!("creating an event: {error}"))
             }
-        })?;
-
-    Ok((StatusCode::CREATED, Json(json!({ "event": created }))))
+        })
 }
 
 /// `PATCH /events/:id`.

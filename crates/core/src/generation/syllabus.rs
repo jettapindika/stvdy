@@ -14,8 +14,9 @@
 use chrono::{DateTime, NaiveDateTime, NaiveTime, TimeZone as _, Utc};
 use chrono_tz::Tz;
 use rrule::{RRule, Unvalidated};
+use uuid::Uuid;
 
-use super::{GenerationError, strip_code_fence};
+use super::{strip_code_fence, GenerationError};
 
 /// The most items one reply may carry. Above what any real syllabus states, so a model that
 /// ignores the module cannot fill the review screen with rows the student has to delete.
@@ -32,6 +33,15 @@ pub const MAX_EVIDENCE_WORDS: usize = 15;
 /// never reaches the screen: the honesty rules forbid showing a confidence score, so it is
 /// used to order the list and to flag an item, and the evidence quote is what is shown.
 pub const REVIEW_FLAG_CONFIDENCE: f64 = 0.6;
+
+/// How many occurrences one kept meeting may become (A269).
+///
+/// Tighter than [`crate::calendar::expand::MAX_OCCURRENCES`], which is the ICS import's cap
+/// and has to admit a feed's whole horizon. A semester is about sixteen weeks, so 60 rows
+/// covers a class that meets twice a week with room to spare; a rule that asks for more than
+/// that is a model malfunction, and the alternative is a typo in an `RRULE` filling a
+/// student's calendar with thousands of rows they then have to delete.
+pub const MAX_OCCURRENCES: usize = 60;
 
 /// The reply, exactly as `prompts/syllabus.v1.md` documents it.
 ///
@@ -442,4 +452,168 @@ fn resolve_instant(
     }
 
     Err(refused())
+}
+
+/// One class occurrence a kept meeting expands to, ready to become an `events` row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeetingOccurrence {
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+}
+
+/// Expands one kept meeting's rule into the occurrences the confirm writes (A269).
+///
+/// The expansion is [`crate::calendar::expand::expand_feed`]'s — Phase 10's, the one the ICS
+/// import already uses — and this function's job is only to state the meeting in the form
+/// that module reads. A second recurrence engine is the failure this avoids: two engines
+/// eventually disagree about a `BYDAY` rule, and the disagreement shows up as a class meeting
+/// on the wrong day.
+///
+/// The anchor is `from`'s local date at `start_time`: the rule then expands forward from
+/// there, and a `BYDAY` filter picks the matching weekdays out of it. That is why an
+/// extraction with no date is still enough to write the series — the module gives a rule and
+/// a clock time, and "the next matching weekday" is what a rule anchored today means.
+///
+/// The window opens at the **start of the anchor's local day**, not at `from` itself. The
+/// expander selects occurrences that start after the window opens, so a window starting at the
+/// confirmation instant would silently drop a class that meets earlier in the day than the
+/// student happened to confirm — Monday's 08:00 lecture, confirmed on Monday at 10:00, is
+/// still part of the timetable.
+///
+/// A `start_time` at or after `end_time` means the class runs past midnight, so the end is
+/// the next day's; refusing it would drop a 22:00 lab.
+#[allow(clippy::too_many_arguments)]
+pub fn expand_meeting(
+    uid: Uuid,
+    title: &str,
+    rrule: &str,
+    start_time: (u32, u32),
+    end_time: (u32, u32),
+    tz: Tz,
+    from: DateTime<Utc>,
+    horizon_days: i64,
+) -> Result<Vec<MeetingOccurrence>, GenerationError> {
+    let rrule = validate_rrule(0, rrule)?;
+    let date = from.with_timezone(&tz).date_naive();
+    let starts = local_instant(tz, date, start_time)?;
+    let end_date = if end_time <= start_time {
+        date.succ_opt().unwrap_or(date)
+    } else {
+        date
+    };
+    let ends = local_instant(tz, end_date, end_time)?;
+
+    let body = one_event_ics(uid, title, starts, ends, tz, &rrule);
+
+    let midnight = local_instant(tz, date, (0, 0))?;
+    let window = crate::calendar::expand::Window::days_from(midnight, horizon_days);
+    let expansion = crate::calendar::expand::expand_feed(&body, window).map_err(|error| {
+        GenerationError::Schema(format!("the meeting's rule could not be expanded: {error}"))
+    })?;
+    if let Some(reason) = expansion.skipped.first() {
+        return Err(GenerationError::Schema(format!(
+            "the meeting's rule could not be expanded: {reason}"
+        )));
+    }
+
+    // `truncated` is reported rather than inferred (A232). Both checks refuse rather than
+    // silently writing part of a series: a student who confirmed a class that meets twice a
+    // week must not get 60 rows of a daily rule and a calendar that looks right.
+    if expansion.truncated {
+        return Err(GenerationError::Schema(format!(
+            "the meeting's rule produces more than the {MAX_OCCURRENCES} occurrences a \
+             semester can hold"
+        )));
+    }
+    if expansion.occurrences.len() > MAX_OCCURRENCES {
+        return Err(GenerationError::Schema(format!(
+            "the meeting's rule produces {} occurrences in the next semester, more than the \
+             {MAX_OCCURRENCES} a class can have",
+            expansion.occurrences.len()
+        )));
+    }
+
+    let occurrences: Vec<MeetingOccurrence> = expansion
+        .occurrences
+        .iter()
+        .map(|occurrence| MeetingOccurrence {
+            starts_at: occurrence.starts_at,
+            ends_at: occurrence.ends_at,
+        })
+        .collect();
+    if occurrences.is_empty() {
+        return Err(GenerationError::Schema(
+            "the meeting's rule produces no occurrence in the next semester".to_string(),
+        ));
+    }
+    Ok(occurrences)
+}
+
+/// A local wall clock on `date`, resolved in `tz`.
+///
+/// A time that does not exist — the hour a DST transition skips — is refused rather than
+/// shifted, for the same reason [`resolve_instant`] refuses one: silently moving a class by
+/// an hour is a wrong answer that looks like a scheduling bug.
+fn local_instant(
+    tz: Tz,
+    date: chrono::NaiveDate,
+    time: (u32, u32),
+) -> Result<DateTime<Utc>, GenerationError> {
+    let local = date.and_hms_opt(time.0, time.1, 0).ok_or_else(|| {
+        GenerationError::Schema(format!("{date} {:02}:{:02} is not a time", time.0, time.1))
+    })?;
+    tz.from_local_datetime(&local)
+        .earliest()
+        .map(|instant| instant.with_timezone(&Utc))
+        .ok_or_else(|| {
+            GenerationError::Schema(format!("{local} does not exist in {tz} (a DST transition)"))
+        })
+}
+
+/// One `VEVENT`, as the ICS text [`crate::calendar::expand::expand_feed`] reads.
+///
+/// Written here rather than through `calendar::feed::render_feed` because that renderer
+/// emits `events` rows, and an `events` row has no rule to render (A231's expand-on-write
+/// rule is why). The recurrence engine is still Phase 10's: this is the input its parser
+/// documents, not a second implementation of it.
+fn one_event_ics(
+    uid: Uuid,
+    title: &str,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    tz: Tz,
+    rrule: &str,
+) -> String {
+    let local = |instant: DateTime<Utc>| {
+        instant
+            .with_timezone(&tz)
+            .format("%Y%m%dT%H%M%S")
+            .to_string()
+    };
+    let stamp = starts_at.format("%Y%m%dT%H%M%SZ").to_string();
+    // RFC 5545 § 3.3.11: TEXT escapes backslash, comma, semicolon and newline. A title with
+    // a comma in it would otherwise split the `SUMMARY` line and hand its tail back as a
+    // property nobody wrote.
+    let summary = title
+        .replace('\\', "\\\\")
+        .replace(',', "\\,")
+        .replace(';', "\\;")
+        .replace(['\n', '\r'], " ");
+
+    format!(
+        "BEGIN:VCALENDAR\r\n\
+         VERSION:2.0\r\n\
+         PRODID:-//stvdy//study calendar//EN\r\n\
+         BEGIN:VEVENT\r\n\
+         UID:{uid}@stvdy.app\r\n\
+         DTSTAMP:{stamp}\r\n\
+         DTSTART;TZID={tz}:{}\r\n\
+         DTEND;TZID={tz}:{}\r\n\
+         SUMMARY:{summary}\r\n\
+         RRULE:{rrule}\r\n\
+         END:VEVENT\r\n\
+         END:VCALENDAR\r\n",
+        local(starts_at),
+        local(ends_at),
+    )
 }
