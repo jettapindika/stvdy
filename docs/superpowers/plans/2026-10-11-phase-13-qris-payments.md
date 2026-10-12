@@ -1862,9 +1862,13 @@ found, gate 5 has now found **seven** defects in this phase's screens, which is 
 the nine the earlier phases found and the same mechanism the brief warned about.
 
 **A browser measurement at a viewport is not a device.** Both legs are headless Chromium: they do
-not prove a camera scans the QR, a real touchscreen tap, or a screen-reader traversal. The 46
-clipped elements the desktop walk reports are dominated by the workspace screen's side panels (28,
-another slice's) rather than by this phase's screens.
+not prove a camera scans the QR, a real touchscreen tap, or a screen-reader traversal. **The 46
+clipped elements this paragraph used to attribute to the workspace screen's side panels are gone
+as of 2026-10-12** — a full re-measurement of the walk at 24 surfaces and 96 combinations reports
+**0 clipped and 0 overlapped on every surface at both scales, phone and desktop** — so the caveat
+that survives is the one about the measurement method, not a residual count. (The 28 were real
+when this was written; the fix landed in the workspace panels afterwards, which is why the number
+in this sentence is now history rather than an outstanding defect.)
 
 ### Gate 7 — honesty
 
