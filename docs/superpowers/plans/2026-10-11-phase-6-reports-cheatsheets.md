@@ -279,7 +279,7 @@ fn labels_resolve_to_citations_and_unknown_ones_are_dropped() { … }
 
 `cargo test -p stvdy-core --test render` → unresolved import.
 
-- [ ] **Step 3: Write the block model**
+- [x] **Step 3: Write the block model**
 
 `blocks.rs`: `Blocks { title, subtitle, course: Option<String>, exam: Option<String>,
 chapters: Vec<Chapter> }`, `Chapter { title, sections }`, `Section { title, blocks }`, and
@@ -292,7 +292,7 @@ chapters: Vec<Chapter> }`, `Chapter { title, sections }`, `Section { title, bloc
 (`MAX_CHAPTERS`, `MAX_SECTIONS_PER_CHAPTER`, `MAX_BLOCKS_PER_SECTION`) so a model that
 ignores the structure rules cannot produce an unrenderable document.
 
-- [ ] **Step 4: Write the renderer**
+- [x] **Step 4: Write the renderer**
 
 `render_html` walks the blocks and emits the template's markup. The template is a
 `&'static str` with `{{…}}` placeholders the renderer fills; the CSS lives in the template,
@@ -320,7 +320,7 @@ The parse is a hand-written scanner rather than a full XML parser: the input is 
 subset, and a scanner that rejects anything it does not recognise is the property wanted
 (the opposite of a parser that accepts more than the allowlist).
 
-- [ ] **Step 5: Run the tests, then commit**
+- [x] **Step 5: Run the tests, then commit**
 
 ```bash
 cargo test -p stvdy-core --test render
@@ -340,7 +340,7 @@ git commit -m "feat(core): the pure renderer, the typed blocks, and the SVG allo
 - Create: `migrations/0023_report_generation.sql`
 - Test: `crates/server/tests/reports.rs`, `crates/core/tests/generation_report.rs`
 
-- [ ] **Step 1: The outline contract and its tests**
+- [x] **Step 1: The outline contract and its tests**
 
 The contract is the prompt's, not a paraphrase of it. `prompts/report_outline.v1.md`
 documents:
@@ -362,7 +362,7 @@ The outline is **editable**, so the route accepts a replacement outline and vali
 against the same struct — an edit the generator could not have produced is still valid
 input if it parses, and its `labels` are re-validated against the sources on generation.
 
-- [ ] **Step 2: The generation columns**
+- [x] **Step 2: The generation columns**
 
 `0023_report_generation.sql` adds to `reports`: `status text not null default 'draft'`
 (`draft | generating | ready | failed`), `error text`, `credits_spent int not null default
@@ -373,7 +373,7 @@ what syncs, so `docs/API.md`'s report/cheatsheet payloads name them.
 
 `report_revisions` needs **nothing**: it exists in `0011_reports.sql`.
 
-- [ ] **Step 3: The job**
+- [x] **Step 3: The job**
 
 `generate_report_section` — that is the name in the roadmap's fixed job table and in
 `migrations/0015_jobs.sql`. Mirror `quizzes::generate` exactly: compose through
@@ -389,7 +389,7 @@ student edits before anything else happens, and it is cheap (3 credits).
 Section generation writes **only that section's** Markdown into `body_md`, replacing any
 previous text for that index, so regenerating one section does not cost the whole report.
 
-- [ ] **Step 4: The routes**
+- [x] **Step 4: The routes**
 
 `POST /workspaces/:id/reports/outline`, `PATCH /reports/:id` (edit the outline),
 `POST /reports/:id/generate` (sections), `GET /reports/:id`, and
@@ -397,7 +397,7 @@ previous text for that index, so regenerating one section does not cost the whol
 Task 4. Each write that can race another device's write stores the losing body as a
 `report_revisions` row (decision 8).
 
-- [ ] **Step 5: Tests, then commit**
+- [x] **Step 5: Tests, then commit**
 
 The tests mirror `tests/quizzes.rs`: generation with a scripted model, the retry naming
 the violation, the refund, the monthly cap, and another account's report being a 404.
@@ -412,23 +412,23 @@ the violation, the refund, the monthly cap, and another account's report being a
 - Create: `crates/server/src/jobs/handlers/cheatsheet.rs`
 - Test: `crates/server/tests/cheatsheets.rs`
 
-- [ ] **Step 1: The contract** — the twelve block kinds, reusing `render::blocks::Block`
+- [x] **Step 1: The contract** — the twelve block kinds, reusing `render::blocks::Block`
       so the parser and the renderer cannot disagree about the shape. The generation
       contract *is* the renderer's input type; a second definition would be a second thing
       to keep in step.
 
-- [ ] **Step 2: The job** — `generate_cheatsheet`, same shape. On success it writes the
+- [x] **Step 2: The job** — `generate_cheatsheet`, same shape. On success it writes the
       blocks to object storage at `blocks_key`, records `template_version`, and enqueues
       `render_cheatsheet_pdf` (Task 4). If the renderer is unavailable the cheatsheet is
       still `ready` with its blocks stored: the document exists, only its PDF does not, and
       that is a retryable render, not a failed generation.
 
-- [ ] **Step 3: The routes** — `POST /workspaces/:id/cheatsheets`,
+- [x] **Step 3: The routes** — `POST /workspaces/:id/cheatsheets`,
       `GET /cheatsheets/:id`, `GET /cheatsheets/:id/html`, `POST /cheatsheets/:id/re-render`.
       Re-render reads `blocks_key`, re-runs the pure renderer with the **current** template,
       and updates `html_key`/`template_version`. It never calls the model, so it is free.
 
-- [ ] **Step 4: Tests, then commit.**
+- [x] **Step 4: Tests, then commit.**
 
 ---
 
@@ -443,14 +443,14 @@ the violation, the refund, the monthly cap, and another account's report being a
 **This is the phase's stated risk: the native dependency must be in the image, not just on
 a laptop.**
 
-- [ ] **Step 1: The renderer**
+- [x] **Step 1: The renderer**
 
 A pooled `headless_chrome` browser, one process, pages reused, with the flags the roadmap
 names: `print_background`, `prefer_css_page_size`, `generate_document_outline`,
 `generate_tagged_pdf`. It returns `(pdf_bytes, page_count)`, and `page_count` is what the
 footer's `Halaman N dari M` depends on.
 
-- [ ] **Step 2: The acceptance test**
+- [x] **Step 2: The acceptance test**
 
 ```rust
 /// The phase's acceptance test, from the roadmap: a 6-page A4 PDF whose text contains the
@@ -475,7 +475,7 @@ async fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
 }
 ```
 
-- [ ] **Step 3: Where Chromium runs, in CI and in the image**
+- [x] **Step 3: Where Chromium runs, in CI and in the image**
 
 The repository has **no server `Dockerfile`**: the container image is Phase 15's deliverable
 ("server Docker image" is in its exit gate), and inventing one here would either be dead
@@ -496,7 +496,7 @@ actually available now, and records the third:
    code runs on both. `crates/server/src/render/chrome.rs` already does this; what this
    step adds is the CI job and the documentation.
 
-- [ ] **Step 4: The PDF routes** — `GET /cheatsheets/:id/pdf` and
+- [x] **Step 4: The PDF routes** — `GET /cheatsheets/:id/pdf` and
       `GET /reports/:id/export?format=pdf`, both gated on `export_formats`.
 
 ---
@@ -509,7 +509,7 @@ actually available now, and records the third:
 - Modify: `app/src/features/workspaces/WorkspaceScreen.tsx` (the Studio sub-tab),
   `app/src/router.tsx`
 
-- [ ] **Step 1: The panel and the screen.** The Studio gains a Report sub-tab beside
+- [x] **Step 1: The panel and the screen.** The Studio gains a Report sub-tab beside
       Flashcards and Quiz, using the same roving-tabindex strip. The report screen edits the
       outline, generates sections one at a time with visible progress, and offers the export
       formats the plan allows.
@@ -532,11 +532,11 @@ actually available now, and records the third:
         from the same numbers the server charges, and any AI-proposed outline is labelled
         "Suggested …" (roadmap gate 7).
 
-- [ ] **Step 2: The cheatsheet preview.** `GET /cheatsheets/:id/html` renders in a sandboxed
+- [x] **Step 2: The cheatsheet preview.** `GET /cheatsheets/:id/html` renders in a sandboxed
       frame (the document is generated HTML; the frame is what keeps it away from the app's
       own DOM), with a "Download PDF" action shown only when the plan allows it.
 
-- [ ] **Step 3: Tests, then commit.** Mirror `QuizScreen.test.tsx`: the export action is
+- [x] **Step 3: Tests, then commit.** Mirror `QuizScreen.test.tsx`: the export action is
       absent when the plan does not allow the format, and the preview frame is `sandbox`ed.
 
 ---
@@ -828,3 +828,8 @@ measure their half-finished edits rather than this phase; the Phase 6 Rust suite
 verified about the server is what it can verify from outside: the real API answered, the
 real Chromium printed, the real PDF's text was extracted, and the real smoke run passed
 end to end.
+
+### Boxes left unticked, and why
+
+  - Task 1 Step 1, "Write the failing tests" -- three of the five tests it names do not exist at HEAD: `markup_in_a_text_field_is_escaped_not_interpreted` (shipped as `crates/core/tests/render.rs::markup_in_a_field_is_escaped_not_interpreted`), `a_script_element_drops_the_whole_block_and_is_recorded` (shipped as `::a_disallowed_svg_element_drops_the_block_and_records_why`) and `svg_ids_are_prefixed_per_block_so_two_diagrams_cannot_collide` (shipped as `::two_diagrams_in_one_section_do_not_share_element_ids`). `rendering_is_deterministic` and `labels_resolve_to_citations_and_unknown_ones_are_dropped` are present verbatim, and this task's own note above records that the draft's names were superseded by the shipped ones, so the named artefacts cannot be confirmed as written.
+  - Task 1 Step 2, "Run them and watch them fail" -- the tests this step runs are the Step 1 set, three of which do not exist at HEAD, so the failure it is written to observe was not observed for those three.
