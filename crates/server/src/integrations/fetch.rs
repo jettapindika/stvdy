@@ -122,10 +122,18 @@ async fn guarded_get(
     let mut current = parse_target(url)?;
 
     for _ in 0..=MAX_REDIRECTS {
-        let host = current
-            .host_str()
-            .ok_or_else(|| FetchError::Invalid("the URL has no host".to_string()))?
-            .to_string();
+        // `Url::host()` rather than `host_str()`: the string form keeps an IPv6 literal's
+        // brackets (`[::ffff:169.254.169.254]`), so `resolve_public`'s `parse::<IpAddr>()`
+        // fails, the literal is skipped, and the name goes to DNS — which is the one thing
+        // this guard must not do, because the fetch-time guard is the one that has to be
+        // airtight. `check_fetchable_literal` was fixed for exactly this reason and its doc
+        // comment says so; this call site, the one that matters, was not.
+        let host = match current.host() {
+            Some(url::Host::Ipv4(addr)) => addr.to_string(),
+            Some(url::Host::Ipv6(addr)) => addr.to_string(),
+            Some(url::Host::Domain(name)) => name.to_string(),
+            None => return Err(FetchError::Invalid("the URL has no host".to_string())),
+        };
         let port = current.port_or_known_default().unwrap_or(443);
         let allowed = resolve_public(&host, port).await?;
 
