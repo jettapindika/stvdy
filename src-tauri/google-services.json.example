@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "The SHAPE of the file the Android Google Services plugin needs, not the",
+    "credential (A328). The real `src-tauri/google-services.json` is supplied at",
+    "build time — from CI secrets, or a local untracked copy — and is gitignored;",
+    "committing one would be a leaked project credential.",
+    "",
+    "Copy this to `src-tauri/google-services.json` and fill in the values from the",
+    "Firebase console (Project settings → Your apps → Android app →",
+    "`google-services.json`). The Android package name must be the app's own",
+    "identifier: `app.stvdy`.",
+    "",
+    "iOS has no equivalent file. APNs needs an `aps-environment` entitlement and a",
+    "signing identity, both supplied at build time — an entitlement without an",
+    "identity fails at the point where it is hardest to diagnose."
+  ],
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "stvdy-<env>",
+    "storage_bucket": "stvdy-<env>.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "app.stvdy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "<the Android API key from the Firebase console>"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

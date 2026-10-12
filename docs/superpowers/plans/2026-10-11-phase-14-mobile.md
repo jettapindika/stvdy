@@ -722,7 +722,7 @@ screen — with the plugin choice isolated behind one seam so a fallback is a sw
 - Produces: `push::register_token(app) -> Result<String, PushError>`,
   `push::provider_for(kind) -> &'static str` (`"apns"` | `"fcm"`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `src-tauri/tests/push.rs`:
 
@@ -746,12 +746,25 @@ fn an_empty_token_is_refused_before_it_reaches_the_network() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+Two cases were added to it, both because the plan's two cases leave the seam's actual
+failure modes unchecked: a **whitespace-only** token (the server's own rule is
+`token.trim().is_empty()`, so `"   "` is a `PUT` that can only 422) and a
+**cross-check of the two provider lists** — `provider_for`'s answers are compared against
+`PUSH_PROVIDERS` as it is written in `crates/server/src/devices.rs`, in both directions,
+because "a third string would be a typo" is a claim about two files and a comment is not
+a check.
+
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test push` →
 `unresolved import stvdy_shell_lib::push`.
 
-- [ ] **Step 3: Add the plugin and the seam**
+**Measured:** `error[E0433]: failed to resolve: could not find `push` in
+`stvdy_shell_lib`, 7 errors, `could not compile stvdy-shell (test "push")`. The line
+reverted to watch it fail was `pub mod push;` in `src-tauri/src/lib.rs` — with the module
+undeclared, the test file cannot see it, which is the state the plan predicts.
+
+- [x] **Step 3: Add the plugin and the seam**
 
 `src-tauri/Cargo.toml`: add `tauri-plugin-notifications = "0.5.0-rc.14"` under
 `[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]` (it is
@@ -762,23 +775,68 @@ mobile-only; the matrix says Windows is not yet available).
 for the SPA to PUT. `src-tauri/src/lib.rs` registers the plugin under
 `#[cfg(any(target_os = "ios", target_os = "android"))]` and adds a `push_token` command.
 
-- [ ] **Step 4: The plugin's config and the credential example**
+**One addition to the dependency the plan's version pin alone would have shipped broken:**
+the `push-notifications` feature. It is **not** in the crate's defaults, and without it
+`register_for_push_notifications` is not compiled at all — it returns
+`Error::Io("Push notifications feature is not enabled")`, the Android build ships no
+Firebase dependency and the iOS build no APNs registration. A receive path that compiles
+and can never receive is exactly the failure this task exists to prevent, so the pin is
+`{ version = "0.5.0-rc.14", features = ["push-notifications"] }`.
+
+**`register` is `async`, and that is not cosmetic.** The plugin's mobile half crosses into
+the native plugin over `run_mobile_plugin_async`, so `request_permission` and
+`register_for_push_notifications` both return futures on iOS/Android (the desktop half of
+the same crate is synchronous, which is why the crate's doc page does not show it). The
+first draft called them synchronously and failed to compile for `aarch64-apple-ios-sim`
+with `expected future, found Result<_, _>` and
+`no method named map_err found for opaque type impl Future` — four errors, all in
+`src/push.rs`. The command is therefore `async fn push_token` too.
+
+**`register` is `cfg`-gated to iOS/Android and the command is not.** The gate is on the
+function that names the plugin, not on the module: `provider_for` and `validate_token`
+compile and are tested on macOS, which is the whole reason the dependency is target-gated
+rather than global. The seam is in the right place — `cargo check --target
+aarch64-apple-ios-sim --lib` exits 0 with the plugin linked, and the pure half is asserted
+by four tests on macOS.
+
+- [x] **Step 4: The plugin's config and the credential example**
 
 `tauri.conf.json` gains `plugins.notifications` with the app's identity (no secrets).
 `src-tauri/google-services.json.example` documents the shape; the real file is untracked
 and supplied at build time (A328). `.gitignore` gains `google-services.json` and
 `**/*.p12`/`**/*.mobileprovision`.
 
-- [ ] **Step 5: Run it**
+**The config block is `{}` and that is correct, not an omission.** `PluginConfig` is
+`#[serde(default)]` over a struct whose only field is `#[cfg(target_os = "windows")]`, so
+on iOS and Android it has *no* fields: there is no app identity for this plugin to carry
+(identity lives in `tauri.conf.json`'s `identifier` and in the store records). The block
+is written anyway so the next reader can see the plugin was considered, and so a future
+version that gains a field has a place to put it.
+
+- [x] **Step 5: Run it**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test push` → both tests pass.
 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` clean.
 
-- [ ] **Step 6: Commit**
+**Measured.** `tests/push.rs`: **4 passed**. The whole shell: **19 unit + 12 cache + 1
+config + 4 push = 36 passed, 0 failed**; `cargo clippy --manifest-path
+src-tauri/Cargo.toml --all-targets -- -D warnings` exits 0; `rustfmt --edition 2024
+--check` is clean on the four files this task touches. **And the plugin is actually
+linked, not merely declared**: `tauri ios build --debug --target aarch64-sim` was re-run
+with the dependency in place and exits **0**, `** BUILD SUCCEEDED **`, producing
+`src-tauri/gen/apple/build/arm64-sim/Stvdy.app` (110 MB, up from 104 MB). That is the
+strongest claim available here — the registration itself needs a device and a signing
+identity and is **not** verified (A328, A327).
+
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 2: push receive plugin behind a provider/token seam"
 ```
+
+**`git commit -am` was NOT used**, for the reason Task 1's Step 6 records: `-a` stages
+every tracked modification in the tree, and other slices' work is in it. Explicit paths,
+`git diff --cached --stat` checked first.
 
 ---
 

@@ -102,6 +102,17 @@ android-native-keyring-store = "1.0.0"
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 tauri-plugin-haptics = "2.4.2"
+# Push receive (A310). Mobile-only for two reasons: the plugin's own matrix says
+# Windows is not yet available, and the seam's pure half (`push::provider_for`,
+# `push::validate_token`) is deliberately compiled and tested on macOS, so the
+# dependency must not follow the shell onto the desktop — a seam that only builds
+# on a phone is a seam nobody can test.
+#
+# `push-notifications` is **not** a default feature. Without it the plugin's
+# registration code is not compiled at all and `registerForPushNotifications`
+# returns an error, so the Android build would ship no FCM dependency and the iOS
+# build no APNs registration — a receive path that compiles and never receives.
+tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
 
 [features]
 default = ["custom-protocol"]

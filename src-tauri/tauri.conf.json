@@ -73,6 +73,7 @@
       "desktop": { "schemes": ["stvdy"] },
       "mobile": [{ "scheme": ["stvdy"] }]
     },
+    "notifications": {},
     "updater": {
       "endpoints": ["https://updates.stvdy.app/{{target}}/{{arch}}/{{current_version}}"],
       "pubkey": "<the operator's minisign public key>",

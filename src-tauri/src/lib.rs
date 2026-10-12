@@ -2,6 +2,7 @@ pub mod cache;
 pub mod commands;
 pub mod deeplink;
 pub mod keychain;
+pub mod push;
 pub mod sync;
 
 use tauri::Manager;
@@ -68,6 +69,7 @@ pub fn run() {
             sync::commands::sync_reset,
             sync::commands::local_state_get,
             sync::commands::local_state_set,
+            push::push_token,
         ]);
 
     #[cfg(desktop)]
@@ -90,6 +92,19 @@ pub fn run() {
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         builder = builder.plugin(tauri_plugin_haptics::init());
+        // Push receive (A310). Registered only on the platforms that have a push
+        // provider, because the dependency itself is declared only there — and
+        // because a plugin registered without its capability permission is a
+        // runtime failure `cargo test` cannot see (`capabilities/mobile.json`).
+        //
+        // Note the name: this is the pinned community plugin
+        // `tauri-plugin-notifications` (Choochmeque), **not** the official
+        // `tauri-plugin-notification` registered above. The official one cannot
+        // receive remote push — its iOS delegate skips `UNPushNotificationTrigger`
+        // and its Android manifest registers no FCM service — so both are present
+        // and they do different jobs: the official one raises a *local*
+        // notification, this one receives a *remote* one.
+        builder = builder.plugin(tauri_plugin_notifications::init());
     }
 
     let result = builder
