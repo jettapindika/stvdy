@@ -130,6 +130,58 @@ describe('the task list', () => {
   })
 })
 
+/**
+ * The due date is rendered in the student's own zone, and the row used to print the
+ * raw `timestamptz`.
+ *
+ * `TasksScreen` rendered `{task.due_at}` directly — the literal instant — while every
+ * other screen formats through `formatInZone(new Date(due_at), timeZone, { dateStyle:
+ * 'medium' })`. For a Jakarta student that is not a cosmetic difference: `due_at` is
+ * stored UTC, so a task due 23:59 WIB read `2026-10-16T16:59:00Z`, which names the
+ * *wrong day* as well as the wrong form. Same class as `QuickCapture`'s Due line and
+ * the study screen's header link, and nothing failed because no test asserted the
+ * rendering — the fixture was set and never read.
+ *
+ * The assertion is the falsifiable pair: the formatted date is present **and** the
+ * raw instant is absent, so a revert to `{task.due_at}` fails on the second half
+ * rather than merely changing a string. `PARENT.due_at` is `+07:00`, so in
+ * `Asia/Jakarta` the medium date is the 16th and the raw form is a different string
+ * entirely — the two cannot be confused for each other.
+ */
+describe('the due date', () => {
+  it('renders in the student’s zone, never as the stored instant', async () => {
+    setup({ task: [PARENT] })
+    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+
+    expect(await screen.findByText('Selesaikan tugas kripto')).toBeInTheDocument()
+    expect(screen.getByText('Due 16 Oct 2026')).toBeInTheDocument()
+    expect(
+      screen.queryByText(PARENT.due_at),
+      'the raw timestamptz must not reach the screen',
+    ).toBeNull()
+  })
+
+  /**
+   * The reciprocal half of the spec's `Plan | Tasks` control.
+   *
+   * `/planner` and `/syllabus` had **no entry point at all** before this: the only two
+   * inbound links formed a closed cycle (planner → syllabus from its empty state,
+   * review → planner after a confirm) and neither nav has a planner item. So the link
+   * is asserted rather than assumed — without it the screens are reachable only by
+   * typing a URL, which is also why the accessibility walk could not measure them.
+   */
+  it('links to the planner, the other half of the Plan | Tasks pair', async () => {
+    setup({ task: [PARENT] })
+    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+
+    const plan = await screen.findByRole('link', { name: 'Plan' })
+    expect(plan).toHaveAttribute('href', '/planner')
+    // `Tasks` is this screen, so it is a current-page mark rather than a second link
+    // back to here — the pair is one control, not two links to each other.
+    expect(screen.queryByRole('link', { name: 'Tasks' })).toBeNull()
+  })
+})
+
 describe('the break-down proposal', () => {
   async function openPanel() {
     const user = userEvent.setup()

@@ -1129,6 +1129,7 @@
     "noun": "tugas",
     "loading": "Memuat tugasmu",
     "done": "Selesai: {{title}}",
+    "due": "Jatuh tempo {{when}}",
     "markDone": "Tandai selesai",
     "reopen": "Buka lagi",
     "subtaskProgress": "{{done}} dari {{total}} sub-tugas selesai",

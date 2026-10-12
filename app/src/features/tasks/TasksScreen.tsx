@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
 import { deleteTask, saveTask, useTasks, type TaskInput } from '@/api/queries/tasks'
 import { PageHeader, Section } from '@/components/layout/Section'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
+import { useSession } from '@/features/auth/useSession'
+import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
 import { BreakdownPanel } from './BreakdownPanel'
 import { orderTasks, subtasksOf, type TaskRow } from './order'
 
@@ -29,7 +32,14 @@ import { orderTasks, subtasksOf, type TaskRow } from './order'
  */
 export function TasksScreen() {
   const { t } = useTranslation()
+  const session = useSession()
   const tasks = useTasks()
+  // The student's own zone, which is where a due date has to be rendered: `due_at`
+  // is a `timestamptz` and the row showed its raw UTC instant, so a task due 23:59
+  // WIB read `2026-10-16T16:59:00Z` — the same defect class as `QuickCapture`'s Due
+  // line and the study screen's header link, found by the gate's `tasks` surface
+  // capturing the literal string as a text pair.
+  const timeZone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
   const [error, setError] = useState<ApiError | null>(null)
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null)
 
@@ -74,6 +84,31 @@ export function TasksScreen() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader title={t('nav.tasks')} subtitle={t('tasks.subtitle')} />
 
+      {/* The reciprocal half of the spec's `Plan | Tasks` control.
+       *
+       * **Without this, `/planner` and `/syllabus` were reachable only by typing a
+       * URL.** The two inbound links formed a closed cycle — `PlannerScreen` links to
+       * `/syllabus` from its empty-goals state, and `SyllabusReviewScreen` links back
+       * to `/planner` after a confirm — and neither nav has a planner item (the tab
+       * bar's five destinations are fixed, and A189 records why a sixth would take
+       * width from all of them). So a student could not open the planner, import a
+       * syllabus or reach the review screen at all, and `nav.planner` existed in both
+       * locales as `PlannerScreen`'s own page title only.
+       *
+       * `Plan` here rather than a nav item, because that is the pair the spec asks for
+       * and because the planner already renders its own half: one control, two
+       * screens, each linking to the other. It is also what makes Phase 11's gate-5
+       * leg measurable — the walk navigates by tapping, so a screen nothing links to
+       * cannot be walked at all. */}
+      <nav aria-label={t('planner.views.label')} className="flex flex-wrap gap-2">
+        <span className="btn btn-secondary" aria-current="page">
+          {t('planner.views.tasks')}
+        </span>
+        <Link to="/planner" className="btn btn-quiet">
+          {t('planner.views.plan')}
+        </Link>
+      </nav>
+
       {error !== null ? (
         <ApiErrorNotice error={error} noun={t('tasks.noun')} action={t('actions.retry')} />
       ) : null}
@@ -105,6 +140,7 @@ export function TasksScreen() {
                   key={task.id}
                   task={task}
                   all={rows}
+                  timeZone={timeZone}
                   onBreakdown={() => setBreakdownFor(task.id)}
                   onError={setError}
                 />
@@ -125,11 +161,14 @@ export function TasksScreen() {
 function TaskItem({
   task,
   all,
+  timeZone,
   onBreakdown,
   onError,
 }: {
   task: TaskRow
   all: TaskRow[]
+  // Passed rather than read here: one `useSession()` for the list, not one per row.
+  timeZone: string
   onBreakdown: () => void
   onError: (error: ApiError | null) => void
 }) {
@@ -174,7 +213,13 @@ function TaskItem({
           {task.status === 'done' ? t('tasks.done', { title: task.title }) : task.title}
         </span>
         <span className="flex flex-wrap items-center gap-2">
-          {task.due_at !== null ? <span className="meta">{task.due_at}</span> : null}
+          {task.due_at !== null ? (
+            <span className="meta">
+              {t('tasks.due', {
+                when: formatInZone(new Date(task.due_at), timeZone, { dateStyle: 'medium' }),
+              })}
+            </span>
+          ) : null}
           {children.length > 0 ? (
             // A count, not a bar: the number of done children is the fact, and a
             // percentage would be a second number this screen computed.

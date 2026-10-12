@@ -1149,6 +1149,7 @@
     "noun": "tasks",
     "loading": "Loading your tasks",
     "done": "Done: {{title}}",
+    "due": "Due {{when}}",
     "markDone": "Mark done",
     "reopen": "Reopen",
     "subtaskProgress": "{{done}} of {{total}} subtasks done",
