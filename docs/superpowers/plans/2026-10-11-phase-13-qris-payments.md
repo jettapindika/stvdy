@@ -1659,7 +1659,7 @@ exist, which is why it is written here.
 | 4 | Web tests | `npm --prefix app test` | **63 files, 585 tests, 0 failed** (reported by the controller on the current tree). |
 | 5 | Web build | `npm --prefix app run build` | **Exit 0.** |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | **Exit 0.** |
-| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **Not run.** This tree uses the runtime `query*` API throughout and this phase added no `query!`/`query_as!` macro, so it should legitimately find nothing — an expectation, not a measurement. |
+| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **PASS, measured 2026-10-12.** `SQLX_OFFLINE=true cargo sqlx prepare --workspace --check` exits **0** with no diff, so the committed `.sqlx` cache matches the tree. The earlier verdict was true when written — several slices were mid-write in `crates/**` — and is superseded. This phase added no `query!`/`query_as!` macro — the tree uses the runtime `query*` API throughout — so the check finding nothing to write is the expected result rather than a vacuous one. |
 | 8 | Shell trio | `just check-shell` | **Not run here**; `src-tauri` is excluded from the workspace and no Phase 13 file touches it. |
 | 9 | **Exit gate, part 1** — sandbox invoice → verified webhook → plan active on the second device | `bash scripts/smoke-phase13.sh` | **PASS, exit 0, against the mock gateway** (`mock (scripts/stub-qris.py)` printed in the run's first line; B1 is unresolved so no live gateway was exercised). Seven scenarios, each printing the numbers it asserts — see the Execution notes. |
 | 10 | **Exit gate, part 2** — duplicate / mismatch / late / expired | `cargo test -p stvdy-server --test webhooks` | **10 passed / 0 failed / 0 ignored** (slice B's run). |

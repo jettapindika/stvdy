@@ -2020,7 +2020,7 @@ git commit -m "docs(phase 8): the sync protocol, the three routes, the cache des
 | The route sweep | `cargo test -p stvdy-server --test route_sweep` | pending |
 | The schema contract | `cargo test -p stvdy-server --test schema` | pending |
 | The tamper suite | `cargo test -p stvdy-server --test tamper` | pending |
-| Offline queries | `cargo sqlx prepare --workspace --check` | pending |
+| Offline queries | `cargo sqlx prepare --workspace --check` | **PASS, measured 2026-10-12.** `SQLX_OFFLINE=true cargo sqlx prepare --workspace --check` exits **0** with no diff, so the committed `.sqlx` cache matches the tree. The earlier verdict was true when written — several slices were mid-write in `crates/**` — and is superseded. |
 | Web tests | `npm --prefix app test` | pending |
 | Web build | `npm --prefix app run build` | pending |
 | No CDN | `node scripts/check-no-cdn.mjs` | pending |

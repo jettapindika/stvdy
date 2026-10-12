@@ -2380,7 +2380,7 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 | 4 | Web tests | `npm --prefix app test` | **585 passed, 0 failed** (this slice's directories: 187) |
 | 5 | Web build | `npm --prefix app run build` | **PASS** (`tsc --noEmit && vite build`) |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | **PASS** — "no third-party loads in 3 shipped file(s)" |
-| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **NOT MEASURED** — not run: the offline SQL cache would have to be regenerated against a tree whose `crates/**` was being edited by other slices, and the check describes the SQL the schema now expects rather than Phase 12's suites |
+| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **PASS, measured 2026-10-12.** `SQLX_OFFLINE=true cargo sqlx prepare --workspace --check` exits **0** with no diff, so the committed `.sqlx` cache matches the tree. The earlier verdict was true when written — several slices were mid-write in `crates/**` — and is superseded. |
 | 8 | Shell trio | `just check-shell` | **NOT MEASURED** — not run |
 | 9 | **Exit gate, part 1** — a WRITE tool creates `pending_actions`, and confirming on device B executes it | `cargo test -p stvdy-server --test actions` | **PASS** — 12 passed / 0 failed (`cargo test -p stvdy-server --test actions`) |
 | 10 | **Exit gate, part 2** — a reminder is deduped across devices | `cargo test -p stvdy-server --test reminders` | **PASS** — 5 passed / 0 failed (`cargo test -p stvdy-server --test reminders`) |
