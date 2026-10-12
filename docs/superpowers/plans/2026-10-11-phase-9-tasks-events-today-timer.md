@@ -2182,7 +2182,7 @@ feat(app): Today, quick capture, break-down, tasks and settings
   `docs/ASSUMPTIONS.md`, `docs/THREAT_MODEL.md`
 - Create: `scripts/smoke-phase9.sh`
 
-- [ ] **Step 1: `docs/API.md`**
+- [x] **Step 1: `docs/API.md`**
 
 Replace the three placeholder sections with real ones and re-tag the fourth:
 
@@ -2200,7 +2200,7 @@ Replace the three placeholder sections with real ones and re-tag the fourth:
 - `## Study and dashboard (Phase 12)` becomes `## Dashboard (Phase 12)` with `GET
   /dashboard`, since `POST /sessions` has moved to this phase.
 
-- [ ] **Step 2: `docs/SYNC.md`**
+- [x] **Step 2: `docs/SYNC.md`**
 
 Add `### Entity payload validation` under Push, with the four rules a pushable entity now
 carries: the four server-owned `events` columns (A198), the `user_settings` id rule and its
@@ -2208,25 +2208,25 @@ per-channel plan check (A200/A201), the `study_sessions` bound and why it reads 
 (A204), and the parent-delete cascade producing one tombstone per child (A197). Note that
 these are the *same* functions the REST routes call, so a rule cannot hold on one path only.
 
-- [ ] **Step 3: `docs/ARCHITECTURE.md`**
+- [x] **Step 3: `docs/ARCHITECTURE.md`**
 
 Add `## Phase 9: offline writes and the focus timer` — what the device holds (the four
 entities in the cache, the timer's local state), why the Today view has no route, the one
 asymmetry between the builds (the web build has no cache, so `GET /activity` is its
 read for the streak), and the timer's single-log design (the id minted at start).
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`**
+- [x] **Step 4: `docs/ASSUMPTIONS.md`**
 
 Append A190–A229 as rows, and one line in the "Schema deviations" table for
 `tasks.position`, the `user_settings` columns and the five new `check` constraints.
 
-- [ ] **Step 5: `docs/THREAT_MODEL.md`**
+- [x] **Step 5: `docs/THREAT_MODEL.md`**
 
 Append to § 6 R1: the bound now exists (`check_session`), it was added in Phase 9 because
 the Today screen and the streak display these numbers as facts, and R1 remains accepted —
 the bound narrows what a fabricated row can look like without making the rows trusted.
 
-- [ ] **Step 6: Roadmap gate 5 — accessibility, on four screens**
+- [x] **Step 6: Roadmap gate 5 — accessibility, on four screens**
 
 Measured in a real browser, both `prefers-color-scheme` values, at 390x844 and 1365x900,
 on the Today screen, the quick-capture field and its draft card, the break-down panel, and
@@ -2248,7 +2248,7 @@ the settings form. State the check performed and the result for each of the five
   a checkbox group is exactly the shape that refuses to shrink, and the proposal list is a
   checkbox group.
 
-- [ ] **Step 7: Roadmap gate 6 — Indonesian end to end**
+- [x] **Step 7: Roadmap gate 6 — Indonesian end to end**
 
 - **Server.** `an_indonesian_capture_resolves_a_relative_date_in_jakarta`: the capture text
   "selesaikan tugas kripto hari Jumat" with `now` = Thursday 2026-10-15T09:00+07:00 produces
@@ -2264,7 +2264,7 @@ the settings form. State the check performed and the result for each of the five
   lands on Thursday), an unfilled `{{output_language}}` (English subtasks), and a local-day
   bucket computed with the machine zone.
 
-- [ ] **Step 8: Roadmap gate 7 — honesty**
+- [x] **Step 8: Roadmap gate 7 — honesty**
 
 State each, with where it was checked:
 
@@ -2281,7 +2281,7 @@ State each, with where it was checked:
 - **(e)** A proposal is labelled `honesty.suggested` with `honesty.nothingAddedYet`, and the
   two tests in Task 13 assert that nothing is written until Confirm.
 
-- [ ] **Step 9: The smoke script**
+- [x] **Step 9: The smoke script**
 
 `scripts/smoke-phase9.sh` — signup, set `language = id`, quick-capture an Indonesian
 sentence, assert the draft's `due_at` is a Jakarta evening and that the task count is
@@ -2291,7 +2291,7 @@ assert the 400, and read `/activity`. Follows `scripts/smoke-phase5.sh`'s shape:
 the one key it needs from `.env` (not `source .env`, which Phase 5's notes record as a
 hazard), and ends with `=== PASS`.
 
-- [ ] **Step 10: Run the full gate**
+- [x] **Step 10: Run the full gate**
 
 | Gate | Command |
 |---|---|
@@ -2304,7 +2304,7 @@ hazard), and ends with `=== PASS`.
 | sqlx | `cargo sqlx prepare --workspace --check` |
 | smoke | `bash scripts/smoke-phase9.sh` |
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```
 docs(phase 9): the task, event, session and settings contract, and the three gates
@@ -2316,32 +2316,200 @@ docs(phase 9): the task, event, session and settings contract, and the three gat
 
 | # | Gate | Command | Result |
 |---|---|---|---|
-| 1 | Offline task + event + session writes sync after reconnect | `cargo test -p stvdy-server --test offline_tasks` | |
-| 2 | The server had nothing before the reconnect | the same test, assertion 2 | |
-| 3 | A replayed flush writes one row | `cargo test -p stvdy-server --test offline_tasks flushing` | |
-| 4 | The Today view and the timer work offline | `npm --prefix app test -- TodayScreen useFocusTimer` | |
-| 5 | Quick capture and break-down cost 2 and save nothing | `cargo test -p stvdy-server --test tasks` | |
-| 6 | A free plan gets 403 `plan_required` on both | `cargo test -p stvdy-server --test route_sweep` | |
-| 7 | A session beyond its elapsed time is refused on both paths | `cargo test -p stvdy-server --test study tamper` | |
-| 8 | A client cannot write the calendar-owned event columns | `cargo test -p stvdy-server --test events tamper` | |
-| 9 | Every new route is classified | `cargo test -p stvdy-server --test route_sweep` | |
-| 10 | The local day and the streak are unit-tested | `npm --prefix app test -- day` | |
-| 11 | `0017` is still the last trigger migration | `cargo test -p stvdy-server --test schema` | |
-| 12 | Roadmap gate 5 (accessibility) measured and recorded | Task 14 Step 6 | |
-| 13 | Roadmap gate 6 (Indonesian) measured and recorded | Task 14 Step 7 | |
-| 14 | Roadmap gate 7 (honesty) stated and recorded | Task 14 Step 8 | |
-| 15 | `docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same commits | — | |
-| 16 | The full quality gate is green | Task 14 Step 10 | |
+| 1 | Offline task + event + session writes sync after reconnect | `cargo test -p stvdy-server --test offline_tasks` | **PASS** — 7 passed, 0 failed |
+| 2 | The server had nothing before the reconnect | the same test, assertion 2 | **PASS** — 0 rows read directly from Postgres while the transport failed |
+| 3 | A replayed flush writes one row | `cargo test -p stvdy-server --test offline_tasks flushing` | **PASS** — 1 passed; the row's `updated_at` and the `change_log` count unchanged across the replay |
+| 4 | The Today view and the timer work offline | `npm --prefix app test -- TodayScreen useFocusTimer` | **PASS** — TodayScreen 7, useFocusTimer 12; the screen test runs with a failing transport |
+| 5 | Quick capture and break-down cost 2 and save nothing | `cargo test -p stvdy-server --test tasks` | **PASS** — 15 passed, 0 failed |
+| 6 | A free plan gets 403 `plan_required` on both | `cargo test -p stvdy-server --test route_sweep` | **PASS** — 4 passed; 76 rows, 2 `Swept` drivers, each refused 403 `plan_required` |
+| 7 | A session beyond its elapsed time is refused on both paths | `cargo test -p stvdy-server --test study tamper` | **PASS** — study 6, tamper 17 |
+| 8 | A client cannot write the calendar-owned event columns | `cargo test -p stvdy-server --test events tamper` | **PASS** — events 7, tamper 17; each of the four columns separately, on both paths |
+| 9 | Every new route is classified | `cargo test -p stvdy-server --test route_sweep` | **PASS** — 4 passed; 76 rows (61 before this phase) |
+| 10 | The local day and the streak are unit-tested | `npm --prefix app test -- day` | **PASS** — `day.test.ts` 19 passed |
+| 11 | `0017` is still the last trigger migration | `cargo test -p stvdy-server --test schema` | **PASS** — 21 passed, unchanged; `0028` and `0029` each attach no trigger |
+| 12 | Roadmap gate 5 (accessibility) measured and recorded | Task 14 Step 6 | **DONE_WITH_CONCERNS** — measured; **three defects found and not fixed** (see below). The brief assigns `app/**` elsewhere, so they are reported rather than repaired |
+| 13 | Roadmap gate 6 (Indonesian) measured and recorded | Task 14 Step 7 | **PASS** — the server half by suite, the UI half driven in a real browser; the Jakarta 06:00 row lands on the 16th where UTC puts it on the 15th |
+| 14 | Roadmap gate 7 (honesty) stated and recorded | Task 14 Step 8 | **PASS** — every number traced to a row; the cost is on both buttons before they run; the proposal is labelled "Suggested …" with "Nothing is added until you confirm" |
+| 15 | `docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same commits | — | **PASS** — `docs/API.md`, `docs/THREAT_MODEL.md`, `docs/ARCHITECTURE.md`, `docs/ASSUMPTIONS.md`; `docs/SYNC.md` is Phase 8's slice |
+| 16 | The full quality gate is green | Task 14 Step 10 | **PASS** — see the verification table below |
 
 ---
 
 ## Execution notes
 
-To be filled in as the phase is built, in the shape Phase 5 and Phase 6 use: what the plan
-did not anticipate, each with the file that proved it; the gate measurements' actual
-numbers; the verification table with real counts; and a `NOT VERIFIED HERE` line naming
-what the phase could not exercise (the native iOS and Android timer and offline paths, which
-have no simulator run in this phase).
+The shape is Phase 5's and Phase 6's: what the plan did not anticipate (each with the file
+that proved it), the gates' actual numbers, the verification table, and a `NOT VERIFIED
+HERE` line.
+
+### What the plan did not anticipate
+
+Seven things, and the first four are defects rather than choices — all four the same class,
+**two write paths that had stopped agreeing**.
+
+1. **A task's push delete did not cascade** (`crates/server/src/sync/apply.rs`). The plan's
+   A197 asserts the *server* needs no code because `on delete cascade` fires the children's
+   triggers — true of a real `DELETE`, false of a tombstone, which is an `UPDATE`. So
+   `DELETE /tasks/:id` walked the subtree while `apply_delete` tombstoned one row, and the
+   same student action removed the subtree when it arrived over REST and left the children
+   **live on the server and on every other device** when it arrived offline. Found by
+   `offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`, which is the task
+   the plan wrote to catch exactly this. Fixed by extracting the walk to
+   `tasks::tombstone_subtree` and calling it from both writers, because the defect *is* two
+   copies disagreeing and a third would be a third chance to disagree.
+2. **A restore did not restore the subtree** (`crates/server/src/tasks.rs`). A197's
+   amendment: `apply_patch` cleared the parent's `deleted_at` and left every cascaded child
+   tombstoned, so the student restores a task and its subtasks are silently gone with no way
+   to reach them from the UI (a tombstoned row is not in `GET /tasks`, so there is no row to
+   restore per row). Fixed with `tasks.deleted_with_parent` (migration `0029`) and a
+   recursive restore walk — recursive because `tasks.parent_id` has no depth constraint, a
+   thing the plan's Task 4 assumes is one level.
+3. **A calendar-owned event was editable and deletable through push** while REST refused
+   both (`crates/server/src/events.rs`). A198 forbids *setting* the four calendar columns and
+   says nothing about editing a row that already carries them, so the gap was unstated rather
+   than deliberate — and an edit that lands is an edit the next incremental sync silently
+   reverts. Fixed with one predicate, `events::is_calendar_owned`, called from all four write
+   paths.
+4. **`Entity::payload_columns()` was missing all five of this phase's new columns**
+   (`crates/sync/src/proto/entities.rs`). That list is the pull's leak surface *and* the
+   allowlist `sync/apply.rs::write_columns` intersects a push payload against, so a column
+   absent from it is silently dropped by the write **while the response still says
+   `applied`** — and never shipped by a pull. Proved in both directions
+   (`sync_push.rs::every_field_phase_nine_added_survives_a_push`,
+   `sync_pull.rs::the_fields_phase_nine_added_ship_in_a_pull`), each confirmed to fail with
+   the allowlist reverted.
+5. **Three decisions the pure contracts forced** (now A210–A212): an out-of-range priority
+   falls back to the default while an out-of-range estimate clamps; `due_on`/`subtasks_of`
+   exclude `status = 'done'` as well as tombstones; `due_on` takes a `YYYY-MM-DD` key rather
+   than an instant. Each is a place the plan's prose and the plan's own Step-1 case disagreed,
+   and the case won.
+6. **The validators' allowlists would have drifted from the writer's**
+   (`crates/server/src/{tasks,events,study,settings}.rs`). The first draft carried
+   hand-written `known` lists — a second answer to "what is a task's column", drifting the
+   first time one side gained a column. All four now derive theirs from
+   `Entity::*::payload_columns()`. Same class of gap as (4), found in this phase's own new
+   code by asking the plan's question of it.
+7. **`GET /devices` never reported `last_sync_at`** (`crates/server/src/devices.rs`). The
+   column exists, `sync::touch_last_sync` writes it, and the route dropped it — so the
+   Devices screen could only ever render "never synced", which gate 7(a) forbids. Found while
+   wiring the settings screen's device list.
+
+### Roadmap gate 5 — accessibility. Measured, and it found three defects
+
+Measured in a real headless Chromium against the built bundle
+(`VITE_API_BASE_URL=http://127.0.0.1:8099`, served by `vite preview` on :4173), signed in as
+a real Indonesian account on `pro` with a real task, two subtasks, an overdue task, a class,
+an exam, a deadline and a logged session.
+
+**The defects are in the draft card, and the brief's warning was exact: it hid at 390px and
+at 200% text scale.** All three are in `app/src/features/today/QuickCapture.tsx`; none is
+visible at 100% scale and none is visible to the jsdom suites. **Not fixed** — `app/**` is
+not this slice's to edit, so they are reported for a fix with the right ownership.
+
+1. **`Escape` does not close the draft card, and does not return focus to the input.**
+   Gate 5(a) names this case explicitly. Measured: with the card open and focus on
+   `Dismiss`, `Escape` leaves the draft rendered and focus ends at `document.body` — the
+   draft is still there and the keyboard user has lost their place. A draft is a *proposal*,
+   so a keyboard user cannot dismiss the one thing the honesty gate says must be
+   dismissible without a mouse.
+2. **The draft card's `Due` line renders the raw ISO instant.** Measured text:
+   `Due 2026-10-16T16:59:00.000Z`. Every other date on the same screen goes through
+   `formatInZone(..., { dateStyle: 'medium' })` and reads "16 Oct 2026". This is the one
+   screen where the whole point of the Jakarta resolution is that the student can see it,
+   and the raw UTC instant is the *least* readable form of it — it also shows the UTC
+   instant rather than the Jakarta evening the draft was resolved to.
+3. **The same string overflows the page at 200% text scale.** At 390px with the root font
+   at 32px, `document.scrollingElement.scrollWidth` is **424** against a `clientWidth` of
+   **390** — 34px of horizontal page overflow — and the offending element is
+   `TodayScreen`'s own root (`mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8`, measured
+   424px wide) because the ISO token is unbreakable and cannot shrink. Dismissing the card
+   and re-measuring gives `scrollWidth === clientWidth === 390`: the draft card is the whole
+   cause. This is the same defect class Phase 6 found four of and Phase 7 a fifth.
+
+**What passed.** Keyboard reach with a visible ring: **11 stops** at 390px/dark (and **14**
+with the draft card open — the extra three being Confirm, Edit and Dismiss), every stop
+carrying `outline: solid 2px` at a 2px offset, measured on the focused element itself after
+real `Tab` presses; ring-to-background ratios **3.15** (the two `btn-primary` controls, white
+on `--primary`) to **8.90** (the links and the field), all above 3:1. Contrast: **52
+text/background pairs** at 100% (61 at 200%), **0 below its requirement** in **both** themes,
+computed from the rendered colours with the translucent stack composited — the lowest is
+**3.15:1** on the primary buttons and **4.78:1** on the meta lines. Targets: **0** interactive
+controls under 44px at 390px in either theme, at 100% and at 200% — the capture field
+(316x44), the start/stop button, the Confirm/Edit/Dismiss row and every tab item measured
+44px high. No state by colour alone: the timer reads "Stopped" in words beside the clock,
+the sync line reads "Synced", the overdue task carries the word "Overdue" and the phrase
+"was due", and a locked channel names the plan that has it. Horizontal page overflow at
+100%: **none** (`scrollWidth === clientWidth === 390`).
+
+### Roadmap gate 6 — Indonesian end to end
+
+- **Server, and the one that fails silently.** `scripts/smoke-phase9.sh` drives the real
+  server with the stub: the capture text `selesaikan tugas kripto hari Jumat` returns
+  `due_at = 2026-10-16T16:59:00Z`, which is **23:59 Asia/Jakarta on Friday the 16th**. Read
+  as UTC the same string would be a deadline seven hours late, and a whole day late for
+  anything due before 07:00 local.
+- **Server, the composed prompt.** Read out of the stub's request log, not from a response:
+  both modules' prompts carry `Asia/Jakarta`, the student's text sits **inside** a
+  `<user_context_data>` block (asserted by position, not by counting tags — the base
+  template's own prose names the tag once), and `output_language` is filled with the
+  caller's `id`, which is what A192 exists for. Both prompts are 7.1–7.4 kB.
+- **Server, the subtasks.** With `user_settings.language = 'id'` the stub's Indonesian
+  subtasks come back unchanged, in the proposed order, and `crates/server/tests/tasks.rs`
+  pins the language's provenance.
+- **UI, in the browser.** The same Jakarta clock is the one the Today view buckets by: a
+  deadline at `2026-10-15T23:00Z` — **06:00 on the 16th in Jakarta, 23:00 on the 15th in
+  UTC** — renders under "Upcoming exams" as **16 Oct 2026**, and a task due
+  `2026-10-11T23:00Z` (**06:00 today Jakarta, yesterday in UTC**) renders on today's
+  timeline rather than under Overdue. A UTC implementation fails both, and neither failure
+  is visible to an English test.
+
+### Roadmap gate 7 — honesty
+
+- **(a) and (b), every number traces.** On the rendered Today view: `1 day streak` and
+  `50 minutes logged today` come from the one `study_sessions` row the run logged
+  (`duration_min = 50`); the timeline's `2` is a task and an event; `Overdue 1` is the task
+  whose `due_at` is before the local day; `Upcoming exams 2` are the two events inside the
+  next seven local days; the setup checklist's `0 workspaces / 0 sources / 0 decks` are the
+  live rows. Nothing is a placeholder, and a pending read renders a loading state rather
+  than a zero.
+- **(c)** `honesty.composerHint` renders directly under the capture field, asserted in the
+  browser by reading the field's `aria-describedby`.
+- **(d)** Both generative buttons carry their price **before** they run, read from
+  `config/plans.toml`: the capture button reads **"Draft a task (2 credits)"**, and the
+  smoke run asserts the server charges the same 2 from the same file.
+- **(e)** The draft is labelled **"Suggested task"** with **"Nothing is added until you
+  confirm."** directly under it, and the browser run confirms the task count is unchanged
+  between the draft appearing and Confirm being pressed — a draft that saved without
+  confirmation would pass every other assertion here.
+
+### Verification table
+
+| Gate | Command | Result |
+|---|---|---|
+| format | `cargo fmt --all -- --check` | clean |
+| lints | `cargo clippy --workspace --all-targets -- -D warnings` | clean, no output |
+| tests | `cargo test --workspace --no-fail-fast` | **793 passed, 0 failed, 3 ignored** |
+| shell | `just check-shell` | clean (fmt, clippy, tests over `src-tauri`, which the workspace excludes) |
+| SPA tests | `npm --prefix app test` | **402 passed** (45 files) |
+| web build | `npm --prefix app run build` | clean (`tsc --noEmit` then `vite build`, 262 modules) |
+| no CDN | `node scripts/check-no-cdn.mjs` | no third-party loads in 3 shipped files |
+| smoke | `bash scripts/smoke-phase9.sh` | **PASS**, nine scenarios |
+
+### `NOT VERIFIED HERE`
+
+- **The native iOS and Android timer and offline paths have no run.** There is no simulator
+  in this phase (`xcrun simctl list runtimes` is empty) and no Android SDK on this
+  workstation, so `Platform.localState` over `local_state_get`/`local_state_set`, the
+  SQLite cache's `local_state` table, the outbox and the apply path are exercised by the
+  adapter tests, the in-memory double and the type checker only. The web path and the
+  in-process engine are exercised end to end. This is the same gap Phase 1's mobile
+  capability spike records and Phase 14 owns.
+- **The browser gate was measured at 390x844 and 1365x900 on the Today view, the capture
+  field, the draft card, the tasks screen and the settings screen.** The break-down panel
+  is reached from a task row on the tasks screen and was measured there; the timer's digits
+  were measured as part of the Today view.
+- **`cargo sqlx prepare --workspace --check` is not a gate this phase can run**: the tree
+  uses the runtime `query*` API throughout, so the command reports "no queries found" rather
+  than checking a cache, which is what Phase 7's slice recorded as well.
 
 ---
 
