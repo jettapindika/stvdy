@@ -10,8 +10,12 @@
 //! makes "may this run?" unit-testable, and it is what keeps the answer in one place
 //! (A270/A271).
 
+pub mod gate;
 pub mod tools;
 
+pub use gate::{
+    GateContext, GateDecision, MAX_PROPOSALS_PER_TURN, Refusal, gate, read_result, tool_result,
+};
 pub use tools::{
     EventKind, QuizDifficulty, QuizTypes, ToolArgs, ToolBounds, ToolError, ToolKind, ToolName,
     bounds, parse_args, specs,
