@@ -186,10 +186,16 @@ describe('the settings form', () => {
 
     // Each names the phase that brings it, so a student looking for a control
     // finds the reason it is not there instead of nothing at all.
-    expect(await screen.findByText('Calendar connections')).toBeInTheDocument()
-    expect(screen.getByText('Google Calendar and ICS arrive in Phase 10.')).toBeInTheDocument()
-    expect(screen.getByText('Data export and deletion')).toBeInTheDocument()
+    expect(await screen.findByText('Data export and deletion')).toBeInTheDocument()
     expect(screen.getByText('Bring your own model key')).toBeInTheDocument()
+
+    // And the list shrinks when a section arrives, which is the half that is easy
+    // to forget: "Google Calendar and ICS arrive in Phase 10" was true until
+    // Phase 10 shipped the calendar screen and `/calendar` stopped being a
+    // `NotBuiltRoute`. Copy that outlives its phase is worse than no copy, because
+    // it tells a student a working feature does not exist.
+    expect(screen.queryByText('Calendar connections')).toBeNull()
+    expect(screen.queryByText(/arrive in Phase 10/)).toBeNull()
   })
 
   it('links to the plan screen, which is a phone build\'s only route to it', async () => {
@@ -218,5 +224,31 @@ describe('the settings form', () => {
 
     const last = fake.sync.writes.at(-1)
     expect(last?.payload.language).toBe('id')
+  })
+
+  it('gives every channel label a 44px box in both directions, not just the short one', async () => {
+    // The number is the browser measurement, not this assertion: jsdom has no
+    // layout engine, so what is pinned here is the class, and Chromium at 390px
+    // measured the label at **65.9x22** (Phase 14 — a thumb aimed at the channel
+    // name and landing a few pixels high hit the row `<div>` and toggled nothing)
+    // and then **35.3x44**, because "Email" is a short word and the label is only
+    // as wide as its own text. Both directions are asserted on **every** label:
+    // the next short name has the same defect, and a per-row fix is one that gets
+    // forgotten. The checkbox stays 13x13 — the label is the hit area.
+    const { container } = renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    await screen.findByLabelText('Email')
+
+    const labels = [...container.querySelectorAll('label[for^="channel-"]')]
+    const boxes = [...container.querySelectorAll('input[id^="channel-"]')]
+    expect(labels).toHaveLength(boxes.length)
+    expect(labels.length).toBeGreaterThanOrEqual(5)
+    for (const label of labels) {
+      expect(label.className, `${label.textContent ?? ''} must be a 44px target`).toMatch(
+        /\bmin-h-11\b/,
+      )
+      expect(label.className, `${label.textContent ?? ''} must be a 44px target`).toMatch(
+        /\bmin-w-11\b/,
+      )
+    }
   })
 })

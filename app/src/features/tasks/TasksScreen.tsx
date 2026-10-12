@@ -36,8 +36,42 @@ export function TasksScreen() {
   const rows = orderTasks(tasks.data ?? [])
   const roots = rows.filter((row) => row.parent_id === null)
 
+  // `w-full` is load-bearing, and it is what Phase 14's fix-round-1 measured at
+  // 200% text on a 390px phone: without it `document.scrollingElement.scrollWidth`
+  // is **493** against a 390 viewport.
+  //
+  // The width is not the due-date control's fault, which is why the control is
+  // untouched. `#task-due` is a `<input type="date">` whose *min-content* is
+  // **346.6px** at 200% text — Chromium's UA stylesheet gives the date control's
+  // shadow DOM an intrinsic width no author CSS can reach (in-browser probes:
+  // `max-width: none`, `width: auto`, `min-width: 0`, `max-width: 100%`,
+  // `flex: 0 1 auto` and `appearance: none` all leave 493; only `max-width: 0`
+  // works, and it squeezes the control to a 59.6px empty box, which is a worse
+  // defect than the scroll). That minimum propagates up: the card's min-content is
+  // 412.6px and this root's is 492.6px.
+  //
+  // This div is `width: auto` inside a column flex container, so its used width is
+  // its *fit-content* — and fit-content can never go below min-content, so the root
+  // stays 492.6px wide inside a 390px `main` and the page scrolls. `w-full` makes
+  // the width definite (the container's content box, 390px) instead of content-based,
+  // which is the property that stops any wide intrinsic child from resizing the
+  // screen. Measured after, both themes: **390/390**, and the control intact and
+  // usable at **192x44** (100% text) and **244x88** (200%).
+  //
+  // `min-w-0` alone does not do it — `min-width: auto` is already 0 in the cross
+  // axis; the width is what has to stop being automatic. `align-self: stretch` alone
+  // does not either, measured.
+  //
+  // **What this does not fix, measured rather than left implicit:** at 200% text the
+  // control's content box is 184.4px and the value is 168.2px in the control's own
+  // font, so the picker indicator no longer has room beside it and Chromium paints
+  // the indicator over the year's last digit. At 100% text there is room (84.1px of
+  // value in 161.2px). The squeeze is the screen's padding at that scale — `px-5`
+  // plus the card's `p-4` is 144px of a 390px viewport — which is house-wide and not
+  // this screen's to change; a Tasks-local padding would be a second convention for
+  // the same thing.
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader title={t('nav.tasks')} subtitle={t('tasks.subtitle')} />
 
       {error !== null ? (
@@ -229,6 +263,11 @@ function CreateForm({
       <label className="label" htmlFor="task-due">
         {t('tasks.new.dueLabel')}
       </label>
+      {/* `type="date"` stays: the native picker is the platform behaviour this
+          control is for, and the screen's sideways scroll is fixed at the root
+          above rather than by squeezing this box. Do not "fix" it here with
+          `max-width: 0` — measured, that leaves a 59.6px empty control with no
+          date and no picker. */}
       <input
         id="task-due"
         className="field max-w-48"
