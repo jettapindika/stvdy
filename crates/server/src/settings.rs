@@ -46,8 +46,50 @@ const LANGUAGES: [&str; 2] = ["en", "id"];
 /// The `theme` values `user_settings.theme` accepts.
 const THEMES: [&str; 3] = ["system", "light", "dark"];
 
+/// The settings routes, plus the three BYOK ones.
+///
+/// `/settings/api-key` is a settings path and belongs in this table (Phase 13's plan puts it
+/// here rather than in `billing/routes.rs`), while the encryption and the provider seam live
+/// in `billing/byok.rs`: the path is where the screen looks, the rule is where the key is.
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/settings", get(read).put(write))
+    Router::new()
+        .route("/settings", get(read).put(write))
+        .route(
+            "/settings/api-key",
+            get(api_key_read).put(api_key_write).delete(api_key_delete),
+        )
+}
+
+/// `GET /settings/api-key`: whether a key is set, and where it points. **Never the key.**
+pub async fn api_key_read(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> AppResult<AxumJson<crate::billing::byok::ByokDescription>> {
+    Ok(AxumJson(
+        crate::billing::byok::describe(&state, &user).await?,
+    ))
+}
+
+/// `PUT /settings/api-key`: store or replace the account's key, encrypted at rest.
+///
+/// The plan gate and the platform refusal are inside `byok::set`, so a caller cannot reach the
+/// encrypt without passing both.
+pub async fn api_key_write(
+    State(state): State<AppState>,
+    user: AuthUser,
+    AxumJson(body): AxumJson<crate::billing::byok::ByokRequest>,
+) -> AppResult<AxumJson<crate::billing::byok::ByokDescription>> {
+    Ok(AxumJson(
+        crate::billing::byok::set(&state, &user, body).await?,
+    ))
+}
+
+/// `DELETE /settings/api-key`: remove it. Idempotent, so a double-click is safe.
+pub async fn api_key_delete(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> AppResult<AxumJson<crate::billing::byok::ByokDescription>> {
+    Ok(AxumJson(crate::billing::byok::clear(&state, &user).await?))
 }
 
 /// The account's settings row.
@@ -352,9 +394,34 @@ fn text_field(object: &Map<String, Value>, key: &str) -> Result<Option<String>, 
 /// `GET /settings`: the row and the account's timezone beside it (A203).
 pub async fn read(State(state): State<AppState>, user: AuthUser) -> AppResult<AxumJson<Value>> {
     let settings = load_or_create(&state.pool, user.user_id).await?;
-    Ok(AxumJson(
-        json!({ "settings": settings, "timezone": user.timezone }),
-    ))
+    Ok(AxumJson(json!({
+        "settings": settings,
+        "timezone": user.timezone,
+        "channels_available": channels_available(&state),
+    })))
+}
+
+/// The reminder channels this deployment can actually deliver on (A288).
+///
+/// **Derived from the transports that exist, not from the plan matrix**, and that distinction
+/// is the whole point of the field: `config/plans.toml` grants `telegram` and `discord` to
+/// Power, `PUT /settings` accepts them, and nothing sends them. A screen that offered a
+/// channel which is granted, selectable and silently never fires is worse than one that shows
+/// it as unavailable, because the student's only evidence is a reminder that never arrives.
+///
+/// The order is the matrix's own (`web, push, email`), so the screen's order is a contract
+/// rather than whatever `HashMap` a future edit reaches for. `web` is unconditional: it is the
+/// in-app feed and the desktop shell's local notification, and it needs no transport. `email`
+/// is unconditional too — the mailer is always present, because a deployment with no SMTP
+/// credentials gets the dev sink, which does deliver (A43's rule that a developer must be able
+/// to exercise the product). `push` is the one that depends on configuration.
+pub fn channels_available(state: &AppState) -> Vec<&'static str> {
+    let mut channels = vec![crate::reminders::channel_str(ReminderChannel::Web)];
+    if state.push.is_configured() {
+        channels.push(crate::reminders::channel_str(ReminderChannel::Push));
+    }
+    channels.push(crate::reminders::channel_str(ReminderChannel::Email));
+    channels
 }
 
 /// `PUT /settings`: a partial write, whole-row stored, channels checked before it happens.
