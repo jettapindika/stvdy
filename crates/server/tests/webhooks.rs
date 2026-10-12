@@ -52,13 +52,17 @@ fn paid_event(payment: &serde_json::Value, event_id: &str, amount_idr: i64) -> (
     (body.clone(), body.into_bytes())
 }
 
-/// Posts a signed body to the webhook.
-async fn post_webhook(
+/// Posts a body with **these** headers, signing nothing.
+///
+/// The distinction matters: [`post_webhook`] signs the bytes it is handed, so a test that
+/// appends a byte and re-posts through it produces a *valid* signature over the tampered
+/// body and the assertion passes for the wrong reason. A test about the raw-bytes handoff
+/// has to send the original headers.
+async fn post_with_headers(
     app: &axum::Router,
-    harness: &TestState,
+    headers: &axum::http::HeaderMap,
     body: &[u8],
 ) -> (StatusCode, serde_json::Value) {
-    let headers = harness.gateway.sign(body);
     let mut request = axum::http::Request::builder()
         .method("POST")
         .uri("/webhooks/qris")
@@ -80,6 +84,41 @@ async fn post_webhook(
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, value)
+}
+
+/// Posts a body the mock gateway signs: exactly these bytes.
+async fn post_webhook(
+    app: &axum::Router,
+    harness: &TestState,
+    body: &[u8],
+) -> (StatusCode, serde_json::Value) {
+    let headers = harness.gateway.sign(body);
+    post_with_headers(app, &headers, body).await
+}
+
+/// Signs in on `platform` and returns the access token.
+///
+/// A second device **logs in**: signing the same address up again is a 409, which is the
+/// account already existing rather than a second device. The token is what matters — the
+/// plan is not a JWT claim, so a token minted after the webhook must already see it.
+async fn log_in_on(app: &axum::Router, email: &str, platform: &str) -> String {
+    let (status, body) = json(
+        app,
+        "POST",
+        "/auth/login",
+        "",
+        serde_json::json!({
+            "email": email,
+            "password": "correct horse battery",
+            "device": { "name": "Second", "platform": platform }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["access_token"]
+        .as_str()
+        .expect("an access token")
+        .to_string()
 }
 
 /// The **subscription period's** grant, not every positive ledger row: signup writes the
@@ -161,7 +200,7 @@ async fn a_signed_paid_webhook_activates_the_plan_and_the_second_device_sees_it(
 
     // The second device: a token minted after the webhook sees the paid plan, because
     // entitlements are loaded per request rather than carried in the token.
-    let other_token = signed_up_on(&app, &harness, "payer@example.test", "macos").await;
+    let other_token = log_in_on(&app, "payer@example.test", "macos").await;
     let (status, me) = json(&app, "GET", "/usage", &other_token, serde_json::Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(
@@ -257,17 +296,38 @@ async fn a_mismatched_amount_lands_in_review_and_activates_nothing(pool: PgPool)
     let (harness, app, _token, payment) = checkout(pool).await;
     let amount = payment["amount_idr"].as_i64().unwrap();
 
-    for (event_id, paid) in [("evt_over", amount + 1), ("evt_under", amount - 1)] {
-        let (_, body) = paid_event(&payment, event_id, paid);
+    // **One payment per direction.** A payment's first report marks it paid and *then* sends
+    // it to `review`, so a second report of the same row is `already_paid` by design — the
+    // guarded transition working, not a second mismatch. Each direction needs its own
+    // payment for the amount check to run at all.
+    let token = log_in_on(&app, "payer@example.test", "web").await;
+    let (status, second) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "plan_id": "pro", "billing_period": "yearly" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let payments = [payment, second];
+
+    for (payment, event_id, paid) in [
+        (&payments[0], "evt_over", amount + 1),
+        (&payments[1], "evt_under", amount - 1),
+    ] {
+        let (_, body) = paid_event(payment, event_id, paid);
         let (status, outcome) = post_webhook(&app, &harness, &body).await;
         assert_eq!(status, StatusCode::OK, "{outcome}");
         assert_eq!(outcome["status"], "review", "{outcome}");
     }
 
-    // The row is `review` with both numbers in the reason, and no subscription exists.
+    // The over-payment's row is `review` with both numbers in the reason, and no subscription
+    // exists. Read through the array: `payments[0]` is the payment the loop just reported,
+    // and indexing avoids holding a binding that the array moved.
     let (status_str, reason): (String, Option<String>) =
         sqlx::query_as("select status, review_reason from payments where id = $1::uuid")
-            .bind(payment["id"].as_str().unwrap())
+            .bind(payments[0]["id"].as_str().unwrap())
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
@@ -283,6 +343,22 @@ async fn a_mismatched_amount_lands_in_review_and_activates_nothing(pool: PgPool)
         "a mismatch activated a plan"
     );
     assert_eq!(ledger_rows(&harness).await, 0, "a mismatch granted credits");
+
+    // The under-payment's row names *its own* two numbers, so the reason is about that
+    // payment rather than a copy of the first.
+    let (under_status, under_reason): (String, Option<String>) =
+        sqlx::query_as("select status, review_reason from payments where id = $1::uuid")
+            .bind(payments[1]["id"].as_str().unwrap())
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(under_status, "review");
+    let under_reason = under_reason.expect("a review names its reason");
+    assert!(
+        under_reason.contains(&amount.to_string())
+            && under_reason.contains(&(amount - 1).to_string()),
+        "the under-payment's reason must name its own two numbers, got {under_reason:?}"
+    );
 
     // The raw payload is kept, which is what a human reads when the amount does not match.
     let payloads: i64 =
@@ -400,28 +476,26 @@ async fn a_forged_signature_is_unauthorized_and_changes_nothing(pool: PgPool) {
     let other = stvdy_core::traits::testing::MockPayment::with_secret(b"another-gateway");
     let headers = other.sign(&body);
 
-    let mut request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/webhooks/qris")
-        .header("content-type", "application/json");
-    for (name, value) in headers.iter() {
-        request = request.header(name, value);
-    }
-    let response = tower::ServiceExt::oneshot(
-        app.clone(),
-        request.body(axum::body::Body::from(body.clone())).unwrap(),
-    )
-    .await
-    .unwrap();
+    let (status, _) = post_with_headers(&app, &headers, &body).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a signature from another gateway was accepted"
+    );
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    // One byte appended, the same headers: the body no longer matches the tag. This is the
-    // assertion that makes the raw-bytes handoff real.
+    // One byte appended, **the original headers**: the body no longer matches the tag. This
+    // is the assertion that makes the raw-bytes handoff real, and it must go through
+    // `post_with_headers` — `post_webhook` would re-sign the tampered bytes and the request
+    // would legitimately verify.
+    let good_headers = harness.gateway.sign(&body);
     let mut tampered = body.clone();
     tampered.push(b' ');
-    let (status, _) = post_webhook(&app, &harness, &tampered).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = post_with_headers(&app, &good_headers, &tampered).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "an appended byte under a signature for the original body was accepted"
+    );
 
     let events: i64 = sqlx::query_scalar("select count(*) from webhook_events")
         .fetch_one(&harness.state.pool)
@@ -496,6 +570,10 @@ async fn a_credit_pack_grants_once_and_the_ledger_names_its_payment(pool: PgPool
     .await
     .unwrap();
     assert_eq!(bucket, "purchased");
+    assert_eq!(
+        reason, "credit_pack",
+        "the ledger row must say why it exists, not only where it went"
+    );
     assert_eq!(delta, pack.credits as i32);
     assert_eq!(
         ref_id.map(|id| id.to_string()).as_deref(),
