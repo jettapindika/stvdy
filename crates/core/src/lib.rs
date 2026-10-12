@@ -17,6 +17,7 @@ pub mod generation;
 pub mod planner;
 pub mod prompts;
 pub mod quiz;
+pub mod reminders;
 pub mod render;
 pub mod retrieval;
 pub mod search;
