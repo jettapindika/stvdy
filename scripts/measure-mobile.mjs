@@ -172,6 +172,19 @@ function thisWeek(weekdayOffset, time = '09:00:00') {
   const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
   const monday = new Date(`${localDate}T00:00:00Z`)
   monday.setUTCDate(monday.getUTCDate() - ((weekday + 6) % 7) + weekdayOffset)
+
+  // **And it must not land on the anchor's own day.** `todayBuckets` puts an event on the
+  // Today timeline whenever its local date *is* today's (`day.ts`'s `overlapsDay` filter,
+  // rendered at `TodayScreen.tsx:154-172`), so a Wednesday run would give the `today`
+  // surface the event's title and time — two more text pairs than a Tuesday run, for no
+  // reason a reader could see. That makes every recorded total weekday-dependent, which is
+  // the kind of drift that turns a re-measurement into an unexplained number change. One
+  // step forward in the week costs nothing and the calendar still renders it: the offset is
+  // 0-4, so +1 is at most 5, still inside the Monday-based week.
+  const target = monday.toISOString().slice(0, 10)
+  if (target === localDate) {
+    monday.setUTCDate(monday.getUTCDate() + 1)
+  }
   return `${monday.toISOString().slice(0, 10)}T${time}Z`
 }
 
@@ -369,6 +382,12 @@ const WORKSPACE = {
   created_at: '2026-10-11T08:00:00Z',
   updated_at: '2026-10-11T08:00:00Z',
   source_count: 2,
+  // The course fields the redesign added. The card and the workspace heading both
+  // render them, and the walk is the only place the *combination* is measured: a
+  // code, a count and a date on one mono line at 200% text.
+  course_code: 'IF4020',
+  color: 2,
+  exam_date: '2026-10-26',
 }
 
 /**
@@ -900,11 +919,19 @@ const SURFACES = [
   // text is on the page.
   { name: 'today', expect: 'Due flashcards', steps: [{ nav: 'Today' }] },
   { name: 'workspaces', steps: [{ nav: 'Work' }] },
-  { name: 'calendar', expect: '1 event in this view', steps: [{ nav: 'Calendar' }] },
+  // Calendar and Tasks are **views inside the planner** as of the redesign, so they are
+  // reached through the Planner tab and its own switcher rather than as tabs of their own.
+  // The `expect` strings are unchanged, which is what makes this a re-route rather than a
+  // rewrite: the same content has to appear at the new address, or the move broke it.
+  {
+    name: 'calendar',
+    expect: '1 event in this view',
+    steps: [{ nav: 'Planner' }, { tab: 'Calendar' }],
+  },
   {
     name: 'tasks',
     expect: 'Selesaikan tugas kriptografi untuk kuliah hari Jumat',
-    steps: [{ nav: 'Tasks' }],
+    steps: [{ nav: 'Planner' }, { tab: 'Tasks' }],
   },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
@@ -925,12 +952,22 @@ const SURFACES = [
   {
     name: 'planner',
     expect: 'UTS Kriptografi',
-    steps: [{ nav: 'Tasks' }, { link: 'Plan' }],
+    steps: [{ nav: 'Planner' }, { tab: 'Plan' }],
   },
   {
     name: 'syllabus',
-    expect: 'Import a syllabus',
-    steps: [{ nav: 'Tasks' }, { link: 'Plan' }, { link: 'Import another syllabus' }],
+    // **`What to call it`, not `Import a syllabus`** — and the reason is the mistake
+    // `study-source`'s guard made. That string is `planner.goals.empty.action` *and*
+    // `syllabus.upload.title`, so it renders on the planner too: a click that landed but
+    // whose route did not render would still find the text on the page it left, and the
+    // surface would measure `/planner` twice while reporting PASS. `nameLabel` is the
+    // upload panel's own field label and appears nowhere else in the app.
+    expect: 'What to call it',
+    steps: [
+      { nav: 'Planner' },
+      { tab: 'Plan' },
+      { link: 'Import another syllabus' },
+    ],
   },
   // The review screen a draft opens. **It needs the upload to have happened**, because a
   // draft is listed nowhere — `SyllabusPanel` holds the id in local state from the POST's
@@ -940,8 +977,8 @@ const SURFACES = [
     name: 'syllabus-review',
     expect: 'Ujian Tengah Semester',
     steps: [
-      { nav: 'Tasks' },
-      { link: 'Plan' },
+      { nav: 'Planner' },
+      { tab: 'Plan' },
       { link: 'Import another syllabus' },
       { fill: '#syllabus-text', value: 'UAS Kriptografi 15 Desember. Tugas 4 minggu depan.' },
       // The upload's button label carries the plan's credit cost, so it is clicked by
@@ -964,6 +1001,19 @@ const SURFACES = [
     name: 'workspace-studio-flashcards',
     steps: [{ nav: 'Work' }, { link: WORKSPACE.name }, { tab: 'Studio' }],
   },
+  // --- The Study hub, the redesign's new destination --------------------------------
+  //
+  // The hub is the nav's third item and it had never been walked, so nothing measured
+  // its two lists, its priority block or its one action. It is reached by its own nav
+  // label — the same label at both widths (`Study`) — and the guard is the *deck title*,
+  // which comes from the fixture rather than from the copy: an `expect` naming one of the
+  // screen's own strings would fail while a translation was being merged, which is a
+  // failure about the locale files rather than about the layout.
+  //
+  // It is also the widest text this walk sees in a list row: the fixture's deck title is
+  // 34 characters of Indonesian and its quiz title is longer still, both rendered in a
+  // `truncate` beside a chip.
+  { name: 'study-hub', expect: 'Kriptografi Kunci Publik', steps: [{ nav: 'Study' }] },
   // --- Phase 4: the study screen, which had never been measured ---------------------
   //
   // Reached the way a phone reaches it — the deck row's own link — because the screen's
@@ -2010,14 +2060,16 @@ async function openSurface(page, surface) {
     // with the other form is what lets one `SURFACES` table be walked at both viewports,
     // which is what gate 5's second leg needs; the phone labels stay exactly as written.
     //
-    // **The five destinations are under change, and this table navigates by their labels.**
-    // An in-flight redesign makes them `Today / Workspaces / Study / Planner / More` —
-    // Tasks and Calendar become views *inside* Planner, and Study gains a tab it never had
-    // (`TabBar.tsx`'s comment). Every `{ nav: 'Tasks' }` step in `SURFACES` breaks the day
-    // that lands, and the failure reads as a missing label rather than a moved route. The
-    // fix is one alias per moved destination here, or rewriting those steps to reach Tasks
-    // through Planner — deliberately not done in advance, because guessing at a design
-    // that is still moving is how a table ends up wrong in a way nobody can date.
+    // **The five destinations changed, and this table navigates by their labels.** They
+    // are now `Today / Workspaces / Study / Planner / More`; Tasks and Calendar became
+    // views *inside* Planner, and Study gained a tab it never had. The `SURFACES` steps
+    // for calendar, tasks, planner, syllabus and syllabus-review were rewritten to reach
+    // those screens through Planner's own switcher — which is also the student's path, so
+    // the walk still proves reachability rather than merely that a URL renders.
+    //
+    // The alias table below is unchanged and still needed: the phone writes `Work` and
+    // `More` where the sidebar writes `Workspaces` and `Settings`, and one `SURFACES`
+    // table is walked at both viewports. The phone labels stay exactly as written.
     const aliases = { Work: 'Workspaces', More: 'Settings' }
     const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
@@ -2338,6 +2390,10 @@ async function main() {
       await page.goto(APP_URL, { waitUntil: 'domcontentloaded' })
       await signIn(page)
 
+      // The shell's own fonts settle here, before the per-surface wait repeats it: the
+      // first surface would otherwise be the one that pays the load.
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+
       // The root font size, set the way the reader's own setting does. 32px is
       // 200% of the 16px default and is what every phase's gate has used.
       await page.evaluate((px) => {
@@ -2347,6 +2403,26 @@ async function main() {
 
       for (const surface of surfaces) {
         await openSurface(page, surface)
+        // **Wait for the webfonts before measuring anything.**
+        //
+        // The app self-hosts Plus Jakarta Sans and JetBrains Mono, and a heading measured
+        // before they arrive is measured in the *fallback* face — which is narrower, so a
+        // screen that overflows with the real font can fit with the fallback and report a
+        // PASS. That is not hypothetical: the redesign's `h1 { font-size: 2rem;
+        // font-family: var(--font-heading) }` makes this the first time it matters, and it
+        // is what made `workspaces` pass at two combinations and fail at the other two in
+        // the same run — the walk was measuring two different fonts.
+        //
+        // `document.fonts.ready` resolves when the pending font loads settle. It is awaited
+        // after every navigation *and* after the root font-size change above, because a
+        // late-arriving face re-lays-out text at any size.
+        //
+        // **This also makes every previously recorded number comparable**, which is the
+        // larger point: a gate whose result depends on a font race is not a gate. The
+        // numbers in the plans were taken before this wait existed, so any that move now
+        // moved for this reason as much as for the surface list.
+        await page.evaluate(() => document.fonts.ready.then(() => undefined))
+        await new Promise((resolve) => setTimeout(resolve, 100))
         // **The resting state, not a hover.** Every step above ends in a click, so the
         // pointer is left sitting on the control that was clicked — and after a navigation
         // that coordinate is very often over a *different* control on the screen just

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { screen, within } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -215,5 +218,64 @@ describe('the syllabus review screen', () => {
     // wrong" — and the item arrives on the second poll.
     expect(await screen.findByText('UAS 15 Desember 08:00', undefined, { timeout: 4000 })).toBeInTheDocument()
     expect(within(container).queryByText(/Something went wrong/)).toBeNull()
+  })
+})
+
+/**
+ * The two defects the accessibility walk found on this screen, pinned where jsdom can
+ * see them.
+ *
+ * Both are **layout** defects, and jsdom has no layout engine — so the assertions are on
+ * the classes that decide the geometry, which is this project's convention for a
+ * browser-measured fix (`TasksScreen.test.tsx`'s "the phone layout the browser measured"
+ * block, `LockedFeature.test.tsx`'s 44px link case). The measured numbers are in the
+ * comments and in the phase plan; the classes are what a later edit can break.
+ */
+describe('the layout the browser measured', () => {
+  const source = readFileSync(join(__dirname, 'SyllabusReviewScreen.tsx'), 'utf8')
+
+  /**
+   * **The page was 680px wide inside a 390px viewport** at 200% text, with 25 elements
+   * past the right edge.
+   *
+   * The root is a column flex container, so without `w-full` its width is its
+   * *fit-content* — and fit-content can never go below min-content, so an intrinsic-width
+   * child (here the `.field` inputs and the chip row) sets the page width instead of being
+   * constrained by it. `w-full` makes the width definite. Measured after: **390/390**.
+   *
+   * Both roots are checked, because the screen has two — the confirmed state and the
+   * review state — and only one of them is on screen in any given run.
+   */
+  it('gives both screen roots a definite width, so an intrinsic child cannot widen the page', () => {
+    const roots = [...source.matchAll(/<div className="([^"]*\bmax-w-3xl\b[^"]*)"/g)].map((m) => m[1])
+    expect(roots.length, 'both roots must carry their classes inline').toBe(2)
+    for (const root of roots) {
+      expect(root).toContain('w-full')
+      // `mx-auto` stays: it is what centres the column on a desktop, where the
+      // measurement is unchanged.
+      expect(root).toContain('mx-auto')
+    }
+  })
+
+  /**
+   * **The `Keep this` control was 61.3x22 against the 44px phone floor** — and at 100%
+   * text, so an overflow-only fix would have looked complete.
+   *
+   * The cause was the input and its label being *siblings*: the wrapper carried
+   * `min-h-11`, but the harness measures a checkbox's **label** (`hitArea` resolves
+   * `el.closest('label')` or `label[for=…]`), and a text-height label is 22px. Nesting
+   * the input inside the label — the app's pattern (`SourcePicker`, `WorkspaceScreen`'s
+   * radios) — is what makes the 44px row the measured and the tappable thing.
+   */
+  it('nests the keep input inside its label, which is what carries the 44px target', () => {
+    const label = /<label\s+htmlFor=\{`keep-\$\{String\(row\.index\)\}`\}\s+className="([^"]*)"/.exec(source)?.[1]
+    expect(label, 'the keep label must carry its classes inline').toBeTruthy()
+    expect(label).toContain('min-h-11')
+    // The row's ring, on top of the global `:focus-visible` rule's ring on the box:
+    // the box alone is correct but small, and the row is the 44px target.
+    expect(label).toContain('has-[:focus-visible]:outline-ring')
+    // And the input is inside it, not a sibling — the whole reason the label is the
+    // measured element.
+    expect(source).toMatch(/<label[^>]*htmlFor=\{`keep-[\s\S]{0,600}?<input[\s\S]{0,600}?<\/label>/)
   })
 })

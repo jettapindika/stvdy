@@ -216,13 +216,18 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
                           measuring the input alone reports a false failure on every
                           checkbox in the app), and the harness's `hitArea` resolves a
                           checkbox's target as `el.closest('label')` **or**
-                          `label[for=…]` — as siblings with `htmlFor` it found the label,
-                          but the wrapper carried only `min-h-11` while the *input* stayed
-                          61.3x22, which is what the walk reported. `has-[:focus-visible]`
-                          is what puts the focus ring on the row rather than on the box. */}
+                          `label[for=…]`. As *siblings* with `htmlFor` it found the label,
+                          but the wrapper carried only `min-h-11` while the input stayed
+                          **61.3x22**, which is what the walk reported.
+
+                          `has-[:focus-visible]` adds the row's ring **on top of** the
+                          global `:focus-visible` rule's ring on the box — the same pair
+                          `SourcePicker` carries. The box's ring alone is correct but
+                          small; the row's is what makes the 44px target look like the
+                          thing that has focus. */}
                       <label
                         htmlFor={`keep-${String(row.index)}`}
-                        className="flex min-h-11 cursor-pointer items-center gap-2 text-body"
+                        className="flex min-h-11 cursor-pointer items-center gap-2 text-body has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
                       >
                         <input
                           id={`keep-${String(row.index)}`}
