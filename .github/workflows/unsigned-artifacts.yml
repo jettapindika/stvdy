@@ -1,0 +1,383 @@
+name: Unsigned artifacts
+
+# The unsigned path to the three installers — a macOS `.dmg`, a Windows NSIS `.exe` and the
+# direct-channel `.apk` — for building, testing and handing out a build **before the
+# certificates exist**.
+#
+# `release.yml` is the signed path and it is untouched by this file. It refuses to run
+# without `APPLE_CERTIFICATE` on purpose (A333: an unsigned, unnotarized macOS build runs
+# only on the machine that built it, and publishing one as a release is worse than a failed
+# release), and it warns rather than fails for Windows (A334: an unsigned installer is a
+# known degraded state, not a release failure). This workflow is the deliberate override of
+# that refusal, which is why it is a separate file with a separate name and why its release
+# notes say what is missing on every artifact.
+#
+# **It never touches the updater channel.** `bundle.createUpdaterArtifacts` is overridden to
+# `false` and no `latest.json` is produced or published, so a build from here cannot reach an
+# installed app. The override is not cosmetic: with the flag at its committed value the CLI
+# refuses to build at all without `TAURI_SIGNING_PRIVATE_KEY` ("A public key has been found,
+# but no private key").
+#
+# The Android project (`src-tauri/gen/android`) is generated in this workflow rather than
+# committed, because it is not in the tree: Phase 14's Android half was blocked without an
+# Android SDK, so `tauri android init` has never run for this repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to build. It must equal the tree's, in all four places.
+        required: true
+        default: 0.1.2
+      visibility:
+        description: What to do with the GitHub Release once the artifacts are built.
+        type: choice
+        options: [prerelease, public, draft]
+        default: prerelease
+      apk_signing:
+        description: >-
+          How the APK is signed. `operator-keystore` needs the ANDROID_* secrets and produces
+          the direct-channel APK; `debug` needs no key material and produces a debug-signed
+          APK that installs but cannot be updated in place by a release build.
+        type: choice
+        options: [operator-keystore, debug]
+        default: operator-keystore
+
+concurrency:
+  group: unsigned-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The one place the "no updater artifacts" override lives, so no job can forget it.
+  UNSIGNED: '{"bundle":{"createUpdaterArtifacts":false}}'
+
+jobs:
+  # -------------------------------------------------------------------------
+  # The version, before anything is built from it.
+  # -------------------------------------------------------------------------
+  version:
+    name: the tree agrees with the version being built
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.agree.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The input, Cargo.toml, tauri.conf.json and the iOS template agree
+        # The same four places `chore(release)` moves by hand, asserted rather than trusted:
+        # `crates/server/tests/release.rs` binds the first two and `src-tauri/tests/share_group.rs`
+        # binds the fourth. A build labelled 0.1.2 whose shell reports 0.1.1 is a mislabelled
+        # artifact, and this is the only step that can catch it before it is uploaded.
+        id: agree
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          workspace="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/, "", $3); print $3; exit}' Cargo.toml)"
+          shell="$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          ios="$(awk '/CFBundleShortVersionString/{print $2; exit}' src-tauri/gen/apple/project.yml.template)"
+
+          echo "input:              $WANT"
+          echo "Cargo.toml:         $workspace"
+          echo "tauri.conf.json:    $shell"
+          echo "project.yml:        $ios"
+
+          for pair in "Cargo.toml:$workspace" "tauri.conf.json:$shell" "project.yml.template:$ios"; do
+            file="${pair%%:*}"; got="${pair#*:}"
+            if [ "$got" != "$WANT" ]; then
+              echo "::error::$file says '$got' and the input says '$WANT'; bump the tree or the input"
+              exit 1
+            fi
+          done
+          echo "version=$WANT" >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------------
+  # macOS: universal, unsigned, unnotarized (the A333 refusal, overridden on purpose).
+  # -------------------------------------------------------------------------
+  macos:
+    name: macOS — universal dmg, unsigned
+    runs-on: macos-15
+    needs: version
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          # `universal-apple-darwin` is a lipo of these two, and the CLI refuses the target
+          # when either is missing.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: What the certificate's absence costs, said before the build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "::warning::APPLE_CERTIFICATE is not set: this dmg is unsigned and unnotarized, so Gatekeeper refuses it on any machine but the one that built it (A333). It is a test build, and the release notes say so."
+          fi
+
+      - name: Build the universal dmg
+        run: ./app/node_modules/.bin/tauri build --target universal-apple-darwin --bundles dmg --config "$UNSIGNED"
+
+      - name: The architectures, measured rather than assumed
+        run: |
+          set -euo pipefail
+          app="$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)"
+          archs="$(lipo -archs "$app/Contents/MacOS/Stvdy")"
+          echo "archs: $archs"
+          case "$archs" in *arm64*) ;; *) echo "::error::not universal: $archs"; exit 1 ;; esac
+          case "$archs" in *x86_64*) ;; *) echo "::error::not universal: $archs"; exit 1 ;; esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+  # -------------------------------------------------------------------------
+  # Windows: the NSIS installer, unsigned (A334's degraded state, taken knowingly).
+  # -------------------------------------------------------------------------
+  windows:
+    name: Windows — NSIS installer, unsigned
+    runs-on: windows-2025
+    needs: version
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: What the certificate's absence costs, said before the build
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if [ -z "${WINDOWS_CERTIFICATE:-}" ]; then
+            echo "::warning::WINDOWS_CERTIFICATE is not set: SmartScreen warns on every install and an unsigned binary never accrues publisher reputation (A334)."
+          fi
+
+      - name: Build the NSIS installer
+        # `--bundles nsis` and not the config's `["app", "dmg", "nsis"]`: the other two are
+        # not valid bundle kinds on Windows.
+        #
+        # `shell: bash` rather than pwsh: the override is a JSON string, and PowerShell
+        # re-quotes a native command's arguments in a way that strips the inner double quotes
+        # (`{bundle:{createUpdaterArtifacts:false}}`, which is not JSON). An environment
+        # variable expanded by bash has no such problem, and Git Bash is on the runner.
+        shell: bash
+        run: ./app/node_modules/.bin/tauri build --bundles nsis --config "$UNSIGNED"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  # -------------------------------------------------------------------------
+  # Android: the direct-channel APK (A352), from a project generated here.
+  # -------------------------------------------------------------------------
+  android:
+    name: Android — the direct-channel APK
+    runs-on: ubuntu-24.04
+    needs: version
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+
+      - name: The SDK packages the generated project asks for
+        # The CLI discovers the NDK at `$ANDROID_HOME/ndk/<version>` (measured: it prints
+        # "Info Using installed NDK: …" and then reads that directory's `source.properties`),
+        # so installing one is enough and `NDK_HOME` is set here for the Gradle side.
+        #
+        # `compileSdk`/`targetSdk` are read from the CLI's own Gradle template rather than
+        # guessed: both are 37 in `@tauri-apps/cli` 2.12.2.
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --prefix app
+
+      - name: Generate the Android project
+        # Not committed in this tree (Phase 14 was blocked without an SDK), so the release
+        # cannot assume it exists. `--ci` skips the CLI's prompts, which a runner cannot answer.
+        run: ./app/node_modules/.bin/tauri android init --ci
+
+      - name: The direct-APK keystore, from secrets, for this run only
+        if: inputs.apk_signing == 'operator-keystore'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set. Either set the four ANDROID_* secrets (A352: the direct APK is signed by the operator's key, not Play's) or re-run with apk_signing=debug."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/direct-apk.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          EOF
+          chmod 600 "$keystore" src-tauri/gen/android/keystore.properties
+
+      - name: The store build carries no purchase UI
+        # A compile-time config, so the same absence has to hold for the direct channel.
+        run: |
+          TAURI_ENV_PLATFORM=android npm --prefix app run build
+          node scripts/check-no-purchase-ui.mjs
+
+      - name: Build the APK
+        # `--debug` for the keyless path: a debug-signed APK installs (that is the whole point
+        # of it) and a release APK with no signing config does not.
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "${{ inputs.apk_signing }}" = "debug" ]; then extra="--debug"; fi
+          ./app/node_modules/.bin/tauri android build --apk --ci $extra --config "$UNSIGNED"
+
+      - name: The APK carries no purchase UI either
+        run: |
+          set -euo pipefail
+          apk="$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -type f | head -1)"
+          if [ -z "$apk" ]; then
+            echo "::error::no APK under src-tauri/gen/android/app/build/outputs/apk"
+            exit 1
+          fi
+          echo "checking $apk"
+          # Against the artifact rather than the build directory: "the build output was clean"
+          # and "the artifact is clean" are different claims (A351, A352).
+          bash scripts/check-mobile-no-purchase.sh "$apk"
+          suffix=""
+          if [ "${{ inputs.apk_signing }}" = "debug" ]; then suffix="-debug"; fi
+          mkdir -p dist/release
+          cp "$apk" "dist/release/Stvdy_${{ needs.version.outputs.version }}_universal${suffix}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: dist/release/*.apk
+
+  # -------------------------------------------------------------------------
+  # The Release.
+  # -------------------------------------------------------------------------
+  publish:
+    name: the GitHub Release
+    runs-on: ubuntu-24.04
+    needs: [version, macos, windows, android]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/release
+          merge-multiple: true
+
+      - name: What is about to be published
+        run: ls -lR dist/release
+
+      - name: Checksums, so a download can be shown to be the upload
+        run: |
+          set -euo pipefail
+          cd dist/release
+          # Written outside the directory first: the shell truncates the redirect target
+          # before `sha256sum` runs, so `./*` would otherwise include a hash of the empty
+          # file it is about to write.
+          sha256sum ./* > "$RUNNER_TEMP/sums"
+          mv "$RUNNER_TEMP/sums" SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          VISIBILITY: ${{ inputs.visibility }}
+          APK_SIGNING: ${{ inputs.apk_signing }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+
+          if [ "$APK_SIGNING" = "debug" ]; then
+            apk_note="signed with the **debug** key: it installs, and a later release build signed with the operator's key **cannot** update it in place (uninstall first)."
+          else
+            apk_note="signed with the operator's direct-channel key (A352), not Play's."
+          fi
+
+          cat > notes.md <<EOF
+          Stvdy $VERSION — **unsigned test build**. Not a release for students.
+
+          The three installers are attached, and each one is missing the signature that makes it
+          distributable:
+
+          | File | What is missing |
+          |---|---|
+          | \`Stvdy_${VERSION}_universal.dmg\` | macOS, universal (arm64 + x86_64), **unsigned and unnotarized**: Gatekeeper refuses it on any machine but the one that built it. Right-click → Open, or \`xattr -dr com.apple.quarantine /Applications/Stvdy.app\`. |
+          | \`Stvdy_${VERSION}_x64-setup.exe\` | Windows x64, NSIS, **unsigned**: SmartScreen warns on every install. |
+          | \`Stvdy_${VERSION}_universal*.apk\` | Android, $apk_note |
+
+          **The updater channel is untouched.** \`createUpdaterArtifacts\` is false for this build and
+          no \`latest.json\` was written or published, so no installed app will be offered it. The
+          signed path — the one that does publish a manifest — is \`.github/workflows/release.yml\`,
+          and it needs the certificates in \`docs/RELEASE.md\`.
+
+          The client talks to \`https://api.stvdy.app\`; the server is not part of this release.
+          \`SHA256SUMS.txt\` covers every file above.
+          EOF
+
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "the release exists: uploading into it"
+            gh release upload "$tag" dist/release/* --clobber
+          else
+            case "$VISIBILITY" in
+              public)     gh release create "$tag" --title "v$VERSION" --notes-file notes.md dist/release/* ;;
+              prerelease) gh release create "$tag" --title "v$VERSION" --prerelease --notes-file notes.md dist/release/* ;;
+              draft)      gh release create "$tag" --title "v$VERSION" --draft --notes-file notes.md dist/release/* ;;
+              *) echo "::error::unknown visibility '$VISIBILITY'"; exit 1 ;;
+            esac
+          fi
+
+      - name: "The round trip: what the Release serves"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release view "v$VERSION" --json tagName,isDraft,isPrerelease,assets \
+            --jq '"\(.tagName) draft=\(.isDraft) prerelease=\(.isPrerelease)", (.assets[] | "  \(.name)\t\(.size) bytes")'
