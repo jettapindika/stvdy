@@ -208,12 +208,17 @@ jobs:
         # `packages` input is `tools platform-tools`, and `tools` is no longer a package
         # `sdkmanager` can resolve — the action fails with `Failed to find package 'tools'`
         # and exit 1 before any of this runs (observed on run 38237309810). The ubuntu-24.04
-        # runner image already carries an SDK, so this installs only what is missing and
-        # asserts what it found rather than trusting the image's inventory.
+        # runner image already carries an SDK, so this installs only what is missing.
         #
-        # The versions are read from the project `tauri android init` generates, not guessed:
-        # `compileSdk`/`targetSdk` are 37 and the Gradle wrapper is 9.6.1 (Gradle downloads
-        # its own distribution), with AGP 9.3.1 and Kotlin 2.2.10.
+        # **The platform id is `android-37.0`, not `android-37`.** API 37 has no plain
+        # `android-37` package: Google's channel lists `platforms;android-37.0`,
+        # `;android-37.1` and `;android-37.2` and nothing else for that level
+        # (`repository2-3.xml`, read 2026-10-12), which is why `sdkmanager --install
+        # platforms;android-37` failed with `Failed to find package 'platforms;android-37'`
+        # on run 38238167815. The generated project asks for `compileSdk = 37` /
+        # `targetSdk = 37`; AGP 9 resolves that against the platform the SDK actually has,
+        # and the step prints both the id it installed and the directories on disk so a
+        # mismatch is visible in the log rather than only in AGP's error.
         run: |
           set -euo pipefail
           echo "ANDROID_HOME=$ANDROID_HOME"
@@ -221,18 +226,32 @@ jobs:
           echo "sdkmanager: $sdkmanager"
 
           yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" --install "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+          "$sdkmanager" --install "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+
+          echo "--- platforms ---"
+          ls "$ANDROID_HOME/platforms"
+          echo "--- build-tools ---"
+          ls "$ANDROID_HOME/build-tools"
 
           # The NDK is cargo's linker, not Gradle's: the generated project has no
-          # `ndkVersion` and no `externalNativeBuild`, so AGP never asks for one. The CLI
-          # discovers the NDK by listing `$ANDROID_HOME/ndk/*` and reading each candidate's
-          # `source.properties`, and takes the **highest** version present (measured: with
-          # 27.3.13750724 and 29.0.14206865 installed it prints the latter). `NDK_HOME` is
-          # exported because cargo-mobile2 warns that it is required.
-          ndk="$(ls -d "$ANDROID_HOME"/ndk/*/ | sort -V | tail -1)"
+          # `ndkVersion` and no `externalNativeBuild`, so AGP never asks for one — but
+          # cargo-mobile2 does, and it reads **`NDK_HOME` and nothing else**
+          # (`cargo-mobile2` 0.22.5 `src/android/ndk.rs::Env::new` reads the variable, rejects
+          # a non-directory, and parses `<it>/source.properties` for the revision; its floor
+          # is 19.0). So the version is pinned by this line rather than left to a scan.
+          #
+          # `ANDROID_NDK_ROOT` is the runner image's own default (27.3.13750724 in the
+          # ubuntu-24.04 image, which also sets `ANDROID_NDK` and `ANDROID_NDK_HOME` to it),
+          # so the build uses the NDK the image vendors as default rather than the newest
+          # directory present — with three installed, "highest" is 30.0.16248370 and that is
+          # not a version anything here has been tested against.
+          ndk="${ANDROID_NDK_ROOT:-}"
+          if [ -z "$ndk" ]; then
+            ndk="$(ls -d "$ANDROID_HOME"/ndk/*/ | sort -V | tail -1)"
+          fi
           echo "NDK: $ndk"
-          test -f "$ndk/source.properties" || { echo "::error::no NDK under $ANDROID_HOME/ndk"; exit 1; }
-          echo "NDK_HOME=${ndk%/}" >> "$GITHUB_ENV"
+          test -f "$ndk/source.properties" || { echo "::error::no NDK at $ndk"; exit 1; }
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -277,13 +296,70 @@ jobs:
           fi
           keystore="$RUNNER_TEMP/direct-apk.keystore"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
-          cat > src-tauri/gen/android/keystore.properties <<EOF
-          storeFile=$keystore
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyPassword=$ANDROID_KEY_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          EOF
+          # `printf` and not a heredoc, for the same reason as the step below: a plain
+          # heredoc's terminator has to sit at column 0, which a YAML block scalar forbids.
+          printf '%s\n' \
+            "storeFile=$keystore" \
+            "storePassword=$ANDROID_KEYSTORE_PASSWORD" \
+            "keyPassword=$ANDROID_KEY_PASSWORD" \
+            "keyAlias=$ANDROID_KEY_ALIAS" > src-tauri/gen/android/keystore.properties
           chmod 600 "$keystore" src-tauri/gen/android/keystore.properties
+
+      - name: Wire the keystore into the generated Gradle build
+        if: inputs.apk_signing == 'operator-keystore'
+        # `keystore.properties` alone signs nothing. The project `tauri android init` writes
+        # has **no** `signingConfigs` block and its release build type sets no `signingConfig`
+        # (read out of `@tauri-apps/cli` 2.12.2's own `app/build.gradle.kts` template: the
+        # file's only reference to the properties file is a `.gitignore` entry), so a release
+        # APK comes out unsigned and Gradle refuses the build. Tauri's own Android signing
+        # guide is explicit that the Gradle block is the operator's to add.
+        #
+        # The block is **appended as a second `android { }`**, not spliced into the middle of
+        # the file: Gradle's Kotlin DSL runs these blocks in order, so a block at the end
+        # creates `signingConfigs.release` after `buildTypes.release` exists and can assign
+        # to it — whereas inserting `signingConfigs` above `buildTypes` would depend on the
+        # template's exact layout, which is another project's file and moves with its version.
+        # Idempotent, so a committed project that already carries the block is left alone.
+        #
+        # Appended with `printf`, not a heredoc: a heredoc's body and terminator have to start
+        # at column 0 for the shell, and a YAML block scalar cannot contain a line that is not
+        # indented past its key — the two requirements are incompatible, and the first attempt
+        # at this step produced a workflow file GitHub could not parse.
+        run: |
+          set -euo pipefail
+          gradle=src-tauri/gen/android/app/build.gradle.kts
+          if grep -q "signingConfigs" "$gradle"; then
+            echo "the project already declares signingConfigs: leaving it alone"
+            exit 0
+          fi
+          printf '%s\n' \
+            '' \
+            '// Added by .github/workflows/unsigned-artifacts.yml. `keystore.properties` is' \
+            '// written from Actions secrets for one run and is never committed; `rootProject`' \
+            '// here is `src-tauri/gen/android`, which is where that file is written.' \
+            'android {' \
+            '    signingConfigs {' \
+            '        create("release") {' \
+            '            val keystoreProperties = rootProject.file("keystore.properties")' \
+            '            if (keystoreProperties.exists()) {' \
+            '                val properties = java.util.Properties().apply {' \
+            '                    keystoreProperties.inputStream().use { load(it) }' \
+            '                }' \
+            '                keyAlias = properties.getProperty("keyAlias")' \
+            '                keyPassword = properties.getProperty("keyPassword")' \
+            '                storeFile = file(properties.getProperty("storeFile"))' \
+            '                storePassword = properties.getProperty("storePassword")' \
+            '            }' \
+            '        }' \
+            '    }' \
+            '    buildTypes {' \
+            '        getByName("release") {' \
+            '            signingConfig = signingConfigs.getByName("release")' \
+            '        }' \
+            '    }' \
+            '}' >> "$gradle"
+          echo "appended the signingConfigs block:"
+          tail -22 "$gradle"
 
       - name: The store build carries no purchase UI
         # A compile-time config, so the same absence has to hold for the direct channel.
@@ -369,26 +445,30 @@ jobs:
             apk_note="signed with the operator's direct-channel key (A352), not Play's."
           fi
 
-          cat > notes.md <<EOF
-          Stvdy $VERSION — **unsigned test build**. Not a release for students.
-
-          The three installers are attached, and each one is missing the signature that makes it
-          distributable:
-
-          | File | What is missing |
-          |---|---|
-          | \`Stvdy_${VERSION}_universal.dmg\` | macOS, universal (arm64 + x86_64), **unsigned and unnotarized**: Gatekeeper refuses it on any machine but the one that built it. Right-click → Open, or \`xattr -dr com.apple.quarantine /Applications/Stvdy.app\`. |
-          | \`Stvdy_${VERSION}_x64-setup.exe\` | Windows x64, NSIS, **unsigned**: SmartScreen warns on every install. |
-          | \`Stvdy_${VERSION}_universal*.apk\` | Android, $apk_note |
-
-          **The updater channel is untouched.** \`createUpdaterArtifacts\` is false for this build and
-          no \`latest.json\` was written or published, so no installed app will be offered it. The
-          signed path — the one that does publish a manifest — is \`.github/workflows/release.yml\`,
-          and it needs the certificates in \`docs/RELEASE.md\`.
-
-          The client talks to \`https://api.stvdy.app\`; the server is not part of this release.
-          \`SHA256SUMS.txt\` covers every file above.
-          EOF
+          # `printf` and not a heredoc: a plain heredoc's body and terminator have to start at
+          # column 0, which a YAML block scalar forbids — and the indented body a YAML-safe
+          # heredoc does produce would arrive in the notes as a markdown code block. No
+          # backticks in the text either, so no line has to fight the shell's quoting.
+          printf '%s\n' \
+            "Stvdy $VERSION — **unsigned test build**. Not a release for students." \
+            '' \
+            'The three installers are attached, and each one is missing the signature that makes' \
+            'it distributable:' \
+            '' \
+            '| File | What is missing |' \
+            '|---|---|' \
+            "| Stvdy_${VERSION}_universal.dmg | macOS, universal (arm64 + x86_64), **unsigned and unnotarized**: Gatekeeper refuses it on any machine but the one that built it. Right-click → Open, or run: xattr -dr com.apple.quarantine /Applications/Stvdy.app |" \
+            "| Stvdy_${VERSION}_x64-setup.exe | Windows x64, NSIS, **unsigned**: SmartScreen warns on every install. |" \
+            "| Stvdy_${VERSION}_universal*.apk | Android, $apk_note |" \
+            '' \
+            '**The updater channel is untouched.** createUpdaterArtifacts is false for this build,' \
+            'and no latest.json was written or published, so no installed app will be offered it.' \
+            'The signed path — the one that does publish a manifest — is' \
+            '.github/workflows/release.yml, and it needs the certificates in docs/RELEASE.md.' \
+            '' \
+            'The client talks to https://api.stvdy.app; the server is not part of this release.' \
+            'SHA256SUMS.txt covers every file above.' > notes.md
+          cat notes.md
 
           if gh release view "$tag" > /dev/null 2>&1; then
             echo "the release exists: uploading into it"
