@@ -47,6 +47,23 @@ chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = { version = "0.10.4", features = ["serde"] }
 uuid = { version = "1.28.0", features = ["v4", "v7", "serde"] }
 
+# --- calendar (Phase 10) ---
+# Pinned for the same reason `headless_chrome` is: the feed is a document a client
+# caches and the parser is what reads someone else's, so a minor upgrade must be a
+# deliberate change with the acceptance test re-run.
+#
+# `features = ["parser"]` is REQUIRED and is NOT a default feature: without it
+# `icalendar::parser::read_components` does not exist, so both the feed's round-trip
+# test and the whole ICS import fail to compile. The builder half (generation) needs
+# no feature.
+icalendar = { version = "0.17.14", features = ["parser"] }
+# The recurrence engine, pinned explicitly rather than used through `icalendar`'s
+# re-export: the crate re-exports only a *subset* of `rrule`'s types, so relying on it
+# would tie the expansion API to `icalendar`'s release cadence and could silently hand
+# back a different `rrule` version than the one this plan's bound is written against.
+# `all(limit) -> RRuleResult { dates, limited }` is the pair A232 depends on.
+rrule = "0.14"
+
 # --- misc ---
 hex = "0.4.3"
 base64 = "0.23.1"
