@@ -9,6 +9,7 @@ pub mod fetch;
 pub mod llm;
 pub mod mailer;
 pub mod payment;
+pub mod push;
 pub mod search;
 pub mod storage;
 
@@ -58,6 +59,13 @@ pub struct Providers {
     /// rather than mint an invoice against a double, because a double's QR string is
     /// not money and its callback signature is one we chose ourselves.
     pub payment: Option<Arc<dyn payment::PaymentGateway>>,
+    /// The push transports (Phase 12, A288).
+    ///
+    /// Not `Option`: the *router* is always present and holds whichever transports the
+    /// configuration names, so a caller asks it for a platform rather than unwrapping a
+    /// provider. `PushRouter::default()` is the honest empty configuration and is what a
+    /// deployment with no push credentials gets.
+    pub push: Arc<push::PushRouter>,
 }
 
 impl Providers {
@@ -192,6 +200,7 @@ impl Providers {
             )?),
             ics_fetch: Arc::new(crate::calendar::ics_in::GuardedFetch),
             payment: payment(cfg)?,
+            push: Arc::new(push::PushRouter::from_config(&cfg.push)),
         })
     }
 }

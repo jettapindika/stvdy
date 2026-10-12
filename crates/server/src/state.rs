@@ -67,6 +67,15 @@ pub struct AppState {
     /// double's QR string is not money, and a signature we chose ourselves proves
     /// nothing about who sent a callback.
     pub payment: Option<Arc<dyn crate::integrations::payment::PaymentGateway>>,
+    /// The push transports (Phase 12, A288).
+    ///
+    /// The router is always present and holds whichever transports the configuration names,
+    /// so a caller asks it for a platform instead of unwrapping a provider and deciding what
+    /// an absent one means. A deployment with no push credentials gets an empty router, which
+    /// is a supported state: in-app and email reminders still deliver, and
+    /// `GET /settings`'s `channels_available` reports `push` as unavailable rather than
+    /// letting a delivery fail at 03:00.
+    pub push: Arc<crate::integrations::push::PushRouter>,
     pub jobs: Queue,
 }
 
