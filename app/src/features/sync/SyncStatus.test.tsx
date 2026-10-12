@@ -61,6 +61,32 @@ describe('the sync status control', () => {
     expect(await screen.findByText('3 changes waiting to sync')).toBeInTheDocument()
   })
 
+  /**
+   * The precedence rule: a refusal outranks a pending write.
+   *
+   * This case exists because nothing else notices the rule. Removing it from
+   * `SyncStatus.tsx`'s derivation leaves this suite green — the four other guards
+   * each have a case, and this one did not — and the consequence is the worst
+   * version of a sync UI lying to a student: with `needs_attention` **and** a
+   * non-empty outbox, the control would read "Syncing" and the refused write would
+   * look like it is still on its way. That is the shape of the Phase 8 gate 7(d)
+   * rule, so the assertion is both halves: the word is the refusal's, and the count
+   * is still on screen, because "not Syncing" alone would also pass if the control
+   * rendered nothing at all.
+   */
+  it('puts a refusal ahead of a pending write, and still shows the count', async () => {
+    const { sync } = installFakePlatform('macos')
+    sync.set({ state: 'needs_attention', code: 'read_only_entity', lastSyncedAt: STORED, outbox: 3 })
+
+    renderWithProviders(<SyncStatus />)
+
+    const word = await screen.findByRole('status')
+    expect(word).toHaveTextContent('Needs attention')
+    expect(word).not.toHaveTextContent('Syncing')
+    expect(await screen.findByText('3 changes waiting to sync')).toBeInTheDocument()
+    expect(await screen.findByText(/read_only_entity/)).toBeInTheDocument()
+  })
+
   it('shows the server code for a rejected mutation and marks the row not saved', async () => {
     const { sync } = installFakePlatform('macos')
     sync.set({ state: 'needs_attention', code: 'read_only_entity', lastSyncedAt: STORED, outbox: 0 })
