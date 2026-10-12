@@ -10,7 +10,7 @@ use uuid::Uuid;
 use stvdy_core::citations::{Citation, resolve};
 use stvdy_core::prompts::registry::{
     BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, NO_EXAM_DATE, NO_OTHER_SECTIONS,
-    SOURCE_LANGUAGE,
+    NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
 };
 use stvdy_core::prompts::{
     ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, UNTRUSTED_VARIABLES, VarKind,
@@ -1327,7 +1327,7 @@ fn the_task_modules_require_a_language_rather_than_defaulting_to_the_source_lang
 
     for module in [ModuleId::QuickCaptureV1, ModuleId::TaskBreakdownV1] {
         assert_eq!(
-            kind(module, "output_language"),
+            kinds_of(module, "output_language"),
             Some(VarKind::Caller),
             "{}: there are no sources to detect a language from",
             module.version()
@@ -1403,4 +1403,59 @@ fn the_task_breakdown_documented_schema_parses_into_the_generation_contract() {
     assert_eq!(parsed.subtasks.len(), 1);
     assert_eq!(parsed.subtasks[0].estimate_min, 45);
     assert_eq!(parsed.total_estimate_min, 180);
+}
+
+/// The two Phase 11 modules' variable kinds, beside the ones Phase 9 pinned.
+///
+/// `timezone` cannot default for the syllabus module: the module resolves a year-less date
+/// ("12 Nov") against it, and a default would silently place every date in the import in
+/// the wrong zone. `semester_context` is the opposite — a syllabus that never names its
+/// semester is the normal case — but its *value* is still typed text, so it is listed in
+/// `UNTRUSTED_VARIABLES` and wrapped. `topics_json` is the server's own JSON and is
+/// deliberately not.
+#[test]
+fn the_phase_11_modules_declare_the_variables_their_rules_need() {
+    assert_eq!(
+        kinds_of(ModuleId::SyllabusV1, "timezone"),
+        Some(VarKind::Caller),
+        "syllabus.v1 resolves every year-less date against the timezone"
+    );
+    assert_eq!(
+        kinds_of(ModuleId::SyllabusV1, "semester_context"),
+        Some(VarKind::Optional(NO_SEMESTER_CONTEXT)),
+        "a syllabus that names no semester is a state the module must be able to state"
+    );
+    assert!(
+        UNTRUSTED_VARIABLES.contains(&"semester_context"),
+        "the semester label is typed text and moves every date in the import"
+    );
+
+    for name in ["goal_title", "target_date", "topics_json"] {
+        assert_eq!(
+            kinds_of(ModuleId::PlannerEffortV1, name),
+            Some(VarKind::Caller),
+            "planner_effort.v1 needs {name} and has no defensible default for it"
+        );
+    }
+    assert!(
+        !UNTRUSTED_VARIABLES.contains(&"topics_json"),
+        "topics_json is JSON the server built from the student's sources, not text they typed"
+    );
+
+    for module in [ModuleId::SyllabusV1, ModuleId::PlannerEffortV1] {
+        assert_eq!(
+            kinds_of(module, "output_language"),
+            Some(VarKind::Optional(SOURCE_LANGUAGE)),
+            "{}: the material-language default is what keeps an Indonesian import Indonesian",
+            module.version()
+        );
+    }
+}
+
+/// The two Phase 11 modules' variable kinds, by name.
+fn kinds_of(module: ModuleId, name: &str) -> Option<VarKind> {
+    module_variables(module)
+        .iter()
+        .find(|(declared, _)| *declared == name)
+        .map(|(_, kind)| *kind)
 }

@@ -83,6 +83,10 @@ pub const UNTRUSTED_VARIABLES: &[&str] = &[
     // strings, and they reach the section call from the outline row as well.
     "style",
     "length",
+    // `semester_context` is typed into the syllabus form ("Semester 1 2025/2026"), and the
+    // semester label is the value the module resolves a year-less date against — so it is
+    // the one field an injected sentence could use to move every date in the import.
+    "semester_context",
 ];
 
 /// The permissive upgrade sentence, used when `allow_upgrade_hint` is true.

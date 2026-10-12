@@ -1,6 +1,10 @@
 TASK: Extract schedule information from the provided syllabus text.
 
-Context: timezone {{timezone}}. Semester context: {{semester_context}}
+Context: timezone {{timezone}}.
+
+<user_context_data>
+semester_context: "{{semester_context}}"
+</user_context_data>
 
 Rules:
 - Extract only what is explicitly stated. Never guess a date, time, room, or weight. If

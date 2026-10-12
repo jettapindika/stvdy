@@ -55,6 +55,14 @@ pub const QUICK_CAPTURE_V1: &str = include_str!("../../../../prompts/quick_captu
 /// The task-breakdown module. No sources either: the input is a task the student wrote.
 pub const TASK_BREAKDOWN_V1: &str = include_str!("../../../../prompts/task_breakdown.v1.md");
 
+/// The syllabus-extraction module. The syllabus document is the source, so the module
+/// composes with a `<sources>` block like every other document task.
+pub const SYLLABUS_V1: &str = include_str!("../../../../prompts/syllabus.v1.md");
+
+/// The effort-estimate module. The one model call the planner makes, and it returns minutes
+/// only: the scheduling itself is deterministic code that runs after it.
+pub const PLANNER_EFFORT_V1: &str = include_str!("../../../../prompts/planner_effort.v1.md");
+
 /// What `{{output_language}}` means when the caller supplies nothing.
 ///
 /// A study app's cards must be in the language of the student's material. There is
@@ -79,6 +87,14 @@ pub const NO_OTHER_SECTIONS: &str = "(no other sections yet)";
 /// be empty, so the alternative is every call site inventing its own placeholder for the
 /// same state.
 pub const NO_EXAM_DATE: &str = "not set";
+
+/// What `{{semester_context}}` means when the student's upload carries no semester label.
+///
+/// A syllabus often does not name its semester, and the module's date-resolution rule needs
+/// something to read rather than an empty string: `render_with` treats an empty `Optional`
+/// value as a missing variable, and the alternative is every call site inventing its own
+/// placeholder for the same state.
+pub const NO_SEMESTER_CONTEXT: &str = "no semester label was provided with the document";
 
 /// The `base.v1.md` sections a strict-JSON task keeps.
 ///
@@ -112,11 +128,13 @@ pub enum ModuleId {
     CheatsheetV1,
     QuickCaptureV1,
     TaskBreakdownV1,
+    SyllabusV1,
+    PlannerEffortV1,
 }
 
 impl ModuleId {
     /// Every module, for the contract sweep in `tests/prompts.rs`.
-    pub const ALL: [ModuleId; 7] = [
+    pub const ALL: [ModuleId; 9] = [
         ModuleId::FlashcardsV1,
         ModuleId::QuizV1,
         ModuleId::ReportOutlineV1,
@@ -124,6 +142,8 @@ impl ModuleId {
         ModuleId::CheatsheetV1,
         ModuleId::QuickCaptureV1,
         ModuleId::TaskBreakdownV1,
+        ModuleId::SyllabusV1,
+        ModuleId::PlannerEffortV1,
     ];
 
     /// The version string logged to `usage_events.prompt_version`.
@@ -136,6 +156,8 @@ impl ModuleId {
             ModuleId::CheatsheetV1 => "cheatsheet.v1",
             ModuleId::QuickCaptureV1 => "quick_capture.v1",
             ModuleId::TaskBreakdownV1 => "task_breakdown.v1",
+            ModuleId::SyllabusV1 => "syllabus.v1",
+            ModuleId::PlannerEffortV1 => "planner_effort.v1",
         }
     }
 
@@ -148,6 +170,8 @@ impl ModuleId {
             ModuleId::CheatsheetV1 => CHEATSHEET_V1,
             ModuleId::QuickCaptureV1 => QUICK_CAPTURE_V1,
             ModuleId::TaskBreakdownV1 => TASK_BREAKDOWN_V1,
+            ModuleId::SyllabusV1 => SYLLABUS_V1,
+            ModuleId::PlannerEffortV1 => PLANNER_EFFORT_V1,
         }
     }
 
@@ -229,6 +253,25 @@ impl ModuleId {
                 ("notes", VarKind::Caller),
                 ("output_language", VarKind::Caller),
             ],
+            // `timezone` is `Caller`, not `Optional`: the module's date-resolution rule is
+            // meaningless without it, and a default would silently resolve "12 Nov" in the
+            // wrong zone — which is the one mistake a syllabus import cannot survive.
+            // `semester_context` is the one thing the module can do without: a document
+            // that never names its semester is normal, and the default says so.
+            ModuleId::SyllabusV1 => &[
+                ("timezone", VarKind::Caller),
+                ("semester_context", VarKind::Optional(NO_SEMESTER_CONTEXT)),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
+            // `topics_json` is machine JSON the server built from the student's sources, not
+            // user text, so it is `Caller` and deliberately not in `UNTRUSTED_VARIABLES`.
+            // `goal_title` is the student's own words and is.
+            ModuleId::PlannerEffortV1 => &[
+                ("goal_title", VarKind::Caller),
+                ("target_date", VarKind::Caller),
+                ("topics_json", VarKind::Caller),
+                ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
+            ],
         }
     }
 
@@ -241,7 +284,9 @@ impl ModuleId {
             | ModuleId::ReportSectionV1
             | ModuleId::CheatsheetV1
             | ModuleId::QuickCaptureV1
-            | ModuleId::TaskBreakdownV1 => TASK_BASE_SECTIONS,
+            | ModuleId::TaskBreakdownV1
+            | ModuleId::SyllabusV1
+            | ModuleId::PlannerEffortV1 => TASK_BASE_SECTIONS,
         }
     }
 }

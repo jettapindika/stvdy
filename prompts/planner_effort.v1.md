@@ -1,6 +1,11 @@
 TASK: Estimate study effort for an exam goal.
 
-Goal: "{{goal_title}}" on {{target_date}}
+Target date: {{target_date}}
+
+<user_context_data>
+goal_title: "{{goal_title}}"
+</user_context_data>
+
 Topics (each with its source size and current quiz accuracy): {{topics_json}}
 
 Rules:
@@ -18,4 +23,4 @@ Rules:
 - Write in {{output_language}}.
 
 Schema:
-{"topics":[{"topic":"string","estimate_min":120,"reason":"string"}],"total_estimate_min":600}
+{"topics":[{"topic":"string","estimate_min":120,"reason":"string"}],"total_estimate_min":120}
