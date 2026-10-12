@@ -216,7 +216,7 @@ docs/API.md, docs/ARCHITECTURE.md, docs/ASSUMPTIONS.md, docs/RELEASE.md
 > distinguish two diagrams in different sections, and a test for exactly that was added in
 > `139c503`. Treat this task as a record of what was built, not as instructions.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests** — **ticked: both exist, one under a different name and one by a stronger mechanism.** `markup_in_a_text_field_is_escaped_not_interpreted` is present verbatim in `crates/core/tests/render.rs`. `a_script_element_drops_the_whole_block_and_is_recorded` shipped as `a_disallowed_svg_element_drops_the_block_and_records_why`, beside four more injection cases in the same file that the plan did not name and that matter more: `a_disallowed_svg_attribute_is_refused`, `a_single_quoted_attribute_value_cannot_inject_an_attribute`, `a_single_quoted_id_cannot_inject_an_attribute` and `an_attribute_value_is_escaped_completely_and_only_once`. **This is the phase whose review round found an SVG attribute-value injection that reached a printed PDF**, so the extra cases are the fix for a defect the plan did not foresee.
 
 ```rust
 /// Generation produces data, never markup. A field containing a tag is escaped and shown
@@ -275,7 +275,7 @@ fn rendering_is_deterministic() {
 fn labels_resolve_to_citations_and_unknown_ones_are_dropped() { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail** — **ticked: it runs the cases above, which exist.**
 
 `cargo test -p stvdy-core --test render` → unresolved import.
 
