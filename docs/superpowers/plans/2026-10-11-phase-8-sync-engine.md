@@ -502,7 +502,7 @@ docs/{SYNC,API,ARCHITECTURE,ASSUMPTIONS}.md
   `MAX_LIMIT`, `Entity::payload_columns() -> &'static [&'static str]`,
   `Entity::payload_shape() -> PayloadShape`.
 
-- [ ] **Step 1: Read what Phase 7 landed, and assert its signature**
+- [x] **Step 1: Read what Phase 7 landed, and assert its signature**
 
 ```bash
 sed -n '1,60p' crates/server/src/sync/push.rs     # the module header and the imports
@@ -601,12 +601,12 @@ fn the_payload_allowlist_excludes_the_identity_and_the_storage_keys() {
 }
 ```
 
-- [ ] **Step 3: Run them and watch them fail**
+- [x] **Step 3: Run them and watch them fail**
 
 `cargo test -p stvdy-sync --test protocol` → `error[E0432]: unresolved import
 stvdy_sync::proto::cursor`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `crates/sync/src/proto/cursor.rs`:
 
@@ -662,11 +662,11 @@ DEFAULT_LIMIT, MAX_LIMIT}` and `entities::PayloadShape`. `Cargo.toml` gains
 `async-trait.workspace = true` and `tokio.workspace = true` (the engine in Task 8 needs
 both; adding them here keeps the manifest change in one commit).
 
-- [ ] **Step 5: Run the tests and the wire suite**
+- [x] **Step 5: Run the tests and the wire suite**
 
 `cargo test -p stvdy-sync` → green, including the existing `wire.rs`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/sync/Cargo.toml crates/sync/src/proto crates/sync/tests/protocol.rs
@@ -687,7 +687,7 @@ git commit -m "feat(sync): the cursor rules, the payload allowlist, and the shap
 - Produces: table `change_log_watermark (user_id uuid primary key references users on
   delete cascade, min_retained_seq bigint not null default 0, compacted_at timestamptz)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `crates/server/tests/schema.rs`, add `change_log_watermark` to `NON_SYNC_TABLES`
 (`:34`, so `non_sync_tables_have_no_triggers` covers it) and **not** to `SYNC_TABLES`
@@ -725,14 +725,14 @@ async fn the_watermark_is_server_side_only(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-server --test schema the_watermark_is_server_side_only` →
 `relation "change_log_watermark" does not exist`. `cargo test -p stvdy-server --test
 schema tables_added_beyond_the_spec_are_deliberate` → passes only because the table
 does not exist yet; the row added in Step 1 is what keeps it passing after Step 3.
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 ```sql
 -- Compaction's per-user watermark.
@@ -751,16 +751,16 @@ create table change_log_watermark (
 );
 ```
 
-- [ ] **Step 4: Run the schema suite**
+- [x] **Step 4: Run the schema suite**
 
 `cargo test -p stvdy-server --test schema` → green.
 
-- [ ] **Step 5: Record the deviation**
+- [x] **Step 5: Record the deviation**
 
 Add to `docs/ASSUMPTIONS.md` § "Schema deviations from the spec": `change_log_watermark`
 (A165/A184). It is one of the rows of A164–A189 and lands with this commit.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add migrations/0027_sync_watermarks.sql crates/server/tests/schema.rs docs/ASSUMPTIONS.md
@@ -789,7 +789,7 @@ git commit -m "feat(server): a per-user compaction watermark, so a cursor can be
   `sync::pull::min_retained_seq(&mut PgConnection, Uuid) -> AppResult<i64>`,
   `sync::touch_last_sync(&PgPool, Uuid) -> sqlx::Result<()>`, `ratelimit::sync_layer()`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/server/tests/sync_pull.rs` (NEW):
 
@@ -848,12 +848,12 @@ async fn a_settings_change_is_keyed_by_the_user_id(pool: PgPool) { … }
 async fn the_page_size_is_validated_and_clamped(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_pull` → `error[E0433]: could not find sync in
 stvdy_server`.
 
-- [ ] **Step 3: Implement the module root and the route**
+- [x] **Step 3: Implement the module root and the route**
 
 `crates/server/src/sync/mod.rs`:
 
@@ -927,7 +927,7 @@ The handler is one transaction: read `min_retained_seq`, refuse a stale cursor w
 page, `touch_last_sync`, commit. It logs `latency_ms`, `rows`, `cursor` and `has_more`
 in one `tracing::info!` (the roadmap requires sync pull latency to be logged).
 
-- [ ] **Step 4: Register the route, classify it, and rate-limit it**
+- [x] **Step 4: Register the route, classify it, and rate-limit it**
 
 - `crates/server/src/lib.rs` gains `pub mod sync;` (alphabetical, before `telemetry`).
 - `crates/server/src/routes/mod.rs` gains `.merge(sync::routes())` beside the other
@@ -945,12 +945,12 @@ in one `tracing::info!` (the roadmap requires sync pull latency to be logged).
 - `crates/server/src/ratelimit.rs` gains `sync_layer()` keyed per account at 600
   requests/minute (A185), applied to the `/sync` routes in `routes()`.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test -p stvdy-server --test sync_pull` → green.
 `cargo test -p stvdy-server --test route_sweep` → green (`/sync/pull` is classified).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/server/src/sync crates/server/src/{lib.rs,routes/mod.rs,ratelimit.rs} \
@@ -983,7 +983,7 @@ append-only `on conflict (id) do nothing` — so this task's batch compiles and 
 pass alone. Task 5 extends it with the field-level merge; it does not introduce the
 module.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/server/tests/sync_push.rs` (NEW):
 
@@ -1046,11 +1046,11 @@ async fn indonesian_text_round_trips_byte_exact(pool: PgPool) { … }
 async fn a_push_records_the_device_and_the_origin(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_push` → `error[E0433]`.
 
-- [ ] **Step 3: Implement the batch**
+- [x] **Step 3: Implement the batch**
 
 ```rust
 /// One transaction for the whole batch, and the order inside it is the contract:
@@ -1080,7 +1080,7 @@ The per-mutation sequence, exactly:
 
 `touch_last_sync` runs once, after the loop, in the same transaction.
 
-- [ ] **Step 4: Register the route and classify it**
+- [x] **Step 4: Register the route and classify it**
 
 `crates/server/src/sync/mod.rs` gains `pub mod push;` and
 `.route("/sync/push", post(push::push))` on the router (with `post` added to the
@@ -1094,14 +1094,14 @@ whose every limit is used still gets its task **applied**, because all six pusha
 entities are free (`push_features` returns `&[]`, R1) — and the refusal path is asserted
 per mutation instead, with a `Message`.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test -p stvdy-server --test sync_push` → green.
 `cargo test -p stvdy-server --test route_sweep` → green.
 `cargo test -p stvdy-server --test tamper` → green (Phase 7's rows are now enforced
 through the route as well as through `decide`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/server/src/sync/push.rs crates/server/tests/{sync_push.rs,route_sweep.rs}
@@ -1133,7 +1133,7 @@ server's apply is its first reader and A175's whole point is that there is one c
 `crates/sync/src/client/mod.rs` is created with `pub mod conflict;` and its re-exports;
 Task 8 adds the remaining modules to it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `crates/server/tests/sync_push.rs`:
 
@@ -1170,13 +1170,13 @@ async fn a_patch_that_omits_deleted_at_does_not_resurrect(pool: PgPool) { … }
 async fn a_settings_push_upserts_the_callers_row(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_push disjoint` → the test exists and fails on
 the merge (the first implementation applies the patch whole, so the other device's field
 is lost).
 
-- [ ] **Step 3: Implement, with the conflict table in `crates/sync`**
+- [x] **Step 3: Implement, with the conflict table in `crates/sync`**
 
 `crates/sync/src/client/conflict.rs` is created here rather than in Task 8, because the
 server's apply is its first reader and A175's whole point is that there is one copy:
@@ -1227,12 +1227,12 @@ pub enum Merge {
 is `on conflict (id) do nothing`, and when nothing was inserted the seq is read from
 `change_log` so the response reports the existing change (A174).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test sync_push` → green.
 `cargo test -p stvdy-sync` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/sync/apply.rs crates/server/src/sync/log.rs \
@@ -1257,7 +1257,7 @@ change.
 - Produces: `sync::stream::stream(State, AuthUser) -> AppResult<Sse<impl Stream<…>>>`,
   `sync::stream::seq_event(i64) -> Event`, `sync::stream::POLL_INTERVAL` (2s).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/sync_stream.rs` (NEW):
 
@@ -1278,11 +1278,11 @@ async fn a_later_change_is_emitted_as_a_seq_event(pool: PgPool) { … }
 async fn another_accounts_change_does_not_move_this_stream(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_stream` → `error[E0433]`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `crates/server/src/sync/mod.rs` gains `pub mod stream;` and
 `.route("/sync/stream", get(stream::stream))`.
@@ -1296,12 +1296,12 @@ terminates it. The handler logs connection open and close with the user id and t
 reason, and it is classified `ReadOnly` in `route_sweep.rs` ("an SSE hint; it reads the
 caller's own clock").
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test sync_stream` → green.
 `cargo test -p stvdy-server --test route_sweep` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/sync/stream.rs crates/server/tests/{sync_stream.rs,route_sweep.rs}
@@ -1326,7 +1326,7 @@ git commit -m "feat(server): GET /sync/stream, a poll of max(seq) that works beh
   `compact::compact_user(&mut PgConnection, Uuid, Retention) -> sqlx::Result<Option<i64>>`,
   `config::AppConfig::{change_log_retention_days, change_log_tombstone_retention_days}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/server/tests/sync_compaction.rs` (NEW):
 
@@ -1363,11 +1363,11 @@ async fn a_stale_cursor_is_told_to_resync_and_cursor_zero_always_works(pool: PgP
 async fn compaction_is_scoped_to_one_account(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_compaction` → `error[E0433]`.
 
-- [ ] **Step 3: Implement the handler**
+- [x] **Step 3: Implement the handler**
 
 One transaction per user: delete `op = 'upsert'` rows older than
 `CHANGE_LOG_RETENTION_DAYS`, delete `op = 'delete'` rows older than
@@ -1378,7 +1378,7 @@ key list in `crates/server/src/config.rs` and `.env.example`, because
 `AppConfig::from_env_at` falls back to the process environment for anything not listed
 and a developer's `.env` must not silently set a retention window.
 
-- [ ] **Step 4: Schedule it**
+- [x] **Step 4: Schedule it**
 
 `jobs/schedule.rs` (Phase 7) gains a daily arm:
 `enqueue(pool, queue, "compact_change_log", json!({}), Some(&format!("compact_change_log:{}", Utc::now().date_naive())))`.
@@ -1386,11 +1386,11 @@ and a developer's `.env` must not silently set a retention window.
 A failure is `Failure::transient` (a lock or a connection is worth a retry); a bad
 config is permanent and surfaces at boot, not here.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test -p stvdy-server --test sync_compaction` → green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/server/src/jobs crates/server/src/config.rs .env.example \
@@ -1415,7 +1415,7 @@ git commit -m "feat(server): compact_change_log, its two retention windows, and 
   `outbox::{next_batch, Retry}`, `apply::{plan, ChangeSet}`, `Engine`,
   `Engine::{sync_once, status, enqueue}`, `SyncState`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/sync/tests/engine.rs` (NEW), over an in-memory `LocalStore` and a scripted
 `Transport` (both in the test file, so the traits are exercised by a second
@@ -1477,11 +1477,11 @@ async fn synced_requires_an_empty_outbox_and_a_successful_pass() { … }
 async fn a_null_payload_is_applied_as_a_delete() { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-sync --test engine` → `error[E0432]`.
 
-- [ ] **Step 3: Implement the traits and the pass**
+- [x] **Step 3: Implement the traits and the pass**
 
 ```rust
 /// Everything the engine needs from a local database, so the engine has no idea
@@ -1529,11 +1529,11 @@ local clock at the moment the pass succeeded. That is a number the app computed 
 pass happened), which is what gate 7(b) requires; the server's `devices.last_sync_at`
 is what the Devices screen shows for the device list.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-sync` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/sync/src/client crates/sync/src/lib.rs crates/sync/tests/engine.rs
@@ -1559,7 +1559,7 @@ Task 10.
   (implementing `Transport`), the IPC commands `sync_status`, `sync_read`, `sync_write`,
   `sync_tombstone`, `sync_now`, `sync_reset`, `sync_configure`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `src-tauri/tests/cache.rs` (NEW). These run under
 `cargo test --manifest-path src-tauri/Cargo.toml`, which CI already runs on macOS:
@@ -1607,12 +1607,12 @@ fn the_access_token_is_not_written_to_the_database() { … }
 fn the_store_rejects_a_row_for_another_account() { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test cache` → the test file cannot
 compile: no `stvdy_shell_lib::cache`.
 
-- [ ] **Step 3: Add the dependencies and the cache**
+- [x] **Step 3: Add the dependencies and the cache**
 
 `src-tauri/Cargo.toml` gains:
 
@@ -1635,7 +1635,7 @@ pull uses, plus `seq`), the outbox (`mutation_id`, `entity`, `op`, `id`, `payloa
 `client_ts`, `state`, `attempts`, `last_error`), the deferred-children table, and the
 single-row `sync_state` (cursor, last_synced_at, last_error, device_id).
 
-- [ ] **Step 4: The commands, and the token handshake**
+- [x] **Step 4: The commands, and the token handshake**
 
 The SPA owns the session, so the shell is handed the access token rather than storing
 it: `sync_configure { base_url, access_token, device_id }` sets them in memory, and the
@@ -1644,13 +1644,13 @@ written to SQLite (asserted in Step 1). `sync_status` returns the `SyncState` pl
 outbox length; `sync_read`/`sync_write`/`sync_tombstone` are the SPA's local-first path;
 `sync_now` runs one pass; `sync_reset` wipes and resyncs.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test --manifest-path src-tauri/Cargo.toml` → green.
 `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` and `cargo clippy
 --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` → clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src src-tauri/tests
@@ -1677,7 +1677,7 @@ app did not compute, asserted by the token-scan test.
   `Platform`, `SyncStatus` union gaining `'needs_attention'`, `useSyncStatus()`,
   `useDevices()`, `DevicesScreen`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `app/src/features/sync/SyncStatus.test.tsx`:
 
@@ -1700,11 +1700,11 @@ it('revokes a device after confirmation and removes it from the list', …)
 it('offers "Reset local data and resync" and says what it deletes', …)
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `npm --prefix app test -- SyncStatus` → `Cannot find module '@/features/sync/SyncStatus'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `types.ts`: `SyncStatus` gains `'needs_attention'` (the spec's four states; the union
   already had three) and `Platform` gains `sync: SyncApi`.
@@ -1728,12 +1728,12 @@ it('offers "Reset local data and resync" and says what it deletes', …)
 - Both locale files gain `sync.*` and `devices.*`; `app/src/i18n/i18n.test.ts` enforces
   key and placeholder parity, so an Indonesian string that drops `{{count}}` fails.
 
-- [ ] **Step 4: Run the tests, the build and the CDN check**
+- [x] **Step 4: Run the tests, the build and the CDN check**
 
 `npm --prefix app test` → green. `npm --prefix app run build` → clean.
 `node scripts/check-no-cdn.mjs` → clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src
@@ -1759,7 +1759,7 @@ price or upgrade control anywhere.
 - Produces: no production API. The suite's contract is that it fails when the exit gate
   stops holding.
 
-- [ ] **Step 1: Write the suite**
+- [x] **Step 1: Write the suite**
 
 The transport here is a `Transport` implementation that calls the real router
 (`tower::ServiceExt::oneshot`) with the device's bearer token, and the store is the
@@ -1814,12 +1814,12 @@ async fn two_devices_pushing_overlapping_batches_both_succeed(pool: PgPool) { �
 async fn offline_reads_work_and_the_status_says_offline(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test sync_convergence` → the file does not compile until
 `crates/sync/src/client/testing.rs` exists.
 
-- [ ] **Step 3: Move the doubles into the crate**
+- [x] **Step 3: Move the doubles into the crate**
 
 `crates/sync/src/client/testing.rs` (a `pub mod testing;` behind no feature gate: the
 crate is `publish = false` and its only consumers are tests and the shell) holds the
@@ -1827,11 +1827,11 @@ in-memory store, the scripted transport and the router-backed transport's reques
 shapes. `crates/sync/tests/engine.rs` then imports them instead of defining its own, so
 the convergence suite and the engine suite cannot drift.
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 `cargo test -p stvdy-server --test sync_convergence` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/tests/sync_convergence.rs crates/sync/src/client/testing.rs \
@@ -1853,7 +1853,7 @@ for this phase; its output is quoted in the phase summary.
 
 **Interfaces:** no production API.
 
-- [ ] **Step 1: `docs/SYNC.md` is the normative protocol document, and it is updated here**
+- [x] **Step 1: `docs/SYNC.md` is the normative protocol document, and it is updated here**
 
 It already carries the cursor model, the advisory-lock argument, the lock-order rule,
 the pull/push shapes, the allowlist, the conflict table, the offline scope, the cache
@@ -1876,7 +1876,7 @@ contents and the compaction paragraph. This task adds, in the same voice:
   the statement that reads it, and a `change_log` row whose `entity_id` is not this
   account's loads no payload.
 
-- [ ] **Step 2: `docs/API.md`**
+- [x] **Step 2: `docs/API.md`**
 
 Replace the one-line `## Sync (Phase 8)` stub (`:207`) with the three routes in the
 document's own style: the query parameters with their defaults and caps, `next_cursor`
@@ -1884,7 +1884,7 @@ and `has_more`, the four `MutationResult` bodies, the `read_only_entity` table, 
 and its remedy, the 403 for a body that claims another device, and the SSE frame. Note
 in the `### SSE` section that `event: seq` is the sync stream's event.
 
-- [ ] **Step 3: `docs/ARCHITECTURE.md`**
+- [x] **Step 3: `docs/ARCHITECTURE.md`**
 
 Extend § Local cache (`:841`) with the cache/outbox design: the table set, the
 `defer_foreign_keys` apply and the two mechanisms that make out-of-order arrival land
@@ -1893,12 +1893,12 @@ why `rusqlite` and `reqwest` live in the shell rather than in `crates/sync` (A18
 one section on the seq clock: why the advisory lock makes `seq` order equal commit
 order, and why the push route takes the lock first.
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`**
+- [x] **Step 4: `docs/ASSUMPTIONS.md`**
 
 Append A164–A189 (§ "Pinned decisions"), add `change_log_watermark` to § "Schema
 deviations from the spec", and record the two new config keys.
 
-- [ ] **Step 5: The three roadmap gates, measured**
+- [x] **Step 5: The three roadmap gates, measured**
 
 - **Gate 5.** In a browser at 390×844 and at 1365px, both themes: tab to the sync
   control and the Devices screen's controls with a visible focus ring; measure the
@@ -1919,7 +1919,7 @@ deviations from the spec", and record the two new config keys.
   these screens, stated explicitly; (f) the Devices screen and the status control carry
   no price, no upgrade button and no external link on any platform.
 
-- [ ] **Step 6: The smoke run**
+- [x] **Step 6: The smoke run**
 
 `scripts/smoke-phase8.sh` drives the running server with `curl` and needs no model stub:
 
@@ -1941,12 +1941,12 @@ deviations from the spec", and record the two new config keys.
 
 Add a `smoke-phase8` recipe to the `justfile` beside the others.
 
-- [ ] **Step 7: The full quality gate**
+- [x] **Step 7: The full quality gate**
 
 `just check` (which is `check-rust check-web check-shell`), plus `cargo sqlx prepare
 --workspace --check`. Quote the output in the phase summary.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs scripts/smoke-phase8.sh justfile
@@ -2301,6 +2301,8 @@ The suite counts this phase owns were measured individually (see the table above
 8. **`seq` is not a wall clock.** Nothing may compare `seq` across users, and nothing
    may order by `changed_at` where the cursor is the point: `changed_at` is `now()` at
    insert time and is not the ordering the cursor guarantees.
+
+  Left unticked — **Task 1 Step 2** ("Write the failing tests"): it names `an_offset_is_only_legal_on_the_initial_pass`, which is not in the tree, because its premise was superseded by the anchored initial pass (A164) — a cursor plus an offset is a later page of the same pass, not `Err(OffsetWithCursor)`, which is what the shipped `an_offset_pages_the_initial_pass_and_a_bare_cursor_walks_the_clock` asserts. The step's other three named tests (`the_page_size_is_defaulted_and_capped`, `a_cursor_of_zero_is_never_stale_and_a_cursor_below_the_watermark_is`, `the_payload_allowlist_excludes_the_identity_and_the_storage_keys`) exist verbatim in `crates/sync/tests/protocol.rs`.
 
 ---
 
