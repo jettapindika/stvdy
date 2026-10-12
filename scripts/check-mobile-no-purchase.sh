@@ -1,50 +1,64 @@
 #!/usr/bin/env bash
 #
-# Fails when the web assets a mobile build ships can buy something.
+# Fails when the web assets a *store* build ships can buy something.
 #
 # This script is a *wrapper*, not a second check. Phase 14's
 # `scripts/check-no-purchase-ui.mjs` holds the rule and is the only
 # implementation of it: it holds the purchase denylist, it holds the rule that a
-# scan of nothing is a failure, and it re-asserts `config/billing_policy.toml`
-# for `ios` and `android`. A second copy of any of that would drift from the
-# first, and a reviewer would then have two answers to one question. So this
-# script runs *that* check, unchanged, against the tree a mobile build actually
-# ships.
+# scan of nothing is a failure, it holds the rule that only a `store`-stamped
+# artifact may pass, and it re-asserts `config/billing_policy.toml` for `ios` and
+# `android`. A second copy of any of that would drift from the first, and a
+# reviewer would then have two answers to one question. So this script runs *that*
+# check, unchanged, against the tree a store build actually ships.
 #
-# Why a wrapper exists. Phase 14's check reads `<repo>/app/dist`, the build
-# output. The bytes a store reviewer sees are the ones inside the packaged
-# artifact, and "the build output was clean" and "the artifact is clean" are two
-# claims: a stale `dist/`, or anything that writes into the artifact after the
-# build, is invisible to the first. This script points the same check at the
-# packaged tree — `app/dist`, or an `.apk`/`.aab`/`.ipa` extracted with `unzip`
-# — and says what it inspected and what it did not.
+# Why a wrapper exists. The check reads a directory of built assets. The bytes a
+# store reviewer sees are the ones inside the packaged artifact, and "the build
+# output was clean" and "the artifact is clean" are two claims: a stale `dist/`,
+# or anything that writes into the artifact after the build, is invisible to the
+# first. This script points the same check at the packaged tree — `app/dist`, or
+# an `.apk`/`.aab`/`.ipa` extracted with `unzip` — and says what it inspected and
+# what it did not.
+#
+# Which build `app/dist` must hold. The store bundle, and the check enforces that
+# rather than trusting this script: every build stamps its `index.html` with
+# `stvdy-build-target`, and the check refuses to pass on anything but `store`. On
+# a phone `tauri build` produces exactly that, because its `beforeBuildCommand` is
+# `npm run build` and the CLI sets `TAURI_ENV_PLATFORM` to the target it is
+# packaging — so the bundle the shell packages is the stamped one. Without a
+# shell: `TAURI_ENV_PLATFORM=ios npm --prefix app run build`, or
+# `npm --prefix app run build:mobile` for `dist-mobile`.
 #
 # How it redirects the check, and why that is not a trick. The shared check
 # resolves the tree it reads as `<its own directory>/../app/dist`, and the policy
 # file as `<its own directory>/../config/billing_policy.toml`. This script
 # copies it into a scratch root whose `app/dist` is the artifact and whose
-# `config/` is this repository's, so the check's own walker, denylist and policy
-# reader run unchanged against the artifact. That layout is an assumption about
-# another file, so it is asserted on every run rather than trusted:
-# `probe_scratch_root` plants a priced file and fails the run if the check does
-# not report it. A refactor that stopped honouring the layout therefore breaks
-# this script loudly, instead of leaving it green while it inspected the wrong
-# directory — the exact failure mode it exists to prevent.
+# `config/` is this repository's, so the check's own walker, denylist, stamp
+# reader and policy reader run unchanged against the artifact. That layout is an
+# assumption about another file, so it is asserted on every run rather than
+# trusted: `probe_scratch_root` plants a priced file and fails the run if the
+# check does not report it. A refactor that stopped honouring the layout
+# therefore breaks this script loudly, instead of leaving it green while it
+# inspected the wrong directory — the exact failure mode it exists to prevent.
 #
 # Usage: scripts/check-mobile-no-purchase.sh [TARGET]
 #
 #   TARGET  the shipped web assets to check: a directory (default: app/dist), or
 #           an .apk/.aab/.ipa/.zip archive to extract first.
 #
-# Exit codes: 0 the artifact is clean; 1 it is not, or nothing was inspected;
-# 2 this script could not check at all (usage, missing `unzip`, an unreadable
-# success line). A 2 is never a pass.
+# Exit codes: 0 the artifact is clean; 1 it is not, or nothing was inspected, or
+# it is not a store build; 2 this script could not check at all (usage, missing
+# `unzip`, an unreadable success line). A 2 is never a pass.
 #
 # What it does not inspect, and no part of this output should be read as
 # covering: the native layer (`lib*.so`, `classes.dex`, `Payload/*.app/*`), the
 # store metadata, the review notes, or the account-deletion screen's server
 # behaviour. Those are checklist rows in `docs/RELEASE.md` § Store submission
 # checklists, not this script's claim.
+#
+# Nor does it prove the artifact it reads is the one that was *submitted*: it
+# reads the tree it is pointed at, and the stamp inside it says which build that
+# tree is. Pointing it at an `.ipa` is what closes the last gap, and that is the
+# form `docs/RELEASE.md` A4 records.
 
 set -euo pipefail
 
@@ -147,8 +161,14 @@ prepare_root() {
 # layout, so assert it every run: plant a price and fail if the check does not
 # find it. This is what keeps "I ran the check against the artifact" from
 # quietly meaning "I ran the check against the repository".
+#
+# The probe tree is stamped `store` on purpose. Without the stamp the check would
+# fail for the identity reason and this probe would be asserting nothing about
+# the redirect — it has to be a tree the check would otherwise pass, so the
+# planted price is the only thing it can fail on.
 mkdir -p "$scratch/probe-dist"
 printf 'const price = "Rp 10.000"\n' >"$scratch/probe-dist/probe.js"
+printf '<meta name="stvdy-build-target" content="store">\n' >"$scratch/probe-dist/index.html"
 prepare_root "$scratch/probe-root" "$scratch/probe-dist"
 if probe_output=$(node "$scratch/probe-root/scripts/check-no-purchase-ui.mjs" 2>&1); then
   printf '%s\n' "$probe_output" >&2
@@ -159,6 +179,27 @@ case "$probe_output" in
   *)
     printf '%s\n' "$probe_output" >&2
     cannot_check "the scratch-root redirect is not reading app/dist: the shared check failed without naming the planted probe.js"
+    ;;
+esac
+
+# The other half of "is this check still the check": the identity gate must be
+# live through this redirect too. A clean, unstamped tree has to be *refused*, or
+# a bundle nobody packages could pass here — which is the whole defect this gate
+# exists to prevent. Asserted rather than assumed for the same reason as above:
+# a check whose gate has been dropped still exits 0 on a clean tree, and an
+# exit 0 is what this script reports as a pass.
+mkdir -p "$scratch/probe-unstamped-dist"
+printf 'export const x = 1\n' >"$scratch/probe-unstamped-dist/app.js"
+prepare_root "$scratch/probe-unstamped-root" "$scratch/probe-unstamped-dist"
+if unstamped_output=$(node "$scratch/probe-unstamped-root/scripts/check-no-purchase-ui.mjs" 2>&1); then
+  printf '%s\n' "$unstamped_output" >&2
+  cannot_check "the shared check passed a clean artifact with no stvdy-build-target stamp: the identity gate is not running, so a bundle no phone installs could pass here"
+fi
+case "$unstamped_output" in
+  *"stvdy-build-target"*) ;;
+  *)
+    printf '%s\n' "$unstamped_output" >&2
+    cannot_check "the shared check refused the unstamped probe without naming the missing stamp, so this script cannot tell an identity failure from a byte-scan one"
     ;;
 esac
 
@@ -181,12 +222,14 @@ else
   fail "TARGET is neither a directory nor a file: $label"
 fi
 
-# 1/2 — the SPA build. This is the tree `tauri build` packages for every
-# platform, and it is the one Phase 14's CI job already checks, so a failure
-# here is a failure of the build rather than of the packaging.
-printf '== the SPA build the mobile artifact packages: app/dist\n'
+# 1/2 — the build the shell packages. This is `frontendDist` in
+# `src-tauri/tauri.conf.json`, so on a phone it *is* the bundle the artifact
+# carries, and the shared check's stamp gate refuses it unless the build that
+# produced it was a store build. A failure here is a failure of the build rather
+# than of the packaging.
+printf '== the build the shell packages: app/dist\n'
 [ -d "$spa_dist" ] ||
-  fail "app/dist is missing — run 'npm --prefix app run build' first (a missing build must not read as clean)"
+  fail "app/dist is missing — build the store bundle first (TAURI_ENV_PLATFORM=ios npm --prefix app run build), because a missing build must not read as clean"
 prepare_root "$scratch/spa-root" "$spa_dist"
 if spa_output=$(node "$scratch/spa-root/scripts/check-no-purchase-ui.mjs" 2>&1); then
   spa_status=$EXIT_PASS
@@ -194,7 +237,8 @@ else
   spa_status=$?
 fi
 printf '%s\n' "$spa_output"
-[ "$spa_status" -eq "$EXIT_PASS" ] || fail "the SPA build carries a purchase affordance or a policy that permits one (see above)"
+[ "$spa_status" -eq "$EXIT_PASS" ] ||
+  fail "app/dist is not a clean store build — either its bytes carry a purchase affordance, its policy permits one, or it is not a store build at all (see above)"
 
 # 2/2 — the artifact, unless it is the same tree, in which case the scan above
 # already is the artifact scan.
@@ -226,6 +270,8 @@ files=$(printf '%s\n' "$output" | sed -n 's/^no purchase UI in \([0-9][0-9]*\) s
 
 printf '\n== summary\n'
 printf 'inspected %s: %s shipped file(s), plus config/billing_policy.toml for ios and android\n' "$label" "$files"
+printf 'the artifact stamps itself stvdy-build-target="store", so it is the build the iOS and Android\n'
+printf 'shells package rather than the web/desktop one — a "full" or unstamped artifact is refused above\n'
 printf 'not inspected: the native layer (lib*.so, classes.dex, Payload/*.app binaries), the store\n'
 printf 'metadata, and the account-deletion behaviour — see docs/RELEASE.md store checklists\n'
 printf 'no purchase UI ships in %s\n' "$label"

@@ -9,9 +9,16 @@
  * checkout call added to a client module — because nothing in review reads the
  * bundle. So this check reads the bundle.
  *
- * Run after `npm --prefix app run build`:
+ * Run after the *store* build. On a phone `tauri build` runs it for you — its
+ * `beforeBuildCommand` is `npm run build`, and the CLI sets `TAURI_ENV_PLATFORM` to
+ * the target it is packaging, which is what `vite.config.ts` keys the store build
+ * on. Without a shell, the same build is one command:
  *
- *   node scripts/check-no-purchase-ui.mjs
+ *   npm --prefix app run build:mobile                 # writes dist-mobile
+ *   node scripts/check-no-purchase-ui.mjs app/dist-mobile
+ *
+ *   TAURI_ENV_PLATFORM=ios npm --prefix app run build  # what `tauri build` runs
+ *   node scripts/check-no-purchase-ui.mjs              # reads app/dist
  *
  * **It looks for affordances, not for words.** The same reasoning
  * `scripts/check-no-cdn.mjs` states for URLs applies here, and it is not
@@ -30,19 +37,34 @@
  * function. A regression that adds any of them fails here.
  *
  * **Which bytes this inspects is a load-bearing fact, not an implementation
- * detail.** `src-tauri/tauri.conf.json` sets `frontendDist: "../app/dist"`, and
- * there is no per-platform `bundle.iOS`/`bundle.android` override, so
- * `app/dist` is *literally the bundle the iOS and Android shells load* — this is
- * not "the web build standing in for the mobile one". The output names the
- * directory it read for exactly that reason: a route path the phone can never
- * render and a route path the phone *does* register are indistinguishable by
- * regex, so the question "which artifact is this?" has to be answerable from the
- * check's own output rather than from an argument about build targets.
+ * detail, and the artifact answers it about itself.** Every build stamps its
+ * `index.html` with `stvdy-build-target` (`vite.config.ts`): `store` for the bundle
+ * iOS and Android receive, `full` for the web/desktop one. This check reads that
+ * stamp and **refuses to pass on anything but a `store` artifact**, because the
+ * property it asserts is platform-conditional — `config/billing_policy.toml`
+ * permits a checkout route on web and desktop and forbids it on the stores — so a
+ * green result from a `full` build would be a control that looks enforced while the
+ * property stayed false. That refusal is not a formality: it is the defect this
+ * check was written through, when `app/dist` was the web build and the check called
+ * it the mobile one.
+ *
+ * The stamp is the artifact's own claim rather than the caller's. A directory name
+ * is a convention, and an env var is what the caller says about a build it may not
+ * have made; Vite rewrites `index.html` on every build, so a `store` stamp cannot
+ * be inherited from an earlier one. It says `store` only when the shell is
+ * packaging for a store platform (`TAURI_ENV_PLATFORM` is `ios` or `android`, which
+ * the Tauri CLI sets for `beforeBuildCommand` — so the bundle `frontendDist`
+ * packages is the stamped one) or when `VITE_PLATFORM=mobile` asked for the same
+ * build without a shell.
+ *
+ * The output names both the directory and the variant it read, so a green result
+ * cannot be attributed to the wrong artifact.
  *
  * The second half of the check is not about bytes at all: `config/billing_policy.toml`
  * must say `false` for all three purchase switches on `ios` and `android`. That
  * file is the switch `LockedFeature` reads, so a bundle with no affordance and a
  * policy that permits one is one edit away from selling; both halves have to hold.
+ * That half is platform-independent and runs whichever artifact is read.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
@@ -61,6 +83,89 @@ const policyFile = join(root, 'config', 'billing_policy.toml')
  * `.svg` are included because both ship as text and both can carry a price.
  */
 const SHIPPED = ['.html', '.js', '.css', '.json', '.svg']
+
+/**
+ * How a build identifies itself, and which identity this check will accept.
+ *
+ * `vite.config.ts` injects `<meta name="stvdy-build-target" content="…">` into
+ * every `index.html` it emits, with one of two values: `store` for the bundle the
+ * iOS and Android shells package, `full` for the web/desktop build. This check
+ * reads that stamp out of the artifact and refuses to pass on anything else,
+ * because the property it asserts is platform-conditional (a checkout route is
+ * legitimate on web and desktop and forbidden on the stores) — so a pass on a
+ * `full` build would be a control that looks enforced while the property stayed
+ * false, which is the exact failure this check was written through.
+ */
+const STAMP_ATTR = 'stvdy-build-target'
+const STORE_VARIANT = 'store'
+const FULL_VARIANT = 'full'
+
+/** One `<meta name="stvdy-build-target" …>` tag, wherever its attributes sit. */
+const STAMP_TAG = new RegExp(`<meta[^>]*\\bname=["']${STAMP_ATTR}["'][^>]*>`, 'i')
+
+/** The `content` of a stamp tag, or `null` when the tag has none. */
+function stampContent(tag) {
+  return /content=["']([^"']*)["']/i.exec(tag)?.[1] ?? null
+}
+
+/**
+ * The variant the artifact says it is, or `null` when it does not say.
+ *
+ * Every `.html` in the bundle is tried, because the file the stamp lands in is
+ * Vite's business (`index.html` today) and hard-coding that name would make this
+ * gate fail on a build config change rather than on the property. A build with no
+ * stamp at all is not a build this check can identify, which is a failure and not
+ * a default (see `artifactOffenders`).
+ */
+export function buildVariant(files) {
+  for (const name of Object.keys(files).sort()) {
+    if (!name.endsWith('.html')) continue
+    const tag = STAMP_TAG.exec(files[name])?.[0]
+    if (tag === undefined) continue
+    return stampContent(tag)
+  }
+  return null
+}
+
+/**
+ * Every reason the artifact is not the one a store receives.
+ *
+ * This is the half that makes the byte scan mean something. `findOffenders` can
+ * only say "these bytes carry no purchase path"; it cannot say whether those bytes
+ * are the ones a phone installs, and the two questions have different answers —
+ * `app/dist` holds a checkout route whenever the shell packaged for web or
+ * desktop, and holds none when it packaged for iOS or Android.
+ *
+ * **A missing stamp is an offender, not a pass.** That is the `dist-mobile`-that-
+ * nobody-ships case: an artifact this check cannot identify is an artifact whose
+ * cleanliness proves nothing, and a gate that greens on it is the original defect
+ * with a new filename. The one caller that may pass an unidentified artifact is
+ * `scripts/check-mobile-no-purchase.sh`'s own probe, and that probe *wants* the
+ * failure.
+ *
+ * An empty map returns no offenders here: "nothing was inspected" is
+ * `findOffenders`' message, and a second copy of it would be a second answer to
+ * one question.
+ */
+export function artifactOffenders(files) {
+  if (Object.keys(files).length === 0) return []
+
+  const variant = buildVariant(files)
+  if (variant === STORE_VARIANT) return []
+  if (variant === null) {
+    return [
+      `no ${STAMP_ATTR} stamp in the artifact — this is not a build this check can identify, and a pass on an unidentified artifact proves nothing about what a store receives`,
+    ]
+  }
+  if (variant === FULL_VARIANT) {
+    return [
+      `the artifact is stamped ${STAMP_ATTR}="${FULL_VARIANT}" — this is the web/desktop build, where a checkout route is legitimate, so a pass here would say nothing about the bundle a phone installs. Build the store artifact (TAURI_ENV_PLATFORM=ios npm run build, or npm run build:mobile) and inspect that`,
+    ]
+  }
+  return [
+    `the artifact is stamped ${STAMP_ATTR}="${variant}", which is not a variant this check knows — expected "${STORE_VARIANT}"`,
+  ]
+}
 
 /**
  * What a purchase path looks like in shipped bytes.
@@ -197,18 +302,19 @@ function isCli() {
 /**
  * Which build to inspect.
  *
- * Defaults to the web/desktop `app/dist`, and the store gate passes the mobile
- * build explicitly:
+ * Defaults to `app/dist`, which is the directory `src-tauri/tauri.conf.json`'s
+ * `frontendDist` packages — and therefore holds the store bundle exactly when the
+ * shell packaged for iOS or Android (`tauri build` runs this build itself, with
+ * `TAURI_ENV_PLATFORM` set to the target). An explicit directory overrides it:
  *
  *   node scripts/check-no-purchase-ui.mjs                  # app/dist
- *   node scripts/check-no-purchase-ui.mjs app/dist-mobile  # the store build
+ *   node scripts/check-no-purchase-ui.mjs app/dist-mobile  # a shell-less store build
  *
- * **The store build is the one that matters for the store rule.** `app/dist` is
- * what the shell and `check-no-cdn.mjs` read, and on the web/desktop targets a
- * checkout route is legitimate — so that run is a regression check on the shared
- * build, and the `dist-mobile` run is the actual "no purchase UI in the bundle
- * the phone downloads" proof. Both are in CI, and the output names the directory
- * it read so a green result cannot be attributed to the wrong artifact.
+ * **A directory argument is not a claim about what is in it.** The check does not
+ * take the caller's word for which build it is reading — it reads the
+ * `stvdy-build-target` stamp out of the artifact and fails on anything but
+ * `store` (see `artifactOffenders`). So the argument only says *where* to look,
+ * and the artifact says *what* it is.
  */
 const dist = process.argv[2] === undefined ? join(root, 'app/dist') : join(root, process.argv[2])
 
@@ -222,10 +328,14 @@ if (isCli()) {
   }
 
   const policy = readFileSync(policyFile, 'utf8')
-  const offenders = [...findOffenders(files), ...policyOffenders(policy)]
+  const offenders = [
+    ...artifactOffenders(files),
+    ...findOffenders(files),
+    ...policyOffenders(policy),
+  ]
 
   if (offenders.length > 0) {
-    console.error(`a mobile build must contain no purchase UI (${offenders.length} found):`)
+    console.error(`a store build must contain no purchase UI (${offenders.length} found):`)
     for (const line of offenders) console.error(`  ${line}`)
     console.error(
       Object.keys(files).length === 0
@@ -235,6 +345,13 @@ if (isCli()) {
     process.exit(1)
   }
 
-  console.log(`no purchase UI in ${Object.keys(files).length} shipped file(s) under ${relative(root, dist)}`)
+  // The count stays on its own line with nothing after it: this exact line is the
+  // contract `scripts/check-mobile-no-purchase.sh` reads to report what was
+  // inspected, and an evidence script whose "what did you inspect" claim is
+  // unreadable is not evidence.
+  console.log(`no purchase UI in ${Object.keys(files).length} shipped file(s)`)
+  console.log(
+    `artifact: ${STAMP_ATTR}="${buildVariant(files)}" under ${relative(root, dist)} — the bundle the iOS and Android shells package`,
+  )
   console.log(`billing_policy.toml denies purchase UI, prices and locked-message CTAs on ${MOBILE.join(' and ')}`)
 }

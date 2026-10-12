@@ -123,10 +123,13 @@ export default defineConfig({
   },
 
   build: {
-    // The store build writes its own directory, so a mobile bundle can be
-    // inspected without destroying the web/desktop one the shell and
-    // `check-no-cdn.mjs` both read.
-    outDir: isMobileBuild ? 'dist-mobile' : 'dist',
+    // A store build the *shell* asked for writes `dist`, because that is the
+    // directory `tauri.conf.json`'s `frontendDist` packages: the bytes a store
+    // receives and the bytes `check-no-purchase-ui.mjs` reads have to be the same
+    // ones, and keying on `TAURI_ENV_PLATFORM` is what makes them so. The same
+    // build made without the shell writes `dist-mobile`, so it cannot destroy the
+    // web/desktop build the shell and `check-no-cdn.mjs` both read.
+    outDir: manualStoreBuild ? 'dist-mobile' : 'dist',
     // Tailwind 4 requires Safari 16.4+, which is the honest floor for the
     // macOS/iOS WKWebView; Windows/Android use Chromium.
     target: isWindows ? 'chrome111' : 'safari16.4',

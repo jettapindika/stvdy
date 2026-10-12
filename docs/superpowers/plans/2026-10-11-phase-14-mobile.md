@@ -38,6 +38,27 @@ Android runners.
 build` both produce a bundle; **no purchase UI anywhere in the mobile bundle**;
 push tokens register; deep links round-trip.
 
+**How the second clause is proved, and what that changed.** "No purchase UI anywhere in
+the mobile bundle" is a claim about *bytes*, so it needs a build that can satisfy it and a
+check pointed at that build. Neither was true when the phase landed: the router registered
+`billing/checkout/:paymentId` at run time, and the check read `app/dist` while that
+directory held the web build — so five checkout strings sat in the one chunk every platform
+installed and the check called it the mobile bundle. Both halves are now real:
+`vite.config.ts` defines `__PURCHASE_UI__` (a build-time constant, so the purchase routes
+and `POST /billing/checkout` are genuinely dropped rather than merely unreachable at run
+time), and `scripts/check-no-purchase-ui.mjs` reads the artifact's own
+`stvdy-build-target` stamp and **refuses to pass on anything but `store`**. Measured: the
+store entry chunk holds zero occurrences of `billing/checkout` against five in the
+web/desktop one. `docs/ARCHITECTURE.md` § Store-absence checks must validate the artifact
+that actually ships states the rule and what neither half covers.
+
+**Not established by any of that:** that `tauri ios build` / `tauri android build` run and
+produce a bundle on this machine — that needs Xcode and the Android SDK, and it is the
+roadmap clause's first half, not this one. The mechanism the store build depends on is
+verified from the CLI's own source (it sets `TAURI_ENV_PLATFORM` for `beforeBuildCommand`
+from the target triple's host component), and the store build is reproduced in CI with the
+same variable, but no mobile bundle has been built here.
+
 **Three roadmap gates are not optional here, and gate 5 is at its most literal:**
 - Gate 5, accessibility: every measured item is checked **on a phone viewport
   (390×844)**, and the ≥44px interactive-target check is measured in a real browser,

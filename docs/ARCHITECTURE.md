@@ -1569,32 +1569,67 @@ remote origin found there is a remote origin found everywhere.
 price, no purchase CTA and no route to a checkout — is **platform-conditional**:
 `config/billing_policy.toml` permits all three on web and desktop and forbids all three on
 `ios` and `android`. Reading the web `dist` therefore proves nothing about the phone
-artifact, and the check is currently inspecting the web build while naming it "the mobile
-build". Its markers are honest for a mobile artifact and merely *present* in the web one:
-the router must register `billing/checkout/:paymentId` and the API layer must POST to
-`/billing/checkout`, so five such strings sit in the one entry chunk that every platform
-installs — `src-tauri/tauri.conf.json` points every platform at the same `../app/dist`
-and declares no per-platform `frontendDist`.
+artifact, and that is the failure this check was written through: the router must register
+`billing/checkout/:paymentId` and the API layer must POST to `/billing/checkout`, so five
+such strings sat in the one entry chunk that every platform installed, while the check
+called that chunk "the mobile build".
 
-The mechanism A322 named does not close the gap. A322 says the checkout component is
-tree-shaken out of the mobile chunk "because the route element is chosen at the router",
-but `billingElementFor` reads `platform.kind()` at **runtime** — which is what makes the
-choice testable and correct at runtime, and also what keeps both route elements in one
-chunk. Runtime routing and build-time exclusion are different mechanisms, and only the
-second one removes bytes.
+**The rule, and how it is satisfied.** A store-absence check must be pointed at a build
+that can satisfy it, and it must **print which artifact it inspected and whether that is
+the one a store receives**. Two things now make that true rather than aspirational:
 
-**The rule.** A store-absence check must be pointed at a build that can satisfy it, and it
-must **print which artifact it inspected and whether that is the one a store receives**. A
-red check that names its gap is worth more than a green one that inspected the wrong
-bytes. The remedy is a build-time exclusion for the mobile bundle (or a genuinely separate
-mobile artifact), and until that exists the check stays red on the web `dist` on purpose.
-Narrowing a marker because the code trips it would make the check agree with the code
-while the property stayed false — a control that looks enforced, which is the failure this
-project's gates exist to catch.
+1. **The store build is a build-time exclusion, not a runtime one.** `vite.config.ts`
+   defines `__PURCHASE_UI__`, `false` in a store build and `true` otherwise; `router.tsx`
+   spreads its `purchaseRoutes` (`/pricing` and `/billing/checkout/:paymentId`) into the
+   route children behind it, and `PlanUsageScreen` guards `BillingScreen` the same way.
+   A `define` is substituted as a literal before the minifier runs, so the branch is
+   provably dead, the two screens lose every remaining reference, and the modules behind
+   them — including `api/queries/billing.ts`, which holds the `POST` — are dropped rather
+   than merely unreachable. **A `platform.kind()` check cannot do this**: it is a run-time
+   condition, so the branch is dead for a phone at run time while every module it names is
+   still in the file. A322's original claim ("tree-shaken out of the mobile chunk") was
+   false for exactly that reason, and it is true from this mechanism on.
 
-**What is established, and what is not.** The *runtime* property holds and is asserted:
-on `ios` and `android` `/billing` renders `MobilePlanScreen`, and `PricingScreen` states
-the fact with zero amounts, zero `button`/`a` elements and no checkout text, with the
+2. **Which build is a store build is decided by the shell.** `tauri build` runs
+   `beforeBuildCommand` with `TAURI_ENV_PLATFORM` set to the target it is packaging — the
+   Tauri CLI sets it to the *host* component of the target triple
+   (`crates/tauri-cli/src/interface/rust.rs`), so `aarch64-apple-ios` gives `ios` and
+   `aarch64-linux-android` gives `android`. `vite.config.ts` keys the store build on that,
+   so the shell's one `frontendDist` (`../app/dist`) holds a phone bundle exactly when the
+   shell is packaging for a phone, and **the bytes a store receives are the bytes the check
+   reads**. `VITE_PLATFORM=mobile` makes the same build without a shell, into
+   `dist-mobile`, for a runner with no Xcode; it loses to the shell, so a desktop package
+   cannot be handed a phone bundle by a stray env var.
+
+**How the check knows what it is reading.** Every build stamps its `index.html` with
+`<meta name="stvdy-build-target" content="store"|"full">`. The check reads that stamp and
+**refuses to pass on anything else** — a `full` artifact fails even when its bytes are
+clean, because a pass there would say nothing about what a phone installs, and an artifact
+with no stamp at all fails too, because a bundle the check cannot identify is one whose
+cleanliness proves nothing. That last case is the one worth stating plainly: it is what
+stops `dist-mobile`-that-nobody-ships, or a dropped stamp, from reading as a green gate.
+The stamp is the artifact's own claim rather than the caller's — a directory name is a
+convention and an env var is what the caller says about a build it may not have made,
+while Vite rewrites `index.html` on every build, so a `store` stamp cannot be inherited
+from an earlier one.
+
+**What is established, and what is not.** Both halves hold and are asserted. The *runtime*
+property: on `ios` and `android` `/billing` renders `MobilePlanScreen`, and `PricingScreen`
+states the fact with zero amounts, zero `button`/`a` elements and no checkout text, with the
 price fields **absent** rather than zeroed (`PricingScreen.test.tsx`). The *byte-level*
-absence does not hold yet, and it is a build gap rather than a component one. The owning
-phase is 14, which owns the mobile artifact and `scripts/check-no-purchase-ui.mjs`.
+property: the store build's entry chunk contains **zero** occurrences of `billing/checkout`
+where the web/desktop build contains five, and no store-reachable surface links to
+`/pricing` or `/billing/checkout` — the remaining `pricing` strings in the store chunk are
+locale *data* under `pricing.*`, which no route renders there. The byte-level half is what
+the runtime half cannot give: it means a patched client has no module to reach and a store
+reviewer's static scan finds no path, rather than a path that a flag currently hides.
+`scripts/check-no-purchase-ui.test.mjs` pins the identity gate in both directions — a clean
+`full` artifact must fail, an unstamped one must fail, and a `store` stamp must not excuse a
+purchase path in the bytes.
+
+**What no part of this covers.** The check reads the shipped web assets. It does not read
+the native layer (`lib*.so`, `classes.dex`, `Payload/*.app/*`), the store metadata, or the
+account-deletion behaviour — those are checklist rows in `docs/RELEASE.md` § Store
+submission checklists. And it does not prove the tree it read is the tree that was
+*submitted*: `scripts/check-mobile-no-purchase.sh <artifact.ipa>` closes that gap by running
+the same check against the packaged archive, and that is the form A4 records.
