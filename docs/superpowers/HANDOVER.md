@@ -7,11 +7,13 @@ been; this is the list of things that cannot be.
 
 These are **code gaps**, not credential gaps, and each one stops a store submission on its own.
 They were found while writing the store checklists (Phase 15), and they are recorded here because
-nothing in a phase's own file list owned them:| # | What is missing | Why it blocks |
+nothing in a phase's own file list owned them:
+
+| # | What is missing | Why it blocks |
 |---|---|---|
 | **In-app account deletion** | No route exists: no `/account` handler in `crates/server/src/routes/mod.rs`, and `purge_deleted_accounts` appears only as a **comment** in `migrations/0015_jobs.sql:11` with no dispatching handler. `SettingsScreen.tsx:37` lists it under "Not built yet" | Apple requires in-app deletion of an account an app can create. Phase 7's plan re-tagged `## Account` away from itself (A160) and deferred it to "the release prerequisites", where nothing picked it up |
 | **The Play account-deletion URL** | The public URL and the server route behind it both do not exist | Google Play requires a public deletion URL for any app with account creation |
-| **The iOS build number** | `src-tauri/tauri.conf.json` sets no `bundle.bundleVersion`, so `CFBundleVersion` is derived from the shell version (`0.1.0`). Bumping the shell version is currently the only way to bump the build number | A second submission without a higher build number is rejected as a duplicate |
+| **The iOS build number** | `src-tauri/tauri.conf.json` sets no build version, so `CFBundleVersion` is derived from the shell version (`0.1.0`). Bumping the shell version is currently the only way to bump the build number. **The key is per-platform, not top-level:** `bundle.iOS.bundleVersion` and `bundle.macOS.bundleVersion` — `bundle.bundleVersion` is not in the schema's `BundleConfig` at all (`app/node_modules/@tauri-apps/cli/config.schema.json`, `IosConfig`/`MacConfig`), so the top-level form would be rejected or silently ignored | A second submission without a higher build number is rejected as a duplicate |
 
 The first two are the same feature and it is a product-scope decision rather than a task: they need
 the retention/purge machinery, a confirm step, and copy that says what is deleted. Say the word and
@@ -19,18 +21,17 @@ I will implement it — it is not large, but it is not mine to invent either.
 
 ## One environment note worth acting on
 
-**The machine is out of disk, and it is now blocking verification rather than merely threatening it.** `/System/Volumes/Data` has **13 GB free of 460 GB (97% full)** and the repository's `target/` is **89 GB** (87 GB of it `target/debug`, 2.7 GB `target/release`). Three things have already died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, and the Docker daemon itself, which no longer starts (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB).
+**The machine is out of disk, and it is now blocking verification rather than merely threatening it.** `/System/Volumes/Data` has **11 GB free of 460 GB (98% full)** and the repository's `target/` is **86 GB** (78 GB of it `target/debug/deps`, 10 GB `target/debug/incremental`). Four things have already died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, the Docker daemon itself (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB), and a second build. **I reclaimed 2.7 GB by deleting `target/release/`**, which nothing has touched since yesterday evening — no `cargo` invocation in this session builds the release profile except the image build, which needs Docker anyway.
 
-Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the evidence for anyway. What it does need is enough room for `cargo test --workspace` and `npm --prefix app test` to finish, and at 13 GB that is no longer comfortable.
+**What is left to reclaim, in the order I would do it:**
 
-**The cheapest 87 GB on this machine:**
+1. **`target/debug/incremental/` — 10 GB, and it is pure query cache.** rustc rebuilds it; deleting it costs time and nothing else. I have **not** deleted it because two `cargo` processes are running against that tree right now and removing the directory under a live build turns a slow build into a confusing failure. Delete it once nothing is compiling.
+2. **`target/debug/deps/` — 78 GB.** This is the real one, and the only safe way to take it back is `cargo clean`, which forces a full rebuild that competes for the `target/` lock with everything else. **Do it after the remaining slices stop, then run `cargo test --workspace` once** — that run is exit-checklist item 1 for every phase and it has never completed in this project's history.
+3. `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB) are outside the repo and yours to judge; the HuggingFace cache is not this project's (the embedder uses `FASTEMBED_CACHE_DIR`), but I would not delete another tool's cache unasked.
 
-```bash
-cd /Users/mac/Documents/Coding/project/Stvdy
-cargo clean          # removes all 89 GB under target/; the next build rebuilds in a few minutes
-```
+Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the evidence for anyway — and that is now a hard fact rather than a preference, since the daemon will not start. What the critical path does need is enough room for `cargo test --workspace` and `npm --prefix app test` to finish, and at 11 GB it is not comfortable.
 
-I have not run it, and the reason is a real tradeoff rather than caution: every `cargo` invocation in flight holds the `target/` lock, so a clean now would make several live slices fail with a lock error, and a full rebuild then competes with them for the same lock. **If you are reading this while I am still running, the right order is: let the remaining slices finish, then `cargo clean`, then one `cargo test --workspace`.** If you would rather have the space immediately, stop me first (`cargo clean` while I am mid-run will look like a spurious test failure, not like a disk problem).
+**The exact order, if you want the space back:** let the remaining slices stop, then `rm -rf target/debug/incremental` (free, costs a rebuild of the query cache only), then `cargo clean` if you want the other 78 GB, then **one** `cargo test --workspace` — which is exit-checklist item 1 for every phase and has never completed in this project's history. Do it in that order and the cost is one long build; do `cargo clean` while slices are running and every live `cargo` invocation fails on the `target/` lock, which reads as a code failure rather than a disk one.
 
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 
@@ -71,9 +72,13 @@ The probes and their recorded state (`docs/ARCHITECTURE.md:344`, `docs/superpowe
 
 ## Verified green so far
 
-Every phase's exit gate is recorded in its own plan file under "Execution notes", and each
-phase's working notes are in `.superpowers/sdd/<plan>/progress.md` (git-ignored scratch, on
-disk only). The short version:
+Every phase's exit gate is recorded in its own plan file, and each phase's working notes are in
+`.superpowers/sdd/<plan>/progress.md` (git-ignored scratch, on disk only). **One exception worth
+knowing before you trust the table below:** Phase 4's plan has no `## Execution notes` section at
+all, so its gates were never recorded anywhere — its tests are covered by the workspace run, and
+its two roadmap gates (5 and 6) have no measurement in any document. Phase 0's accessibility box
+and Phase 4's are the same gap: two surfaces whose accessibility has never been measured, and the
+honest state is "unknown" rather than "fine". The short version:
 
 | Phase | Status |
 |---|---|
