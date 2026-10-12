@@ -181,6 +181,29 @@ smoke-server-phase9:
 smoke-phase9:
     BASE=http://localhost:8099 bash scripts/smoke-phase9.sh
 
+# Phase 11's run. The stub must answer with a syllabus extraction and an effort estimate:
+# both are strict-JSON generators, so the Phase 2 default (a prose answer) would fail both
+# for good. `--answers-file` matches on the prompt rather than on the request's position, so
+# a re-run answers correctly.
+#
+# It reads the database back — the draft's status, the credit ledger, the `events`/`tasks`/
+# `goals` counts before and after the confirm, and the accepted blocks' `goal_id` — so it
+# needs `DATABASE_URL`, which it reads out of `.env` itself, and it prunes `signup_attempts`
+# for 127.0.0.1 at the start because A154's window is 24h.
+#
+# It is a slow run on purpose: the extraction and the effort estimate are both jobs, so the
+# script polls the draft and the proposal to `ready` rather than sleeping a fixed amount.
+smoke-llm-phase11:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-phase11-requests.jsonl \
+      --answers-file scripts/fixtures/phase11-answers.json
+
+smoke-server-phase11:
+    LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase11:
+    BASE=http://localhost:8099 bash scripts/smoke-phase11.sh
+
 # Phase 8's run. **No model stub and no browser**: nothing on the sync path calls an LLM
 # and nothing here renders a document, so `just smoke-server-phase7` is a fine server for
 # it (the stub it points at is never reached) and CHROME_PATH is not part of the pairing.
@@ -191,6 +214,21 @@ smoke-phase9:
 # for 127.0.0.1 at the start, because A154's window is 24h and every run adds to it.
 smoke-phase8:
     BASE=http://localhost:8099 bash scripts/smoke-phase8.sh
+
+# Phase 10's run. **No model stub and no browser**: nothing on the calendar path calls an
+# LLM and nothing here renders a document, so any of the phase 7-9 servers is a fine server
+# for it — the stub it points at is never reached.
+#
+# The Google half degrades to the ICS half, and the script's header says why: the consent
+# routes are not in the router (Task 6 is unlanded) and the OAuth client does not exist in
+# this repo, so there is nothing to connect against. The one Google-shaped assertion it can
+# make is the *refusal* on free.
+#
+# It reads the database back (the connection row, the stored feed token), so it needs
+# `DATABASE_URL`, which it reads out of `.env` itself, and it prunes `signup_attempts` for
+# 127.0.0.1 at the start because A154's window is 24h.
+smoke-phase10:
+    BASE=http://localhost:8099 bash scripts/smoke-phase10.sh
 
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
