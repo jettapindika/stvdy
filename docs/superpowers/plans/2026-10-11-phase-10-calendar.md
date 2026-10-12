@@ -1989,28 +1989,28 @@ docs(phase 10): the calendar contract, and the three gates
 
 | # | Gate | Command | Result |
 |---|---|---|---|
-| 1 | `/cal/:token.ics` validates and carries the caller's own app-owned rows | `cargo test -p stvdy-server --test calendar feed` | |
-| 2 | A regenerated feed token retires the old one | the same test, assertion 3 | |
-| 3 | The feed is `text/calendar`, `no-store`, `noindex` | the same test, assertions 2 | |
-| 4 | An external ICS is imported with recurrence and timezones | `cargo test -p stvdy-server --test calendar ics` | |
-| 5 | A second poll sends the validator and a 304 touches nothing | the same test, assertion 2 | |
-| 6 | A private host is refused at save and at fetch | `cargo test -p stvdy-server --test ssrf` + `--test calendar refused` | |
-| 7 | Expansion is bounded and reports truncation | `cargo test -p stvdy-core --test calendar expansion` | |
+| 1 | `/cal/:token.ics` validates and carries the caller's own app-owned rows | `cargo test -p stvdy-server --test calendar feed` | **PASS** — `the_feed_validates_and_a_regenerated_token_stops_working` (server calendar, **10 passed / 0 failed**): the body carries `BEGIN:VCALENDAR` and the caller's own rows (`UAS Jaringan Komputer`, `Blok belajar`, `Kumpulkan laporan`), and another account's token resolves to that account's rows only |
+| 2 | A regenerated feed token retires the old one | the same test, assertion 3 | **PASS** — same test, assertion 3: after `POST /calendar/feed/regenerate` the old token 404s and the new token serves 200 |
+| 3 | The feed is `text/calendar`, `no-store`, `noindex` | the same test, assertions 2 | **PASS** — same test, assertion 2: `content-type: text/calendar; charset=utf-8`, `cache-control: no-store`, `x-robots-tag: noindex` |
+| 4 | An external ICS is imported with recurrence and timezones | `cargo test -p stvdy-server --test calendar ics` | **PASS** — `an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validator`: 9 rows (8 occurrences plus the exam), and Jakarta 08:00 imports to `2026-06-10T01:00:00Z` through `chrono-tz` |
+| 5 | A second poll sends the validator and a 304 touches nothing | the same test, assertion 2 | **PASS** — same test: the re-poll and the manual sync both send `etag: "v1"` (the first fetch is unconditional) and the `change_log` count is unchanged, so a 304 touches no row |
+| 6 | A private host is refused at save and at fetch | `cargo test -p stvdy-server --test ssrf` + `--test calendar refused` | **PASS** — save: `an_ics_url_that_is_not_fetchable_is_refused_when_it_is_saved` (400 `validation` with a readable reason); fetch: `crates/server/tests/ssrf.rs::the_guarded_text_fetch_refuses_a_private_host_and_a_non_http_scheme` (ssrf **8 passed / 0 failed**) |
+| 7 | Expansion is bounded and reports truncation | `cargo test -p stvdy-core --test calendar expansion` | **PASS** — `crates/core/tests/calendar.rs::expansion_is_bounded_and_reports_truncation` (core calendar **12 passed / 0 failed**), plus `a_truncated_recurrence_imports_what_it_read_and_records_the_error`: 500 occurrences stored and `recurrence_truncated` recorded, cleared by a later clean pass |
 | 8 | Google two-way sync is incremental | `cargo test -p stvdy-server --test calendar incremental` | |
 | 9 | A 410 triggers a full resync, and the pass after it is incremental again | the same test, assertion 3 | |
-| 10 | A calendar-sourced event is read-only to a client on both write paths | `cargo test -p stvdy-server --test calendar read_only` | |
-| 11 | The sync can still write the columns the routes refuse | the same test, assertion 4 | |
-| 12 | The consent URL is offline + PKCE + the two scopes; the callback returns no token | `cargo test -p stvdy-server --test calendar consent` | |
-| 13 | A free account is 403 `plan_required` on connect, and the account cap binds on pro | the same test, assertions 3–4 | |
-| 14 | The poll is dedupe-guarded and the manual sync is bounded | `cargo test -p stvdy-server --test calendar poll` | |
-| 15 | Every new route is classified | `cargo test -p stvdy-server --test route_sweep` | |
-| 16 | `0017` is still the last trigger migration and `calendar_connections` is not synced | `cargo test -p stvdy-server --test schema` | |
-| 17 | The week/month windows are unit-tested against a fixed clock and zone | `npm --prefix app test -- calendar` | |
-| 18 | Roadmap gate 5 (accessibility) measured and recorded | Task 11 Step 6 | |
-| 19 | Roadmap gate 6 (Indonesian) measured and recorded | Task 11 Step 7 | |
-| 20 | Roadmap gate 7 (honesty) stated and recorded | Task 11 Step 8 | |
-| 21 | `docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same commits | — | |
-| 22 | The full quality gate is green | Task 11 Step 10 | |
+| 10 | A calendar-sourced event is read-only to a client on both write paths | `cargo test -p stvdy-server --test calendar read_only` | **PASS** — `an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validator`: `PATCH` 403, `DELETE` 403, and `/sync/push` answers `read_only_entity` |
+| 11 | The sync can still write the columns the routes refuse | the same test, assertion 4 | **PASS** — same test: the re-poll renames the row to `UAS Jaringan Komputer (revisi)` with `source` still `ics`, so the sync writes a row the routes refuse |
+| 12 | The consent URL is offline + PKCE + the two scopes; the callback returns no token | `cargo test -p stvdy-server --test calendar consent` | **PASS** — `the_consent_url_asks_for_offline_access_and_carries_an_encrypted_state` (`access_type=offline`, `prompt=consent`, `code_challenge_method=S256`, the exact two-scope string) and `the_callback_refuses_a_state_that_is_not_its_own_and_never_returns_a_token` (the deep link carries none of `refresh`, `access_token`, `token=`, `code=`) |
+| 13 | A free account is 403 `plan_required` on connect, and the account cap binds on pro | the same test, assertions 3–4 | **HALF MET** — the free 403 **is** asserted in `the_consent_url_asks_for_offline_access_and_carries_an_encrypted_state` (403, `code: plan_required`, `min_plan: pro`). The pro account cap binding is **NOT asserted at route level**: no test drives a second Google connection through `connect` on pro, because that needs a real exchange to get the first one |
+| 14 | The poll is dedupe-guarded and the manual sync is bounded | `cargo test -p stvdy-server --test calendar poll` | **PASS** — `the_poll_job_is_dedupe_guarded_and_a_manual_sync_is_rate_limited`: a second tick and a manual press each produce one job row, not two |
+| 15 | Every new route is classified | `cargo test -p stvdy-server --test route_sweep` | **PASS** — `cargo test -p stvdy-server --test route_sweep`: **4 passed / 0 failed**; `every_registered_route_is_classified` fails on an unclassified route |
+| 16 | `0017` is still the last trigger migration and `calendar_connections` is not synced | `cargo test -p stvdy-server --test schema` | **PASS** — `cargo test -p stvdy-server --test schema`: **27 passed / 0 failed** |
+| 17 | The week/month windows are unit-tested against a fixed clock and zone | `npm --prefix app test -- calendar` | **PASS** — `npm --prefix app test -- calendar`: **21 passed / 0 failed** (`calendar.test.ts` 11, `CalendarScreen.test.tsx` 6, `layout.test.ts` 4) |
+| 18 | Roadmap gate 5 (accessibility) measured and recorded | Task 11 Step 6 | **PASS** — measured in headless Chromium at 390×844 (both themes, 100% and 200%) and at 1365×900: the calendar surface has 0 contrast pairs below requirement (lowest 5.01:1), 0 targets under 44px, 0 clipped, 0 overlapped; two defects found and fixed. One inherited finding, named rather than fixed: the shell's sidebar `a.nav-item` links measure 215×40 at 100% text (not the calendar surface) |
+| 19 | Roadmap gate 6 (Indonesian) measured and recorded | Task 11 Step 7 | **PARTIAL** — the server data half is measured: `an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day` (Jakarta 06:00 on the 16th imports to `2026-10-15T23:00:00Z`; the title round-trips; the local-day deadline renders `DTSTART;VALUE=DATE:20261016`) with `--test indonesian` **4 passed / 0 failed**. The UI half at 200% text was not driven in a browser |
+| 20 | Roadmap gate 7 (honesty) stated and recorded | Task 11 Step 8 | **PASS** — (a)–(e) stated in the phase's own gate-7 notes: no number invented, each traceable to a row, nothing on the screen generative, no cost badge, nothing an AI proposal |
+| 21 | `docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same commits | — | **PASS** — all five carry a Phase 10 section: `docs/API.md` `## Calendar (Phase 10)`, `docs/SYNC.md` `## Calendar-sourced events (Phase 10)`, `docs/ARCHITECTURE.md` `## Calendar (Phase 10)`, `docs/ASSUMPTIONS.md` A230–A249, `docs/THREAT_MODEL.md` the § 2 asset rows and residual risk R7 |
+| 22 | The full quality gate is green | Task 11 Step 10 | **NOT GREEN** — `cargo fmt --all -- --check` clean exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean exit 0 (after `31900fb`); `npm --prefix app test` 63 files / 585 tests / 0 failed; `npm --prefix app run build` exit 0; `node scripts/check-no-cdn.mjs` exit 0. `cargo test --workspace` is **NOT** green: it stops at `crates/server/tests/syllabus.rs` (14 passed / 5 failed, Phase 11's exit gate), so it says nothing about the suites after it |
 
 ---
 
