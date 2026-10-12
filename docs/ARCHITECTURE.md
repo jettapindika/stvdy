@@ -1233,3 +1233,67 @@ and a reload loses an unaccepted draft — which is what "confirm" means. The dr
 proposal therefore live in the SPA's component state for as long as the student is looking at
 them, and no part of the server holds them.
 
+
+## Container image
+
+One image runs the whole server — API, job worker and scheduler, as one process — because
+three of its dependencies are native binaries the code loads at runtime from paths it reads
+from the environment (`CHROME_PATH`, `PDFIUM_LIB_PATH`, `FASTEMBED_CACHE_DIR`), and each has a
+documented absent-binary policy rather than a crash. The image's job is to make all of them
+present and **pinned**; its verification is that the same acceptance test a developer's laptop
+runs also runs inside it (`scripts/release-image.sh`, CI's `image` job).
+
+| Installed | Version | Env | Why it is pinned |
+|---|---|---|---|
+| Chromium (Debian `chromium` + `chromium-common`) | `ARG CHROMIUM_VERSION` | `CHROME_PATH` | the renderer's output is the document a student prints, and `tests/pdf.rs` asserts a page count and a footer read back from the renderer — an unpinned browser makes that depend on when the image was built |
+| pdfium (`bblanchon/pdfium-binaries`) | `chromium/8086`, SHA-256 verified | `PDFIUM_LIB_PATH` | the one dependency that parses attacker-supplied files; an unpinned download from a release URL is a supply-chain hole (A341) |
+| `fastembed` model | `intfloat/multilingual-e5-base` | `FASTEMBED_CACHE_DIR` | 1.06 GB, and the config default is a *relative* path, which in a container means "relative to the working directory" (A342) |
+| LibreOffice (`-core`/`-writer`/`-impress`) | bookworm | `SOFFICE_BIN` | the PPTX/DOCX preview (A158); dormant until Phase 7's ingestion lands (A343) |
+| Print assets (KaTeX, Inter, JetBrains Mono) | KaTeX 0.19.0 | `ASSETS_DIR` | `rust-embed` compiles them into the binary; the runtime copy is for the operator (A339) |
+
+**Base image: `debian:bookworm-slim`.** Not distroless and not Alpine, because all three
+native dependencies are glibc builds and none of them exists on musl. The security cost of the
+larger base is accepted, and the mitigation is a pinned base digest plus a weekly rebuild.
+
+**The image carries the release `target/` directory.** That is what makes `cargo test --test
+pdf` runnable inside it, and it is the phase's stated risk's defence: the acceptance test is
+`#[ignore]`d so a laptop without a browser still gets a green `cargo test`, and the only honest
+way to keep it from being a test nobody runs is to run it against the image's own Chromium,
+pdfium and assets (A337). The image is therefore larger than a minimal runtime — a deliberate
+trade, stated here so it is not mistaken for an oversight.
+
+**Non-root, sandbox on.** The renderer refuses an unsandboxed render outside dev, so the
+container runs as `stvdy` (uid 10001) and Chromium keeps its sandbox. The sandbox needs
+`--shm-size` and a writable `/tmp`; both are in `docs/OPERATIONS.md` with the `docker run`
+stanza, because a missing `/dev/shm` reads as a memory error in code rather than as a
+deployment flag (A338).
+
+### The print assets are served, not fetched
+
+`templates/cheatsheet.v1.html` links KaTeX and two typefaces, and until Phase 15 it linked them
+from `cdn.jsdelivr.net` and `fonts.googleapis.com` — while its own header comment said the
+renderer rewrites `ASSET_BASE` to a local mount, which **no code did**. The failure that hides
+is not a missing stylesheet: it is a PDF that prints every formula as literal `$…$`, which the
+`data-math-ready` guard turns into a failed job rather than a wrong document (A339, A340).
+
+Three pieces close it, and they are one mechanism rather than three:
+
+1. `assets/` holds the bytes, with `assets/checksums.txt` pinning each SHA-256 and
+   `scripts/fetch-print-assets.sh` verifying every file before it writes it. A build that
+   reached the network for a font would fail on the day the CDN is slow, and it would fail as a
+   missing glyph rather than as an error.
+2. `crates/server/src/assets.rs` embeds the directory with `rust-embed` — so a file missing
+   from the repository is a **build** failure — and serves it from `GET /assets/{*path}` with an
+   explicit content type and `Cache-Control: public, max-age=31536000, immutable`. The route is
+   in the public group because the browser fetching it is headless Chromium printing a document
+   with no credentials, and every file is a vendored upstream release.
+3. `render::chrome::rewrite_asset_base` points the template's CDN references at that route
+   before `document.write`, using `AppConfig::assets_base_url` (default
+   `http://127.0.0.1:<BIND_ADDR port>`). The base must be absolute: `document.write` gives the
+   page no base URL, so a relative or `file://` reference would not resolve.
+
+The rewrite is a table of known URLs rather than a general "any remote origin" rewriter, so a
+template that gained a *fifth* remote reference is not silently pointed at the wrong local
+path: it survives the rewrite, and `crates/server/tests/assets.rs` fails on it. `ASSETS_DIR`
+points at the image's second, redundant copy of the same bytes — an operator checking what
+shipped should not have to unpack the binary.

@@ -81,6 +81,123 @@ jobs:
         run: test -x "$CHROME_PATH" || { echo "no Chrome at $CHROME_PATH"; exit 1; }
       - run: cargo test -p stvdy-server --test pdf -- --ignored
 
+  image:
+    name: server image (pinned Chromium, pdfium, model)
+    # The phase's stated risk is an image that builds and runs on a laptop but not on the
+    # host: `find_executable` probes `/Applications/Google Chrome.app/…` first, so on a
+    # developer's Mac the PDF pipeline works with the vendor's Chrome, and on a host with
+    # no Chrome the symptom is not a failed deploy but a PDF nobody can download
+    # (docs/RELEASE.md, A130).
+    #
+    # The mechanical defence is this job: build the image, boot it against Postgres, and
+    # run the same acceptance test the `pdf` job runs on a bare runner — but against the
+    # image's own Chromium, pdfium and print assets. A pass here also proves the assets
+    # are in the image, because the test asserts no raw `$` delimiter reaches the PDF.
+    #
+    # The 45-minute timeout is a real bound, not padding: a hang is this job's failure
+    # mode (a Chromium that will not start under the sandbox, a boot that never answers
+    # /health), and a default timeout would spend an hour discovering it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stvdy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        run: docker build -t stvdy-server:ci .
+
+      - name: The pin is the pin
+        # An image that silently tracked Debian's `stable` would pass every other check in
+        # this job: the browser starts, the render works, and the page count changes
+        # whenever Debian moves. So the version the running image reports is compared to
+        # the `ARG` in the Dockerfile, and a mismatch fails the build rather than changing
+        # every PDF.
+        run: |
+          built=$(docker run --rm --entrypoint /usr/bin/chromium stvdy-server:ci --version)
+          declared=$(grep -oE '^ARG CHROMIUM_VERSION=.*' Dockerfile | cut -d= -f2)
+          echo "built:    $built"
+          echo "declared: Chromium $declared"
+          test "$built" = "Chromium $declared" || {
+            echo "the image's Chromium is not the declared pin"; exit 1; }
+
+      - name: The other native dependencies are present
+        # Each of these has a documented absent-binary policy, and each failure mode is a
+        # feature that quietly stops working: no pdfium is a source stuck in `processing`,
+        # an empty model cache is a 1.06 GB download at the first ingest (A342).
+        run: |
+          docker run --rm --entrypoint /bin/sh stvdy-server:ci -c '
+            set -e
+            test -x "$CHROME_PATH" || { echo "no Chromium at $CHROME_PATH"; exit 1; }
+            test -f "$PDFIUM_LIB_PATH" || { echo "no pdfium at $PDFIUM_LIB_PATH"; exit 1; }
+            test -x "$SOFFICE_BIN" || { echo "no LibreOffice at $SOFFICE_BIN"; exit 1; }
+            test -n "$(ls -A "$FASTEMBED_CACHE_DIR")" || {
+              echo "the model cache at $FASTEMBED_CACHE_DIR is empty"; exit 1; }'
+
+      - name: Migrate, then boot
+        # `--migrate-only` runs to completion *before* the server starts: two replicas
+        # starting together both migrate, and the one that loses the race then serves
+        # against a schema it has not verified (A346).
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy \
+            stvdy-server:ci --migrate-only
+
+          docker run -d --name stvdy --network host --shm-size=1g --tmpfs /tmp \
+            -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy \
+            -e APP_ENV=prod \
+            -e JWT_SECRET=ci-only-secret-that-is-long-enough \
+            -e ENCRYPTION_KEY_HEX=1111111111111111111111111111111111111111111111111111111111111111 \
+            -e WEB_ORIGIN=http://localhost:5173 \
+            -e STORAGE_BACKEND=local \
+            -e STORAGE_LOCAL_DIR=/tmp/objects \
+            stvdy-server:ci
+
+          for _ in $(seq 1 60); do
+            curl -fsS localhost:8080/health && break
+            sleep 1
+          done
+          curl -fsS localhost:8080/health | grep -q '"status":"ok"'
+
+      - name: The print assets are served from inside the image
+        # The route the renderer rewrites the template's CDN references to (A339). A 404
+        # here is what produces a PDF full of literal `$…$`, so it is checked before the
+        # render rather than inferred from it.
+        run: |
+          for path in katex/katex.min.css katex/katex.min.js \
+                      katex/contrib/auto-render.min.js fonts.css; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "localhost:8080/assets/$path")
+            echo "$code /assets/$path"
+            test "$code" = 200 || exit 1
+          done
+
+      - name: The PDF pipeline runs here, not only on a laptop
+        # The same command the `pdf` job runs, against the image's own browser, pdfium and
+        # assets. The binary's name carries a cargo hash, so it is resolved rather than
+        # hard-coded; `scripts/release-image.sh` is the readable form of this whole
+        # sequence and is what an operator runs on the production host.
+        run: |
+          bin=$(docker exec stvdy sh -c 'ls /opt/tests/deps/pdf-* | head -1')
+          echo "running $bin"
+          docker exec stvdy sh -c \
+            "cd /opt/tests && CHROME_PATH=/usr/bin/chromium ./deps/$(basename "$bin") --ignored --nocapture"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs stvdy || true
+
   shell:
     name: shell lint + test
     runs-on: macos-15
