@@ -175,31 +175,28 @@ pub async fn callback(
     if let Some(error) = query.error.as_deref().filter(|value| !value.is_empty()) {
         // The student declined, or Google refused. Not an internal error, and not a 4xx
         // either: the browser needs to be sent back to the app.
-        return Ok(deep_link("denied", Some(error)));
+        return deep_link("denied", Some(error));
     }
 
     let Some(encoded) = query.state.as_deref().filter(|value| !value.is_empty()) else {
-        return Ok(deep_link("error", Some("missing OAuth state")));
+        return deep_link("error", Some("missing OAuth state"));
     };
     let payload = match decrypt_state(&state, Purpose::Calendar, encoded) {
         Ok(payload) => payload,
         Err(error) => {
             tracing::info!(%error, "a calendar consent callback presented a state we refuse");
-            return Ok(deep_link("error", Some("the consent request is not valid")));
+            return deep_link("error", Some("the consent request is not valid"));
         }
     };
     let Some(user_id) = payload.user_id else {
         // Unreachable through `connect`, which always sets it. A state with no account
         // cannot be acted on, and guessing one would connect a calendar to the wrong
         // student.
-        return Ok(deep_link(
-            "error",
-            Some("the consent request names no account"),
-        ));
+        return deep_link("error", Some("the consent request names no account"));
     };
 
     let Some(code) = query.code.as_deref().filter(|value| !value.is_empty()) else {
-        return Ok(deep_link("error", Some("missing authorization code")));
+        return deep_link("error", Some("missing authorization code"));
     };
 
     let token = match exchange_code(google, code, &payload.verifier).await {
@@ -209,7 +206,7 @@ pub async fn callback(
             // `redirect_uri_mismatch`, which is an operator's problem, and the deep link is
             // rendered to the student.
             tracing::warn!(%error, %user_id, "the Google Calendar code exchange failed");
-            return Ok(deep_link("error", Some("Google refused the connection")));
+            return deep_link("error", Some("Google refused the connection"));
         }
     };
 
@@ -217,10 +214,7 @@ pub async fn callback(
         // `access_type=offline` plus `prompt=consent` should always return one; a response
         // without it cannot keep a connection alive past the first hour.
         tracing::warn!(%user_id, "Google returned no refresh token for the calendar grant");
-        return Ok(deep_link(
-            "error",
-            Some("Google did not grant offline access"),
-        ));
+        return deep_link("error", Some("Google did not grant offline access"));
     };
 
     // The cap is enforced **where the row is written** (A245). `require_for` is the
@@ -230,26 +224,26 @@ pub async fn callback(
         crate::entitlements::require_for(&state, user_id, Feature::GoogleCalendar).await
     {
         tracing::info!(%user_id, code = error.code(), "a calendar connect was refused after consent");
-        return Ok(deep_link(
+        return deep_link(
             "error",
             Some("Google Calendar is not available on your plan"),
-        ));
+        );
     }
     if let Err(error) =
         crate::entitlements::require_for(&state, user_id, Feature::GoogleAccount).await
     {
         tracing::info!(%user_id, code = error.code(), "the Google account cap refused a connect");
-        return Ok(deep_link(
+        return deep_link(
             "error",
             Some("your plan's Google account limit is already in use"),
-        ));
+        );
     }
 
     let encrypted = crate::auth::oauth_state::encrypt_secret(&state, refresh_token)?;
     store_connection(&state, user_id, &encrypted).await?;
 
     tracing::info!(%user_id, "Google Calendar connected");
-    Ok(deep_link("connected", None))
+    deep_link("connected", None)
 }
 
 /// A redirect to the app's deep link, with the reason percent-encoded.
@@ -263,18 +257,23 @@ pub async fn callback(
 /// answers 302; two OAuth returns in one product disagreeing about a status a client may
 /// branch on is the kind of difference that is invisible until one of them breaks. This is
 /// the same construction `auth::routes::google_callback` uses.
-fn deep_link(status: &str, reason: Option<&str>) -> axum::response::Response {
+///
+/// `AppResult` rather than a bare `Response` because the workspace denies `expect`, and a
+/// `.expect("this literal parses")` on a constant is exactly the pattern that rule exists to
+/// keep out — a `url::Url` error is unreachable here, and mapping it is what makes that
+/// visible rather than asserted.
+fn deep_link(status: &str, reason: Option<&str>) -> AppResult<axum::response::Response> {
     let mut params: Vec<(&str, &str)> = vec![("status", status)];
     if let Some(reason) = reason {
         params.push(("reason", reason));
     }
     let url = url::Url::parse_with_params(DEEP_LINK, &params)
-        .expect("the deep link is a literal this module controls");
-    (
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("building the deep link: {error}")))?;
+    Ok((
         axum::http::StatusCode::FOUND,
         [(axum::http::header::LOCATION, url.to_string())],
     )
-        .into_response()
+        .into_response())
 }
 
 /// Finds the student's Google connection and refreshes its grant, or creates one.
