@@ -269,6 +269,18 @@
       "title": "Upcoming exams",
       "emptyTitle": "No exams tracked",
       "emptyReason": "Add an exam as a goal and it becomes the anchor the planner schedules against."
+    },
+    "timer": {
+      "running": "Running",
+      "stopped": "Stopped",
+      "stale": "Needs your call",
+      "start": "Start",
+      "stopAndLog_one": "Stop and log {{count}} min",
+      "stopAndLog_other": "Stop and log {{count}} min",
+      "staleReason": "This timer has been running for more than four hours, so it is not counted automatically. Save the minutes you actually studied, or discard it.",
+      "minutesLabel": "Minutes studied",
+      "save": "Save session",
+      "discard": "Discard"
     }
   },
   "workspaces": {

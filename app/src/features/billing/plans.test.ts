@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { PLANS, REPORT_CREDITS, parsePlans, planForFormat } from './plans'
+import { PLANS, REPORT_CREDITS, TASK_CREDITS, parsePlans, planForFormat } from './plans'
 
 /**
  * The client half of two rules that are enforced on the server.
@@ -83,5 +83,40 @@ describe('the plan matrix reader', () => {
     expect(parsed.plans.free?.exportFormats).toEqual([])
     expect(parsed.plans.pro?.exportFormats).toEqual(['md', 'pdf'])
     expect(parsed.plans.free?.name).toBe('Free')
+  })
+
+  it('reads task_breakdown from the credits table', () => {
+    // The number the quick-capture button and the break-down panel show *before*
+    // the action runs (gate 7d). It is the file's, read at build time, so this is
+    // the assertion that a change to `config/plans.toml` reaches both screens
+    // rather than leaving a literal behind.
+    expect(TASK_CREDITS.breakdown).toBe(2)
+  })
+
+  it('prices a quick capture as the break-down action, because the matrix has no key of its own', () => {
+    // A190: `[credits]` has `task_breakdown` and no `quick_capture`, and
+    // `CreditAction` has no variant for one. Both screens therefore read this one
+    // field — the assertion pins that they cannot drift onto two different numbers
+    // without this test moving with them.
+    const parsed = parsePlans('[credits]\ntask_breakdown = 5\nreport_outline = 3\n')
+    expect(parsed.taskCredits.breakdown).toBe(5)
+    expect(parsed.credits.outline).toBe(3)
+  })
+
+  it('returns null rather than a guess when the key is absent', () => {
+    // The failure direction the report credits also fail in: a missing price is no
+    // price, never a default. A button that quoted a number the matrix does not
+    // charge is a price the student was shown and not charged — or worse, the
+    // other way round.
+    const parsed = parsePlans('[credits]\nreport_outline = 3\nreport_section = 6\n')
+    expect(parsed.taskCredits.breakdown).toBeNull()
+  })
+
+  it('does not read a task_breakdown outside the credits table', () => {
+    // `task_breakdown` is also a *feature* name under `[plans.*]`, where it is a
+    // boolean grant rather than a price. Reading it there would put `NaN` — or, on
+    // a plan that grants it, a `1` — on the button.
+    const parsed = parsePlans('[plans.pro]\ntask_breakdown = true\nquick_capture = true\n')
+    expect(parsed.taskCredits.breakdown).toBeNull()
   })
 })

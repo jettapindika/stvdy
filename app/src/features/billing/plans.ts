@@ -37,9 +37,27 @@ export interface ReportCredits {
   section: number | null
 }
 
+/**
+ * What the matrix charges for the two generative task actions.
+ *
+ * One number, not two, and that is the matrix's own shape rather than a
+ * simplification here (A190): `config/plans.toml [credits]` has a `task_breakdown`
+ * key and no `quick_capture` key, and `CreditAction` has no variant for one. The
+ * roadmap's rule for a missing key is that the closest *stated* action's price
+ * applies rather than one invented in code — the same rule that charges a
+ * cheatsheet as `report_section` (A120). So both screens quote this field, and the
+ * name says what it is: the price of the breakdown action, which a capture is
+ * priced as.
+ */
+export interface TaskCredits {
+  /** `task_breakdown`: the price of a break-down, and of a quick capture (A190). */
+  breakdown: number | null
+}
+
 export interface ParsedPlans {
   plans: Record<string, PlanFacts>
   credits: ReportCredits
+  taskCredits: TaskCredits
 }
 
 /**
@@ -53,6 +71,7 @@ export interface ParsedPlans {
 export function parsePlans(toml: string): ParsedPlans {
   const plans: Record<string, PlanFacts> = {}
   const credits: ReportCredits = { outline: null, section: null }
+  const taskCredits: TaskCredits = { breakdown: null }
   let current: PlanFacts | null = null
   let inCredits = false
 
@@ -85,6 +104,7 @@ export function parsePlans(toml: string): ParsedPlans {
       if (digits === undefined) continue
       if (key === 'report_outline') credits.outline = Number(digits)
       if (key === 'report_section') credits.section = Number(digits)
+      if (key === 'task_breakdown') taskCredits.breakdown = Number(digits)
       continue
     }
 
@@ -105,7 +125,7 @@ export function parsePlans(toml: string): ParsedPlans {
     }
   }
 
-  return { plans, credits }
+  return { plans, credits, taskCredits }
 }
 
 const PARSED = parsePlans(plansToml)
@@ -118,6 +138,15 @@ const PARSED = parsePlans(plansToml)
  * rather than a wrong one.
  */
 export const REPORT_CREDITS: ReportCredits = PARSED.credits
+
+/**
+ * What the plan matrix charges for the two generative task actions.
+ *
+ * Both are the `task_breakdown` price (A190). The screens quote this field before
+ * the action runs — never a literal, and never `REPORT_CREDITS` — so a change to
+ * `config/plans.toml` reaches the button.
+ */
+export const TASK_CREDITS: TaskCredits = PARSED.taskCredits
 
 /**
  * The plans the file declares, keyed by plan id.

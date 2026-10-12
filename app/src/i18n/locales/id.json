@@ -267,6 +267,17 @@
       "title": "Ujian mendatang",
       "emptyTitle": "Belum ada ujian yang dicatat",
       "emptyReason": "Tambahkan ujian sebagai target, dan itu jadi patokan penjadwalan."
+    },
+    "timer": {
+      "running": "Berjalan",
+      "stopped": "Berhenti",
+      "stale": "Perlu keputusanmu",
+      "start": "Mulai",
+      "stopAndLog_other": "Hentikan dan catat {{count}} menit",
+      "staleReason": "Timer ini sudah berjalan lebih dari empat jam, jadi tidak dicatat otomatis. Simpan menit yang benar-benar kamu pakai untuk belajar, atau buang.",
+      "minutesLabel": "Menit belajar",
+      "save": "Simpan sesi",
+      "discard": "Buang"
     }
   },
   "workspaces": {

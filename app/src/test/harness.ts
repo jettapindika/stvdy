@@ -1,6 +1,14 @@
 import { vi } from 'vitest'
 
-import { installPlatform, type DeepLinkIntent, type PlatformKind, type SecureStore } from '@/platform'
+import {
+  installPlatform,
+  type DeepLinkIntent,
+  type PlatformKind,
+  type Runtime,
+  type SecureStore,
+  type SyncApi,
+  type SyncReport,
+} from '@/platform'
 import { webPlatform } from '@/platform/web'
 
 /**
@@ -37,10 +45,99 @@ export interface FakeDeepLinks {
   subscribers: number
 }
 
+/**
+ * A sync surface a test can drive.
+ *
+ * The status is push-based in production (`Platform.sync.onStatus`), so the fake
+ * has to be too: `set` decides what a fresh `status()` answers, and `emit` is what
+ * the shell's own event would do — a report arriving while the control is mounted.
+ * `writes` and `tombstones` are recorded rather than spied so a test can assert
+ * what was queued and in which order.
+ */
+export interface FakeSync {
+  /** The report a later `status()` answers with. */
+  set(report: SyncReport): void
+  /** Delivers a report to every `onStatus` subscriber, as the shell's event does. */
+  emit(report: SyncReport): void
+  writes: Array<{ entity: string; id: string; payload: Record<string, unknown> }>
+  tombstones: Array<{ entity: string; id: string }>
+  resets: number
+  syncNows: number
+  /** How many subscribers are live, for asserting an unsubscribe actually ran. */
+  readonly subscribers: number
+}
+
+/** The report a fake platform answers before a test says otherwise. */
+const DEFAULT_REPORT: SyncReport = {
+  state: 'synced',
+  code: null,
+  lastSyncedAt: null,
+  outbox: 0,
+}
+
+function fakeSync(overrides?: Partial<SyncApi>): { api: SyncApi; fake: FakeSync } {
+  let report = DEFAULT_REPORT
+  const handlers = new Set<(report: SyncReport) => void>()
+  const fake: FakeSync = {
+    set(next) {
+      report = next
+    },
+    emit(next) {
+      report = next
+      for (const handler of handlers) handler(next)
+    },
+    writes: [],
+    tombstones: [],
+    resets: 0,
+    syncNows: 0,
+    get subscribers() {
+      return handlers.size
+    },
+  }
+
+  const api: SyncApi = {
+    async status() {
+      return report
+    },
+    async read<T>() {
+      return null as T | null
+    },
+    async write(entity, id, payload) {
+      fake.writes.push({ entity, id, payload })
+    },
+    async tombstone(entity, id) {
+      fake.tombstones.push({ entity, id })
+    },
+    async syncNow() {
+      fake.syncNows += 1
+      return report
+    },
+    async reset() {
+      fake.resets += 1
+      report = DEFAULT_REPORT
+    },
+    async onStatus(handler) {
+      handlers.add(handler)
+      return () => {
+        handlers.delete(handler)
+      }
+    },
+    ...overrides,
+  }
+
+  return { api, fake }
+}
+
 export function installFakePlatform(
   kind: PlatformKind = 'web',
-  options: { current?: DeepLinkIntent | null; deepLinks?: boolean } = {},
-): FakeSecureStore & { deepLinks: FakeDeepLinks; opened: string[] } {
+  options: {
+    current?: DeepLinkIntent | null
+    deepLinks?: boolean
+    sync?: Partial<SyncApi>
+    /** Overridden so a test can render the native-only paths (A14). */
+    runtime?: Runtime
+  } = {},
+): FakeSecureStore & { deepLinks: FakeDeepLinks; opened: string[]; sync: FakeSync } {
   const values = new Map<string, string>()
   const deleted: string[] = []
   // Every URL the app handed to the system browser, in order. Recorded rather
@@ -75,9 +172,17 @@ export function installFakePlatform(
     },
   }
 
+  const { api: syncApi, fake: sync } = fakeSync(options.sync)
+
   installPlatform({
     ...webPlatform(kind),
+    // A native kind has a runtime with a local database; `web` does not. The
+    // fake follows the kind rather than always claiming `web`, because the
+    // online-only sync path is chosen by `runtime()` and a fake that lied here
+    // would make every native test exercise the web branch (A14).
+    runtime: () => options.runtime ?? (kind === 'web' ? 'web' : 'tauri'),
     secureStore,
+    sync: syncApi,
     async openExternal(url) {
       opened.push(url)
     },
@@ -97,7 +202,7 @@ export function installFakePlatform(
         }
       : {}),
   })
-  return { values, deleted, deepLinks, opened }
+  return { values, deleted, deepLinks, opened, sync }
 }
 
 /**
