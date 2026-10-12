@@ -114,11 +114,21 @@ export function WorkspaceScreen() {
 
       {workspaceError === null && (
         <>
+          {/* The strip scrolls, the same answer the phone tab bar gives and for the
+              same measured reason: each tab is a `.btn`, which carries
+              `min-width: 0` so a long label wraps inside the button instead of
+              overflowing — but a *word* cannot wrap, and at 200% text "Sources" is
+              110px of glyphs plus 70px of padding, so three tabs need ~540px of a
+              326px strip. They shrank to 101px each and their labels were clipped
+              (`scrollWidth` 106 against a `clientWidth` of 101; "Flashcards" 124
+              against 101). `min-w-max` stops the shrink and `overflow-x-auto` makes
+              the remainder reachable by swipe and by `Tab`; at 100% nothing scrolls,
+              so the visual is unchanged. */}
           <div
             role="tablist"
             aria-label={t('workspaces.panels.label')}
             onKeyDown={onKeyDown}
-            className="mx-3 mb-3 flex gap-1 rounded-pill bg-surface-raised p-1 lg:hidden"
+            className="mx-3 mb-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 lg:hidden"
           >
             {panels.map((panel) => {
               const selected = active === panel.id
@@ -138,7 +148,7 @@ export function WorkspaceScreen() {
                   onClick={() => {
                     setActive(panel.id)
                   }}
-                  className={`btn flex-1 ${selected ? 'btn-secondary' : 'btn-quiet'}`}
+                  className={`btn flex-1 min-w-max ${selected ? 'btn-secondary' : 'btn-quiet'}`}
                 >
                   {panel.label}
                 </button>
@@ -216,7 +226,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
         role="tablist"
         aria-label={t('workspaces.studio.sections')}
         onKeyDown={onKeyDown}
-        className="mx-3 mt-3 flex gap-1 rounded-pill bg-surface-raised p-1"
+        className="mx-3 mt-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1"
       >
         {sections.map((entry) => {
           const selected = entry.id === section
@@ -235,7 +245,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
               onClick={() => {
                 setSection(entry.id)
               }}
-              className={`btn flex-1 ${selected ? 'btn-secondary' : 'btn-quiet'}`}
+              className={`btn flex-1 min-w-max ${selected ? 'btn-secondary' : 'btn-quiet'}`}
             >
               {entry.label}
             </button>

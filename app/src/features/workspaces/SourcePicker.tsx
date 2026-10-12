@@ -56,9 +56,18 @@ export function SourcePicker({
       <legend className="label">{label}</legend>
       <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
         {sources.map((source) => (
+          /* `shrink-0` is load-bearing. The list is capped at `max-h-32` (128px,
+          which is 256px at 200% text), so when the rows' natural heights exceed
+          the cap the flex container shrinks them — and a row is a label whose text
+          cannot shrink with it, so the text overflowed the box it was clipped to:
+          measured at 200% text on a 390px phone, a row's `scrollHeight` was 147
+          against a `clientHeight` of 135, i.e. a line of the source's title cut off
+          inside a scrolling list that was scrolling. Refusing to shrink makes the
+          container scroll instead, which is what `overflow-y-auto` is there for.
+          `max-h-32` stays: at 100% the two rows fit in it and nothing scrolls. */
           <label
             key={source.id}
-            className="flex min-h-11 items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+            className="flex min-h-11 shrink-0 items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
           >
             <input
               type="checkbox"

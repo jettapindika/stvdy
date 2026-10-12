@@ -198,7 +198,19 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Link
             to={`/workspaces/${workspace.id}`}
-            className="flex min-h-11 min-w-0 flex-1 items-center break-words font-medium hover:underline"
+            /* `w-full … sm:w-auto sm:flex-1`, the shape `ReportPanel`'s row and
+               `ReportScreen`'s section heading already use, and load-bearing for
+               the same reason. `flex-1` gives the name a flex basis of `0`, and
+               this row's other three children (a count, Rename, Delete) are all
+               effectively fixed-width: at 100% they fit on one line and the name
+               takes the remainder, but at 200% text they take the whole line, so
+               the name was left **44px** of a 390px phone — measured in Chromium,
+               `scrollWidth` 81 against a `clientWidth` of 44, the workspace's own
+               name wrapping to six lines at 100% text and twelve at 200%. Giving
+               it the whole line at phone width pushes the other three to the next
+               line and lets the name wrap at word boundaries; `sm:` restores the
+               one-line row where there is room for all four. */
+            className="flex min-h-11 min-w-0 w-full items-center break-words font-medium hover:underline sm:w-auto sm:flex-1"
           >
             {workspace.name}
           </Link>

@@ -140,7 +140,17 @@ function DeviceRow({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1 break-words font-medium">{device.name}</span>
+        {/* `w-full … sm:w-auto sm:flex-1`, the shape `ReportPanel`'s row uses and
+            load-bearing for the same reason. `flex-1` gives the name a flex basis of
+            `0` and this row's other four children are all effectively fixed-width, so
+            at 200% text they take the whole line and leave the name **20px** of a
+            390px phone — measured in Chromium, `scrollWidth` 29 against a
+            `clientWidth` of 20, a device name wrapping a character per line. Taking
+            the whole line at phone width pushes the rest to the next line; `sm:`
+            restores the one-line row where there is room. */}
+        <span className="min-w-0 w-full break-words font-medium sm:w-auto sm:flex-1">
+          {device.name}
+        </span>
         {device.current && <span className="chip">{t('devices.thisDevice')}</span>}
         <span className="meta">{platformLabel}</span>
         <span className="meta">{lastSynced}</span>
@@ -184,7 +194,14 @@ function DeviceRow({
             )
           }}
         >
-          <label className="flex min-w-40 flex-1 flex-col gap-1">
+          {/* `min-w-0` and not `min-w-40`. This form is a column at phone width and
+             a row from `sm` up, so the minimum only ever applied where the layout
+             does not need it — and it is `min-width: 10rem`, 320px at a 32px root,
+             which is wider than the 310px content box it sat in: measured in
+             Chromium at 390px with 200% text, the form's `scrollWidth` was 320
+             against a `clientWidth` of 310. `flex-1` is what takes the row, which is
+             the same pairing `ConnectionsPanel`'s ICS field uses. */}
+          <label className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="label">{t('devices.renameLabel')}</span>
             <input
               className="field"

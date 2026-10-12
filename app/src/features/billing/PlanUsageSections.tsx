@@ -192,9 +192,18 @@ export function PlanUsageSections() {
           <Section title={t('plan.limits')}>
             <dl className="flex flex-col divide-y divide-border border-y border-border text-sm">
               {limits.map((limit) => (
+                /* `flex-wrap` is load-bearing. `justify-between` on a row that
+                   cannot wrap puts the label and the value on one line whatever it
+                   costs, and the value here is a count *plus* an "At the limit"
+                   chip: measured in Chromium at 390px with 200% text, the
+                   Workspaces row's `scrollWidth` was 327 against a `clientWidth` of
+                   310, so the chip sat outside the row's own box. The credits and
+                   costs `<dl>`s share the row shape and were measured with it — both
+                   are label plus a short number and neither overflows, so neither is
+                   changed here. */
                 <div
                   key={limit.label}
-                  className="flex items-baseline justify-between gap-4 py-1.5"
+                  className="flex flex-wrap items-baseline justify-between gap-4 py-1.5"
                 >
                   <dt className="text-muted">{limit.label}</dt>
                   <dd className="flex items-baseline gap-2 text-right">

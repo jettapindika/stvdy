@@ -100,7 +100,15 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
           emptyHint={t('studio.noIndexedSources')}
         />
         <div className="flex flex-wrap gap-3">
-          <div className="flex min-w-40 flex-1 flex-col gap-1">
+          {/* `min-w-40` was `min-width: 10rem` — 160px at a 16px root and **320px at
+              a 32px root**, so at 200% text the two children's minimums (320 + 320)
+              plus the gap exceeded this panel's 276px content box and the row could
+              not wrap out of it: measured in Chromium at 390px with 200% text, the
+              row's `scrollWidth` was 320 against a `clientWidth` of 276. The cap is
+              what makes the minimum safe — `min(10rem, 100%)` is 160px while there
+              is room for two and the container's own width when there is not, so at
+              100% the pair still sits side by side exactly as before. */}
+          <div className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-1">
             <label className="label" htmlFor="quiz-difficulty">
               {t('studio.quiz.difficultyLabel')}
             </label>
@@ -119,7 +127,7 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
               ))}
             </select>
           </div>
-          <div className="flex min-w-40 flex-1 flex-col gap-1">
+          <div className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-1">
             <label className="label" htmlFor="quiz-types">
               {t('studio.quiz.typesLabel')}
             </label>
