@@ -333,10 +333,11 @@ below name it rather than repeating it, so the two cannot drift.
 
 **Two rows this slice added, because they are store blockers and were not in the
 plan's table:** A2/G2 (in-app account deletion and the deletion URL) and A5 (the mobile
-build number has no `bundleVersion` to bump). **A2's code half has since shipped (A355)**,
-so the in-app row is now `code` and only the public URL remains `user` — it needs the
-production host in row 12. A5 is still named rather than fixed, and it is not this slice's
-code to write.
+build number had no `bundleVersion` to bump). **Both have since moved:** A2's code half shipped
+(A355), so the in-app row is now `code` and only the public URL remains `user` — it needs the
+production host in row 12. **A5 has since been fixed too** — `bundle.iOS.bundleVersion` and
+`bundle.macOS.bundleVersion` are both `"1"`, so the row below now names the keys to bump rather
+than describing the gap.
 
 ## Privacy labels
 
