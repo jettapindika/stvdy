@@ -19,30 +19,18 @@ I will implement it — it is not large, but it is not mine to invent either.
 
 ## One environment note worth acting on
 
-**The machine is nearly out of disk, and it has already cost work.** `/System/Volumes/Data` is 95%
-full with ~22 GB free, and the repository's `target/debug` alone is **74 GB** (plus 2.7 GB of
-`target/release`). Two builds have failed on it: Phase 13's test run died mid-run with
-`No space left on device`, and Phase 15's one local `docker build` attempt died with the Docker
-daemon, which no longer starts (`docker info` fails; `~/Library/Containers/com.docker.docker` is
-6.2 GB).
+**The machine is out of disk, and it is now blocking verification rather than merely threatening it.** `/System/Volumes/Data` has **13 GB free of 460 GB (97% full)** and the repository's `target/` is **89 GB** (87 GB of it `target/debug`, 2.7 GB `target/release`). Three things have already died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, and the Docker daemon itself, which no longer starts (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB).
 
-Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the
-evidence for anyway. What it does need is enough space for `cargo test --workspace` and
-`npm --prefix app test` to finish, so the remaining slices can verify.
+Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the evidence for anyway. What it does need is enough room for `cargo test --workspace` and `npm --prefix app test` to finish, and at 13 GB that is no longer comfortable.
 
-If you want 40 GB back cheaply:
+**The cheapest 87 GB on this machine:**
 
 ```bash
 cd /Users/mac/Documents/Coding/project/Stvdy
-cargo clean -p stvdy-server -p stvdy-core -p stvdy-sync -p stvdy-shell   # or just: cargo clean
+cargo clean          # removes all 89 GB under target/; the next build rebuilds in a few minutes
 ```
 
-`cargo clean` deletes all 76 GB under `target/` and the next build rebuilds it from scratch (a few
-minutes for this workspace). That is the single largest reclaimable thing on the disk, and it costs
-only time. **I have not run it**: a full rebuild competes with several live `cargo` invocations for
-the same `target/` lock, and the machine's 128 GB `~/Documents` is somewhere I will not touch. Your
-call — and if you would rather not, the failures above will show up again as flakes rather than as
-errors.
+I have not run it, and the reason is a real tradeoff rather than caution: every `cargo` invocation in flight holds the `target/` lock, so a clean now would make several live slices fail with a lock error, and a full rebuild then competes with them for the same lock. **If you are reading this while I am still running, the right order is: let the remaining slices finish, then `cargo clean`, then one `cargo test --workspace`.** If you would rather have the space immediately, stop me first (`cargo clean` while I am mid-run will look like a spurious test failure, not like a disk problem).
 
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 
@@ -86,6 +74,7 @@ disk only). The short version:
 
 ## Things found that you should know about
 
+- **A live SSRF guard that did DNS work instead of refusing, and the test that proved it was red on committed code.** `guarded_get` read the request host with `Url::host_str()`, which **keeps an IPv6 literal's brackets** (`[::ffff:169.254.169.254]`). `resolve_public` then tried `parse::<IpAddr>()` on that string, failed on the brackets, and fell through to a resolver — so the fetch-time guard, the one whose own doc comment calls itself "the thing that must not be duplicated", did network work where it had to refuse, and answered with a `Provider("resolving …")` error that reads like an outage. `check_fetchable_literal` had already been fixed for exactly this reason and says the suite caught it; the fix landed in the courtesy check and not in the guard. `crates/server/tests/ssrf.rs::the_guarded_text_fetch_refuses_a_private_host_and_a_non_http_scheme` asserted the property correctly, needs no network and no stub, and was **7 passed / 1 failed on committed code** — a test nobody ran, not a test that was missing. Fixed (`d23232c`), now 8/0.
 - **A gap in the build's own safety net, found by hand:** the root workspace excludes
   `src-tauri` and `src-tauri` is its own workspace root, so `[workspace.lints]` in the root
   **never reached it** — the project's "no `unwrap`/`expect` in non-test code" rule was
@@ -108,9 +97,42 @@ disk only). The short version:
 - **A WCAG Level A failure in the SPA:** `index.html` is a static `lang="en"` and nothing updates
   it, so a screen reader pronounces the entire Indonesian UI with an English voice. Found by
   Phase 8's gate; being fixed.
+- **Gate 5's desktop leg had never run, for any phase, and nobody could tell.** The shared walk's
+  steps name the phone tab bar's labels (`nav.work` = "Work") while the desktop sidebar reads
+  `nav.workspaces` = "Workspaces", so `VIEWPORT_WIDTH=1365` died on `FAIL: no nav a labelled
+  "Work"` after the first surface. Every phase's desktop-width accessibility evidence was either
+  taken by a private probe or absent. Fixed in `bc7eed8`; the first real run found the sidebar's
+  nav items at **215×40** (under 44px in height on every surface, both themes) and a `minmax(200px,
+  1fr)` grid floor that does not grow with the text.
+- **A class of layout defect that only one measurement caught, and it is the one that matters
+  most.** The dashboard scrolled sideways at 390px **at 100% text** (423 > 390, 15 elements past
+  the edge) — the first defect in the whole series visible at *normal* size, and a different
+  mechanism from the rem-doubling one that every other finding belonged to: a `truncate`'s
+  `white-space: nowrap` min-content propagating up through a flex column until an *ancestor*
+  reports the overflow, where the element that is too wide reports none of its own. `min-width: 0`
+  on the root is **inert in the cross axis** (measured: still 423/390); `w-full` is what makes the
+  width definite. Both scales are now part of the pass condition.
+- **The absence gate was asserting the wrong thing about the wrong artifact, and the fix changed
+  the remedy.** Phase 13's slice first reported that `scripts/check-no-purchase-ui.mjs` "inspects
+  the web build while calling it the mobile build". That was wrong: `frontendDist` is
+  `../app/dist` with no per-platform override, so those bytes **are** what a phone loads and the
+  check was reading the right artifact and reporting a real violation. What was missing was a
+  **build-time exclusion** — the route was chosen at run time, which does not remove bytes. Now
+  `TAURI_ENV_PLATFORM` keys the store build so the phone bundle lands where `frontendDist` points,
+  every build stamps its own `stvdy-build-target`, and the check refuses anything but `store`:
+  **0** occurrences of `billing/checkout` in the 764,625-byte store chunk against **5** in the
+  778,765-byte web one, and it fails closed on an empty directory, an absent stamp and a `full`
+  stamp as well.
+- **A screen that rendered five of its twelve field labels as raw locale keys**, caught by the
+  Indonesian browser render and by nothing else: the card resolved labels from the tool schema's
+  argument names, and neither the i18n contract test (which marks every key under a prefix as
+  used) nor the card's own test (which asserts the *value*) could see a missing label.
+- **A locale key that could not be rendered at all:** `reminder.planEnding` has no entry in either
+  locale file and no renderer in the SPA — the renewal writes `subject_id = null` and
+  `feedKey` returns `null` for such a row. Found by trying to assert the Indonesian renewal
+  reminder, and recorded as a contract the tree does not implement rather than papered over.
 
-
-## One thing worth knowing about the plan set
+## Things worth knowing about the plan set
 
 All sixteen phase plans now exist and are committed. Two of them were corrected against the
 tree before execution rather than during it (Phase 6 needed five corrections, Phase 7 five
