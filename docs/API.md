@@ -981,11 +981,161 @@ routes, the manual mark/refund and the completed margin report.
 
 ## Tasks (Phase 9)
 
-CRUD `/tasks`, `POST /tasks/quick-capture`, `POST /tasks/:id/breakdown`.
+Auth. A task is one of the six entities a client may write offline, so every field
+here is client-writable and the REST routes are **not** a second write path: they
+call the same `tasks` table triggers a push does, which is what makes the two
+produce the same `change_log` entries and the same LWW outcome. Both write paths
+run the same field rules (`validate_task`), and both tombstone a subtree through
+the same walk (`tasks::tombstone_subtree`) — a second copy of either is how the
+two paths stop agreeing.
+
+`TaskView`:
+
+```json
+{ "id": "uuid", "workspace_id": null, "parent_id": null, "title": "Selesaikan tugas kripto",
+  "notes": null, "due_at": "2026-10-16T16:59:00Z", "estimate_min": 90, "priority": 1,
+  "status": "todo", "position": 0, "created_at": "2026-10-12T03:01:41Z",
+  "updated_at": "2026-10-12T03:01:41Z" }
+```
+
+`priority` is `1` high / `2` normal / `3` low, and `2` is the documented "unset"
+(A210). `status` is `todo` or `done`. `position` orders the subtasks of one parent
+and is a normal client-writable field (A196): the order key is
+`(due_at nulls last, priority, position, created_at, id)`, and the id is the last
+component because a batch insert shares `created_at` to the microsecond — the
+mistake that made Phase 5's quiz questions come back shuffled (A100).
+
+- `GET /tasks?status=&workspace_id=&parent_id=&due_before=&due_after=&limit=` →
+  200 `{ "tasks": [ "...TaskView" ] }`. Tombstones are excluded, `limit` defaults
+  to 200 and is clamped to 1–500, and the order above is applied in SQL.
+- `POST /tasks` body `{ "title", "id?", "workspace_id?", "parent_id?", "notes?",
+  "due_at?", "estimate_min?", "priority?", "status?", "position?" }` → 201
+  `{ "task": "...TaskView" }`. The client may supply `id` (A8), which is what lets
+  a row be created offline and synced later. 400 `validation` for an empty or
+  over-long title, a priority outside 1–3, a negative `position`, a task that is
+  its own parent, an unknown `status`, or a field a client may not write; 409
+  `conflict` when that id is already in use (checked **without** a `user_id`
+  predicate, so the answer is the same for another account's row and the id — not
+  the row — is the only thing disclosed); 400 `validation` when `parent_id` or
+  `workspace_id` names a row that does not exist. A dangling reference is the
+  body's fault, so it is the client's 400 rather than a 500 from the foreign key.
+- `PATCH /tasks/:id` body = any subset of the create fields → 200
+  `{ "task": "...TaskView" }`. Partial: a field the body does not name keeps its
+  stored value, and a nullable one named as `null` is cleared. `deleted_at` is
+  **not** REST-writable here — deleting is `DELETE`, and a restore is a sync
+  concern — so a body naming it is ignored rather than honoured. 404 for another
+  account's row or a tombstone.
+- `DELETE /tasks/:id` → 204. Tombstones the task **and its live descendants**
+  (A197) in one transaction, one `change_log` `delete` row per tombstoned row, and
+  404 when nothing was live to delete.
+- `POST /tasks/quick-capture` body `{ "text" }` → 200
+  `{ "draft", "credits_spent", "credits_remaining", "prompt_version" }`.
+- `POST /tasks/:id/breakdown` body `{}` → 200
+  `{ "proposal", "credits_spent", "credits_remaining", "prompt_version" }`.
+
+**The two generative routes write no task.** That is the contract, not an
+implementation detail (A193, A195): a capture returns a draft and a break-down
+returns a proposal, and the student confirms before anything is saved. The only
+writer of a task row is `POST /tasks` (or a push), so "accept" is N ordinary
+creates — one per kept subtask, with `parent_id` and `position` — and dismissing a
+proposal or a draft costs nothing and writes nothing. The consequence is stated
+rather than hidden: **a reload loses an unaccepted draft**, and that is what
+"confirm" means.
+
+`CaptureDraft` — the model's reply, normalised, never a row:
+
+```json
+{ "title": "Selesaikan tugas kripto", "notes": "Bab 4 dan latihannya",
+  "due_at": "2026-10-16T16:59:00Z", "priority": 1, "estimate_min": 90, "warnings": [] }
+```
+
+`warnings` is one line per field the reply could not supply as asked, and the draft
+still returns: an unreadable `due_at` becomes `null` with a warning naming the raw
+string rather than a failed request, because the credits are already spent by then
+(A194). A naive datetime is read in the student's zone **and** warned about, so the
+assumption is visible rather than silent. An out-of-range `priority` falls back to
+2 while an out-of-range `estimate_min` clamps to 1440, and an estimate of zero or
+less becomes `null` — "no estimate" and "estimated at zero minutes" are different
+claims (A210).
+
+`Proposal` — likewise never a row:
+
+```json
+{ "subtasks": [ { "title": "Baca bab 4", "estimate_min": 30 } ],
+  "total_estimate_min": 95, "warnings": [] }
+```
+
+The vector's index *is* the `position` the caller assigns on accept. `total_estimate_min`
+is the model's own number and is shown only inside the "Suggested …" region; the
+`estimate_min` that gets stored is whatever the student left after editing.
+
+Both generative routes:
+
+- Price: `2` credits, read from `config/plans.toml`'s `[credits] task_breakdown`.
+  A quick capture is charged as `task_breakdown` because the matrix has no
+  `quick_capture` key and the rule is that the closest stated action's price
+  applies rather than one invented in code (A190).
+- Gate: `quick_capture` / `task_ai_breakdown` from the plan matrix, checked
+  **before** the charge, so a plan that does not grant the feature gets the refusal
+  it can act on rather than a charge it cannot: 403 `plan_required` with
+  `min_plan`.
+- Both take a **verified** account: an unverified one is 403
+  `email_not_verified`, which is the same rule every AI action carries (A43).
+- 400 `validation` for empty text or text longer than 2000 characters, and 404 for
+  a break-down of a task that is not the caller's (or is a tombstone).
+- 402 `insufficient_credits` when the balance cannot cover the reservation.
+- The reply carries `prompt_version` whether or not the reply was usable, because
+  every model call is attributable (A38). A provider failure refunds the
+  reservation rather than charging for nothing.
 
 ## Events (Phase 9)
 
-CRUD `/events`, `GET /events?from=&to=`.
+Auth. An event is one of the six offline-writable entities. `kind` is one of
+`class`, `exam`, `study_block`, `deadline`, `external`; a deadline is an event with
+`kind = "deadline"` and `ends_at = starts_at`, because `events.ends_at` is
+`not null` and there is no all-day flag (A199).
+
+`EventView`:
+
+```json
+{ "id": "uuid", "workspace_id": null, "kind": "exam", "title": "UTS Kripto",
+  "starts_at": "2026-10-16T00:00:00Z", "ends_at": "2026-10-16T00:00:00Z",
+  "source": "app", "task_id": null, "created_at": "2026-10-12T03:03:13Z",
+  "updated_at": "2026-10-12T03:03:13Z" }
+```
+
+- `GET /events?from=&to=` → 200 `{ "events": [ "...EventView" ] }`. The window is an
+  **overlap**, not a containment: a row is in it when `starts_at < to` **and**
+  `ends_at > from`. A `starts_at between from and to` filter drops the three-hour
+  class that began before the window and is still running, which is the one event on
+  that timeline the student most needs. `from` is required; `to` defaults to
+  `from + 7 days`; 400 when `to` is before `from`. Ordered by `starts_at, id`.
+- `POST /events` body `{ "kind", "title", "starts_at", "ends_at", "id?",
+  `workspace_id?", "task_id?" }` → 201 `{ "event": "...EventView" }`. `source`
+  defaults to `"app"`. 400 for an unknown `kind`, a missing required field, an
+  unknown key, **any of the four calendar-owned columns**, or a `workspace_id` /
+  `task_id` that does not exist; 409 when the id is taken.
+- `PATCH /events/:id` body = any subset → 200 `{ "event": "...EventView" }`.
+- `DELETE /events/:id` → 204.
+
+**Four columns are the calendar sync's, not a client's** (A198): `source` (any
+value other than `"app"`), `external_id`, `etag` and `connection_id`. Phase 10
+fills them from Google and ICS, so a client that could write them could forge a
+"Google" event, hijack the `(connection_id, external_id)` unique index, or
+overwrite a synced row that the next incremental sync would then not match.
+Through REST each is 400 `validation`; through `/sync/push` each is
+`read_only_entity`, which is the same rule in the vocabulary each path's client
+reads. A **null** counts as setting it: clearing `external_id` breaks that match
+just as surely as forging one. `source = "app"` is the one permitted value, so a
+client echoing the row it pulled is not refused.
+
+A row that already carries a calendar `source` is **read-only**: `PATCH` and
+`DELETE` both answer 403 `forbidden` with a message naming the calendar, rather
+than 404 — the row exists and a 404 would read as "deleted". The check reads the
+row under the same row lock as the write, so a Phase 10 sync landing between a
+check and a write cannot be overwritten. The push path refuses the same two
+operations with `read_only_entity`, because an edit that lands is an edit the next
+incremental sync silently reverts.
 
 ## Goals and planner (Phase 11)
 
@@ -1007,14 +1157,127 @@ CRUD `/goals`, `POST /goals/:id/plan`, `POST /plans/accept`, `POST /plan/replan`
 
 `GET /actions/pending`, `POST /actions/:id/confirm`, `POST /actions/:id/reject`.
 
-## Study and dashboard (Phase 12)
+## Sessions and activity (Phase 9)
 
-`POST /sessions`, `GET /dashboard`.
+Auth. A study session is append-only and client-id'd: the timer mints the id when it
+**starts**, persists it with the running timer, and flushes it when it stops (A206),
+so a flush after a restart is the same id and `on conflict (id) do nothing` makes a
+replay a no-op. That is the mechanical defence against "a timer that logs a session
+twice on restart" — and it is why the id, not the row count, is what the tests
+assert.
+
+`SessionView`:
+
+```json
+{ "id": "uuid", "workspace_id": null, "task_id": "uuid",
+  "started_at": "2026-10-12T02:15:26Z", "duration_min": 50,
+  "created_at": "2026-10-12T03:05:26Z", "updated_at": "2026-10-12T03:05:26Z" }
+```
+
+- `POST /sessions` body `{ "id", "started_at", "duration_min", "client_ts",
+  "task_id?", "workspace_id?" }` → 201 `{ "applied": true }`, or
+  `{ "applied": false }` when that id already had a row. `client_ts` is the
+  **device's own report of when it wrote the row** and is required: it is the field
+  the bound is compared against, and the mutation contract already carries it
+  (`Mutation.client_ts`), which is what lets one validator serve both paths. A body
+  that also names `client_ts` in the payload must agree with the value the caller
+  passed.
+- `GET /sessions?from=&to=` → 200 `{ "sessions": [ "...SessionView" ] }`. `from` is
+  required, `to` defaults to `from + 1 day`, and the order is `started_at desc,
+  id desc`. 400 when `to` is before `from`.
+- `GET /activity?from=&to=` → 200 `{ "reviews": [...], "attempts": [...],
+  "sessions": [...] }` — three arrays of instants, in one round trip.
+
+**The plausibility bound, and why it reads the client's clock** (A204):
+
+| Rule | Value |
+|---|---|
+| `duration_min` | `1 ..= 1440` |
+| `started_at` | not more than 24 h past `server_now` — the same bound a review and an attempt already use |
+| `started_at + duration_min` | not more than `client_ts + 2 min` |
+
+Comparing the last one against the *server's* clock would reject a legitimate
+offline session from a device whose clock runs fast, and rejecting valid data is its
+own defect. A violation is 400 `validation` with a message saying what it compared,
+and it writes nothing. `docs/THREAT_MODEL.md` § 6 R1 is the risk this narrows: the
+rows stay client-writable, but a fabricated one can no longer claim more time than
+the device said had elapsed.
+
+`GET /activity` exists because the web build has no local cache (A183) and the
+streak is computed on the client (A205): the route ships the three instants and the
+*rule* that turns them into a streak lives in
+`app/src/features/today/day.ts`, because the Today view has to work offline and a
+server route cannot. A second implementation here would be a second answer to "how
+many days in a row".
 
 ## Settings (Phase 9)
 
-`GET /settings`, `PUT /settings`, `PUT /settings/api-key`,
-`DELETE /settings/api-key`.
+Auth. The settings row is keyed by the user and **created on first read**, so a read
+never has to answer "no settings yet" and a write never has to decide whether to
+insert. `GET /settings` returns the row and the account's timezone *beside* it:
+the timezone lives on `users` (A203) because the reminder and planner maths read it
+for an account that has never opened this screen, and a second copy on the settings
+row is exactly the drift the "local-date maths only through `chrono-tz`" rule would
+not catch.
+
+```json
+{ "settings": { "study_start_hour": 8, "study_end_hour": 22,
+    "max_study_min_per_day": 240, "block_len_min": 50, "break_min": 10,
+    "reminder_channels": ["web"], "quiet_start_hour": 22, "quiet_end_hour": 7,
+    "language": "id", "theme": "system", "updated_at": "2026-10-12T03:02:05Z" },
+  "timezone": "Asia/Jakarta" }
+```
+
+- `GET /settings` → 200 the shape above.
+- `PUT /settings` body = any subset of `{ "study_start_hour", "study_end_hour",
+  "max_study_min_per_day", "block_len_min", "break_min", "reminder_channels",
+  "quiet_start_hour", "quiet_end_hour", "language", "theme", "timezone" }` → 200
+  the same shape.
+
+`PUT` is **partial**: the screen saves per section, and a full replace would let a
+stale tab clobber a channel set changed on another device. What it writes is the
+whole row, because the roadmap gives `user_settings` record-level LWW and the table
+has no per-field timestamp to merge with (A201).
+
+Bounds, each 400 `validation` before the write, so the migration's `check`
+constraints are a backstop rather than the error path:
+
+| Field | Rule |
+|---|---|
+| `study_start_hour` | `0 ..= 23`, and below `study_end_hour` — checked only when the body names both, because a partial write that changes one hour is a legitimate request |
+| `study_end_hour` | `1 ..= 24` |
+| `max_study_min_per_day` | `15 ..= 1440` |
+| `block_len_min` | `5 ..= 180` |
+| `break_min` | `0 ..= 60` |
+| `quiet_start_hour`, `quiet_end_hour` | `0 ..= 23` each, and **a pair**: set both or neither, because a body naming one hour has stated half a window |
+| `language` | `en` or `id` |
+| `theme` | `system`, `light` or `dark` |
+| `timezone` | an IANA zone `chrono-tz` can parse |
+
+**The quiet window may wrap midnight.** The test is "inside the window", not
+`start < end`, because `22 → 7` is the normal case (A202) — a naive `start < end`
+check rejects the value every student actually wants.
+
+**A reminder channel the plan does not grant is refused per channel**, 403
+`plan_required` with `min_plan`, **before** the write, so a rejected channel leaves
+the row exactly as it was. The check goes through
+`entitlements::require(Feature::ReminderChannel(c))` and never a
+`plans.get(..).reminder_channels` read: the matrix is the authority, a second read of
+it here would be a second source of truth for what a plan grants, and the route
+sweep forbids it (A201). `reminder_channels` is a **whole-array** write — the body
+states the full set it wants, not a delta.
+
+An unknown zone is refused rather than stored: `chrono-tz` reads an unparseable
+string as UTC, so a typo would silently move the student's day boundary to
+Greenwich and every date on the Today view with it (A6).
+
+`PUT /settings/api-key` and `DELETE /settings/api-key` are **Phase 13** (BYOK): the
+screen names them and they are not built here.
+
+## Dashboard (Phase 12)
+
+`GET /dashboard`. `POST /sessions` has moved to `## Sessions and activity (Phase
+9)`, where the timer that writes it lives.
 
 ## Account (Phase 15)
 

@@ -141,6 +141,46 @@ themselves.
 the fix is server-side plausibility bounds (a session cannot exceed elapsed wall time; reviews cannot
 exceed cards × a plausible rate) — never a client check.
 
+**R1 addendum (Phase 9): the session bound this row names now exists, and R1 is still accepted.**
+
+`study_sessions` is one of the six entities a client may write offline, and Phase 9 is the phase that
+**displays** it: the Today view's "N min today" is the sum of today's `study_sessions.duration_min`, and
+the streak counts consecutive local days that hold a session, a review or an attempt. A fabricated row
+is therefore no longer confined to a report nobody opens — it is a number on the home screen, stated as
+a fact. That is why the bound arrived here rather than with the dashboard.
+
+The bound is `crates/core/src/study.rs::check_session`, called by `POST /sessions` **and** by
+`sync::push::decide`, so a rule cannot hold on one path and not the other:
+
+| Rule | Value |
+|---|---|
+| `duration_min` | `1 ..= 1440` |
+| `started_at` | not more than `MAX_FUTURE_HOURS = 24 h` past `server_now` — the same bound a review and an attempt already use |
+| `started_at + duration_min` | not more than `SESSION_CLOCK_GRACE_MIN = 2 min` past the **client's own** `client_ts` |
+
+The third comparison is against the device's own report, not the server's clock, and that is
+deliberate rather than a shortcut: a legitimate offline session from a device whose clock runs fast
+would be **rejected** by a server-clock comparison, and rejecting valid data is its own defect. The
+field is `Mutation.client_ts`, which the sync contract already carried, so no wire change was needed.
+
+*What this changes, and what it does not.* It narrows what a fabricated row can look like — a client
+can no longer claim twenty hours of study in an afternoon, and a session cannot claim more time than
+the device said had elapsed — and it makes the number on the Today screen consistent with a clock
+rather than with the attacker's arithmetic. It does **not** make the rows trusted: a client that lies
+coherently (a plausible duration, started inside the elapsed window) still writes a row nobody can
+disprove, and every row here remains the account's own claim about itself. The rows are still accepted
+by design, the attacker still deceives only themselves, and no credit, quota, plan or money reads them.
+
+*Not built here, and named rather than implied:* the second half of the fix this row names — "reviews
+cannot exceed cards × a plausible rate" — is still absent. `flashcard_reviews` and `quiz_attempts`
+carry only the future bound a review and an attempt already had. The trigger is unchanged.
+
+*Evidence:* `crates/server/tests/study.rs` (the bound's three rules, each with its boundary),
+`crates/server/tests/tamper.rs::a_pushed_session_beyond_its_elapsed_time_is_rejected` (the push path),
+`crates/server/tests/offline_tasks.rs::a_session_that_starts_beyond_the_devices_own_clock_is_refused`
+(both directions — a session from a clock running 30 h fast is *stored*, so the case tests the bound
+and not a check that refuses every session), and `scripts/smoke-phase9.sh` scenario 7.
+
 **R2 — Local cache is readable and editable.** SQLCipher is off by default (A13). The cache holds only
 the user's own synced entities — never `chunks`, embeddings, or other users' rows
 (`docs/SPEC.md` § What is cached locally on native clients). Local edits are overwritten by the next pull.
@@ -230,6 +270,17 @@ The design never depends on this column. It is recorded so that no phase mistake
 | Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md` § QUALITY BAR, "Payment tests") |
 | Retrieved text cannot act as instructions | 12 | injection fixture in an uploaded document does not alter tool behaviour |
 | Rendered documents are inert | 6 | a source containing `</div><script>` and `<svg onload=…>` produces a PDF with neither |
+| The offline-writable entities really are written offline | 9 | `crates/server/tests/offline_tasks.rs::a_task_an_event_and_a_session_written_offline_sync_after_reconnect` — a task, an event and a session are written through Phase 8's real client engine with a failing transport, the server is read **directly from Postgres and holds zero rows**, and after reconnect it holds all three under the device's own ids. A write that secretly went through REST cannot pass this case, which is why the "nothing on the server" half is asserted rather than assumed |
+| A replayed flush writes one row | 9 | `offline_tasks.rs::flushing_the_same_session_id_twice_writes_one_row` — the same append-only id flushed twice with the second response lost leaves the row's `updated_at` and the `change_log` count unchanged, asserted on the row rather than on the push response |
+| A session beyond its reported elapsed time is refused on **both** paths | 9 | `crates/server/tests/study.rs::a_session_longer_than_the_client_reported_elapsed_time_is_refused`, `crates/server/tests/tamper.rs::a_pushed_session_beyond_its_elapsed_time_is_rejected` (R1 addendum) |
+| A client cannot write the calendar-owned event columns | 9 | `crates/server/tests/events.rs::a_client_cannot_set_the_columns_the_calendar_sync_owns` — each of `source != "app"`, `external_id`, `etag` and `connection_id` separately, a null counting as setting it; `tamper.rs::a_pushed_event_with_a_google_source_is_rejected` is the push half (`read_only_entity`) |
+| An externally sourced event cannot be edited or deleted | 9 | `events.rs::an_externally_sourced_event_cannot_be_edited_or_deleted` (403 naming the calendar, under the row lock) and `offline_tasks.rs::a_calendar_owned_event_is_read_only_on_both_paths` (the same through push) |
+| A settings mutation for another account is refused, not applied | 9 | `tamper.rs::a_pushed_settings_row_for_another_user_id_is_rejected` — `user_settings`' primary key *is* `user_id`, so a forged mutation id would otherwise be accepted and silently do nothing, which looks exactly like success |
+| A reminder channel the plan does not grant is refused per channel | 9 | `crates/server/tests/settings.rs::a_channel_the_plan_does_not_grant_is_refused_with_the_plan_that_does` — through `entitlements::require`, with the row left as it was |
+| Both generative actions are refused on a plan that does not grant them | 9 | `crates/server/tests/route_sweep.rs::every_swept_route_refuses_an_exhausted_account` drives `POST /tasks/quick-capture` and `POST /tasks/{id}/breakdown` through the real router asserting 403 `plan_required`, and `crates/server/tests/tasks.rs::quick_capture_is_refused_on_a_plan_that_does_not_grant_it` is the direct half |
+| The two generative routes write no row | 9 | `tasks.rs::a_capture_returns_a_draft_and_writes_no_task`, `a_breakdown_returns_a_proposal_and_writes_no_subtasks`, `accepting_a_proposal_creates_ordered_subtasks` — the task count is read before and after, and the accepted subtasks come back in the proposed order |
+| Every new route is classified, and no handler reads a plan limit | 9 | `route_sweep.rs::every_registered_route_is_classified` (both directions: an unclassified route **and** a stale row), `no_file_outside_the_entitlements_layer_reads_a_plan_limit` |
+| A task deleted offline tombstones its subtree, and a restore brings back only what the cascade took | 9 | `offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`, `restoring_a_parent_restores_only_the_children_its_delete_tombstoned` (A197) |
 
 An unverified claim in this document is a claim the repo does not have. When a phase closes a row of
 §5 or §6, it updates this file in the same commit.
