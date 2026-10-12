@@ -88,7 +88,13 @@ pub async fn pull(
     }
     for change in &mut page.changes {
         if change.op == Op::Upsert {
-            change.data = payloads.remove(&(change.entity, change.id));
+            // `get`, not `remove`: the payload is a property of the **row**, so every
+            // change of a row in this page ships it. `remove` would hand it to the first
+            // change and leave `None` on the rest, and `None` on an `upsert` is A188's
+            // signal that the row is not visible — which the client applies as a delete.
+            // A row that loads no payload at all is genuinely gone, so that signal is
+            // untouched.
+            change.data = payloads.get(&(change.entity, change.id)).cloned();
         }
     }
 

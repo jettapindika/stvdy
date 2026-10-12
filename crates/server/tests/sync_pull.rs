@@ -581,3 +581,114 @@ async fn the_page_size_is_validated_and_clamped(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 }
+
+/// Every change of a live row in one page carries the row.
+///
+/// The payload is a property of the **row**, not of the change: a row created and edited
+/// inside one pass set appears several times in one page, and each of those changes must
+/// ship the row. A `data: null` on an `upsert` is A188's signal that the row is *not
+/// visible to this account*, which the client applies as a delete — so handing the payload
+/// to only the first change of a row would make every later change read as a row the
+/// device may not see, and the client would delete a row the account still has.
+#[sqlx::test(migrations = "../../migrations")]
+async fn every_change_of_a_live_row_in_one_page_carries_the_row(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, _) = account(&app, &harness, "payload@example.test").await;
+
+    // One row, three changes: an insert and two edits, all inside the pass set.
+    let task = insert_task(&harness.state.pool, user_id, "Pertama").await;
+    sqlx::query("update tasks set title = 'Kedua' where id = $1")
+        .bind(task)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query("update tasks set title = 'Ketiga' where id = $1")
+        .bind(task)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/sync/pull?cursor=0",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let mine: Vec<&serde_json::Value> = changes(&body)
+        .iter()
+        .filter(|change| change["id"] == task.to_string())
+        .collect();
+    assert_eq!(
+        mine.len(),
+        3,
+        "the row has three changes in the pass: {body}"
+    );
+    for change in &mine {
+        assert_eq!(change["op"], "upsert", "{change}");
+        assert_ne!(
+            change["data"],
+            serde_json::Value::Null,
+            "a live row's change must carry the row: {change}"
+        );
+        assert_eq!(
+            change["data"]["title"], "Ketiga",
+            "and the payload is the row as it stands: {change}"
+        );
+    }
+}
+
+/// The null signal A188 defines survives that: a row this account cannot load still ships
+/// `data: null`, so a device never creates a row it may not see.
+///
+/// The two halves belong together. The naive repair for the case above — making every
+/// payload non-null — would delete the signal and let a device invent a row from another
+/// account's `change_log` row.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_row_that_cannot_be_loaded_still_ships_a_null_payload(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, a_user, _) = account(&app, &harness, "null-a@example.test").await;
+    let (_, b_user, _) = account(&app, &harness, "null-b@example.test").await;
+
+    let b_task = insert_task(&harness.state.pool, b_user, "B's secret").await;
+    // Two changes for one id, neither loadable for A: both must ship the null.
+    sqlx::query(
+        "insert into change_log (user_id, entity, entity_id, op)
+         values ($1, 'tasks', $2, 'upsert'), ($1, 'tasks', $2, 'upsert')",
+    )
+    .bind(a_user)
+    .bind(b_task)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/sync/pull?cursor=0",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let planted: Vec<&serde_json::Value> = changes(&body)
+        .iter()
+        .filter(|change| change["id"] == b_task.to_string())
+        .collect();
+    assert_eq!(planted.len(), 2, "{body}");
+    for change in planted {
+        assert_eq!(
+            change["data"],
+            serde_json::Value::Null,
+            "B's row must never be loaded for A: {change}"
+        );
+    }
+}
