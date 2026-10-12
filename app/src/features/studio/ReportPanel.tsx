@@ -8,6 +8,7 @@ import {
   type CheatsheetDepth,
 } from '@/api/queries/cheatsheets'
 import {
+  readableOutline,
   useCreateOutline,
   useReports,
   type Report,
@@ -322,7 +323,11 @@ function ReportRow({ report }: { report: Report }) {
     ready: t('studio.status.ready'),
     failed: t('studio.status.failed'),
   }
-  const total = report.outline?.sections.length ?? 0
+  // The outline is passed through by the server, so it can be a row the
+  // generator would not have written — see `readableOutline`. Without it this
+  // read threw and took the whole Studio panel down with an error boundary,
+  // which is also what made the report screen behind this link unreachable.
+  const total = report.outline === null ? 0 : readableOutline(report.outline).sections.length
   const written = report.sections.filter((section) => section.body_md !== null).length
 
   return (

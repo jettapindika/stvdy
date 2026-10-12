@@ -96,6 +96,39 @@ export interface ReportResponse {
   report: Report
 }
 
+/**
+ * The outline as a screen can render it.
+ *
+ * `GET /reports/:id` and `GET /workspaces/:id/reports` pass the stored `outline`
+ * through **verbatim** — the server's `ReportJson.outline` is the raw `jsonb`
+ * column, deliberately, so that what the student edited comes back un-re-encoded
+ * and no field can be lost on the way out — and the server derives the top-level
+ * `sections` from the stored outline's headings, answering `[]` when there are
+ * none. So a row can arrive with a shape `parse_outline` would never have
+ * accepted: a hand-written or legacy row with no `sections` array at all, or a
+ * section with no `labels`.
+ *
+ * Both readers of `outline.sections` — the report screen and the Studio's report
+ * row — threw `Cannot read properties of undefined (reading 'length')` on such a
+ * row and took the screen down with them. The missing pieces are filled in as
+ * empty here, in one place, so the two readers cannot disagree about what an
+ * outline is; an empty `sections` is what the report screen uses to say out loud
+ * that the outline cannot be read, rather than rendering an empty document as
+ * though the model had produced nothing.
+ */
+export function readableOutline(outline: ReportOutline): ReportOutline {
+  const sections = Array.isArray(outline.sections) ? outline.sections : []
+  return {
+    ...outline,
+    sections: sections.map((section) => ({
+      heading: typeof section.heading === 'string' ? section.heading : '',
+      purpose: typeof section.purpose === 'string' ? section.purpose : '',
+      labels: Array.isArray(section.labels) ? section.labels : [],
+      gaps: section.gaps === true,
+    })),
+  }
+}
+
 export const reportKeys = {
   reports: (workspaceId: string) => ['workspaces', workspaceId, 'reports'] as const,
   report: (reportId: string) => ['reports', reportId] as const,

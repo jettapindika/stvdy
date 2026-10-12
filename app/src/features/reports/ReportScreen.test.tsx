@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Route, Routes } from 'react-router'
 
 import { ReportScreen } from './ReportScreen'
-import type { Report } from '@/api/queries/reports'
+import type { Report, ReportOutline } from '@/api/queries/reports'
 import { installFakePlatform, jsonResponse, mockFetch, type RecordedCall } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
 import { setAccessToken } from '@/lib/tokens'
@@ -389,6 +389,62 @@ describe('a report that cannot be shown', () => {
     expect(
       screen.getByText('The model returned a section that did not parse'),
     ).toBeInTheDocument()
+  })
+})
+
+/**
+ * The stored outline is passed through, not validated on the way out.
+ *
+ * `GET /reports/:id` answers with the raw `reports.outline` `jsonb` and derives the
+ * top-level `sections` from its headings — measured against the real API, a row
+ * whose outline is `{"title":"Laporan Uji"}` came back as exactly that, with
+ * `sections: []`. So the screen can be handed a shape `parse_outline` would never
+ * have accepted, and the fixtures below are the payloads the server really sends
+ * for such a row, typed with a cast because the API type claims they cannot exist.
+ */
+describe('an outline the server would not have written', () => {
+  it('renders what the row carries instead of throwing on a missing sections list', async () => {
+    serve({
+      report: report({
+        outline: { title: 'Laporan Uji' } as unknown as ReportOutline,
+        sections: [],
+      }),
+    })
+    renderReport()
+
+    // Before the guard this read `outline.sections.length` and threw
+    // `Cannot read properties of undefined (reading 'length')`, which unmounted
+    // the whole screen: the student could not even read the report's title.
+    expect(await screen.findByText("This report's outline cannot be read")).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Jaringan Komputer' })).toBeInTheDocument()
+    // Nothing is offered that cannot work: there are no sections to edit or
+    // generate, and the export route answers 409 without a generated body.
+    expect(screen.queryByRole('button', { name: 'Save outline' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Download/ })).not.toBeInTheDocument()
+    // And it is stated, not swallowed: an empty outline is not a report the model
+    // produced nothing for.
+    expect(screen.queryByText('This report has no outline')).not.toBeInTheDocument()
+  })
+
+  it('renders a section whose outline row is missing its labels', async () => {
+    // The same pass-through, one level down: a hand-written row can hold a
+    // section without `labels`, and `section.labels.length` threw the same
+    // TypeError. The outline is still editable, so this row renders rather than
+    // being declared unreadable.
+    serve({
+      report: report({
+        outline: {
+          title: 'Jaringan Komputer',
+          sections: [{ heading: 'Pendahuluan', purpose: 'Menetapkan ruang lingkup.' }],
+        } as unknown as ReportOutline,
+        sections: [{ heading: 'Pendahuluan', body_md: null, generating: false, error: null }],
+      }),
+    })
+    renderReport()
+
+    expect(await screen.findByLabelText('Section 1')).toHaveValue('Pendahuluan')
+    expect(screen.getByText('Menetapkan ruang lingkup.')).toBeInTheDocument()
+    expect(screen.queryByText("This report's outline cannot be read")).not.toBeInTheDocument()
   })
 })
 

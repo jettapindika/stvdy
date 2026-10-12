@@ -52,8 +52,18 @@ export function LockedFeature({
         <p className="text-small text-subtle">
           {policy.showUpgradeCta ? t('lock.availableOn', { plan: minPlan }) : t('lock.notOnPlan')}
         </p>
+        {/* The one control on this card, and it is the control a user who has
+            just been told the feature is locked is meant to reach. A bare `link`
+            is text-height — measured in Chromium at 390px it was **93x19**,
+            against the 44px phone target the accessibility gate requires — so it
+            carries `min-h-11` and centres its label the way `States.tsx`'s plan
+            link does. `self-start` keeps it as wide as its label rather than
+            stretching to the card. */}
         {policy.showUpgradeCta ? (
-          <Link to="/billing" className="link mt-1 self-start text-small">
+          <Link
+            to="/billing"
+            className="link mt-1 inline-flex min-h-11 items-center self-start text-small"
+          >
             {t('lock.upgrade', { plan: minPlan })}
           </Link>
         ) : null}

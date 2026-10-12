@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router'
 import { asApiError } from '@/api/errors'
 import {
   EXPORT_FORMATS,
+  readableOutline,
   useExportReport,
   useGenerateSection,
   useReport,
@@ -90,6 +91,26 @@ export function ReportScreen() {
     )
   }
 
+  const outline = readableOutline(data.outline)
+
+  // An outline that is present but names no sections is a row the generator could
+  // not have written — `parse_outline` refuses an empty outline — so it is a
+  // legacy or hand-written row, and the honest answer is to say so. Rendering the
+  // editor with nothing in it would read as a model that produced nothing, and the
+  // export below it has no document to build from (the route answers 409 without
+  // generated sections), so neither is offered.
+  if (outline.sections.length === 0) {
+    return (
+      <div className="flex flex-col gap-6 px-4 py-4">
+        <h1 className="min-w-0 flex-1 break-words">{data.title}</h1>
+        <EmptyState
+          title={t('reports.brokenOutline.title')}
+          reason={t('reports.brokenOutline.reason')}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6 px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -97,12 +118,12 @@ export function ReportScreen() {
         <span className="meta">
           {t('reports.sectionProgress', {
             written: data.sections.filter((section) => section.body_md !== null).length,
-            total: data.outline.sections.length,
+            total: outline.sections.length,
           })}
         </span>
       </div>
 
-      <OutlineEditor report={data} outline={data.outline} />
+      <OutlineEditor report={data} outline={outline} />
       <Sections report={data} />
       <ExportMenu reportId={data.id} />
     </div>

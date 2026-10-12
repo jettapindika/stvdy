@@ -754,6 +754,10 @@
       "title": "Laporan ini belum punya kerangka",
       "reason": "Usulkan kerangka dari Studio, lalu sunting di sini sebelum membuat bagian mana pun."
     },
+    "brokenOutline": {
+      "title": "Kerangka laporan ini tidak bisa dibaca",
+      "reason": "Kerangka yang tersimpan tidak punya daftar bagian, jadi tidak ada yang bisa disunting atau dibuat di sini. Usulkan kerangka lagi dari Studio."
+    },
     "sectionProgress": "{{written}} dari {{total}} bagian sudah ditulis",
     "outline": {
       "title": "Kerangka",

@@ -764,6 +764,10 @@
       "title": "This report has no outline",
       "reason": "Propose an outline from the Studio, then edit it here before generating any section."
     },
+    "brokenOutline": {
+      "title": "This report's outline cannot be read",
+      "reason": "The stored outline has no list of sections, so there is nothing here to edit or generate. Propose an outline again from the Studio."
+    },
     "sectionProgress": "{{written}} of {{total}} sections written",
     "outline": {
       "title": "Outline",

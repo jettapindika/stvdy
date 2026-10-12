@@ -239,6 +239,38 @@ describe('the reports list', () => {
   })
 
   /**
+   * A row whose outline has no `sections` must not take the panel down.
+   *
+   * The server passes the stored `outline` through verbatim, so a hand-written or
+   * legacy row can hold `{"title":"…"}` with no `sections` at all. This row's
+   * count read `report.outline?.sections.length` and threw `Cannot read properties
+   * of undefined (reading 'length')` — measured in Chromium against the real API,
+   * where it replaced the whole Studio panel with React Router's error boundary,
+   * which is what made the report screen (and so the PDF export) unreachable from
+   * the UI at all. The row still carries a title, a status and a link, so it is
+   * rendered with the count it can compute: no sections is not a count of zero
+   * sections to claim, so the "written" chip is absent rather than saying "0 of 0".
+   */
+  it('renders a row whose stored outline has no sections list', async () => {
+    serve([
+      {
+        ...REPORT,
+        outline: { title: 'Laporan Uji' } as unknown as Report['outline'],
+        sections: [],
+      },
+    ])
+    renderPanel()
+
+    expect(await screen.findByText('Jaringan Komputer')).toBeInTheDocument()
+    expect(screen.getByText('Outline only')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open report' })).toHaveAttribute(
+      'href',
+      '/reports/r1',
+    )
+    expect(screen.queryByText(/^\d+ of \d+ written$/)).not.toBeInTheDocument()
+  })
+
+  /**
    * The row's title must claim the whole line on a phone, and this is the one
    * place jsdom can see it.
    *
