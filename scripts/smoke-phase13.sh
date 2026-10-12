@@ -492,13 +492,12 @@ PAYMENT_3="$(field '["id"]' < "$TMP/payment-3.json")"
   || fail "the yearly amount is not the config's $PRO_YEARLY"
 
 db "update payments set expires_at = now() - interval '1 minute' where id = '$PAYMENT_3'" > /dev/null
-# The poll route re-checks expiry, so the student's own screen stops offering a dead code
-# without waiting for a job.
-curl -fsS "$BASE/billing/payments/$PAYMENT_3" -H "authorization: Bearer $EXPIRED" > "$TMP/poll-expired.json"
-READ_BACK="$(field '["status"]' < "$TMP/poll-expired.json")"
-printf 'the poll route on the expired invoice: status=%s\n' "$READ_BACK"
-[ "$READ_BACK" = "expired" ] || fail "an expired invoice must read expired, got $READ_BACK"
 
+# **The late callback first, while the row is still `pending`.** The poll route re-checks
+# expiry and *persists* it, so asking the poll first would terminalise the row and the
+# callback would then hit the guarded transition (`where status = 'pending'`), update zero
+# rows and answer `already_paid` — a correct answer to a different question. The order is
+# therefore the order a real late payment arrives in: the money moves, then someone looks.
 paid_event "$TMP/event-4.json" "evt-$STAMP-4" "$ORDER_3" "$PRO_YEARLY" "$(now_rfc3339)"
 STATUS="$(post_webhook "$TMP/hook-5.json" "$TMP/event-4.json")"
 [ "$STATUS" = "200" ] || fail "the late callback answered $STATUS: $(cat "$TMP/hook-5.json")"
@@ -508,6 +507,22 @@ case "$LATE" in review*) ;; *) fail "a payment after the expiry must be review: 
 case "$LATE" in *"expired at"*) ;; *) fail "the reason must name the expiry: $LATE" ;; esac
 [ "$(db "select count(*) from subscriptions where user_id = '$EXPIRED_ID'")" = "0" ] \
   || fail "an expired invoice activated a subscription"
+
+# And the poll route re-checks expiry on its own, so a student whose clock is wrong cannot
+# extend their own invoice by not noticing. Driven on a **second** expired invoice, because
+# the one above is now `review` and a poll of it would prove nothing about the re-check.
+STATUS="$(curl -sS -o "$TMP/payment-5.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
+  -H "authorization: Bearer $EXPIRED" -H 'content-type: application/json' \
+  -d '{"plan_id":"pro","billing_period":"monthly"}')"
+[ "$STATUS" = "200" ] || fail "the fifth checkout answered $STATUS: $(cat "$TMP/payment-5.json")"
+PAYMENT_5="$(field '["id"]' < "$TMP/payment-5.json")"
+db "update payments set expires_at = now() - interval '1 minute' where id = '$PAYMENT_5'" > /dev/null
+curl -fsS "$BASE/billing/payments/$PAYMENT_5" -H "authorization: Bearer $EXPIRED" > "$TMP/poll-expired.json"
+READ_BACK="$(field '["status"]' < "$TMP/poll-expired.json")"
+STORED_5="$(db "select status from payments where id = '$PAYMENT_5'")"
+printf 'the poll route on a pending-but-expired invoice: reads %s, the row is %s\n' "$READ_BACK" "$STORED_5"
+[ "$READ_BACK" = "expired" ] || fail "an expired invoice must read expired, got $READ_BACK"
+[ "$STORED_5" = "expired" ] || fail "the poll must persist the expiry, the row is $STORED_5"
 
 # ==========================================================================================
 # 6. The poller
@@ -527,7 +542,9 @@ say "6. the poller: nothing for a paid row (never asked), everything for a pendi
 run_job() { # $1 = kind, $2 = payload json
   local kind="$1" payload="$2"
   local job_id
-  job_id="$(db "insert into jobs (kind, payload) values ('$kind', '$payload'::jsonb) returning id")"
+  # `head -1`: `psql` prints the `INSERT 0 1` command tag after the returned id, and taking
+  # the whole output would make the id `"<uuid>\nINSERT 0 1"`.
+  job_id="$(db "insert into jobs (kind, payload) values ('$kind', '$payload'::jsonb) returning id" | head -1)"
   local status=""
   for _ in $(seq 1 120); do
     status="$(db "select status from jobs where id = '$job_id'")"

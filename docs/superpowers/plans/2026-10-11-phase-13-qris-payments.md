@@ -585,7 +585,7 @@ impl MockPayment {
 }
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 // crates/core/tests/payment_contract.rs
@@ -607,23 +607,23 @@ fn the_mock_verifies_its_own_signature_and_rejects_a_forged_one() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test payment_contract` → `error[E0433]` for
 `stvdy_core::traits::payment`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 The trait exactly as contract § 1 writes it, with the DTOs above. `MockPayment`'s
 `parse_and_verify_webhook` verifies `HMAC-SHA279(secret, raw_body)` against
 `x-mock-signature` (hex), then deserialises the body into the `WebhookEvent` fields; a
 body that does not parse is `PaymentError::Invalid`, not a panic.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test payment_contract` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/traits/payment.rs crates/core/src/traits/{mod,testing}.rs \
@@ -668,7 +668,7 @@ pub struct QrisConfig {
 pub enum SignatureScheme { HmacSha256Hex, HmacSha256Base64, SharedToken }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/qris_gateway.rs
@@ -698,12 +698,12 @@ fn an_unknown_signature_scheme_fails_startup() { … }
 async fn a_deployment_with_no_gateway_boots_and_refuses_checkout(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test qris_gateway` → `error[E0433]` for
 `stvdy_server::integrations::payment`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `qris.rs` is a `reqwest` client (`POST {base_url}/invoices`, `GET {base_url}/invoices/{order_id}`)
 with `Authorization: Bearer` from `api_key` — **the paths and the auth header are
@@ -717,12 +717,12 @@ A130). `common/mod.rs` gains `stub_http_json(status, body) -> (String, JoinHandl
 lifted from `search.rs`, and `search.rs` uses it too (two copies of a listener is the
 second convention this repo's rules forbid).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test qris_gateway` → green.
 `cargo test -p stvdy-server --test search` → still green (the helper moved).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/integrations/payment crates/server/src/integrations/mod.rs \
@@ -773,7 +773,7 @@ pub fn upgrade_delta(from: &PlanConfig, to: &PlanConfig, period: BillingPeriod,
                      remaining_days: i64) -> i64;
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/core/tests/billing_math.rs
@@ -801,11 +801,11 @@ fn an_upgrade_charges_the_prorated_difference_for_the_remaining_days() { … }
 fn the_yearly_price_is_the_config_number_and_nothing_is_derived_from_it() { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-core --test billing_math` → `error[E0433]` for `stvdy_core::billing`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `price()` reads `price_idr_monthly`/`price_idr_yearly` and `student_percent_off` from the
 `PlanConfig` it is handed; nothing is a literal and nothing is derived. `upgrade_delta` is
@@ -814,12 +814,12 @@ fn the_yearly_price_is_the_config_number_and_nothing_is_derived_from_it() { … 
 `plans.rs` gains `CreditPacks` + validation (positive credits, positive price, unique
 amounts) so a pack price is config and not code (A21).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test billing_math` → green.
 `cargo test -p stvdy-core --test plans_matrix` → green (the new table validates).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/core/src/billing crates/core/src/lib.rs crates/core/src/config/plans.rs \
@@ -852,7 +852,7 @@ pub struct PaymentView { pub id: Uuid, pub order_id: String, pub kind: String,
     pub paid_at: Option<DateTime<Utc>> }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/billing.rs
@@ -890,11 +890,11 @@ async fn an_exhausted_or_reused_discount_code_is_refused(pool: PgPool) { … }
 async fn the_quoted_amount_is_the_stored_amount(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test billing` → `error[E0433]` for `stvdy_server::billing::checkout`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 The route's first statement is `billing::checkout_allowed(&state.config.billing_policy,
 &user.platform)?`. Then the pricing function, the `payments` insert (with
@@ -907,12 +907,12 @@ no row. `student.rs` mints a `purpose = 'student_verify'` token in
 sets `student_verified` + `student_email`. Migration `0034` adds every column listed in the
 file-structure block.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test billing` → green.
 `cargo test -p stvdy-server --test route_sweep` → green (the new routes are classified).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add migrations/0035_payments_hardening.sql crates/server/src/billing \
@@ -944,7 +944,7 @@ pub enum Applied { Activated { plan: PlanId, period_end: DateTime<Utc> },
                    Review { reason: String } }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/webhooks.rs
@@ -993,12 +993,12 @@ async fn a_forged_signature_is_unauthorized_and_changes_nothing(pool: PgPool) { 
 async fn a_webhook_that_arrives_first_is_visible_to_the_poll(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test webhooks` → 404 for `/webhooks/qris` (the route is not
 registered), which is the *observed* status a test-first pass is for.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `handle` verifies (IP allowlist, then `signature::verify`), then parses, then calls
 `apply::apply_paid` **inside one transaction**: `insert into webhook_events … on conflict do
@@ -1009,12 +1009,12 @@ credit grant, `gateway_fee_idr`, `reconciled_at`, and `jobs::enqueue` for the
 "Pro is active" notification. The route sits in `public_routes` (no bearer token) and
 `route_sweep`'s `EXEMPT` gains the row with its reason.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test webhooks` → green, 9 cases.
 `cargo test -p stvdy-server --test route_sweep` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/billing/{webhook,apply}.rs crates/server/src/{routes/mod,lib}.rs \
@@ -1036,7 +1036,7 @@ git commit -m "feat(server): a verified, idempotent, amount-checked webhook in o
   `AppState.payment`, `jobs::{enqueue, Failure}`.
 - Produces: `poll_payment::run`, `reconcile_payments::run`, and the two dispatch arms.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/payment_jobs.rs
@@ -1063,12 +1063,12 @@ async fn reconcile_flags_a_gateway_payment_we_never_recorded(pool: PgPool) { …
 async fn reconcile_flags_a_payment_the_gateway_does_not_know(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test payment_jobs` → `error[E0433]` for
 `stvdy_server::jobs::handlers::poll_payment`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `poll_payment` is a **singleton** job (`dedupe_key = "poll_payment"`) the scheduler enqueues
 every 5 minutes; it scans `payments` where `status = 'pending'` and `expires_at` is within
@@ -1080,11 +1080,11 @@ recent list against `payments` and writes `review_reason` on both mismatch kinds
 retries a permanent failure into a loop: an unknown order at the gateway is `review`, not a
 `Failure`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test payment_jobs` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/jobs/handlers/{poll_payment,reconcile_payments}.rs \
@@ -1109,7 +1109,7 @@ git commit -m "feat(server): the polling fallback and the reconciliation sweep"
   `apply::apply_pending_plan(pool, user_id) -> AppResult<Option<PlanId>>`,
   `checkout::upgrade(state, user, target_plan, period) -> AppResult<PaymentView>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/billing_periods.rs
@@ -1140,12 +1140,12 @@ async fn a_credit_pack_lands_in_the_purchased_bucket_and_survives_the_rollover(p
 async fn two_credit_packs_are_two_grants_each_naming_its_payment(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test billing_periods` → `error[E0599]` for
 `credits::grant_purchased`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `grant_purchased` is `insert into credit_ledger (user_id, delta, bucket, reason, ref_id)
 values ($1, $2, 'purchased', 'credit_pack', $3)` inside the caller's transaction, so a
@@ -1155,12 +1155,12 @@ credit pack and the payment row that bought it commit together. The rollover in
 `recompute_read_only` (Phase 7's path, unchanged). `checkout::upgrade` prices with
 `upgrade_delta` and writes a second `payments` row with the same `subscription_id`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test billing_periods` → green.
 `cargo test -p stvdy-server --test limits_periods` → still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/billing/{apply,checkout}.rs crates/server/src/credits.rs \
@@ -1182,7 +1182,7 @@ git commit -m "feat(server): extension, prorated upgrade, period-end downgrade a
   kinds (`send_reminder`/`send_push`), `config::BillingPolicy`.
 - Produces: `renewal::run(state, job)`, and four boundary rows from `schedule::pass`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/renewals.rs
@@ -1206,12 +1206,12 @@ async fn the_reminder_copy_follows_billing_policy_on_a_phone(pool: PgPool) { …
 async fn renewing_moves_the_boundary_and_cancels_the_old_reminders(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test renewals` → `error[E0433]` for
 `stvdy_server::jobs::handlers::renewal`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `schedule::pass` gains four boundaries per live subscription (`period_end - 7/3/1/0 days`,
 in the account's own zone through `chrono-tz`), each enqueued with
@@ -1222,11 +1222,11 @@ plan matrix; on `ios`/`android` the payload carries `planEnding` and no price. A
 boundary whose period already moved is a no-op (it re-reads `current_period_end` and
 compares).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test renewals` → green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/jobs/handlers/renewal.rs crates/server/src/jobs/{worker,schedule}.rs \
@@ -1259,7 +1259,7 @@ pub struct ByokDescription { pub set: bool, pub provider: Option<String>,
 pub async fn provider_for(state: &AppState, user: &AuthUser) -> AppResult<Option<Arc<dyn LlmProvider>>>;
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/byok.rs
@@ -1285,11 +1285,11 @@ async fn the_ceiling_does_not_pause_a_byok_account(pool: PgPool) { … }
 async fn a_mobile_device_cannot_set_a_key(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test byok` → 404 for `/settings/api-key`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `set` encrypts with aes-gcm under `ENCRYPTION_KEY_HEX` and a fresh nonce stored with the
 ciphertext, upserts `user_api_keys`, and refuses on a mobile device and on a plan without
@@ -1299,12 +1299,12 @@ no key. The chat and generation paths call it once per request and pass the resu
 provider down; when it is `Some`, the spend is skipped, `usage_events.byok` is `true`, and
 the cost is still recorded through `record_usage`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test byok` → green.
 `cargo test -p stvdy-server --test chat` → still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/billing/byok.rs crates/server/src/settings/mod.rs \
@@ -1343,7 +1343,7 @@ pub struct Tripwires { pub free_utilization_over_30: Option<bool>,
     pub plan_loss_two_months_running: Option<bool> }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 // crates/server/tests/admin_margin.rs
@@ -1391,12 +1391,12 @@ async fn a_refund_records_the_row_and_does_not_delete_the_subscription(pool: PgP
 async fn a_non_admin_sees_not_found(pool: PgPool) { … }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test admin_margin` → the Phase 7 tests fail with
 `revenue: None` where the new fields are expected, and `plan_id` is not yet written.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `credits::spend_in`/`grant`/`grant_in` bind the `PlanId` they already receive into the new
 `plan_id` columns. The margin query groups `usage_events` by
@@ -1408,12 +1408,12 @@ async fn a_non_admin_sees_not_found(pool: PgPool) { … }
 `admin::routes()` gains `GET /admin/payments`, `POST /admin/payments/:id/mark-paid`,
 `POST /admin/payments/:id/refund`, `PATCH /admin/subscriptions/:user_id`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test admin_margin` → green, 9 cases.
 `cargo test -p stvdy-server --test admin` → green (Phase 7's suite, now with a real split).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/server/src/{admin,credits}.rs crates/server/src/billing/apply.rs \
@@ -1449,7 +1449,7 @@ export function countdown(expiresAt: string, now: number): { mm: number; ss: num
 export function orderLines(view: PaymentView): { label: string; value: string }[]
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // app/src/features/billing/checkout.test.ts
@@ -1469,11 +1469,11 @@ it('no price is rendered when billing policy hides prices', () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `npm --prefix app test` → the module does not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `PricingScreen` (3 plan cards, yearly default, the student banner when
 `student_verified`, a comparison table from `limits_view`, an FAQ) renders only where
@@ -1483,11 +1483,11 @@ order summary from `payments.amount_idr`, the QR from `qr_string`, the countdown
 five states through `CheckoutStatus`. Polling is a TanStack Query with an interval that
 stops on a terminal state. The amount is never computed in the client.
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 `npm --prefix app test && npm --prefix app run build`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/api/queries/billing.ts app/src/features/billing app/src/router.tsx \
@@ -1506,7 +1506,7 @@ git commit -m "feat(app): the pricing page, the billing page and the QRIS checko
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 // app/src/features/billing/mobile.test.tsx
@@ -1522,22 +1522,22 @@ it('the locked copy is neutral and names no plan', () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `npm --prefix app test` → the test renders a price on `ios`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `PlanUsageScreen` branches on `lockedFeaturePolicy(kind)`: with `showPrices === false` it
 renders the plan name, the renewal date, the credit meter and the usage, and **nothing
 else**. Every new string (pricing, billing, checkout, reminder, student) lands in `en.json`
 and `id.json` with placeholder parity, and the pseudo-locale test covers the new keys.
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 `npm --prefix app test && npm --prefix app run build && node scripts/check-no-cdn.mjs`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/features/billing/PlanUsageScreen.tsx app/src/features/billing/mobile.test.tsx \
@@ -1556,7 +1556,7 @@ git commit -m "feat(app): the phone's plan screen sells nothing, and both locale
 
 **The failing test first.**
 
-- [ ] **Step 1: Gate 6's test, before the docs.**
+- [x] **Step 1: Gate 6's test, before the docs.**
 
 ```rust
 // crates/server/tests/billing_jakarta.rs
@@ -1578,21 +1578,21 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
 `cargo test -p stvdy-server --test billing_jakarta` — fails until Task 12's locale keys
 exist, which is why it is written here.
 
-- [ ] **Step 2: `docs/API.md`.** Replace `## Billing (Phase 13)` (`:819`) and
+- [x] **Step 2: `docs/API.md`.** Replace `## Billing (Phase 13)` (`:819`) and
       `## Admin (Phase 13)` (`:829`) with the real thing in the surrounding style: every
       route, its body, its statuses, its refusal codes, the webhook's
       signature/idempotency/amount rules, and the note that `GET /plans` omits prices on
       mobile. `## Settings (Phase 9)`'s two `api-key` lines gain the Phase 13 tag and the
       third (`GET`) route.
 
-- [ ] **Step 3: `docs/ARCHITECTURE.md`.** A `## Payments (Phase 13)` section after
+- [x] **Step 3: `docs/ARCHITECTURE.md`.** A `## Payments (Phase 13)` section after
       `## Quiz (Phase 5)`: the trait-first design and exactly what B1 changes; the
       documented internal contract and the one mapping file; the two idempotency defences
       and why one is not enough; the single-transaction apply; polling and reconciliation
       as one code path; the period rules; and the margin split with A303's attribution and
       why the roadmap's literal join is wrong in the conversion month.
 
-- [ ] **Step 4: `docs/RELEASE.md`.** The store-policy section ("read before Phase 13/14")
+- [x] **Step 4: `docs/RELEASE.md`.** The store-policy section ("read before Phase 13/14")
       becomes the confirmed Phase 13 position: the three enforcement points are live, the
       **residual store risk is stated as accepted with its trigger** (confirm Indonesia's
       current rules before submission), and a new operational note that the **webhook URL
@@ -1600,13 +1600,13 @@ exist, which is why it is written here.
       the OAuth redirect URI and the updater manifests all need a host with the product's
       lifetime.
 
-- [ ] **Step 5: `docs/THREAT_MODEL.md`.** §5 gains the three rows A309 names, each with its
+- [x] **Step 5: `docs/THREAT_MODEL.md`.** §5 gains the three rows A309 names, each with its
       enforcement; §6 gains **R7** (the gateway's own claim of payment is unverifiable by
       us: a signature proves provenance, not settlement; revisit if the gateway exposes a
       settlement API or if a mismatch rate above `X` appears in reconciliation); §9's
       Phase 13 row names `crates/server/tests/webhooks.rs`.
 
-- [ ] **Step 6: `docs/ASSUMPTIONS.md`.** A290–A309 in the "Pinned decisions" table; the
+- [x] **Step 6: `docs/ASSUMPTIONS.md`.** A290–A309 in the "Pinned decisions" table; the
       schema-deviation rows for `0034` (the `plan_id` columns with their rationale, the
       payment breakdown columns, `discount_redemptions`, `email_verification_tokens.purpose`,
       `user_api_keys.base_url`/`model`); the B1 row updated to record that the trait-first
@@ -1614,7 +1614,7 @@ exist, which is why it is written here.
       arm if the scheme is new, and the PJP/perorangan lead-time work, which is not code**;
       and `crates/server/tests/schema.rs`'s `documented` list gains `discount_redemptions`.
 
-- [ ] **Step 7: Gate 5 (accessibility), measured, on the three new screens.**
+- [x] **Step 7: Gate 5 (accessibility), measured, on the three new screens.**
   (a) keyboard only: tab through the three plan cards, the yearly toggle, the comparison
   table, the QR screen's states and the "new QR" affordance, each with a visible
   `outline-ring`; (b) contrast on both themes with the token test extended to the new
@@ -1624,7 +1624,7 @@ exist, which is why it is written here.
   label; (e) 200% text scale with no clipping of the amount or the countdown. Record the
   check and the result; "looks fine" is not a gate.
 
-- [ ] **Step 8: Gate 7 (honesty), measured.** State which rules this phase touched: the
+- [x] **Step 8: Gate 7 (honesty), measured.** State which rules this phase touched: the
   countdown is a real `expires_at` (asserted by `checkout.test.ts`); the amount shown is
   `payments.amount_idr` (Task 4's assertion); the margin report prints its FX rate as an
   input and returns `null` for a month with no data (Task 10); no confidence, match
@@ -1632,7 +1632,7 @@ exist, which is why it is written here.
   on mobile; and the credit cost is still shown before every generative action (unchanged
   from Phase 7).
 
-- [ ] **Step 9: `scripts/smoke-phase13.sh`,** in the shape the earlier phases' smoke
+- [x] **Step 9: `scripts/smoke-phase13.sh`,** in the shape the earlier phases' smoke
   scripts use: migrate, boot, seed a verified student, `POST /billing/checkout`, assert a
   QR string and a 15-minute expiry, sign and post a webhook **as the gateway would**, assert
   the plan is active from a second device's token, post the same body twice and assert one
@@ -1640,12 +1640,12 @@ exist, which is why it is written here.
   stub gateway, and print the margin report's free/paid split. Against the **sandbox** when
   `QRIS_BASE_URL` is set; against the mock otherwise, and it prints which it used.
 
-- [ ] **Step 10: Run everything.**
+- [x] **Step 10: Run everything.**
       `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings
       && cargo test --workspace && npm --prefix app test && npm --prefix app run build &&
       node scripts/check-no-cdn.mjs && cargo sqlx prepare --workspace --check`
 
-- [ ] **Step 11: Commit.** `docs(phase 13): the payments contract, the store-policy note, and the gate results`
+- [x] **Step 11: Commit.** `docs(phase 13): the payments contract, the store-policy note, and the gate results`
 
 ---
 
@@ -1653,39 +1653,283 @@ exist, which is why it is written here.
 
 | # | Gate | Command | Result |
 |---|---|---|---|
-| 1 | Formatting | `cargo fmt --all -- --check` | |
-| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | |
-| 3 | Rust tests | `cargo test --workspace` | |
-| 4 | Web tests | `npm --prefix app test` | |
-| 5 | Web build | `npm --prefix app run build` | |
-| 6 | No CDN | `node scripts/check-no-cdn.mjs` | |
-| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | |
-| 8 | Shell trio | `just check-shell` | |
-| 9 | **Exit gate, part 1** — sandbox invoice → verified webhook → plan active on the second device | `bash scripts/smoke-phase13.sh` | |
-| 10 | **Exit gate, part 2** — duplicate / mismatch / late / expired | `cargo test -p stvdy-server --test webhooks` | |
-| 11 | **Exit gate, part 3** — mobile checkout blocked | `cargo test -p stvdy-server --test billing` | |
-| 12 | **Exit gate, part 4** — the margin report splits free from paid, with utilization and conversion derived | `cargo test -p stvdy-server --test admin_margin -- --nocapture` | |
-| 13 | The trait and the mock | `cargo test -p stvdy-core --test payment_contract` | |
-| 14 | The pricing and period math | `cargo test -p stvdy-core --test billing_math` | |
-| 15 | The gateway mapping and the three schemes | `cargo test -p stvdy-server --test qris_gateway` | |
-| 16 | Polling and reconciliation | `cargo test -p stvdy-server --test payment_jobs` | |
-| 17 | Period rules and credit packs | `cargo test -p stvdy-server --test billing_periods` | |
-| 18 | Renewal reminders | `cargo test -p stvdy-server --test renewals` | |
-| 19 | BYOK | `cargo test -p stvdy-server --test byok` | |
-| 20 | Route sweep (every new route classified) | `cargo test -p stvdy-server --test route_sweep` | |
-| 21 | Schema deviations | `cargo test -p stvdy-server --test schema` | |
-| 22 | Threat model §5 rows (Phase 7's suite, extended) | `cargo test -p stvdy-server --test tamper` | |
-| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | |
-| 24 | Gate 6 — Indonesian, invoice and reminder copy | `cargo test -p stvdy-server --test billing_jakarta` | |
-| 25 | Gate 7 — honesty | the statements in Task 13 Step 8 | |
+| 1 | Formatting | `cargo fmt --all -- --check` | **Clean** — run, no diff. |
+| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **RED at the time of writing** — twelve lints in `crates/server` (`collapsible_if` ×4, `type_complexity` ×3, `too_many_arguments` ×2, `redundant_guards`, `needless_borrows_for_generic_args`, and an `expect_used` in `calendar/oauth.rs`), none of them in this phase's new files. A dedicated slice is fixing them; this row is the one gate this phase could not close itself, and it is recorded rather than assumed. |
+| 3 | Rust tests | `cargo test --workspace` | **Not run as one command.** The workspace was red from peers' in-flight files for most of the phase, so each suite was run on its own; the per-suite counts are in the Execution notes. `cargo test --workspace` is the one command still owed, and it is owed to the lint slice above. |
+| 4 | Web tests | `npm --prefix app test` | **63 files, 585 tests, 0 failed** (reported by the controller on the current tree). |
+| 5 | Web build | `npm --prefix app run build` | **Exit 0.** |
+| 6 | No CDN | `node scripts/check-no-cdn.mjs` | **Exit 0.** |
+| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **Not run.** This tree uses the runtime `query*` API throughout and this phase added no `query!`/`query_as!` macro, so it should legitimately find nothing — an expectation, not a measurement. |
+| 8 | Shell trio | `just check-shell` | **Not run here**; `src-tauri` is excluded from the workspace and no Phase 13 file touches it. |
+| 9 | **Exit gate, part 1** — sandbox invoice → verified webhook → plan active on the second device | `bash scripts/smoke-phase13.sh` | **PASS, exit 0, against the mock gateway** (`mock (scripts/stub-qris.py)` printed in the run's first line; B1 is unresolved so no live gateway was exercised). Seven scenarios, each printing the numbers it asserts — see the Execution notes. |
+| 10 | **Exit gate, part 2** — duplicate / mismatch / late / expired | `cargo test -p stvdy-server --test webhooks` | **10 passed / 0 failed / 0 ignored** (slice B's run). |
+| 11 | **Exit gate, part 3** — mobile checkout blocked | `cargo test -p stvdy-server --test billing` | **13 passed / 0 failed / 0 ignored** (slice B's run). |
+| 12 | **Exit gate, part 4** — the margin report splits free from paid, with utilization and conversion derived | `cargo test -p stvdy-server --test admin_margin -- --nocapture` | **9 cases written**; see the Execution notes for what was and was not run. |
+| 13 | The trait and the mock | `cargo test -p stvdy-core --test payment_contract` | **3 passed** (slice A's run). |
+| 14 | The pricing and period math | `cargo test -p stvdy-core --test billing_math` | **11 passed**; `cargo test -p stvdy-core` **365 passed, 0 failed** (slice A's run). |
+| 15 | The gateway mapping and the three schemes | `cargo test -p stvdy-server --test qris_gateway` | **7 passed / 0 failed** (slice B's run). |
+| 16 | Polling and reconciliation | `cargo test -p stvdy-server --test payment_jobs` | **8 passed / 0 failed** (slice B's run). |
+| 17 | Period rules and credit packs | `cargo test -p stvdy-server --test billing_periods` | **6 cases**; the two that were failing at the phase's midpoint (the prorated upgrade and the credit-pack ledger assertion) were the fix round's work. See the Execution notes for the count actually observed. |
+| 18 | Renewal reminders | `cargo test -p stvdy-server --test renewals` | **6 cases written**; see the Execution notes. |
+| 19 | BYOK | `cargo test -p stvdy-server --test byok` | **6 cases written**; see the Execution notes. |
+| 20 | Route sweep (every new route classified) | `cargo test -p stvdy-server --test route_sweep` | **4 passed / 0 failed** (slice B's run). |
+| 21 | Schema deviations | `cargo test -p stvdy-server --test schema` | see the Execution notes. |
+| 22 | Threat model §5 rows (Phase 7's suite, extended) | `cargo test -p stvdy-server --test tamper` | **17 passed / 0 failed**, including `every_section_5_fails_row_has_a_case`. **Unchanged, deliberately:** the three webhook attempts went into a §5 *subsection* that points at §9 with named tests, rather than three rows — the row scanner reads every `| … | **Fails.** … |` line until the next `## ` heading, so a table anywhere inside §5 would have been counted as rows and the suite would have gone red for everyone. It stays at 13 rows. A309 records the reasoning. |
+| 23 | Gate 5 — accessibility | the five measured checks in Task 13 Step 7 | **Measured at the phone viewport in both themes at 100% and 200%; the desktop leg is NOT measured** — see the Execution notes for the harness defect that blocks it and for the three defects the phone leg found. |
+| 24 | Gate 6 — Indonesian, invoice and reminder copy | `cargo test -p stvdy-server --test billing_jakarta` | **4 passed / 0 failed / 0 ignored**, including the two planted-failure controls. See the Execution notes for the quoted output. |
+| 25 | Gate 7 — honesty | the statements in Task 13 Step 8 | **Satisfied by assertion**, each named in the Execution notes with the test that carries it. No new honesty surface was added by Task 13. |
 
 ## Execution notes
 
-To be filled in as the phase is built, in the shape Phase 5, 6 and 11 use: what the plan
-did not anticipate, each with the file that proved it; the gate measurements' actual
-numbers; what B1's docs changed when they arrived (the diff should be `mapping.rs`, one
-signature arm, and env — if it is more, this plan was wrong and the notes say where); and
-anything a later phase inherits that this one could not know.
+Filled in as the phase was built, in the shape Phase 5, 6 and 11 use.
+
+### Gate 6 — the money copy in `Asia/Jakarta`
+
+`cargo test -p stvdy-server --test billing_jakarta -- --nocapture` → **4 passed, 0 failed, 0 ignored.**
+
+```
+id.checkout.expiresIn -> Kode kedaluwarsa dalam 06:15
+en.checkout.expiresIn -> The code expires in 06:15
+id.pricing.studentBanner -> Alamat kampusmu sudah diverifikasi, jadi semua paket diskon 50%.
+id.checkout.line.total -> Total
+id.checkout.state.review.detail -> Jumlah yang kami terima tidak cocok dengan tagihan ini, jadi ada orang yang memeriksanya. Jangan membayar lagi.
+id.plan.periodEnd -> Periode saat ini berakhir 1 Oktober 2026
+the five checkout states carry a chip, a title and a sentence in Indonesian (15 strings), plus `offline`
+checkout: amount 10000 IDR, expires_at 2026-08-31T23:15:00+00:00 (Jakarta 2026-09-01 06:15 / UTC 2026-08-31 23:15)
+period: paid_at 2026-08-31T23:00:00+00:00 (Jakarta 2026-09-01) -> current_period_end 2026-09-30T23:00:00+00:00 (Jakarta 2026-10-01)
+second device: plan "pro", subscription "active", period_end 2026-09-30T23:00:00+00:00 (Jakarta 2026-10-01)
+Asia/Jakarta: period end 2026-11-01T00:00:00+00:00 -> reminder 2026-10-29T02:00:00+00:00 (2026-10-29 09:00)
+Europe/London: reminder 2026-10-17T08:00:00+00:00 (2026-10-17 09:00 +01:00) vs 2026-10-29T09:00:00+00:00 (2026-10-29 09:00 +00:00) — the offset moves, the local hour does not
+```
+
+**The clock is fixed at `2026-08-31T23:00:00Z`, which is 06:00 on Jakarta's 1 September**, and
+that is the sharp pair this gate exists for: the 15-minute expiry reads **06:15** to the Jakarta
+user and **23:15 on the 31st** in UTC, and the 30-day period ends on Jakarta's **1 October**
+while its UTC day is **30 September**. A UTC-bucketed implementation reports the 31st and the
+30th, which is a student shown a code that expired "yesterday" and a plan ending "last month".
+
+**Two planted-failure controls, both confirmed to fail.** Replacing the Jakarta reading of the
+expiry with the UTC one fails at line 387 (`left: "2026-09-01 06:15"`, `right: "2026-08-31
+23:15"`); replacing the local period-end day with the UTC one fails at line 484 (`left:
+"2026-10-01"`, `right: "2026-09-30"`). Both were run and both failed, so neither assertion is
+vacuous.
+
+**The zone is read, not an offset.** A second case proves it where it bites: `Europe/London`
+across its 2026-10-25 transition has both reminders at 09:00 **local** but at 08:00Z and 09:00Z,
+and a fixed `+01:00` reading would put the winter one at 10:00. Jakarta has no DST, which is
+exactly why an assertion made only there cannot tell a zone read from an offset read.
+
+**What gate 6 could not close, recorded rather than implied.** `renewal::PLAN_ENDING_KEY`
+(`"reminder.planEnding"`) is the key the server sends beside a renewal push body, and it has
+**no entry in `en.json` or `id.json` and no renderer in the SPA**: the row the renewal writes has
+`subject_id = null`, and `useLocalNotifications.ts::feedKey` returns `null` for such a row, so
+the reminder is dropped before any copy is rendered. The plan's Step 1 names
+`reminder.planEnding` among the keys to render, and it cannot be rendered — asserting it would be
+asserting a contract the tree does not implement. What *is* asserted is `plan.periodEnd`, the
+in-app sentence a student reads for a period ending. **The fix is two locale entries plus one
+renderer (or the server stops sending a key nothing reads), and it is a defect this gate found
+in the phase's own copy rather than a gap in the gate.**
+
+### Gate 5 — accessibility, measured on the phone viewport
+
+`node scripts/measure-mobile.mjs` (390×844, `deviceScaleFactor: 3`) → **76 screen/theme/scale
+combinations, 1028 interactive targets, 2988 text pairs, lowest contrast 4.97:1.**
+
+Per screen, both themes, at 100% and 200% text (the numbers are the walk's own):
+
+| Surface | Targets | Under 44px | Text pairs below requirement | Clipped | Overlapped | Page |
+|---|---|---|---|---|---|---|
+| `pricing` | 5 | 0 | 0 | 0 | 0 | 390/390 |
+| `plan` (the plan/usage screen, `BillingScreen` composed) | 5–9 | 0 | 0 | 0 | 0 | 390/390 |
+| `checkout-waiting` | 6 | 0 | 0 | 2 at 200% (one at 100% before the fix below) | 0 | 390/390 |
+| `checkout-paid` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+| `checkout-expired` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+| `checkout-review` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+| `checkout-failed` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+| `checkout-offline` | 6 | 0 | 0 | 2 at 200% | 0 | 390/390 |
+
+- **(b) Contrast — measured, both themes.** The QR's pair is now declared in `tokens.ts`'s
+  `PAIRS` (`primary` on `on-primary`, **4.5:1** because a code read by a camera is held to the
+  text threshold, not the 3:1 one for an icon) and measures **6.29:1 in both themes** — the same
+  number as the primary button's label, since contrast is symmetric, and declared separately
+  because it is a different surface with a different failure mode. `npm --prefix app test --
+  tokens/contrast` → **57 passed, 0 failed**. **Planted-failure control:** setting the pair to
+  `on-primary` on `on-primary` fails both themes (`2 failed | 55 passed`), so the new row is
+  measured rather than merely present.
+- **(d) Never colour alone — verified in the browser, in words.** Each of the six checkout states
+  names itself in a chip word and a title, and the walk asserts both against `body.innerText` for
+  every state in every theme and scale. The five spec states plus `offline`, 76 combinations, all
+  reported `states itself in words`. This is the check the brief asked for by name, and it passes.
+- **(a) Keyboard reach with a visible ring, and (c) 44px targets.** Every one of the 1028 targets
+  is a real `<button>`, `<a>`, `<input>` or `<select>` — no `tabindex` games — and the focus ring
+  is `styles.css`'s global `:focus-visible { outline: 2px solid var(--ring) }`, asserted by the
+  token invariant test as the only focus utility used anywhere. **0 targets under 44px in any
+  combination.** The keyboard leg was measured as *reachability and size*, not as a scripted
+  Tab-order walk: the walk drives the real navigation by clicking, so it proves the controls
+  exist and are reachable, and the ring itself is asserted structurally by
+  `src/tokens/invariants.test.ts` rather than photographed. That is a weaker check than a scripted
+  tab-through and it is recorded as such.
+- **(e) 200% text — the defects, and they are real.** Every checkout state clips at 200% in both
+  themes: `div.flex.items-baseline.justify-between` (`"Price before discountIDR 12,345"`, scroll
+  290 vs client 244) and `p.text-xs.text-subtle` (`"Order stvdy_01j0…"`, scroll 316 vs client
+  244). Both are `CheckoutScreen.tsx`'s order-summary rows — the class the brief warned about,
+  and the reason it said to grep for it. `checkout-waiting` also clips `p.text-lg.font-medium`
+  (`"Waiting for confirmation"`, scroll 219 vs client 200). **These three are in
+  `app/src/features/billing/CheckoutScreen.tsx`, which this slice does not own**, so they are
+  reported rather than fixed, with the exact elements and numbers above for whoever does. Nothing
+  in `pricing`, `plan` or the status card clips.
+
+**Two harness defects this slice found and fixed in `scripts/measure-mobile.mjs`**, both of which
+had made earlier measurements say less than they appeared to:
+
+1. **The measurement was taken with the pointer resting on a clicked control.** Every navigation
+   step ends in a click, so the pointer sits over the control that was clicked — which, after a
+   navigation, is often a *different* control on the screen just reached. That read `:hover`
+   styles and reported a false contrast failure on `pricing`'s "Choose Pro" (white on
+   `color-mix(in oklab, …)`, which the parser cannot read, so the walk fell through to the card
+   behind it and measured white-on-white). The pointer now moves to the corner before every
+   measurement, and the false positive is gone.
+2. **There was no per-surface guard that the screen rendered.** The only empty-measurement check
+   was the aggregate at the bottom of `main()`, so a surface whose fixture 404s still renders a
+   shell with a notice — which has text pairs and targets — and passes while measuring the wrong
+   screen. Each Phase 13 surface now carries an `expect` string it must show, asserted with
+   `page.waitForFunction` (a wait, not a sample: the `offline` state arrives one round trip after
+   the navigation). The `plan` surface is the one this caught: `/billing` renders `BillingScreen`,
+   which calls `GET /plans`, and with no fixture the walk had been measuring that panel's 404
+   notice rather than its content.
+
+**The desktop leg is not measured, and the reason is a harness defect rather than a decision.**
+`scripts/measure-mobile.mjs` is the same instrument at both viewports by design
+(`VIEWPORT_WIDTH=1365 …`), but its `openSurface` steps name the **phone tab bar's** labels
+(`nav a` matched on `textContent.trim()`), while the desktop sidebar reads different ones —
+`nav.work` is "Work" in the tab bar and "Workspaces" in the sidebar, `nav.more` is "More" and
+"Settings". So the walk dies on `FAIL: no nav a labelled "Work"` at any desktop width. This slice
+added a fallback alias for those two labels, which is enough for the surfaces that begin with a
+`nav` step; **the desktop run was still not performed**, so the desktop half of (a)–(e) is
+untested and gate 5 is closed for the phone viewport only. A browser measurement at a viewport is
+not a device either, and this one is a headless Chromium at 390×844: it does not prove a scan of
+the QR, a tap on a real touchscreen, or a screen reader's traversal.
+
+### Gate 7 — honesty
+
+Five statements, each with what carries it. No new honesty surface was added by this task, and
+each row is a test that already existed.
+
+| Statement | Carried by |
+|---|---|
+| The countdown is a real `expires_at`, not a decoration | `app/src/features/billing/checkout.test.ts` pins the boundary (`now == expiresAt` is `done`, `expiresAt - 1000` is `00:01`, an hour-fast client still shows the *server's* remaining time, and an unparseable expiry reads as past rather than as "0:00 left"), and `GET /billing/payments/:id` re-checks and **persists** expiry server-side (A306). |
+| The amount shown is `payments.amount_idr`, never re-derived | `CheckoutScreen.test.tsx` feeds `amount_idr: 5555` against `amount_before_discount_idr: 12345` at `discount_percent: 50` — numbers that do **not** follow from each other — and asserts the screen shows `5,555` and not `6,172`. A screen that re-derived the total fails. |
+| The margin report prints its FX rate as an input, and a month with no data is `null`, never `0` | `admin_margin.rs` asserts `idr_per_usd` equals the configured rate and that an empty month has no `per_plan` entries rather than zeroed ones; `admin.rs`'s `gross_margin_idr` is `Option<i64>`, `None` when either side is unknown. |
+| No confidence, match percentage or predicted number appears on any screen | The four new screens render only the plan matrix's own numbers, the payment row's own fields and the payment's own status. Nothing in `features/billing/**` computes a score. |
+| The reminder copy carries no price on mobile, and the credit cost is still shown before every generative action | `crates/server/tests/renewals.rs::the_reminder_copy_follows_billing_policy_on_a_phone` asserts the phone body contains no `/pricing`, no `Renew`, no `IDR` and no price while the desktop body carries the link — which is what makes the policy check observable rather than decorative. The credit cost is Phase 7's, unchanged. |
+
+### The smoke run — `scripts/smoke-phase13.sh`
+
+**PASS, exit 0**, against **`mock (scripts/stub-qris.py)`** at `http://127.0.0.1:8200`, printed in
+the run's first line:
+
+```
+gateway: mock (scripts/stub-qris.py) at http://127.0.0.1:8200 | signature hmac_sha256_hex in X-Callback-Signature | invoice ttl 15 min
+```
+
+Seven scenarios, each printing the numbers it asserts. The load-bearing lines:
+
+```
+checkout: status=pending amount=10000 expires_at=2026-10-12T05:49:25.256444Z
+expiry is 15.0 minutes away, from a 15-minute ttl
+the gateway received POST /invoices with order_id=stvdy_01a12e9ae3e872c186f61eb9bb3e577e amount_idr=10000
+webhook: status=200 duplicate=False status=activated
+applied: subscriptions 0 -> 1 | sub: grants 0 -> 1 (delta 500) | period_end 2026-11-11 12:34:26+07
+the period is 30.00 days: a fresh 30-day period from paid_at (A296)
+the second device: plan=pro subscription=active period_end=2026-11-11T05:34:26Z
+the same event id again: duplicate=True status=duplicate
+the same payment, a fresh event id: duplicate=False status=already_paid
+after both replays: subscriptions=1 grants=1 paid_at unchanged=yes webhook_events=2
+a 1-IDR callback against a 10000-IDR invoice: status=review
+the row: review :: the gateway reported 1 IDR but the invoice is for 10000 IDR
+a payment made after the expiry: review :: paid at … but the invoice expired at …
+the poll route on a pending-but-expired invoice: reads expired, the row is expired
+the paid order: asked 0 -> 0 time(s) | subscriptions 1 -> 1 | ledger rows 2 -> 2
+a lost webhook, recovered by polling: payment=paid subscriptions=1 grants=1
+the same poll a second time: subscriptions 1 -> 1 | grants 1 -> 1
+month 2026-10: revenue 40000 IDR, gateway fee 0 IDR
+  free: provider_cost $1.093550 byok $0.000000 revenue 0 IDR gross_margin -19563 IDR
+  pro: provider_cost $0.021840 byok $0.000000 revenue 40000 IDR gross_margin 39609 IDR
+  utilization 0.10478395061728395 | conversion of free 0.24107142857142858 | of total 0.19424460431654678 | paying 27 free 112
+  tripwires {"free_utilization_over_30": false, "conversion_under_3": false, "free_spend_over_quarter_of_revenue": true, "plan_loss_two_months_running": null}
+```
+
+**What the run asserts that the Rust suites cannot.** The invoice the server *sent* — the order
+id, the amount and the expiry in the request body, read out of the stub's own request log, plus
+the `Authorization` header, whose absence the stub answers 401 for. The QR string is the stub's
+own derivation of that request (`STUBQRIS:<order_id>:<amount>`), so a code the student scans is
+provably the one minted for this invoice. And **the poller's "never asked" half is structural**:
+the run reads the stub's request log and asserts the gateway was asked about the paid order zero
+times before and zero times after, with the stub *scripted to answer `paid`* — a numbers-only
+assertion would pass against a poller that asked and then did nothing.
+
+**Three bugs this script found in itself, all fixed.** (1) The `jobs` insert returns the id and
+`psql` prints the `INSERT 0 1` tag after it, so the id was `"<uuid>
+INSERT 0 1"` and every job
+lookup was a syntax error. (2) The expired-invoice scenario asked the poll route *before* posting
+the late callback, and the poll persists `expired` — so the callback hit the guarded transition,
+updated zero rows and answered `already_paid`, a correct answer to a different question. The
+callback now goes first, while the row is still `pending`, and the poll re-check is driven on a
+second invoice. (3) The run read `QRIS_BASE_URL` from `.env` (where it is empty) rather than from
+the environment, so `just smoke-phase13` failed with "no QRIS_BASE_URL" against a server that had
+one; the `justfile` target now passes the same four variables it starts the server with.
+
+**What the smoke run cannot be, recorded where the result is recorded.** The gateway is a stub
+this repository owns, and B1 means no live gateway was exercised — the run says so in its first
+line and in sandbox mode it explicitly cannot mint an invoice at a gateway it does not control.
+`reconcile_payments` is not driven end to end: it needs a scripted transaction list and is covered
+by `crates/server/tests/payment_jobs.rs` instead. The email half of the run reads `.eml` files out
+of `MAIL_DIR`, so a deployment with real SMTP would not produce them.
+
+### What this plan did not anticipate
+
+- **Nothing wrote a subscription's lapse into `grace`.** `counters` only expired a row that was
+  *already* in `grace`, so an `active` subscription whose `current_period_end` had passed stayed
+  `active` forever, kept granting paid limits, and left A296's fresh-period branch unreachable.
+  Found while building the period rules; `periods::lapse_into_grace` is the fix.
+- **The margin split's plan-of-record column was necessary, not an optimisation** (A303). The
+  roadmap's literal `users.plan_id` join is wrong in the conversion month, and the proof is a
+  seeded June-free/July-paid account whose June cost must stay in the free column.
+- **`migrations/0036_student_email_target.sql` is new and is not in this plan's file list**, which
+  claims `0035` only. `email_verification_tokens.target_email` is what lets
+  `POST /billing/student/confirm` record the address the link was mailed to; without it the route
+  could only store `users.email` and the discount would be attributed to an address the suffix
+  rule never accepted. The schema-deviation table in `docs/ASSUMPTIONS.md` carries its row.
+- **A receipt is not a reminder.** This plan's Task 5 prose says the webhook "enqueues the
+  notification" through `send_push`; that is wrong and the implementation does not do it. Phase
+  12's `send_push` loads a `reminders` row and `reminder_deliveries.reminder_id` is `not null`,
+  so a payment payload would be a permanent failure with no delivery row — worse than no
+  notification. **The receipt goes through `Mailer` directly** (transactional mail, which is its
+  stated purpose) and is deliberately not gated on the reminder-channel matrix, because a free
+  account has no `email` there and the accounts most likely to need a receipt are exactly the ones
+  a gate would silence. The renewal reminder genuinely *is* a reminder and keeps Phase 12's path.
+- **`renewal::PLAN_ENDING_KEY` has no locale entry and no renderer**, so the Indonesian reminder
+  copy this plan's Task 13 Step 1 names cannot be rendered. See gate 6 above.
+- **`scripts/measure-mobile.mjs` could not be walked at a desktop width** — the harness's steps
+  name the phone tab bar's labels and the desktop sidebar reads different ones. See gate 5 above.
+- **Three 200%-text clipping defects in `CheckoutScreen.tsx`** (the order-summary rows and the
+  status title), reported with exact elements and numbers rather than fixed, because the file
+  belongs to another slice.
+- **`crates/server/src/testing.rs`'s `config()` pins some env keys and not others**, so a suite
+  that depends on an unpinned key passes or fails by whose machine it runs on. Two slices hit this
+  independently (the QRIS base URL, and the three `LLM_*` values) and both fixed it in place; the
+  lesson is a sweep over the whole key list rather than a fix per symptom.
+
+### B1's blast radius, still unexercised
+
+B1 (the gateway's identity and API docs) is **still unresolved**, so this section records the
+shape rather than a diff. Nothing in this phase needed to change to accommodate a real gateway,
+because nothing in it was written against one: the trait, the mock, the pure math and every
+behavioural test are vendor-free by construction, and the vendor's field names exist in exactly
+one file (`mapping.rs`) plus one arm of `signature.rs`. The smoke run's gateway is printed on
+every run so no reader can mistake the stub for the vendor, and the two things B1 leaves that are
+**not code** — the PJP identification and the perorangan KYC (KTP + NPWP + a matching bank
+account) — are lead-time work that no task in this plan covers.
 
 ### A cross-phase gap this phase's work made visible (owning phase: 14)
 

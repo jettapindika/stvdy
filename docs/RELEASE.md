@@ -46,27 +46,42 @@ absence check against the assets a build packages, and
 extracted store artifact. Both store checklists below cite it; what it does and
 does not inspect is in § Store submission checklists.
 
-## Store policy risk (read before Phase 13/14)
+## Store policy risk (the Phase 13 position, confirmed)
 
 Billing is QRIS only, and **the iOS and Android apps do not sell anything**: no
 checkout, no purchase buttons, no prices, and no links or instructions pointing
 to a website purchase. Users buy on the web or the desktop app, and the plan then
 syncs to their account on every device.
 
-This is enforced in three places rather than by convention:
+The three enforcement points are **live**, not planned:
 
 1. `config/billing_policy.toml`. `validate()` rejects a mobile entry that
    enables purchase UI, prices, or an upgrade CTA, so the file cannot be edited
    into a violation.
-2. `GET /plans` omits prices on those platforms.
-3. `POST /billing/checkout` is rejected for `platform in (ios, android)`.
+2. `GET /plans` omits prices where `show_prices` is false, including the
+   credit-pack prices, so a phone is not told a price it must not show.
+3. `POST /billing/checkout`, `POST /billing/upgrade` and `POST /billing/downgrade`
+   are refused for `platform in (ios, android)` with 403 `feature_locked`, and the
+   platform is read from `devices.platform` rather than from the request body
+   (A144) — so a patched client that claims `web` from an iPhone is still refused.
 
-**The risk to document and accept:** both Apple and Google require their own
-in-app purchase for digital subscriptions in many regions. A QRIS-only mobile app
-that unlocks paid features may be rejected, or required to add store billing. The
-`PaymentProvider` trait is kept generic so store billing can be added later
-without restructuring. Confirm the current rules for Indonesia before submission
-rather than relying on this note.
+A fourth enforcement point is the **build** rather than the server, and it is the
+one that makes the first three more than a rendering decision: the store build is
+keyed on `TAURI_ENV_PLATFORM`, the router's purchase routes and `BillingScreen` are
+guarded by `__PURCHASE_UI__`, and `scripts/check-no-purchase-ui.mjs` refuses an
+artifact that does not carry the `stvdy-build-target="store"` stamp. The route
+table in a store build has no `/pricing` and no `/billing/checkout/:paymentId` at
+all, so there is no dead link to a screen that is not there.
+
+**The residual risk is accepted, with its trigger.** Both Apple and Google require
+their own in-app purchase for digital subscriptions in many regions, and a
+QRIS-only mobile app that unlocks paid features may be rejected or required to add
+store billing. The `PaymentProvider` trait is kept generic so store billing can be
+added later without restructuring. **The trigger is the confirmation step below:**
+the risk is accepted *against the current Indonesian rules as re-read on the
+submission date*, not accepted once and forever. If step 1 or step 2 comes back
+"required", this section is wrong and the store-billing work becomes a phase rather
+than a note.
 
 ### The confirmation step, and the date
 
@@ -446,6 +461,23 @@ The `data-math-ready` guard is unchanged and is still the gate: an unreachable a
 `renderMathInElement` undefined, the template marks `unavailable`, and the render fails rather
 than shipping a document full of LaTeX source (A340).
 
+
+### The webhook URL needs a host with the product's lifetime
+
+`POST /webhooks/qris` is a **public** route (its authorisation is the signature, not a session), so
+its URL is registered with the gateway and is the gateway's retry target for every payment. It must
+**not** be hosted on the staging VPS: A45 makes that host a one-month trial, and a webhook URL that
+dies with the trial takes the callback path with it — a gateway retrying into a 502 is a payment the
+student made and the plan that never activated. The same requirement applies to the Google OAuth
+redirect URI and the updater manifests, for the same reason and in the same sentence: all three are
+addresses a third party has been told about, and none of them can move without coordination.
+
+The two mitigations that exist are not substitutes for a durable host. `poll_payment` recovers a
+callback that was never delivered, and `reconcile_payments` flags the ones that disagree — both run
+inside the server, so a deployment with no reachable webhook URL still activates payments, just more
+slowly and with more `review` rows. `QRIS_WEBHOOK_IPS` is opt-in and reads `X-Forwarded-For`'s last
+hop, so a deployment behind a load balancer needs its own extractor before that allowlist means
+anything; the signature is required either way.
 
 ## Tax and PPN
 

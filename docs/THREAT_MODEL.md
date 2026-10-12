@@ -127,6 +127,17 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 rows are not bugs; they are the price of shipping a local-first client, and each is bounded to
 consequences the attacker inflicts on themselves.
 
+### The QRIS callback is not a row in the table above
+
+**The three webhook attempts — forge a callback, replay it, and confirm another account's order —
+are refusals, not §5 rows, and their tests are named in §9.** The table above answers "what can a
+modified *client* do with a client's privileges"; a forged callback is what **anyone on the
+internet** can do to a route that has no bearer token at all, and its control is the route's own
+authorisation rather than a tamper boundary. Adding them as rows would also mean three `tamper.rs`
+cases that do not belong to the thing that suite tests — its contract is client mutations at the
+sync and route boundary. The one thing this design **cannot** verify is the gateway's own claim
+that money arrived, which is R9 in §6.
+
 ### The ICS fetch is not a row in the table above
 
 **Reach a private address through an ICS URL → Fails.** Enforced by the shared SSRF guard:
@@ -338,10 +349,13 @@ asked the same question — not who.
 *Revisit if:* the cached key ever incorporates user-scoped data (a workspace filter, a private
 document), which would turn a shared cache into a cross-tenant channel.
 
-<!-- R7 is Phase 10's feed-token row and R8 is this phase's. The numbering follows the
-     phase sequence (R1-R6 are phases 7-9), not landing order: both rows were written
-     concurrently and each phase had already cross-referenced its own number, so the
-     later-landing slice renumbered. Do not renumber one of these back. -->
+<!-- R7 is Phase 10's feed-token row, R8 is Phase 15's update key, and R9 is Phase 13's
+     gateway row. The numbering follows the phase sequence (R1-R6 are phases 7-9), not
+     landing order: these rows were written concurrently and each phase had already
+     cross-referenced its own number, so the later-landing slice renumbered. Do not
+     renumber one of these back. Phase 13's plan says "R7" for the gateway row because
+     that was the next free number when the plan was written; R7 is Phase 10's, so the
+     row landed as R9 rather than colliding with it. -->
 **R8 — The update key is a single point of trust.** A compromised minisign private key forges an
 update that **every installed copy accepts and runs**, with the user's privileges, and the app has
 no way to tell it from a genuine one. This is the largest single-point failure in the product: it is
@@ -373,6 +387,38 @@ not in a build artifact, and not on any machine that runs the verifier.
 person needs to sign a release; or if the operator cannot say where the key is stored. Any of the
 three turns a custody problem into an exposure, and the trigger is a conversation rather than a
 test failure — which is why it is written here.
+
+---
+
+### R9. The gateway's claim that money arrived is unverifiable by us
+
+**The risk.** Everything this phase does with a payment rests on the gateway telling the truth. A
+valid signature proves the message came from the gateway and proves nothing about the gateway: if
+it reports a payment it never received, or reports one and keeps the money, the server activates a
+plan for money that does not exist. Nothing in this tree can tell the difference, and no amount of
+signature strength changes that — it is a property of the counterparty, not of the protocol.
+
+**Why it is accepted rather than fixed.** The alternative is a settlement API to reconcile against,
+and B1 means the gateway has no documented API at all: it is unresolved whether one exposes a
+settlement feed, a bank statement, or nothing. Building against a feed whose shape is unknown is the
+guess this whole phase is designed to avoid (A291). The compensations that *are* in place are the
+ones that make the risk measurable rather than invisible: every callback is stored in
+`webhook_events` with its raw payload, `payments.provider_status` records what the gateway said, the
+hourly reconciliation sweep compares the gateway's own recent list against our rows in **both**
+directions (a transaction we have no row for, and a payment the gateway does not know), and both
+mismatches land as `review` rows with a `review_reason` a human reads. `QRIS_FEE_PERCENT` defaults
+to `0`/`0` — "unknown, record nothing" — rather than a plausible-looking rate, so the margin report
+says it does not know instead of inventing a number (A304).
+
+**Bounded because:** the exposure is one plan's price per fabricated payment, the gateway is a
+single contracted counterparty whose identity the operator controls (A45), and the reconciliation
+sweep is what turns a systematic lie into a visible mismatch rate rather than a slow leak.
+
+**Revisit if:** the gateway exposes a settlement API (then reconcile against it and this becomes a
+test); or the reconciliation mismatch rate for either direction exceeds **1% of payments in a
+month** (then the reconciliation is the product's problem, not the gateway's); or a payment is
+disputed and the gateway cannot produce the transaction it reported. The threshold is stated so the
+trigger is a number rather than a feeling, and `GET /admin/margin` is where it is read.
 
 ---
 
@@ -440,6 +486,23 @@ The design never depends on this column. It is recorded so that no phase mistake
 | Every new route is classified, and no handler reads a plan limit | 9 | `route_sweep.rs::every_registered_route_is_classified` (both directions: an unclassified route **and** a stale row), `no_file_outside_the_entitlements_layer_reads_a_plan_limit` |
 | ICS feed cannot be brute-forced or indexed | 10 | `crates/server/tests/calendar.rs` — the feed is `text/calendar`, `no-store` and `noindex`, the route is in the 30/min/IP auth bucket, and a regenerated token 404s the old one while the new one serves |
 | A task deleted offline tombstones its subtree, and a restore brings back only what the cascade took | 9 | `offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`, `restoring_a_parent_restores_only_the_children_its_delete_tombstoned` (A197) |
+
+| The QRIS callback refuses forgery, replay and amount tampering | 13 | `crates/server/tests/webhooks.rs` — ten cases driving the **real** route with bodies the mock gateway really signs: a one-byte mutation of a signed body is 401, an unknown order is 404 with nothing written, the same event id twice activates once, the same payment under a fresh event id answers `already_paid` and activates nothing, a mismatched amount is `review` with both numbers in `review_reason`, and a payment made after the expiry is `review` unconditionally (A293, A294, A309). The three attempts are not §5 rows and the subsection above says why |
+
+### The three QRIS webhook attempts, with their tests
+
+These are deliberately **not** rows in §5's table — the paragraph there says why — and they are
+asserted against the **real route**, with bodies the mock gateway really signs, in
+`crates/server/tests/webhooks.rs`:
+
+| Attempt | Outcome | Enforced by | Test |
+|---|---|---|---|
+| Forge a webhook to activate a plan without paying | **Refused.** 401, and nothing is written | The signature over the **raw bytes** in `QRIS_SIGNATURE_HEADER`, one of three schemes (A292); the body is never parsed before it verifies, so a forged payload cannot choose which failure is reported | `a_forged_signature_is_refused_and_writes_nothing` |
+| Replay a webhook to double-activate | **Refused.** 200 `{duplicate: true}` for the same event id, `"already_paid"` for the same payment under a **new** one; one subscription, one grant | `webhook_events`' `unique (provider, event_id)` with `on conflict do nothing returning id`, **and** the guarded transition `update payments … where id = $1 and status = 'pending'` (A293) — two defences because a unique key cannot see a fresh event id, and a guarded update cannot see the same id | `the_same_event_id_twice_activates_once`, `the_same_payment_under_a_new_event_id_activates_once` |
+| Confirm another account's order, or tamper with the amount | **Refused.** 404 for an order we do not have, with the `webhook_events` row rolled back so a guessed id writes nothing; `review` with both numbers in `review_reason` for an amount that does not equal `payments.amount_idr` | `order_id` resolves to a payment scoped by `provider` **and** the payment's own `user_id`; the amount is compared against the column the quote was written to, which comes from the same `billing::price` the quote did (A294) | `a_mismatched_amount_is_refused_into_review`, `an_unknown_order_is_404_and_writes_nothing` |
+
+**What the signature does not prove** is the gateway's own claim that money arrived — a signature
+proves the message came from the gateway and proves nothing about the gateway. That is R9 in §6.
 
 An unverified claim in this document is a claim the repo does not have. When a phase closes a row of
 §5 or §6, it updates this file in the same commit.

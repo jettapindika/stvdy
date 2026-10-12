@@ -1872,18 +1872,103 @@ with the release prerequisites.
 
 ## Billing (Phase 13)
 
-`GET /plans`, `GET /billing/me`, `POST /billing/checkout`,
-`GET /billing/payments/:id`, `GET /billing/invoices`,
-`POST /webhooks/qris` (signature-verified, not bearer-authenticated).
+Auth, verified email for the routes that cost money, and — for the callback — no bearer
+token at all.
 
-`POST /billing/checkout` is rejected for `platform in (ios, android)`:
-`config/billing_policy.toml` forbids mobile selling, and the server enforces it
-rather than trusting the client.
+`GET /plans`, `POST /billing/checkout`, `GET /billing/payments/:id`, `GET /billing/invoices`,
+`POST /billing/upgrade`, `POST /billing/downgrade`, `POST /billing/student/verify`,
+`POST /billing/student/confirm`, `POST /webhooks/qris`.
 
-## Admin (Phase 13)
+**Every price is the server's, and there is one function that computes it.** The amount a
+student is quoted comes from `billing::price` over `config/plans.toml`, and the amount the
+webhook checks the payment against is `payments.amount_idr` — the column the quote was
+written to. Nothing on the client adds, subtracts or rounds, which is why `PaymentView`
+carries `amount_before_discount_idr` and `discount_percent` as well: the screen itemises the
+charge from the row rather than re-deriving it.
 
-Users, plan overrides, manual payment mark/refund, credit grants, margin report.
-The plan override, the credit grant and the margin report are already live from
-Phase 7 (`## Admin (Phase 7)` above); this phase adds the payment half and the
-completed margin report (revenue and conversion, which Phase 7 returns as
-`null`).
+```json
+{ "id": "uuid", "order_id": "stvdy_01j0…", "kind": "subscription",
+  "plan_id": "pro", "billing_period": "monthly", "credits": null,
+  "amount_idr": 10000, "amount_before_discount_idr": 10000, "discount_percent": 0,
+  "discount_code": null, "student_discount": false,
+  "qr_string": "…", "expires_at": "2026-10-12T07:15:00Z",
+  "status": "pending", "paid_at": null }
+```
+
+- `GET /plans` → the matrix: every plan's limits and features, `credit_packs`, `currency`,
+  `current_plan`, `student_verified`, and the two policy flags `show_prices` and
+  `purchase_allowed`. **Prices are omitted where `show_prices` is false** (A305), which is
+  what a phone gets — plan names, limits and features and no prices, including no
+  credit-pack prices — because the platform is the device row (A144) and a phone must not be
+  told a price it may not show. An unauthenticated caller gets 401.
+- `POST /billing/checkout` body `{ "plan_id", "billing_period" }` or
+  `{ "credit_pack": <credits> }`, plus an optional `"discount_code"` → **200** with a
+  `PaymentView` in `pending`. **A second checkout for the same plan and period returns the
+  pending invoice rather than minting a second QR** (A307): "the user paid twice for one
+  period" is one of the spec's edge cases, and a second code is how it happens. The reuse key
+  is every field that decides what is being bought — the user, the kind, the plan, the period
+  and the credit amount. 403 `feature_locked` for `ios`/`android`
+  (`config/billing_policy.toml` forbids mobile selling and the server enforces it rather than
+  trusting the client — the platform is read from `devices.platform`, never the body);
+  400 `validation` for a period that is not `monthly`/`yearly`, a pack that does not exist, or
+  a code that cannot be used; 502 `provider_error` where no gateway is configured, decided
+  **before** anything is written so no pending row is left behind; and the route requires a
+  **verified email** (A43).
+- `GET /billing/payments/:id` → the poll the checkout screen runs (A306), scoped by
+  `user_id` in the statement rather than checked after the read. **Expiry is re-checked here**,
+  so a client whose clock is wrong cannot extend its own invoice by not noticing: a `pending`
+  row past its expiry reads `expired`. 404 for another account's payment.
+- `GET /billing/invoices` → `{ "invoices": [PaymentView…] }`, the caller's own newest 50.
+  It does **not** re-check expiry, unlike the single-payment read: this is a read of what
+  happened, and a list that quietly rewrote rows while the student was looking at their
+  history would be a surprise.
+- `POST /billing/upgrade` / `POST /billing/downgrade` body
+  `{ "plan_id", "billing_period" }`. An **upgrade** prices the prorated difference for the
+  remaining days and mints an invoice for it; the plan does not move until that invoice is
+  paid, because until the money arrives the student is on the plan they paid for — and moving
+  it now would make the payment look like a renewal and hand them a free period. A
+  **downgrade** is recorded, not applied: it writes the pending columns and nothing else, and
+  the rollover applies it when the period ends, so a downgrade never shortens time already
+  paid for. Both refuse a mobile platform with 403 `feature_locked`, and both need a verified
+  email.
+- `POST /billing/student/verify` body `{ "email" }` → mails a link to that address, rate
+  limited and only for a suffix in `STUDENT_EMAIL_SUFFIXES` (default `.ac.id`), matched on the
+  **domain** so `user@ui.ac.id` matches and `user@ac.id.evil.example` does not. Without both
+  the volume rule and the content rule the endpoint is a mail amplifier pointed at a campus
+  domain. `POST /billing/student/confirm` body `{ "token" }` sets `student_verified` and
+  `student_email` **from the address the link was mailed to** — there is no body field for it,
+  because that is what proves control of a campus address. The discount then applies at
+  checkout from `plans.<id>.student_percent_off`, and the student promo and a discount code
+  **do not stack**: the larger percentage wins and a tie goes to the student promo, which needs
+  no redemption.
+- `POST /webhooks/qris` — the gateway's callback, and the only route in the API with **no
+  bearer token**. Its authorisation is the signature over the **raw bytes** in
+  `QRIS_SIGNATURE_HEADER`, one of three schemes (`hmac_sha256_hex`, `hmac_sha256_base64`,
+  `shared_token`), and the order of operations is the whole security story: the IP allowlist
+  (when `QRIS_WEBHOOK_IPS` is set), then the signature, then the parse, then the idempotency
+  insert, then the guarded transition and the apply. A body that fails the signature is never
+  parsed and a request that fails any step writes nothing — an unknown `order_id` is 404 with
+  the `webhook_events` row rolled back, so an unauthenticated caller cannot write rows with a
+  guessed order id. **401** for a bad signature, **404** for an order we do not have, **502**
+  where no gateway is configured (so the gateway retries rather than reading a valid callback
+  as forged), and **200** with `{ "duplicate": bool, "status": string }` otherwise.
+
+  **Idempotency has two defences because there are two replays** (A293). The *same* event id
+  twice is caught by `webhook_events`' `unique (provider, event_id)` with
+  `on conflict do nothing returning id`: no row back means already handled, and the answer is
+  `{ "duplicate": true, "status": "duplicate" }`. The *same payment* under a **new** event id —
+  which is what a real gateway does when it re-sends — is caught by the transition itself
+  being `update payments set status = 'paid' … where id = $1 and status = 'pending'`, so a
+  second report updates zero rows and the answer is `"already_paid"`. A defence against one
+  does nothing against the other.
+
+  **The amount is checked after the transition, deliberately**: a mismatch is marked
+  paid-but-under-review rather than left `pending` for a retry loop, and both directions (over-
+  and under-payment) are the same outcome, `"review"`, with the two numbers written to
+  `review_reason` for the operator who reads the queue. A non-IDR currency is refused the same
+  way. A payment made **after** the invoice expired is `review` unconditionally; a payment made
+  before the expiry whose *confirmation* arrived late is honoured when `QRIS_HONOR_LATE_PAYMENT`
+  (default true) is set, because the lateness is ours and must not cost the student their plan.
+  The money moves in **one transaction**: mark paid, extend or start the period, grant the
+  credits, record the fee, notify — all of it, or none of it.
+

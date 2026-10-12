@@ -1556,6 +1556,80 @@ Every chart carries a **text equivalent**: each figure has a sentence beside it 
 fact in words, so the screen is readable without the bars and works with a screen reader and at
 200% text scale at once.
 
+## Payments (Phase 13)
+
+**The trait is the design, and B1 is why.** The QRIS gateway has no identity, no base URL, no auth
+scheme, no invoice-create response shape, no status-query shape, no callback signature scheme and no
+fee rates — the spec's own line is `GATEWAY = <FILL IN>`. So everything that touches the wire is
+written against a **documented internal contract we define and we test**, and the mapping from that
+contract to the gateway's fields lives in one file with every value read from env. The defence is
+structural rather than a promise:
+
+- `PaymentProvider` lives in `crates/core/src/traits/payment.rs` and is the contract's own signature
+  (A290). It is implemented by a mock in `crates/core/src/traits/testing.rs` that computes a **real
+  HMAC-SHA256** and compares with `Mac::verify_slice` — a canned-event double could not fail, so the
+  whole signature suite would be vacuous. Every behavioural test in this phase runs against the
+  trait, not the vendor, so the suite that proves idempotency, amount-checking and the period rules
+  keeps passing on the day the docs arrive.
+- The vendor's field names live in exactly one module,
+  `crates/server/src/integrations/payment/mapping.rs`, with tests that assert the request we send
+  and the responses we accept — so a mapping change is a test change and not a silent one. **No name
+  in that file is a real provider's**, and its doc comment says so.
+- The signature scheme is `QRIS_SIGNATURE_SCHEME`, a closed set of three shapes
+  (`hmac_sha256_hex`, `hmac_sha256_base64`, `shared_token`), each unit-tested, and an unknown value
+  **fails at startup** rather than defaulting to something that would verify everything. A
+  configured gateway with no `QRIS_CALLBACK_TOKEN` also fails to boot: the token is the HMAC key.
+
+**What changes when B1's docs arrive:** `mapping.rs`, one arm of `signature.rs` if the scheme is not
+one of the three, and the env values. Nothing else, and no test outside those two files.
+
+**The money moves in one transaction, through one function.** `billing::apply::apply_paid` is the
+only activation path: the webhook calls it, `poll_payment` calls it, and a future admin "mark paid"
+calls it. The webhook and the poller therefore cannot diverge, and the poller's synthesised event id
+(`poll:<order_id>:<paid_at>`) is **stable**, so two polls of one payment collide on `webhook_events`'
+unique key exactly as two webhooks would. `billing/poll.rs` contains no subscription update and no
+credit grant, and the reconciliation sweep can only write `review_reason` on rows in
+`('pending','paid')` — so a sweep can never become a scheduled activation.
+
+**Idempotency has two defences because there are two replays** (A293). The *same* event replayed is
+caught by `webhook_events`' `unique (provider, event_id)` with `on conflict do nothing returning id`.
+The *same payment* reported under a **new** event id is caught by the transition itself being
+`update payments set status = 'paid' … where id = $1 and status = 'pending'`, so a second report
+updates zero rows. A defence against one does nothing against the other, and only the second happens
+when a real gateway re-sends with a fresh id.
+
+**The amount is checked after the transition**, so a mismatch is marked paid-but-under-review rather
+than left `pending` for a retry loop; both over- and under-payment are the same outcome, `review`,
+with the two numbers in `review_reason`. A payment made after the expiry is `review`
+**unconditionally**; the `QRIS_HONOR_LATE_PAYMENT` switch decides only the case where the student
+paid in time and our confirmation arrived late — a switch that could activate a payment made after
+the deadline would be a switch that sells expired invoices.
+
+**The period rules** are pure and live in `crates/core/src/billing/period.rs` (A296): live paid time
+is extended from `current_period_end` so paying early never loses days; anything else starts a fresh
+period at `paid_at`; an upgrade switches immediately, charges the prorated difference and **never
+moves the period end**; a downgrade is recorded in `subscriptions.pending_plan_id` and applied by
+the rollover, so it never shortens time already paid for. `periods::lapse_into_grace` is what moves
+an `active` subscription whose window has passed into `grace` — without it, paid limits were granted
+past the paid period and A296's fresh-period branch was unreachable.
+
+**The margin split, and why the roadmap's join is wrong.** The report attributes each row to the
+plan **of record at write time** (`usage_events.plan_id`, `credit_ledger.plan_id`, A303) and reads
+`coalesce(<table>.plan_id, users.plan_id)` with a documented fallback for pre-Phase-13 history. The
+roadmap's literal "join `usage_events` → `users.plan_id`" is wrong in exactly the month the report
+exists to examine: the month a student converts, every earlier row that month is re-attributed to the
+paid tier, so the free-tier cost is understated by precisely the cost of converting. The proof is a
+test that seeds a user free in June and paid in July and asserts June's cost stays in the free
+column. BYOK calls are reported **beside** each tier rather than inside it (A156): a call on the
+student's own key is not our cost, and counting it would overstate our spend. The FX rate the
+arithmetic used is printed as the input it is, and a month with no data is `null`, never `0`.
+
+**The client is untrusted, and the platform is a fact about the device row.** Checkout reads
+`AuthUser.platform`, which the extractor fills from `devices.platform` (A144), so a body claiming
+`platform: "web"` from an iPhone is still refused with 403 `feature_locked`. `GET /plans` omits
+prices where `show_prices` is false, so a phone is not told a price it must not show — the SPA's
+`policy.ts` is a second reading of the same config file, not a second decision.
+
 ## Store-absence checks must validate the artifact that actually ships
 
 A check that asserts a property **absent** from a build is only as good as the build it
