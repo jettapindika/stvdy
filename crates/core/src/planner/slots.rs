@@ -112,7 +112,16 @@ pub(crate) fn window_for(input: &PlannerInput, day: NaiveDate) -> Option<Interva
 /// The capacity is the free window's minutes, not the chunked minutes: a window whose
 /// leftover is shorter than one block still contains that time, and contract § 6's deficit
 /// counts what the day holds rather than what the chunker could tile.
-pub(crate) fn free_slots(input: &PlannerInput, day: NaiveDate) -> (Vec<Interval>, i64) {
+///
+/// **The one `pub` item in this module**, and it is public for one caller: the agent's
+/// `find_free_slots` READ tool (`chat/agent.rs`), which answers "when can I study between X
+/// and Y". A tool that re-derived the free-slot math from `merge`/`subtract` would be a
+/// second implementation of the same rule, and the two disagree the first time either
+/// changes — the disagreement being a study block the planner places into a slot the tool
+/// told the student was free. Everything it needs is already in `PlannerInput` (`busy` and
+/// `pinned` arrive merged by the caller), so `free_slots` alone is the whole surface: the
+/// helpers below stay `pub(crate)`.
+pub fn free_slots(input: &PlannerInput, day: NaiveDate) -> (Vec<Interval>, i64) {
     let Some(mut window) = window_for(input, day) else {
         return (Vec::new(), 0);
     };

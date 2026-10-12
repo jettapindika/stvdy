@@ -14,7 +14,7 @@ mod allocate;
 mod balance;
 mod model;
 mod replan;
-mod slots;
+pub mod slots;
 
 pub mod progress;
 
