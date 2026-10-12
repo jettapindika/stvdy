@@ -55,6 +55,13 @@ pub enum PushError {
     UnknownPlatform,
     #[error("push registration failed: {0}")]
     Registration(String),
+    /// The `PUT` never reached the server: a bad URL, no network, a TLS failure.
+    #[error("the push token could not be sent: {0}")]
+    Network(String),
+    /// The server answered, and refused. The body is the server's own message and
+    /// carries no credential; a status without it is a report nobody can act on.
+    #[error("the server refused the push token ({status}): {body}")]
+    Refused { status: u16, body: String },
 }
 
 /// The provider string for a platform kind.
@@ -160,4 +167,80 @@ pub async fn push_token(app: tauri::AppHandle) -> Result<PushToken, String> {
         let _ = &app;
         Err(PushError::UnknownPlatform.to_string())
     }
+}
+
+/// The route a token is registered against. **One place, so the client and the server's
+/// own router cannot disagree**: `crates/server/src/devices.rs` mounts
+/// `put(put_push_token)` at `/devices/{id}/push-token`, and `tests/push.rs` reads that
+/// file and compares the two spellings rather than trusting this comment.
+pub fn token_path(device_id: &str) -> String {
+    format!("/devices/{device_id}/push-token")
+}
+
+/// Registers this device's token with the server (A329).
+///
+/// **The client's only job is to obtain a token and `PUT` it.** The route already
+/// exists (`crates/server/src/devices.rs`), it is an upsert because the OS rotates a
+/// token and the client re-registers the same device, and it refuses a provider
+/// outside `PUSH_PROVIDERS` and a blank token — which is why [`validate_token`] runs
+/// here too, one hop earlier than the server's own check, so a token that could only
+/// be refused never becomes a round trip.
+///
+/// `device_id` is the row login created; the caller owns the session, so the access
+/// token is an argument rather than something read from the keychain.
+///
+/// A 204 is the whole success signal — the server writes no body — and anything else
+/// is reported with its status, because "the PUT failed" without the code is a bug
+/// report nobody can act on.
+pub async fn register_with_device(
+    client: &reqwest::Client,
+    base_url: &str,
+    access_token: &str,
+    device_id: &str,
+    token: &PushToken,
+) -> Result<(), PushError> {
+    let validated = validate_token(&token.token)?;
+    let url = format!(
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        token_path(device_id)
+    );
+
+    let response = client
+        .put(&url)
+        .bearer_auth(access_token)
+        .json(&Registration {
+            provider: token.provider,
+            token: validated,
+        })
+        .send()
+        .await
+        .map_err(|error| PushError::Network(error.to_string()))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        // The body is the server's own error message; it carries no credential, and a
+        // status without it is a report nobody can act on.
+        let body = response.text().await.unwrap_or_default();
+        return Err(PushError::Refused {
+            status: status.as_u16(),
+            body,
+        });
+    }
+
+    // The token is never logged — it is a device credential — so the record of what
+    // happened is the provider and the device, not the secret.
+    tracing::info!(
+        provider = token.provider,
+        device_id,
+        "push token registered"
+    );
+    Ok(())
+}
+
+/// What `PUT /devices/{id}/push-token` accepts: `devices.rs`'s `PushTokenRequest`.
+#[derive(Debug, serde::Serialize)]
+struct Registration<'a> {
+    provider: &'a str,
+    token: &'a str,
 }

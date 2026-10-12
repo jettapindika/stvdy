@@ -75,6 +75,11 @@ pub struct Ignored {
 pub enum IgnoreReason {
     /// The scheme is not `stvdy://` (for example an `https://` link).
     NotStvdyScheme,
+    /// A universal link (`https://`) whose host is not the one this app claims, or one
+    /// on a transport the OS did not verify (`http://`). Separate from
+    /// [`IgnoreReason::NotStvdyScheme`] because it is a *different* URL that arrived
+    /// by a route the app does advertise, which is the one worth seeing in a log.
+    NotOurHost,
     /// The scheme is ours but the route is not one this app handles.
     UnknownRoute,
     /// `auth/callback` with a missing or blank `code`.
@@ -87,12 +92,18 @@ pub enum IgnoreReason {
 }
 
 /// Classifies one incoming URL. Never panics: any input that is not a valid,
-/// actionable `stvdy://` URL becomes [`DeepLinkIntent::Ignored`].
+/// actionable URL of ours becomes [`DeepLinkIntent::Ignored`].
+///
+/// **Two schemes, one vocabulary (A320).** A URL arrives either as `stvdy://<route>`
+/// (the custom scheme, registered on both platforms) or as `https://app.stvdy/<route>`
+/// (a universal link on iOS, an app link on Android). Both are reduced to the same
+/// route-and-query pair *before* the route match below, so there is one handler table
+/// and one set of tests for both — a second parsing path would be a second vocabulary,
+/// and only one of the two would ever be exercised.
 pub fn classify(raw: &str) -> DeepLinkIntent {
-    let Some(rest) = strip_stvdy_scheme(raw) else {
-        return DeepLinkIntent::Ignored(Ignored {
-            reason: IgnoreReason::NotStvdyScheme,
-        });
+    let rest = match strip_scheme(raw) {
+        Ok(rest) => rest,
+        Err(reason) => return DeepLinkIntent::Ignored(Ignored { reason }),
     };
 
     // A fragment is never meaningful to an OAuth return; drop it before parsing.
@@ -160,10 +171,54 @@ fn non_blank(value: Option<&String>) -> Option<String> {
     }
 }
 
-fn strip_stvdy_scheme(raw: &str) -> Option<&str> {
-    let prefix = raw.get(..SCHEME.len())?;
-    if prefix.eq_ignore_ascii_case(SCHEME) {
-        raw.get(SCHEME.len()..)
+/// The host a universal link must carry to be ours. **The same string
+/// `plugins.deep-link.mobile[].host` names**, which is what the CLI turns into
+/// `applinks:app.stvdy` in the app's entitlements — asserted by
+/// `tests/deep_link.rs` against `tauri.conf.json` rather than trusted to match.
+pub const APP_LINK_HOST: &str = "app.stvdy";
+
+/// Reduces a URL of either scheme to its route and query, or says why it is not ours.
+///
+/// `https://app.stvdy/auth/callback?code=…` and `stvdy://auth/callback?code=…` both
+/// yield `auth/callback?code=…`. Everything else — a foreign host, `http://`, a
+/// different custom scheme, a userinfo section — is refused, because the only thing
+/// that makes a URL actionable is that the OS verified the app as its owner.
+fn strip_scheme(raw: &str) -> Result<&str, IgnoreReason> {
+    if let Some(rest) = strip_prefix_ignore_case(raw, SCHEME) {
+        return Ok(rest);
+    }
+
+    // A universal link. `https` only: the AASA file is fetched over TLS and the OS
+    // verifies the association, so an `http://` URL that reached here is a link that
+    // could have been forged in transit, and it is refused rather than downgraded.
+    let Some(rest) = strip_prefix_ignore_case(raw, "https://") else {
+        return Err(IgnoreReason::NotStvdyScheme);
+    };
+    // No userinfo: `https://app.stvdy@evil.example/…` is a URL whose host is
+    // `evil.example`, and reading the authority as a whole would accept it.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    // The port, if any, is dropped before the host is compared: `app.stvdy:443` is the
+    // same host as `app.stvdy`, and a link that classified differently because a caller
+    // wrote the default port would be a route that works from one client and not another.
+    let host = authority
+        .split('@')
+        .next_back()
+        .unwrap_or(authority)
+        .split(':')
+        .next()
+        .unwrap_or(authority);
+    if authority.contains('@') || !host.eq_ignore_ascii_case(APP_LINK_HOST) {
+        return Err(IgnoreReason::NotOurHost);
+    }
+    rest.get(authority_end..).ok_or(IgnoreReason::NotOurHost)
+}
+
+/// `str::strip_prefix` is case-sensitive and a URL's scheme is not.
+fn strip_prefix_ignore_case<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = raw.get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix) {
+        raw.get(prefix.len()..)
     } else {
         None
     }
@@ -365,10 +420,20 @@ mod tests {
         );
     }
 
+    /// A `https://` link is now *parsed* rather than rejected outright (A320), so a
+    /// foreign host is refused by host rather than by scheme. A scheme that is neither
+    /// ours nor `https` is still `NotStvdyScheme`, and both cases are asserted here so
+    /// the two reasons cannot collapse into one another.
     #[test]
     fn a_foreign_scheme_is_ignored() {
         assert_eq!(
             classify("https://example.com/auth/callback?code=abc&state=xyz"),
+            DeepLinkIntent::Ignored(Ignored {
+                reason: IgnoreReason::NotOurHost
+            })
+        );
+        assert_eq!(
+            classify("ftp://app.stvdy/auth/callback?code=abc&state=xyz"),
             DeepLinkIntent::Ignored(Ignored {
                 reason: IgnoreReason::NotStvdyScheme
             })
@@ -431,7 +496,7 @@ mod tests {
         );
         assert_eq!(
             json,
-            r#"{"action":"ignored","payload":{"reason":"not_stvdy_scheme"}}"#
+            r#"{"action":"ignored","payload":{"reason":"not_our_host"}}"#
         );
     }
 

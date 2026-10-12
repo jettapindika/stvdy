@@ -73,7 +73,10 @@
   "plugins": {
     "deep-link": {
       "desktop": { "schemes": ["stvdy"] },
-      "mobile": [{ "scheme": ["stvdy"] }]
+      "mobile": [
+        { "scheme": ["stvdy"] },
+        { "host": "app.stvdy", "scheme": ["https"], "appLink": true }
+      ]
     },
     "notifications": {},
     "updater": {
