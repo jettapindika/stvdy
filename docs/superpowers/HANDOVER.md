@@ -45,6 +45,12 @@ disk only). The short version:
 
 ## Things found that you should know about
 
+- **A gap in the build's own safety net, found by hand:** the root workspace excludes
+  `src-tauri` and `src-tauri` is its own workspace root, so `[workspace.lints]` in the root
+  **never reached it** — the project's "no `unwrap`/`expect` in non-test code" rule was
+  unenforced in the one crate that holds a keychain and a SQLite cache. Fixed: the shell declares
+  the lints, and the one real violation (an `expect` on the event loop's result) now logs and
+  exits non-zero, so a supervisor sees a failure rather than a process that vanished.
 - **A defect in the roadmap itself, found by Phase 13's plan:** the margin report's attribution
   was specified as a join on `users.plan_id`, which is wrong in the one month the report exists
   for (it holds only the *current* plan, so a converting user re-attributes their own earlier
