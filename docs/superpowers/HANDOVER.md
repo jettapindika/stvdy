@@ -87,6 +87,27 @@ Two consequences worth acting on when the block clears:
 - `release.yml` is the signed path and it needs its certificates regardless, so it is blocked
   on credentials as well as on billing.
 
+## The installers carry a build-time API origin, so they have to be built for a server
+
+**The client's API address is inlined at build time, not configurable at run time.**
+`app/src/api/client.ts` reads `import.meta.env.VITE_API_BASE_URL`, Vite substitutes it as a
+literal, and the fallback when it is unset is `http://localhost:8080`. So an installer is
+bound to one server when it is built, and **the exe that `unsigned-artifacts.yml` produced
+before `a1c3caa` points at `localhost:8080`** — that workflow set no `VITE_API_BASE_URL` at
+all (verified against the workflow at `a28ed56`), so that artifact cannot reach any deployed
+server. The dmg and the APK attached to v0.1.2 were rebuilt locally against the staging host.
+
+`unsigned-artifacts.yml` now takes `api_base_url` as a **required** input, exports it
+job-wide, and refuses the development fallback before building. A re-run with
+`api_base_url=http://168.110.202.106:8080` produces three correct artifacts in one pass.
+
+**What the CORS allowlist does and does not require.** The server always allows the three
+Tauri webview origins (`tauri://localhost`, `https://tauri.localhost`,
+`http://tauri.localhost` — `crates/server/src/routes/mod.rs`), so a **desktop or mobile**
+installer needs nothing added to `WEB_ORIGIN`; that variable is for a browser serving the SPA.
+The API origin still has to be reachable: on this host that means the Oracle **VCN** ingress
+rule for TCP 8080, which is the console step `docs/OPERATIONS.md` § Staging names as not done.
+
 ## Staging on the Batam trial host, and the one thing that needs you
 
 The A45 host (`168.110.202.106`) now runs the real stack — Postgres + pgvector, the server image,
