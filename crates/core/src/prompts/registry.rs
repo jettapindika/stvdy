@@ -48,6 +48,13 @@ pub const REPORT_SECTION_V1: &str = include_str!("../../../../prompts/report_sec
 /// that renders it are one thing.
 pub const CHEATSHEET_V1: &str = include_str!("../../../../prompts/cheatsheet.v1.md");
 
+/// The quick-capture module. No sources: the input is one line the student typed, so
+/// the prompt has no material to detect a language from and the caller states it.
+pub const QUICK_CAPTURE_V1: &str = include_str!("../../../../prompts/quick_capture.v1.md");
+
+/// The task-breakdown module. No sources either: the input is a task the student wrote.
+pub const TASK_BREAKDOWN_V1: &str = include_str!("../../../../prompts/task_breakdown.v1.md");
+
 /// What `{{output_language}}` means when the caller supplies nothing.
 ///
 /// A study app's cards must be in the language of the student's material. There is
@@ -103,16 +110,20 @@ pub enum ModuleId {
     ReportOutlineV1,
     ReportSectionV1,
     CheatsheetV1,
+    QuickCaptureV1,
+    TaskBreakdownV1,
 }
 
 impl ModuleId {
     /// Every module, for the contract sweep in `tests/prompts.rs`.
-    pub const ALL: [ModuleId; 5] = [
+    pub const ALL: [ModuleId; 7] = [
         ModuleId::FlashcardsV1,
         ModuleId::QuizV1,
         ModuleId::ReportOutlineV1,
         ModuleId::ReportSectionV1,
         ModuleId::CheatsheetV1,
+        ModuleId::QuickCaptureV1,
+        ModuleId::TaskBreakdownV1,
     ];
 
     /// The version string logged to `usage_events.prompt_version`.
@@ -123,6 +134,8 @@ impl ModuleId {
             ModuleId::ReportOutlineV1 => "report_outline.v1",
             ModuleId::ReportSectionV1 => "report_section.v1",
             ModuleId::CheatsheetV1 => "cheatsheet.v1",
+            ModuleId::QuickCaptureV1 => "quick_capture.v1",
+            ModuleId::TaskBreakdownV1 => "task_breakdown.v1",
         }
     }
 
@@ -133,6 +146,8 @@ impl ModuleId {
             ModuleId::ReportOutlineV1 => REPORT_OUTLINE_V1,
             ModuleId::ReportSectionV1 => REPORT_SECTION_V1,
             ModuleId::CheatsheetV1 => CHEATSHEET_V1,
+            ModuleId::QuickCaptureV1 => QUICK_CAPTURE_V1,
+            ModuleId::TaskBreakdownV1 => TASK_BREAKDOWN_V1,
         }
     }
 
@@ -193,6 +208,27 @@ impl ModuleId {
                 ("depth", VarKind::Caller),
                 ("output_language", VarKind::Optional(SOURCE_LANGUAGE)),
             ],
+            // `now` and `timezone` are `Caller` and filled by `values_of(ChatVars)`, so
+            // the caller passes nothing for them and they still cannot be left unfilled.
+            // `output_language` is `Caller` rather than `Optional(SOURCE_LANGUAGE)` because
+            // this module has no sources: see A192.
+            ModuleId::QuickCaptureV1 => &[
+                ("now", VarKind::Caller),
+                ("timezone", VarKind::Caller),
+                ("capture_text", VarKind::Caller),
+                ("output_language", VarKind::Caller),
+            ],
+            // `due_at` and `notes` are `Caller` and not `Optional`: the module renders
+            // `Due: {{due_at}}` and `Notes: {{notes}}` as lines the model reads, and the
+            // caller has the values (a task with no due date has the string the caller
+            // chooses — the route passes `"none"`, which is a statement the prompt can
+            // read, not an absence).
+            ModuleId::TaskBreakdownV1 => &[
+                ("task_title", VarKind::Caller),
+                ("due_at", VarKind::Caller),
+                ("notes", VarKind::Caller),
+                ("output_language", VarKind::Caller),
+            ],
         }
     }
 
@@ -203,7 +239,9 @@ impl ModuleId {
             | ModuleId::QuizV1
             | ModuleId::ReportOutlineV1
             | ModuleId::ReportSectionV1
-            | ModuleId::CheatsheetV1 => TASK_BASE_SECTIONS,
+            | ModuleId::CheatsheetV1
+            | ModuleId::QuickCaptureV1
+            | ModuleId::TaskBreakdownV1 => TASK_BASE_SECTIONS,
         }
     }
 }

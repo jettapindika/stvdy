@@ -2,7 +2,10 @@ TASK: Turn the user's text into a task draft.
 
 Current date/time: {{now}}
 Timezone: {{timezone}}
+
+<user_context_data>
 User text: "{{capture_text}}"
+</user_context_data>
 
 Rules:
 - Resolve relative dates ("Friday", "tomorrow night", "next week", "akhir bulan") to an

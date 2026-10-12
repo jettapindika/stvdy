@@ -1,8 +1,10 @@
 TASK: Break this task into concrete subtasks.
 
+<user_context_data>
 Task: "{{task_title}}"
 Due: {{due_at}}
 Notes: {{notes}}
+</user_context_data>
 
 Rules:
 - 3-8 subtasks. Each title starts with a verb and describes a unit of work small enough

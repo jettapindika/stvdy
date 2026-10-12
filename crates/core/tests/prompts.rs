@@ -1302,3 +1302,45 @@ fn an_absent_optional_variable_renders_its_sentence() {
     );
     assert!(!composed.text.contains("{{"), "{}", composed.text);
 }
+
+/// The two task modules' variable kinds: `output_language` cannot default to the source
+/// material's language because neither module has sources, and `now`/`timezone` must be
+/// declared because the module uses them even though `ChatVars` fills them. The documented
+/// schemas' halves are checked beside their structs in the modules that define them.
+#[test]
+fn the_task_modules_require_a_language_rather_than_defaulting_to_the_source_language() {
+    let kind = |module: ModuleId, name: &str| {
+        module_variables(module)
+            .iter()
+            .find(|(declared, _)| *declared == name)
+            .map(|(_, kind)| *kind)
+    };
+
+    for module in [ModuleId::QuickCaptureV1, ModuleId::TaskBreakdownV1] {
+        assert_eq!(
+            kind(module, "output_language"),
+            Some(VarKind::Caller),
+            "{}: there are no sources to detect a language from",
+            module.version()
+        );
+    }
+
+    for name in ["now", "timezone"] {
+        assert_eq!(
+            kind(ModuleId::QuickCaptureV1, name),
+            Some(VarKind::Caller),
+            "quick_capture.v1 uses {{{{{name}}}}}"
+        );
+    }
+
+    // `due_at` and `notes` are `Caller` and not `Optional`: the module renders them as
+    // lines the model reads, and a task with no due date has a string the caller chooses
+    // ("none"), which is a statement the prompt can read rather than an absence.
+    for name in ["task_title", "due_at", "notes"] {
+        assert_eq!(
+            kind(ModuleId::TaskBreakdownV1, name),
+            Some(VarKind::Caller),
+            "task_breakdown.v1 renders {{{{{name}}}}} as a line the model reads"
+        );
+    }
+}
