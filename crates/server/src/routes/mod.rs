@@ -179,7 +179,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         // Goals are not plan-gated (the free plan has goals and a manual planner); the two
         // generating routes under `planner` are, and they carry their own refusal.
         .merge(goals::routes())
-        .merge(planner::routes())
+        .merge(planner::routes::routes())
         // The same body limit the generic upload gets, for the same reason: the plan check is
         // what produces the precise refusal, and this only stops a body no plan could accept
         // from being read at all. A syllabus is a PDF or pasted text, so the ceiling is the

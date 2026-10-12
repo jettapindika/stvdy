@@ -96,7 +96,12 @@ fn window_end(day: NaiveDate, hour: u32, tz: chrono_tz::Tz) -> Option<DateTime<U
 }
 
 /// The day's usable window as one interval, or `None` when the whole window falls in a gap.
-pub(crate) fn window_for(input: &PlannerInput, day: NaiveDate) -> Option<Interval> {
+///
+/// Public for the same reason [`free_slots`] is: `POST /plans/accept` re-validates the blocks
+/// the client adjusted (A264) and has to answer "is this block inside the student's study
+/// hours, in their zone, on a DST day" — the one question a fixed offset gets wrong. A second
+/// copy of the gap search in the server is a second DST rule, so this is the one.
+pub fn window_for(input: &PlannerInput, day: NaiveDate) -> Option<Interval> {
     let start = window_start(day, input.settings.start_hour, input.tz)?;
     let end = window_end(day, input.settings.end_hour, input.tz)?;
     (end > start).then_some(Interval {
@@ -113,14 +118,14 @@ pub(crate) fn window_for(input: &PlannerInput, day: NaiveDate) -> Option<Interva
 /// leftover is shorter than one block still contains that time, and contract § 6's deficit
 /// counts what the day holds rather than what the chunker could tile.
 ///
-/// **The one `pub` item in this module**, and it is public for one caller: the agent's
-/// `find_free_slots` READ tool (`chat/agent.rs`), which answers "when can I study between X
-/// and Y". A tool that re-derived the free-slot math from `merge`/`subtract` would be a
-/// second implementation of the same rule, and the two disagree the first time either
-/// changes — the disagreement being a study block the planner places into a slot the tool
-/// told the student was free. Everything it needs is already in `PlannerInput` (`busy` and
-/// `pinned` arrive merged by the caller), so `free_slots` alone is the whole surface: the
-/// helpers below stay `pub(crate)`.
+/// **One of the two `pub` items in this module** (the other is [`window_for`]), and it is
+/// public for one caller: the agent's `find_free_slots` READ tool (`chat/agent.rs`), which
+/// answers "when can I study between X and Y". A tool that re-derived the free-slot math from
+/// `merge`/`subtract` would be a second implementation of the same rule, and the two disagree
+/// the first time either changes — the disagreement being a study block the planner places
+/// into a slot the tool told the student was free. Everything it needs is already in
+/// `PlannerInput` (`busy` and `pinned` arrive merged by the caller), so `free_slots` alone is
+/// the whole surface: the helpers below stay `pub(crate)`.
 pub fn free_slots(input: &PlannerInput, day: NaiveDate) -> (Vec<Interval>, i64) {
     let Some(mut window) = window_for(input, day) else {
         return (Vec::new(), 0);
