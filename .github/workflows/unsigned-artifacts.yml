@@ -127,13 +127,31 @@ jobs:
         run: ./app/node_modules/.bin/tauri build --target universal-apple-darwin --bundles dmg --config "$UNSIGNED"
 
       - name: The architectures, measured rather than assumed
+        # `lipo -archs` on the **built binary**, not on the `.app`: with `--bundles dmg` and
+        # nothing else, Tauri deletes the `.app` once the dmg is written — the log says
+        # `Cleaning .../bundle/macos/Stvdy.app` — so a check that looks for it fails after a
+        # successful build (observed on run 38239252653, where the dmg was 9.28 MiB and the
+        # step that failed was this one). The binary is what the dmg contains, it is the
+        # path the bundler itself prints (`Built application at: …`), and it survives.
         run: |
           set -euo pipefail
-          app="$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)"
-          archs="$(lipo -archs "$app/Contents/MacOS/Stvdy")"
+          # The cargo binary is `stvdy-shell` (the log's own `Built application at:` line) and
+          # the bundler copies it into the `.app` as `Stvdy`; either name is the same bytes.
+          release=src-tauri/target/universal-apple-darwin/release
+          binary="$(ls "$release"/stvdy-shell "$release"/Stvdy 2>/dev/null | head -1 || true)"
+          if [ -z "$binary" ]; then
+            echo "::error::no built binary under $release"
+            ls -l "$release" | head -20
+            exit 1
+          fi
+          echo "binary: $binary"
+          archs="$(lipo -archs "$binary")"
           echo "archs: $archs"
           case "$archs" in *arm64*) ;; *) echo "::error::not universal: $archs"; exit 1 ;; esac
           case "$archs" in *x86_64*) ;; *) echo "::error::not universal: $archs"; exit 1 ;; esac
+
+          dmg="$(ls "$release"/bundle/dmg/*.dmg | head -1)"
+          echo "dmg: $dmg ($(du -h "$dmg" | cut -f1))"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -325,12 +343,24 @@ jobs:
         # at column 0 for the shell, and a YAML block scalar cannot contain a line that is not
         # indented past its key — the two requirements are incompatible, and the first attempt
         # at this step produced a workflow file GitHub could not parse.
+        #
+        # **`Properties()`, never `java.util.Properties()`.** In a Gradle Kotlin DSL script
+        # `java` resolves to the Java plugin's extension rather than the package, so the
+        # qualified form fails to compile with `Unresolved reference 'util'` — observed on
+        # run 38239252653, where Gradle reported it at the line and column of the qualifier.
+        # The generated file imports `java.util.Properties` on its first line, which is why the
+        # unqualified name works and why the template's own `tauriProperties` uses it; the
+        # import is asserted below rather than assumed, because it is another project's file.
         run: |
           set -euo pipefail
           gradle=src-tauri/gen/android/app/build.gradle.kts
           if grep -q "signingConfigs" "$gradle"; then
             echo "the project already declares signingConfigs: leaving it alone"
             exit 0
+          fi
+          if ! grep -qx "import java.util.Properties" "$gradle"; then
+            echo "::error::$gradle no longer imports java.util.Properties, so the block appended below cannot name it. Rewrite the block to read the file without that class."
+            exit 1
           fi
           printf '%s\n' \
             '' \
@@ -342,7 +372,7 @@ jobs:
             '        create("release") {' \
             '            val keystoreProperties = rootProject.file("keystore.properties")' \
             '            if (keystoreProperties.exists()) {' \
-            '                val properties = java.util.Properties().apply {' \
+            '                val properties = Properties().apply {' \
             '                    keystoreProperties.inputStream().use { load(it) }' \
             '                }' \
             '                keyAlias = properties.getProperty("keyAlias")' \
