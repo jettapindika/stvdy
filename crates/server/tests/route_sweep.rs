@@ -232,6 +232,13 @@ fn read_only_rows() -> Vec<Row> {
         ro("GET", "/sessions", "reads the caller's own sessions"),
         ro("POST", "/sessions", "a session is free (R1), like a review"),
         ro("GET", "/activity", "reads the caller's own activity"),
+        ro("GET", "/settings", "reads the caller's own settings"),
+        ro(
+            "PUT",
+            "/settings",
+            "a channel the plan does not grant is refused per channel by the engine, which \
+             crates/server/tests/settings.rs asserts with a body (A209)",
+        ),
     ]
 }
 
