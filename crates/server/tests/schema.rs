@@ -46,6 +46,9 @@ const NON_SYNC_TABLES: &[&str] = &[
     "subscriptions",
     "webhook_events",
     "discount_codes",
+    // Phase 13. The once-per-user redemption row (A298): a billing internal like
+    // `discount_codes` itself, and no client entity reaches it.
+    "discount_redemptions",
     "user_api_keys",
     "report_revisions",
     "calendar_connections",
@@ -196,8 +199,8 @@ async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
     // The two columns whose value outlives the row they name: a device that is revoked and
     // a message that is deleted must leave the resolution readable rather than take it with
     // them, which is what `on delete set null` buys and `on delete cascade` would not.
-    let cascades: Vec<(String, String, i8)> = sqlx::query_as(
-        "select a.attname, rt.relname, c.confdeltype::int8
+    let cascades: Vec<(String, String, String)> = sqlx::query_as(
+        "select a.attname, rt.relname, c.confdeltype::text
            from pg_constraint c
            join pg_class t on t.oid = c.conrelid
            join pg_class rt on rt.oid = c.confrelid
@@ -209,7 +212,11 @@ async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
     .await
     .expect("query foreign keys");
 
-    // `n` is `ON DELETE SET NULL` in `pg_constraint.confdeltype`; `c` would be cascade.
+    // `n` is `ON DELETE SET NULL` in `pg_constraint.confdeltype`; `c` would be cascade. The
+    // column is read as **text**, not cast to an integer: `confdeltype` is Postgres' internal
+    // one-byte `"char"` type and has no direct cast to `int8`, so `::int8` is a
+    // `42846 cannot cast type "char" to bigint` on every version — the test would fail before
+    // it reached the assertion it exists for.
     for (column, table) in [
         ("resolved_by_device_id", "devices"),
         ("message_id", "messages"),
@@ -220,7 +227,7 @@ async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
             .unwrap_or_else(|| panic!("{column} has no foreign key"));
         assert_eq!(found.1, table, "{column} must reference {table}");
         assert_eq!(
-            found.2, b'n' as i8,
+            found.2, "n",
             "{column} must be `on delete set null`, not cascade: the resolution has to \
              outlive the device or the message it names"
         );
@@ -456,6 +463,15 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // `0017_sync_triggers.sql` stays the last trigger-attaching migration.
         "reminders",
         "reminder_deliveries",
+        // Phase 13. A discount code is once per user, and this row is what makes it so: the
+        // unique key is `(code, user_id)`, so a second attempt by one account is refused by
+        // the database rather than by a read-then-write in the route. It is also the answer
+        // to "why was this code counted" — the row names the payment that redeemed it, and
+        // `on delete cascade` on that payment is right here (unlike `webhook_events`, which
+        // is evidence and takes `set null`). Not a `+sync` table (A298): it is a billing
+        // internal like `discount_codes` itself, and `0017_sync_triggers.sql` stays the last
+        // trigger-attaching migration.
+        "discount_redemptions",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
