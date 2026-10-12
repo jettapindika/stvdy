@@ -168,13 +168,13 @@ scripts/smoke-phase3.sh
 **Files:** `src/traits/search.rs`, `src/search/{mod.rs,rank.rs,normalize.rs}`,
 `src/traits/mod.rs`, `src/lib.rs`, `tests/{search_rank.rs,search_normalize.rs}`.
 
-- [ ] **Step 1: The trait and DTOs**, verbatim from decision 1.
-- [ ] **Step 2: `normalize.rs`.** `normalize_url`, `normalize_query`, and
+- [x] **Step 1: The trait and DTOs**, verbatim from decision 1.
+- [x] **Step 2: `normalize.rs`.** `normalize_url`, `normalize_query`, and
   `dedupe_key`. Tracking parameters to strip: any `utm_*`, `fbclid`, `gclid`,
   `mc_cid`, `mc_eid`, `ref`, `source`. Lowercase scheme and host, keep path case
   (paths are case-sensitive), drop the fragment.
-- [ ] **Step 3: `rank.rs`.** `rank(hits) -> Vec<SearchHit>` per decision 2.
-- [ ] **Step 4: Tests.** Normalizer: `HTTP://Example.COM/a/?utm_source=x#frag` and
+- [x] **Step 3: `rank.rs`.** `rank(hits) -> Vec<SearchHit>` per decision 2.
+- [x] **Step 4: Tests.** Normalizer: `HTTP://Example.COM/a/?utm_source=x#frag` and
   `https://example.com/a/` collapse to one key; a `javascript:` URL is `None`; a
   DOI-only difference is not a URL difference. Ranker: an Academic hit outranks a
   Web hit; a DOI duplicate collapses into one entry and the survivor keeps the DOI;
@@ -188,13 +188,13 @@ scripts/smoke-phase3.sh
 
 **Files:** `migrations/0020_search_cache.sql`.
 
-- [ ] **Step 1: Write it** per decision 3, with the reasoning in comments: the cache
+- [x] **Step 1: Write it** per decision 3, with the reasoning in comments: the cache
   is global because a query carries no user data (A40); `unresponsive_engines` is on
   `usage_events` so silent degradation of the free path shows up in the margin
   report instead of being discovered by a user.
-- [ ] **Step 2: Apply** against the existing dev database (not only a fresh one,
+- [x] **Step 2: Apply** against the existing dev database (not only a fresh one,
   because append-only means the migration must work on a populated database).
-- [ ] **Step 3: Add both names to `crates/server/tests/schema.rs`'s known set** and
+- [x] **Step 3: Add both names to `crates/server/tests/schema.rs`'s known set** and
   record the table in `docs/ASSUMPTIONS.md` § Schema deviations, which is that
   test's contract.
 
@@ -205,20 +205,20 @@ passes.
 
 **Files:** `src/integrations/search/*.rs`, `Cargo.toml`.
 
-- [ ] **Step 1: `academic.rs`.** One provider per API (OpenAlex, Crossref, arXiv,
+- [x] **Step 1: `academic.rs`.** One provider per API (OpenAlex, Crossref, arXiv,
   DOAJ, ERIC, PubMed), each keyless or free-key, each mapping its response to
   `SearchHit` with `source_kind: Academic` and a real `published_at` and `doi`
   where the API gives them. They are tiers 1a..1f, tried in that order.
-- [ ] **Step 2: `searxng.rs`.** `GET {SEARXNG_URL}/search?q=&format=json`, mapping
+- [x] **Step 2: `searxng.rs`.** `GET {SEARXNG_URL}/search?q=&format=json`, mapping
   `results[]` to `SearchHit`. The response's `unresponsive_engines` is **captured
   and surfaced**, not dropped: it is how A3's engine-list health reaches the admin
   report. An empty `results` with a non-empty `unresponsive_engines` is `Ok(vec![])`
   plus a recorded list, not an error.
-- [ ] **Step 3: `exa.rs`** (`x-api-key`) and **`tavily.rs`** (`Authorization: Bearer`).
+- [x] **Step 3: `exa.rs`** (`x-api-key`) and **`tavily.rs`** (`Authorization: Bearer`).
   Both map to `SearchHit`; Exa carries a published date, Tavily does not.
-- [ ] **Step 4: `composite.rs`** per decision 4, with the cache read/write and the
+- [x] **Step 4: `composite.rs`** per decision 4, with the cache read/write and the
   outcome record. `max_results` defaults to 8.
-- [ ] **Step 5: Tests** against a stub HTTP server: a tier returning results stops
+- [x] **Step 5: Tests** against a stub HTTP server: a tier returning results stops
   the walk; a tier erroring is recorded and the next tier is tried; all tiers
   failing yields an empty vec and an outcome naming every tier; a second identical
   query is a cache hit and does not call the stub again (asserted by request count).
@@ -229,16 +229,16 @@ passes.
 
 **Files:** `src/integrations/fetch.rs`, `src/sources/web.rs`, `tests/ssrf.rs`.
 
-- [ ] **Step 1: The three-step fetcher** (Exa `/contents` → `moli` → reqwest +
+- [x] **Step 1: The three-step fetcher** (Exa `/contents` → `moli` → reqwest +
   readability), each behind the same trait, each carrying `--block-private-networks`
   or the equivalent check.
-- [ ] **Step 2: The SSRF guard** for the reqwest path: resolve the host, refuse
+- [x] **Step 2: The SSRF guard** for the reqwest path: resolve the host, refuse
   loopback, private, link-local and metadata ranges, and refuse a redirect that
   lands in one. Tested per range.
-- [ ] **Step 3: `POST /workspaces/:id/sources` gains a `kind=web` shape** taking
+- [x] **Step 3: `POST /workspaces/:id/sources` gains a `kind=web` shape** taking
   `{url}`: fetch, store the extracted text as the object, insert the source with
   `kind='web'` and `url` set, and enqueue the normal ingest job.
-- [ ] **Step 4: Tests.** A fetch of a private URL is refused with a clear error and
+- [x] **Step 4: Tests.** A fetch of a private URL is refused with a clear error and
   no request made; a saved web result appears in the source list with its URL; the
   page text becomes chunks.
 
@@ -246,16 +246,16 @@ passes.
 
 **Files:** `src/chat/{routes.rs,web.rs,prompt.rs}`, `src/credits.rs`.
 
-- [ ] **Step 1: Un-refuse `use_web`** (decision 7) and pass the flag through.
-- [ ] **Step 2: `web.rs`.** Runs the composite, cleans and truncates each snippet,
+- [x] **Step 1: Un-refuse `use_web`** (decision 7) and pass the flag through.
+- [x] **Step 2: `web.rs`.** Runs the composite, cleans and truncates each snippet,
   builds `PromptWebHit`s labelled `[W1]`, `[W2]`, and returns the labels for the
   citation resolver. Truncation is per hit and bounded, because a page's snippet
   can be large and the context has a budget.
-- [ ] **Step 3: Credits.** `web_search` is charged **once per search**, and a cache
+- [x] **Step 3: Credits.** `web_search` is charged **once per search**, and a cache
   hit charges **nothing** while still writing a `usage_events` row with
   `cache_hit = true` (A40). The existing spend path is reused; the cache-hit path
   writes the row without a ledger entry.
-- [ ] **Step 4: Tests.** A web answer cites `[W1]` and resolves to `{type:"web",
+- [x] **Step 4: Tests.** A web answer cites `[W1]` and resolves to `{type:"web",
   url, title}`; the same query twice bills one credit and the second row says
   `cache_hit`; an unknown `[W9]` is dropped on both the streamed and the stored
   path (the Phase 2 property, which must not regress now that a second label
@@ -266,15 +266,15 @@ passes.
 **Files:** `crates/server/tests/search.rs`, `scripts/smoke-phase3.sh`,
 `scripts/stub-searxng.py`.
 
-- [ ] **Step 1: The roadmap's acceptance case.** With the SearXNG tier pointed at a
+- [x] **Step 1: The roadmap's acceptance case.** With the SearXNG tier pointed at a
   closed port and both fallback keys unset, a `use_web` chat still answers: the
   academic tier is consulted first, so it answers from there; if it returns
   nothing, the turn proceeds **without** web context rather than erroring.
-- [ ] **Step 2: The smoke run** drives the real server with the stub SearXNG (this
+- [x] **Step 2: The smoke run** drives the real server with the stub SearXNG (this
   machine cannot run the real one, decision 8) and asserts: a URL **and** a DOI in
   the citations, the second identical query is a cache hit, and the toggle-off path
   is unchanged.
-- [ ] **Step 3: Record what was not verified**: the real SearXNG engine list, which
+- [x] **Step 3: Record what was not verified**: the real SearXNG engine list, which
   needs the staging VPS. A3's measured baseline (1 of 8 engines on a laptop, 3 on
   the production host) is the reason not to tune it here.
 
@@ -282,40 +282,40 @@ passes.
 
 **Files:** `app/src/features/chat/*`, `app/src/api/queries/chat.ts`.
 
-- [ ] **Step 1: The toggle becomes real**: enabled, remembered per workspace, and
+- [x] **Step 1: The toggle becomes real**: enabled, remembered per workspace, and
   sent as `use_web`. Its copy says what it does now, replacing the "arrives in
   Phase 3" note.
-- [ ] **Step 2: Web citations render** with their host and title, and open in the
+- [x] **Step 2: Web citations render** with their host and title, and open in the
   system browser through the platform adapter (never an in-app webview).
-- [ ] **Step 3: Gate 5 on the changed screen**, stated with measured results.
-- [ ] **Step 4: Gate 6 still holds** with web context present: an Indonesian query
+- [x] **Step 3: Gate 5 on the changed screen**, stated with measured results.
+- [x] **Step 4: Gate 6 still holds** with web context present: an Indonesian query
   with `use_web` on still retrieves and cites the Indonesian source.
 
 ## Task 8: Docs and the phase gate
 
-- [ ] **Step 1: `docs/API.md`**: the `use_web` behaviour, the `kind=web` upload
+- [x] **Step 1: `docs/API.md`**: the `use_web` behaviour, the `kind=web` upload
   shape, and the web citation shape.
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**: the composite's tier order and why,
+- [x] **Step 2: `docs/ARCHITECTURE.md`**: the composite's tier order and why,
   the ranking rules, the cache's global scope, and the SSRF guard.
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`**: A65 superseded (the refusal is lifted),
+- [x] **Step 3: `docs/ASSUMPTIONS.md`**: A65 superseded (the refusal is lifted),
   the new table, the SSRF policy, and the SearXNG-verification gap.
-- [ ] **Step 4: Run the gate**: fmt, clippy, tests, web build, shell, the desktop
+- [x] **Step 4: Run the gate**: fmt, clippy, tests, web build, shell, the desktop
   bundle, `sqlx prepare --check`, and the smoke.
-- [ ] **Step 5: Phase summary** with gates 5 and 6 stated as performed checks.
+- [x] **Step 5: Phase summary** with gates 5 and 6 stated as performed checks.
 
 ## Phase 3 exit checklist
 
-- [ ] fmt, clippy, `cargo test --workspace`, `npm test`, `npm run build`,
+- [x] fmt, clippy, `cargo test --workspace`, `npm test`, `npm run build`,
   `tauri build`, `sqlx prepare --check` all green.
-- [ ] A `use_web` turn streams cited results with a **URL and a DOI**.
-- [ ] The same query twice bills **one** credit; the second row says `cache_hit`.
-- [ ] SearXNG down and both fallback keys unset: the request still answers.
-- [ ] "Save to workspace" creates a `kind=web` source that ingests to `ready`.
-- [ ] A private-address URL is refused by the fetcher, per range.
-- [ ] An unknown `[W9]` is dropped from the streamed text as well as the stored copy.
-- [ ] Gate 6 still passes with web context in the prompt.
-- [ ] What could not be verified here (the real SearXNG engine list) is named.
-- [ ] Phase summary posted; wait for "continue".
+- [x] A `use_web` turn streams cited results with a **URL and a DOI**.
+- [x] The same query twice bills **one** credit; the second row says `cache_hit`.
+- [x] SearXNG down and both fallback keys unset: the request still answers.
+- [x] "Save to workspace" creates a `kind=web` source that ingests to `ready`.
+- [x] A private-address URL is refused by the fetcher, per range.
+- [x] An unknown `[W9]` is dropped from the streamed text as well as the stored copy.
+- [x] Gate 6 still passes with web context in the prompt.
+- [x] What could not be verified here (the real SearXNG engine list) is named.
+- [x] Phase summary posted; wait for "continue".
 
 ## Execution notes (Phase 3, as built)
 
