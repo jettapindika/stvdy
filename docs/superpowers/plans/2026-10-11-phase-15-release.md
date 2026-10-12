@@ -651,7 +651,7 @@ plugin panics at startup with an absent `plugins.updater` config, so the honest 
 is not "an updater that trusts nothing" — it is no updater, which is where the tree is
 today.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/release.rs` is a plain (non-`sqlx::test`) suite, because none of these
 facts need a database. Its first case is the one that makes the trust chain testable:
@@ -675,6 +675,8 @@ Err**).
 
 - [ ] **Step 2: Run it and watch it fail**
 
+*(Not ticked: the red run this step names is a transient observation with no artefact in the tree. What it produced — `crates/server/tests/release.rs` — is there and green; the compile failure itself was not recorded anywhere.)*
+
 ```bash
 cargo test -p stvdy-server --test release
 ```
@@ -682,7 +684,7 @@ cargo test -p stvdy-server --test release
 Expected: fails to compile, because `release.rs` names nothing that exists yet, and the
 config assertions below have no `plugins.updater` to read.
 
-- [ ] **Step 3: The config, with the two keys the schema requires**
+- [x] **Step 3: The config, with the two keys the schema requires**
 
 `src-tauri/tauri.conf.json` gains, in `bundle`:
 
@@ -718,7 +720,7 @@ one is the startup panic A35 records. **`signingIdentity` is deliberately not se
 committed file** — the workflow passes `APPLE_SIGNING_IDENTITY` from a secret, so a
 contributor's build is unsigned rather than failing on a missing identity.
 
-- [ ] **Step 4: The dependency and the capability**
+- [x] **Step 4: The dependency and the capability**
 
 `src-tauri/Cargo.toml`:
 
@@ -735,7 +737,7 @@ tauri-plugin-updater = "2.13.3"
 capability's `platforms` is already `["macOS", "windows", "linux"]`, which is the plugin's
 own platform matrix — a mobile build cannot see the permission.
 
-- [ ] **Step 5: Register it**
+- [x] **Step 5: Register it**
 
 `src-tauri/src/lib.rs` builds the plugin conditionally:
 
@@ -747,7 +749,7 @@ own platform matrix — a mobile build cannot see the permission.
 let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 ```
 
-- [ ] **Step 6: The config invariants, as tests**
+- [x] **Step 6: The config invariants, as tests**
 
 The rest of `crates/server/tests/release.rs` asserts the committed facts that are easy to
 undo by hand, each one a bug the release workflow would otherwise discover late:
@@ -768,7 +770,7 @@ fn the_version_is_the_workspace_version() { … }   // tauri.conf.json version =
 The last one is the version-drift guard A353 needs: two files that must agree and a test
 that says so beats a release that ships 0.1.0 twice.
 
-- [ ] **Step 7: Run the tests**
+- [x] **Step 7: Run the tests**
 
 ```bash
 cargo test -p stvdy-server --test release
@@ -803,7 +805,7 @@ export type UpdateStatus =
   | { kind: 'error'; message: string }            // a failed check, never a silent no-op
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `UpdatesPanel.test.tsx` asserts the three states a user can be in and the honesty
 constraint that makes the panel safe:
@@ -819,11 +821,13 @@ constraint that makes the panel safe:
 
 - [ ] **Step 2: Run it and watch it fail**
 
+*(Not ticked: no artefact. The tree records `npm --prefix app test -- UpdatesPanel → 7 passed` after the implementation; no record of the red run before it exists.)*
+
 ```bash
 npm --prefix app test -- UpdatesPanel
 ```
 
-- [ ] **Step 3: The adapter, three ways**
+- [x] **Step 3: The adapter, three ways**
 
 `types.ts` declares the two methods. `desktop.ts` implements them against
 `@tauri-apps/plugin-updater`'s `check()` / `downloadAndInstall()` with a progress
@@ -834,7 +838,7 @@ ARCHITECTURE). `web.ts` and `mobile.ts` return `{ kind: 'unsupported' }`. The mo
 adapter's comment says why in one line: mobile updates ship through TestFlight and Play,
 and the Tauri updater does not support them.
 
-- [ ] **Step 4: The panel**
+- [x] **Step 4: The panel**
 
 `UpdatesPanel.tsx` is a `LockedFeature`-free, ordinary Settings section: the current
 version (from `Platform`), a `Check for updates` button, the three states, and an install
@@ -843,6 +847,8 @@ action that shows the adapter's progress. Every string goes through `t()` in bot
 file only, and on a placeholder mismatch between them).
 
 - [ ] **Step 5: Run the web tests and the build**
+
+*(Not ticked: no recorded green run of this pair at the time — `task-B-report.md` records the full suite as red on peers' in-flight `app/**` work, and only the two `-- UpdatesPanel`/`-- SettingsScreen` filters as green.)*
 
 ```bash
 npm --prefix app test
@@ -880,7 +886,7 @@ only on the machine that built it. `docs/RELEASE.md` states that in those words 
 release workflow **fails the macOS job** when `APPLE_CERTIFICATE` is absent, so an
 unsigned artifact is never published by accident.
 
-- [ ] **Step 1: Write the entitlement file, and keep it minimal**
+- [x] **Step 1: Write the entitlement file, and keep it minimal**
 
 `src-tauri/entitlements.plist` carries exactly what the shell needs and nothing else. The
 hardened runtime blocks JIT and unsigned executable memory, so an entitlement added "just
@@ -901,6 +907,8 @@ a decision with a reason, not a default.
 
 - [ ] **Step 2: The notarization script**
 
+*(Not ticked: `scripts/notarize-macos.sh` does not exist in the tree — the one artefact this step names. `.github/workflows/release.yml`'s `macos` job asserts it is present and fails with that sentence rather than signing an app it cannot staple.)*
+
 `scripts/notarize-macos.sh` takes the `.dmg` path, submits it with `notarytool submit
 --wait`, and **staples the ticket to both the `.dmg` and the `.app` inside it** before
 re-packing. Two details that are easy to get wrong and are the reason this is a script
@@ -912,7 +920,7 @@ rather than three workflow lines:
   the ticket is stapled to the app before the dmg is rebuilt. A user who copies the app
   out of the dmg onto a second machine then launches it offline gets a working app.
 
-- [ ] **Step 3: The workflow job**
+- [x] **Step 3: The workflow job**
 
 `.github/workflows/release.yml`'s `macos` job, on `macos-15`:
 
@@ -935,6 +943,8 @@ lipo -archs "$APP/Contents/MacOS/Stvdy" | grep -q 'x86_64 arm64'  # it is univer
 ```
 
 - [ ] **Step 4: Record what was measured**
+
+*(Not ticked: `docs/RELEASE.md` § Desktop distribution states the requirement in prose but carries none of the commands this step asks for — no `codesign`, no `spctl`, no `xcrun stapler validate`, no `lipo`, and no runner image — so the "transcript rather than an adjective" the step asks for is not there.)*
 
 `docs/RELEASE.md` § Desktop distribution gains the exact commands and the runner image
 they ran on, so the claim "signed and notarized" is a transcript rather than an adjective.
@@ -961,7 +971,7 @@ a cloud signer. **Degraded without it:** the installer builds and installs unsig
 SmartScreen warns on every install until publisher reputation accrues — which an unsigned
 binary never accrues.
 
-- [ ] **Step 1: The job**
+- [x] **Step 1: The job**
 
 On `windows-2025`, `tauri build --bundles nsis` with the certificate environment set, then
 verification:
@@ -976,7 +986,7 @@ be discovered by a user, not by us), and a timestamp is present (without one, th
 signature stops validating when the certificate expires, and every installed copy becomes
 unverifiable).
 
-- [ ] **Step 2: Record the degraded path**
+- [x] **Step 2: Record the degraded path**
 
 `docs/RELEASE.md` gains one sentence and one command: without a certificate the job is
 skipped with a warning, the artifact is published unsigned, and that is a **known degraded
@@ -999,14 +1009,14 @@ not a release failure; a release that did not say so is.
   the updater artifacts (`*.app.tar.gz`, `*.nsis.zip`, and their `.sig` files) and
   `latest.json`.
 
-- [ ] **Step 1: The gate job, first**
+- [x] **Step 1: The gate job, first**
 
 The workflow's first job re-runs `cargo fmt --check`, `cargo clippy -D warnings`,
 `cargo test --workspace` and the web build on the tagged commit. A release pipeline that
 trusts a green CI badge from a branch is a pipeline that can ship a commit CI never saw,
 because tags are not commits.
 
-- [ ] **Step 2: The build matrix**
+- [x] **Step 2: The build matrix**
 
 Three jobs, each producing its own artifacts: `macos` (Task 3, universal, signed,
 notarized, stapled), `windows` (Task 4, NSIS, signed), `android` (the release APK for the
@@ -1015,7 +1025,7 @@ true` makes Tauri emit the `.sig` next to each updater archive; a job that produ
 archive and not the signature is a failure, and the workflow asserts the `.sig` exists
 rather than trusting the bundler's exit code.
 
-- [ ] **Step 3: The manifest**
+- [x] **Step 3: The manifest**
 
 `latest.json` is generated from the artifacts, with one entry per
 `{{target}}/{{arch}}` pair, each carrying `signature` (the contents of the `.sig`) and
@@ -1025,7 +1035,7 @@ artifact whose integrity the whole channel rests on, so the workflow verifies it
 output: it downloads the published manifest back over HTTPS, verifies the signature
 against the committed public key, and fails if that round trip does not hold.
 
-- [ ] **Step 4: The version, in one place**
+- [x] **Step 4: The version, in one place**
 
 A step asserts `Cargo.toml [workspace.package] version`, `src-tauri/tauri.conf.json
 version`, and the tag (without its `v`) agree, and fails with the three values printed.
@@ -1034,12 +1044,27 @@ the shell, and a server-only hotfix is tagged `server-v…` and skips the client
 table in `docs/RELEASE.md` § Versioning is what makes that a procedure rather than a
 guess.
 
-- [ ] **Step 5: Run the artifact verifier**
+- [x] **Step 5: Run the artifact verifier**
 
 The last step of every job runs `scripts/verify-release-artifacts.sh` (Task 11) against
 what was just produced, in the mode that matches the artifact. **This is the step that
 makes the exit gate mechanical rather than a claim**: a job that produced an unsigned
 installer or an unstapled dmg fails here, before the artifact is published.
+
+**What has been verified about `release.yml`, and what has not.** It is **written, and it
+parses as YAML** — that is the whole of the mechanical evidence, because the workflow cannot
+be executed here: it needs a `v*` tag, an Apple Developer ID certificate, an Authenticode
+certificate, an Android keystore, the minisign private key and a production static endpoint,
+and none of those exists in this tree. `actionlint` is not installed on this machine either,
+so the stronger lint did not run. **Its verification is therefore CI-only**, on the first
+tag: a green run is the tag's to produce, and this plan does not claim one. What *was*
+checked by hand is the part that would otherwise fail silently: every secret the workflow
+names is a GitHub Actions secret and no path in the repository; the version-agreement step
+was run against five tag shapes (agreeing, disagreeing, `server-v…` agreeing, `server-v…`
+disagreeing, and a malformed tag) and fails with all three values printed; the manifest
+builder was run against a fixture and against an empty directory, where it refuses to write a
+manifest naming a file that does not exist; every `run:` block was extracted and is `bash -n`
+clean.
 
 **Gates:** 5 — no UI change. 6 — no UI change. 7 — no UI change.
 
@@ -1058,7 +1083,7 @@ installer or an unstapled dmg fails here, before the artifact is published.
   `ARG CHROMIUM_VERSION`, whose `/opt/pdfium/libpdfium.so` exists, whose
   `/opt/models/fastembed` is populated, and whose `/usr/bin/soffice` runs.
 
-- [ ] **Step 1: The build stage**
+- [x] **Step 1: The build stage**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -1086,7 +1111,7 @@ The whole `target/release/` directory is what the runtime stage copies (A337), s
 acceptance test binaries come with it. `--locked` so the image builds the lockfile that
 CI tested.
 
-- [ ] **Step 2: The runtime stage, with the pin as an argument**
+- [x] **Step 2: The runtime stage, with the pin as an argument**
 
 ```dockerfile
 FROM debian:bookworm-slim AS runtime
@@ -1108,7 +1133,7 @@ Debian bookworm archive at implementation time, and the exact value is pinned in
 and asserted by Task 9's job.** A plan that guessed a version string would be a plan whose
 image does not build.
 
-- [ ] **Step 3: pdfium, with a verified checksum**
+- [x] **Step 3: pdfium, with a verified checksum**
 
 ```dockerfile
 ARG PDFIUM_RELEASE=chromium/8086
@@ -1125,7 +1150,7 @@ RUN curl -sSL -o /tmp/pdfium.tgz \
 ENV PDFIUM_LIB_PATH=/opt/pdfium/lib/libpdfium.so
 ```
 
-- [ ] **Step 4: The embedding model, pre-baked, at an absolute path**
+- [x] **Step 4: The embedding model, pre-baked, at an absolute path**
 
 The build stage runs a small fetch using the same code path the server uses, so the cache
 layout cannot differ between the image and the running process:
@@ -1145,7 +1170,7 @@ builds the embedder (which downloads into `FASTEMBED_CACHE_DIR`) and exits. It i
 honest way to populate the cache, because it uses `fastembed`'s own layout rather than a
 hand-copied directory that a version bump would invalidate.
 
-- [ ] **Step 5: The vendored print assets, and the fonts**
+- [x] **Step 5: The vendored print assets, and the fonts**
 
 ```dockerfile
 # The template names Inter and JetBrains Mono and loads KaTeX from a CDN. The
@@ -1162,7 +1187,7 @@ the checksum record. One of the two is redundant, and the plan keeps both becaus
 release engineer needs to see what shipped — the redundancy is stated here so it is not
 mistaken for a mistake.
 
-- [ ] **Step 6: The runtime user, the sandbox, and the entrypoint**
+- [x] **Step 6: The runtime user, the sandbox, and the entrypoint**
 
 ```dockerfile
 # A non-root user, because Chromium's sandbox is what the renderer requires outside
@@ -1185,13 +1210,13 @@ ENTRYPOINT ["/usr/local/bin/stvdy-server"]
 `/dev/shm` is the classic "Chromium crashes with a memory error that looks like a code
 bug" failure.
 
-- [ ] **Step 7: `.dockerignore`**
+- [x] **Step 7: `.dockerignore`**
 
 `target/`, `node_modules/`, `app/dist/`, `.git/`, `var/`, `.env*`, `supabase/` and the
 plan documents. Without it the build context is gigabytes and a stale `var/` leaks into
 the image.
 
-- [ ] **Step 8: `docs/ARCHITECTURE.md` gains the image's contents**
+- [x] **Step 8: `docs/ARCHITECTURE.md` gains the image's contents**
 
 A new `## Container image` section, one table: what is installed, at which version, why,
 and which environment variable names it. This is the section the task's brief asks for, and
@@ -1215,7 +1240,7 @@ it is the reference for the next person who adds a native dependency.
 - Produces: `GET /assets/{*path}`; `chrome::rewrite_asset_base(html, base) -> String`;
   `AppConfig.assets_base_url`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/assets.rs`:
 
@@ -1241,13 +1266,15 @@ and **no** `https://fonts.googleapis.com`, and that it does contain the base URL
 
 - [ ] **Step 2: Run it and watch it fail**
 
+*(Not ticked: no artefact. `crates/server/tests/assets.rs` exists and passes (6/6, recorded in `task-A-report.md`); the red run before the route and the rewrite existed was not recorded.)*
+
 ```bash
 cargo test -p stvdy-server --test assets
 ```
 
 Expected: fails, because neither the route nor the rewrite exists.
 
-- [ ] **Step 3: The vendored assets and the fetch script**
+- [x] **Step 3: The vendored assets and the fetch script**
 
 `scripts/fetch-print-assets.sh` downloads, for a pinned version, the four KaTeX files the
 template references (`katex.min.css`, `katex.min.js`, `contrib/auto-render.min.js`, and
@@ -1261,7 +1288,7 @@ missing glyph rather than an error.
 `assets/README.md` records each file, its version, its source URL and its checksum.
 `THIRD_PARTY_NOTICES.md` gains the KaTeX and font entries it does not have yet (Task 12).
 
-- [ ] **Step 4: The route**
+- [x] **Step 4: The route**
 
 `crates/server/src/assets.rs` uses `rust-embed` over `assets/` and serves
 `GET /assets/{*path}` with a match on the extension for the content type
@@ -1273,7 +1300,7 @@ no credentials — and because the assets are public files with no user data. `r
 public group is where `Exempt` routes live, so `crates/server/tests/route_sweep.rs` gets a
 row for the new path (Task 11 covers the sweep).
 
-- [ ] **Step 5: The rewrite, and where it goes**
+- [x] **Step 5: The rewrite, and where it goes**
 
 `crates/server/src/render/chrome.rs` gains
 
@@ -1294,7 +1321,7 @@ replaces are the four the template carries; a test asserts the count of replacem
 the count of matches in the source, so a template that gains a fifth remote reference fails
 the test rather than silently loading it.
 
-- [ ] **Step 6: The config value**
+- [x] **Step 6: The config value**
 
 `AppConfig` gains `assets_base_url: String`, from `ASSETS_BASE_URL`, defaulting to
 `http://127.0.0.1:{port of BIND_ADDR}`. **The default is what makes a single-container
@@ -1302,7 +1329,7 @@ deployment work with no configuration**, and the override is what makes a deploy
 where Chromium cannot reach the server's advertised address work at all. `docs/RELEASE.md`
 records the variable and the two cases.
 
-- [ ] **Step 7: Keep the guard as the gate**
+- [x] **Step 7: Keep the guard as the gate**
 
 `data-math-ready` is unchanged (A340). The render still fails when the assets do not
 load, and `crates/server/tests/pdf.rs`'s "no raw `$` delimiters" assertion is what proves
@@ -1325,7 +1352,7 @@ Indonesian-capable and this task changes URLs, not text). 7 — no UI change.
   `stvdy-server --fetch-embedder-model` (build the embedder, which populates the cache,
   then exit).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 A process-level test is the honest shape here, and `std::process::Command` against
 `env!("CARGO_BIN_EXE_stvdy-server")` is how `crates/server/tests/release.rs` runs it:
@@ -1342,7 +1369,7 @@ async fn migrate_only_exits_zero_without_binding(pool: PgPool) { … }
 The assertion that it did **not** bind is a port probe after the process exits, because
 "it exited 0" is also true of a process that bound and then crashed.
 
-- [ ] **Step 2: The flags**
+- [x] **Step 2: The flags**
 
 `main.rs` parses `std::env::args()` before anything else, and the two modes are early
 returns:
@@ -1365,6 +1392,8 @@ stage can run it before Postgres exists — which is what Task 6's Step 4 depend
 
 - [ ] **Step 3: Run the tests**
 
+*(Not ticked: no artefact for this run as its own step — the same command's `8 passed; 0 failed` is recorded in `task-B-report.md` under Task 1's step 7, which is where it is ticked.)*
+
 ```bash
 cargo test -p stvdy-server --test release
 ```
@@ -1385,7 +1414,7 @@ cargo test -p stvdy-server --test release
 - Produces: a `docker` job that builds the image, starts Postgres, and runs the PDF
   acceptance test **inside** the container.
 
-- [ ] **Step 1: The job, and what it proves**
+- [x] **Step 1: The job, and what it proves**
 
 ```yaml
   image:
@@ -1427,7 +1456,7 @@ The last step's exact binary name is resolved at implementation time (cargo's te
 names carry a hash); `scripts/release-image.sh` is the local, readable form of the same
 sequence so a developer can run it on their machine.
 
-- [ ] **Step 2: `scripts/release-image.sh`**
+- [x] **Step 2: `scripts/release-image.sh`**
 
 Builds the image, runs the three steps above against a local Postgres, prints the pinned
 versions it found, and ends with `=== PASS`. It is the command `docs/OPERATIONS.md` tells
@@ -1436,6 +1465,8 @@ an operator to run **on the production host** before deploying a new image — b
 second one is the one that ships.
 
 - [ ] **Step 3: Record the measured output**
+
+*(Not ticked: there is no phase summary in the tree, and no measured `image` job output to quote — the Docker daemon died mid-build under disk pressure during the phase (`.superpowers/sdd/2026-10-11-phase-15-release/progress.md`), so the job's output does not exist yet.)*
 
 The phase summary quotes the job's output, per roadmap verification gate 3.
 
@@ -1748,7 +1779,7 @@ copy).
 - Consumes: Tasks 6, 9, 13; the existing README structure.
 - Produces: a README whose "Run it" and "Ship it" halves are both real.
 
-- [ ] **Step 1: The README's deployment section**
+- [x] **Step 1: The README's deployment section**
 
 The existing README documents local development thoroughly (it is 200+ lines of quickstart,
 Supabase, quality gates and layout). It gains a `## Deploying` section that is a **pointer
@@ -1756,18 +1787,18 @@ and a summary**, not a second copy of `docs/OPERATIONS.md`: the image, the
 `--migrate-only` step, the environment's production subset, and a link. Two documents that
 both explain deployment drift within a month; one that points at the other does not.
 
-- [ ] **Step 2: The release section**
+- [x] **Step 2: The release section**
 
 How to cut a release: bump the version, tag, watch the workflow, run the verifier, publish.
 Three sentences and a link to `docs/RELEASE.md` § Release process.
 
-- [ ] **Step 3: The mobile section**
+- [x] **Step 3: The mobile section**
 
 How to build for TestFlight and Play, and where the checklists live. This is the section
 Phase 14's work needs to be reproducible, and it names the two build commands
 (`tauri ios build` / `tauri android build`) that the roadmap's verification gate 2 lists.
 
-- [ ] **Step 4: The justfile**
+- [x] **Step 4: The justfile**
 
 `just image` (build the image), `just image-check` (`scripts/release-image.sh`),
 `just verify-release <dir>` (`scripts/verify-release-artifacts.sh`),
@@ -1775,6 +1806,8 @@ Phase 14's work needs to be reproducible, and it names the two build commands
 command and the typed command are the same string.
 
 - [ ] **Step 5: Run the whole quality gate**
+
+*(Not ticked: not run by this slice — it is YAML, Markdown and justfile work, and `just check` plus the shell suite is the workspace gate another slice owns. `just check` also needs a reachable Postgres.)*
 
 ```bash
 just check

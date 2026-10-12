@@ -222,6 +222,106 @@ entirely, hence the separate target. `check-shell` depends on `check-web` becaus
 `unwrap_used`/`expect_used`/`panic` inside tests while non-test code is denied
 them.
 
+## Deploying
+
+The server is **one container**: the API, the job worker and the scheduler are
+three tasks in one process, so one image is the whole server. The image bakes the
+native dependencies the code loads at runtime — a **pinned** Chromium
+(`CHROME_PATH`), pdfium (`PDFIUM_LIB_PATH`), the embedding model
+(`FASTEMBED_CACHE_DIR`) and LibreOffice (`SOFFICE_BIN`) — and each is pinned for a
+reason that is written down in `docs/ARCHITECTURE.md` § Container image. **The
+procedure itself is `docs/OPERATIONS.md`**, and this section points at it rather
+than restating it: two documents that both explain deployment drift within a
+month; one that links to the other does not.
+
+```bash
+just image                          # docker build -t stvdy-server:local .
+IMAGE=stvdy-server:<tag> DATABASE_URL="$DATABASE_URL" just image-check
+```
+
+`just image-check` builds, boots against Postgres, probes `/health` and the
+`/assets/` route, and runs the PDF acceptance test **inside the container**
+against the image's own browser. Run it **on the production host** before
+deploying — "works in CI" and "works on this host" are different claims, and the
+second one is the one that ships.
+
+Two things are contracts rather than conveniences:
+
+- **The migration is a step, not a side effect.** `--migrate-only` runs
+  `connect → migrate → seed_plans → exit` without binding a port, and it runs
+  **once, before any replica starts** (A346). Without it two replicas starting
+  together both run `sqlx::migrate!`, and the one that loses the race serves
+  traffic against a schema it has not verified.
+- **Production sets a subset of the environment.** `APP_ENV=prod` (which requires
+  a ≥32-character `JWT_SECRET` and a `WEB_ORIGIN`), `DATABASE_URL`,
+  `ENCRYPTION_KEY_HEX`, the R2 values behind `STORAGE_BACKEND=s3`
+  (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION=auto`, `S3_FORCE_PATH_STYLE=false`), and
+  `SEARXNG_URL` pointing at the **separate** search service. `CHROME_PATH`,
+  `PDFIUM_LIB_PATH`, `FASTEMBED_CACHE_DIR`, `SOFFICE_BIN` and `ASSETS_DIR` come
+  from the image's own defaults. `.env.example` is the contract;
+  `docs/OPERATIONS.md` § Environment variables is the production table.
+
+The container needs `--shm-size` and a writable `/tmp` for Chromium's sandbox
+(A338), and the exact `docker run` stanza is in `docs/OPERATIONS.md`. So are the
+day-two procedures: backups and the restore drill (`just restore-drill`),
+monitoring with thresholds, the breach runbook, and retention.
+
+## Releasing
+
+**A release is a tag, not a branch**: tags are not commits, and a pipeline that
+trusts a green badge from a branch can ship a commit CI never saw. Bump the
+version in the two places that must agree, tag, watch the workflow re-run the
+checks `ci.yml` runs on the tagged commit, verify what it produced, publish.
+
+```bash
+# bump `[workspace.package] version` in Cargo.toml AND `version` in
+# src-tauri/tauri.conf.json — crates/server/tests/release.rs asserts they are equal
+git tag v0.2.0 && git push origin v0.2.0
+just verify-release dist/release    # the machine-readable gate, --all
+```
+
+`.github/workflows/release.yml` then builds the macOS universal dmg (signed,
+notarized, stapled), the Windows NSIS installer, the direct-channel Android APK
+and `latest.json`, and verifies its own output. A server-only hotfix is tagged
+`server-v…` and skips the client jobs, because clients are not recallable and an
+update prompt for a fix that does not touch one is noise (A353).
+
+The full sequence, the versioning table, the store checklists and the launch
+checklist are **`docs/RELEASE.md` § Release process** — that document is
+normative (A354), and this section points at it rather than restating it.
+
+## Mobile
+
+The iOS and Android apps are the same SPA in `app/`, packaged by Tauri. The two
+commands the roadmap's verification gate names:
+
+```bash
+npm --prefix app install
+./app/node_modules/.bin/tauri ios build --export-method release-testing   # TestFlight
+./app/node_modules/.bin/tauri android build --apk                         # the direct channel
+```
+
+`tauri build` sets `TAURI_ENV_PLATFORM` to the target it is packaging and runs
+`beforeBuildCommand` with it, so the bundle a phone installs is the
+**store-stamped** one — which is what `scripts/check-no-purchase-ui.mjs` requires
+and why `app/dist` has to hold the store build when that check runs by hand. The
+iOS project is committed at `src-tauri/gen/apple`; Android needs
+`tauri android init` once first, which commits `src-tauri/gen/android`.
+
+**The store builds sell nothing** (A352): billing is QRIS on the web and the
+desktop app, the mobile policy is enforced at compile time by
+`config/billing_policy.toml`, and the direct-download APK is signed by a
+**different key** from Play's. `scripts/check-mobile-no-purchase.sh <artifact>`
+is the evidence for that against the packaged artifact rather than against a build
+directory.
+
+The per-store submission checklists — privacy labels, the Data Safety form,
+review notes, build numbers, which key signs which artifact — are
+**`docs/RELEASE.md` § Store submission checklists**, and the policy risk they
+manage is § Store policy risk. Two rows there are typed `blocked` rather than
+`code` (in-app account deletion, and the public deletion URL); both are named
+rather than quietly omitted.
+
 ## Layout
 
 ```
@@ -236,7 +336,7 @@ prompts/         versioned prompt modules
 templates/       print templates (cheatsheet PDF)
 migrations/      sqlx migrations; 0017 attaches sync triggers and must stay last
 docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md,
-                 RELEASE.md, THREAT_MODEL.md
+                 RELEASE.md, OPERATIONS.md, EULA.md, THREAT_MODEL.md
 ```
 
 ## Documentation
@@ -247,6 +347,14 @@ docs/            SPEC.md, ASSUMPTIONS.md, ARCHITECTURE.md, API.md, SYNC.md,
   capability matrix, prototype results.
 - `docs/API.md`. Routes, conventions, SSE event shapes.
 - `docs/SYNC.md`. Cursor model, push allowlist, conflict rules, offline scope.
+- `docs/RELEASE.md`. The normative release document: what is distributed and
+  under which policy, the release process, the store submission checklists and
+  the launch checklist.
+- `docs/OPERATIONS.md`. The day-two runbook: the production host checklist, the
+  deploy sequence, backups and the restore drill, monitoring, the breach runbook
+  and retention. Shorter on purpose — it is the one an operator opens during an
+  incident.
+- `docs/EULA.md`. A **draft requiring legal review**; not published.
 - `docs/THREAT_MODEL.md`. The normative trust boundary: assets, attacker
   classes, what a modified client can and cannot do, residual risks, and the
   per-phase verification obligations that follow.

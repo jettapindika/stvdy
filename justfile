@@ -362,3 +362,43 @@ smoke-phase13:
     QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_API_KEY=smoke-qris-key \
       QRIS_CALLBACK_TOKEN=smoke-callback-token QRIS_SIGNATURE_SCHEME=hmac_sha256_hex \
       BASE=http://localhost:8099 bash scripts/smoke-phase13.sh
+
+# --- release (Phase 15) ---
+# The four commands an operator runs most, aliased so the command in `docs/RELEASE.md`
+# and `docs/OPERATIONS.md` is the same string as the one typed here. Two documents that
+# both explain the release drift within a month; one that points at the other does not.
+#
+# The tag is the image's, and it is the one thing an operator has to get right: every
+# command below names the image it acts on, so `IMAGE=stvdy-server:v0.2.0 just image`
+# and `IMAGE=stvdy-server:v0.2.0 just image-check` are the same artifact.
+image_tag := env("IMAGE", "stvdy-server:local")
+
+# Build the server image. `--shm-size` and a writable `/tmp` are the *run* flags Chromium's
+# sandbox needs (A338), not build flags; `just image-check` and `docs/OPERATIONS.md` carry
+# them.
+image:
+    docker build -t {{image_tag}} .
+
+# Build the image, boot it against Postgres, probe `/health` and the `/assets/` route, and
+# run the PDF acceptance test **inside the container** (A337). `docs/OPERATIONS.md` tells an
+# operator to run this **on the production host** before deploying: "works in CI" and "works
+# on this host" are different claims, and the second one is the one that ships.
+image-check:
+    IMAGE={{image_tag}} bash scripts/release-image.sh
+
+# The machine-readable release gate against a directory of built artifacts (A332-A334).
+# `--all` is version + macOS + Windows + the manifest, and the manifest is read from the
+# same directory: the four commands `docs/RELEASE.md` § Release process step 5 lists, with
+# one directory argument instead of four. It **refuses to run (exit 2)** when the updater's
+# signing key is in the environment, because a verifier that can sign cannot establish that
+# the signature is the operator's.
+verify-release dir:
+    bash scripts/verify-release-artifacts.sh --all --dir {{dir}} --manifest-dir {{dir}}
+
+# The backup restore drill (A347). The arguments are the script's own: the dump to restore
+# and the scratch database to restore into — never production. `--source-url` is optional
+# and only adds the row-count comparison against the live database. It prints `=== PASS`, and
+# its output goes into `docs/OPERATIONS.md` with a date, because a backup that has never been
+# restored is a hope.
+restore-drill dump target source="":
+    bash scripts/restore-drill.sh --dump {{dump}} --target-url {{target}}{{ if source != "" { " --source-url " + source } else { "" } }}
