@@ -137,7 +137,10 @@ fn the_plugin_class_only_holds_the_webview_for_its_lifecycle_hook() {
 #[test]
 fn neither_native_seam_emits_a_frontend_event() {
     for (name, source) in [
-        ("Scheduler.swift", include_str!("../ios/Sources/Scheduler.swift")),
+        (
+            "Scheduler.swift",
+            include_str!("../ios/Sources/Scheduler.swift"),
+        ),
         (
             "MobilePlugin.swift",
             include_str!("../ios/Sources/MobilePlugin.swift"),

@@ -16,9 +16,17 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
-    tauri_plugin::Builder::new(COMMANDS)
+    // `expect` is denied in this crate: the shell's lint block reaches it through
+    // `[lints] workspace = true`, and the project's rule is "no `expect` in non-test
+    // code". A build script that panics also prints a Rust backtrace, where the reader
+    // needs the ACL generator's own error — so the cause is printed and the build
+    // fails, which is the same shape `tauri_plugin::Builder::build` uses internally.
+    if let Err(error) = tauri_plugin::Builder::new(COMMANDS)
         .android_path("android")
         .ios_path("ios")
         .try_build()
-        .expect("the mobile plugin's ACL could not be generated");
+    {
+        eprintln!("stvdy-mobile: the plugin's ACL could not be generated: {error:#}");
+        std::process::exit(1);
+    }
 }

@@ -25,7 +25,9 @@ use tauri::{
     plugin::{Builder, TauriPlugin},
 };
 
-pub use commands::{ScheduleAck, mobile_background_sync, mobile_scheduler_register, mobile_share_intake};
+pub use commands::{
+    ScheduleAck, mobile_background_sync, mobile_scheduler_register, mobile_share_intake,
+};
 pub use intake::{INBOX_DIR, IntakeError, SharedFile};
 pub use scheduler::{
     BackgroundReport, BackgroundSync, MIN_INTERVAL_MINUTES, PROCESSING_TASK_ID, PassOutcome,

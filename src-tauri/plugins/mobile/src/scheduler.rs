@@ -77,8 +77,9 @@ pub struct PassOutcome {
 /// `Send + Sync` because it is managed as app state and read from whichever thread
 /// the OS woke the app on. Boxed because a background entry point has no place to
 /// thread a generic through.
-pub type SyncPass =
-    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<PassOutcome, String>> + Send>> + Send + Sync>;
+pub type SyncPass = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<PassOutcome, String>> + Send>> + Send + Sync,
+>;
 
 /// The injected pass, as Tauri manages it.
 pub struct BackgroundSync {

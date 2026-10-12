@@ -98,7 +98,8 @@ pub fn accept<R: Runtime>(
     };
 
     let sidecar = inbox.join(format!("{id}.json"));
-    let encoded = serde_json::to_vec(&file).map_err(|error| IntakeError::Write(error.to_string()))?;
+    let encoded =
+        serde_json::to_vec(&file).map_err(|error| IntakeError::Write(error.to_string()))?;
     std::fs::write(&sidecar, encoded).map_err(|error| IntakeError::Write(error.to_string()))?;
 
     tracing::info!(
