@@ -17,4 +17,6 @@ pub mod render;
 pub mod retrieval;
 pub mod search;
 pub mod sm2;
+pub mod study;
+pub mod tasks;
 pub mod traits;
