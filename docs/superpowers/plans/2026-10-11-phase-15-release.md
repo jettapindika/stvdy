@@ -1939,12 +1939,34 @@ node scripts/check-no-cdn.mjs
       on a missing file → **exit 0** with `credentials: none -- the real run would refuse
       (exit 2)`, so the dry run prints the plan and the real run refuses before it submits
       anything.
+      **And the bundle itself was produced and measured, which is the artifact this item names — the
+      three checks above were first run against a bare `--no-bundle` executable, where they mean less.**
+      `tauri build --target universal-apple-darwin --bundles dmg --config
+      '{"bundle":{"createUpdaterArtifacts":false}}'` (the updater-signing override, because the committed
+      `pubkey` is still the operator's placeholder and no `TAURI_SIGNING_PRIVATE_KEY` exists) exits **0**
+      and writes **`Stvdy_0.1.2_universal.dmg` (9,733,354 bytes)**. Mounted, its inner app reports
+      `lipo -archs` → **`x86_64 arm64`** and `Format=app bundle with Mach-O universal (x86_64 arm64)` — so
+      the item's **first clause passes on the bundled artifact**, not merely on the intermediate binary.
+      The same three checks against the `.dmg` return **1 / 3 / 65** with the identical messages, and
+      `codesign -dv` on the inner app gives the cause: `flags=0x20002(adhoc,linker-signed)`,
+      `Signature=adhoc`, `TeamIdentifier=not set`. **The bundling step does not sign with the development
+      identity**, so the remaining blocker is exactly the certificate — and the `unsigned-artifacts.yml`
+      path the operator will use is now exercised locally, which it had not been.
 - [ ] The NSIS installer is signed, SHA-256, and timestamped, and `osslsigncode verify`
       says so.
-      **NOT MEASURED** — no NSIS installer was built or signed here: `tauri build` for
-      `x86_64-pc-windows-msvc` needs a Windows host or a cross-toolchain this machine does
-      not have, the signing certificate is the operator's, and `osslsigncode` is not
-      installed. `release.yml`'s Windows job is what would produce it.
+      **NOT MEASURED, and the two reasons are independent — the cross-compile cannot work and the
+      signing half has no artefact to check.** `x86_64-pc-windows-msvc` was attempted and fails in
+      `aws-lc-sys`'s C build on `windows.h` and `stdlib.h` file not found: no Windows SDK is
+      installed, and the `-msvc` target additionally needs `link.exe`, so a macOS cross-compile is
+      not a path to this installer at all — `release.yml`'s Windows runner is, and the certificate
+      is the operator's. **`osslsigncode` *is* installed now** (2.14_1), which the earlier version of
+      this note said it was not, and its fail-closed behaviour is measured rather than assumed:
+      `osslsigncode verify -in <a Mach-O binary>` exits **1** with `Initialization error or
+      unsupported input file type`, and a truncated PE does the same. So the tool refuses what it
+      cannot parse rather than reporting a pass — but an **unsigned** PE would fail it by
+      construction too, which is why installing it could not convert this box to a tick. What would:
+      a signed installer from a Windows host. `scripts/verify-release-artifacts.sh --windows --dir
+      <empty>` already produces the named `FAIL windows: no .exe under …` refusal without one.
 - [ ] `Dockerfile` installs a **pinned** Chromium (asserted equal to the running
       container's `--version`), pdfium at a verified checksum, the embedding model at an
       absolute `FASTEMBED_CACHE_DIR`, and LibreOffice behind `SOFFICE_BIN`.
@@ -1958,10 +1980,10 @@ node scripts/check-no-cdn.mjs
   - **The `pdf` acceptance test passes, against a real Chromium** — `cargo test -p stvdy-server --test pdf -- --ignored` → **3 passed / 0 failed**, including `the_cheatsheet_renders_to_a_six_page_a4_pdf` (4.39s). That is the phase's acceptance test doing the thing it exists for: a six-page A4 PDF from the real renderer. It needs Chromium, which is why it is `#[ignore]`d; running it here proves the test and the renderer, and what the image adds is *its pinned* Chromium (`CHROMIUM_VERSION`, whose pin was verified separately above).
   - **`--migrate-only` migrates and does not bind, asserted on the running binary** — `crates/server/tests/release.rs::migrate_only_exits_zero_without_binding` spawns `stvdy-server --migrate-only` against a scratch database and asserts four things, not one: exit 0; `_sqlx_migrations` has rows, so a process that parsed the flag and returned fails; `plans` is seeded; and **nothing is listening** — no `listening` in stdout *and* a `TcpStream::connect` to the chosen port that must fail. Its own comment names why that last assertion is the one that matters: "it exited 0" is equally true of a process that bound a port and crashed. It runs in `just check` (green).
   - **`/health`** is the route `crates/server/tests/health.rs` covers, and `scripts/release-image.sh` is what runs all three in-container. **The half that needs the image is unchanged and is the operator's:** `just image-check` on a host with a working Docker.
-- [x] The container runs as a non-root user with Chromium's sandbox enabled.
-      **THE TWO FACTS ARE NOW ASSERTED, AND THEY WERE ASSERTED BY NOTHING BEFORE THIS.** A property of the running container still needs a container — but the chain that *produces* it is three facts across three files, and it now has a test: `crates/server/tests/release.rs::the_container_is_non_root_and_renders_with_the_sandbox_on` asserts that `Dockerfile`'s last `USER` is not root and that the non-root user is created with a fixed uid (`--uid 10001`, so a mounted volume has predictable ownership), that the image's `APP_ENV` is `prod`, and that `integrations/mod.rs` derives the renderer's sandbox from `cfg.env.is_dev()` rather than defaulting it on. The chain it closes: `APP_ENV=prod` → `is_dev()` false → `allow_no_sandbox` false → `chrome.rs` launches with `.sandbox(true)`. **A reader could follow that chain before; what nothing could do is notice a later change that breaks it** — flipping `APP_ENV` to `dev` for convenience, or dropping the `USER` line while debugging, produces a container that renders model-influenced HTML unsandboxed as root and reports nothing. That is the roadmap's own "a control that is configured but not enforced" row.
+- [ ] The container runs as a non-root user with Chromium's sandbox enabled.
+      **THE ENFORCED HALF IS ASSERTED AND THE OBSERVED HALF IS NOT, which is why this box stays unticked — deliberately the same shape as the `pdf` item above.** The item says the container **runs** non-root with the sandbox on, and that is a statement about a running container; no container ran, so it is not met. What *is* met, and was asserted by nothing before this: the configuration that makes it true. A property of the running container still needs a container — but the chain that *produces* it is three facts across three files, and it now has a test: `crates/server/tests/release.rs::the_container_is_non_root_and_renders_with_the_sandbox_on` asserts that `Dockerfile`'s last `USER` is not root and that the non-root user is created with a fixed uid (`--uid 10001`, so a mounted volume has predictable ownership), that the image's `APP_ENV` is `prod`, and that `integrations/mod.rs` derives the renderer's sandbox from `cfg.env.is_dev()` rather than defaulting it on. The chain it closes: `APP_ENV=prod` → `is_dev()` false → `allow_no_sandbox` false → `chrome.rs` launches with `.sandbox(true)`. **A reader could follow that chain before; what nothing could do is notice a later change that breaks it** — flipping `APP_ENV` to `dev` for convenience, or dropping the `USER` line while debugging, produces a container that renders model-influenced HTML unsandboxed as root and reports nothing. That is the roadmap's own "a control that is configured but not enforced" row.
       **Falsified three ways before committing, and the first attempt found a defect in the test itself.** Planting `APP_ENV=dev` → `APP_ENV must be `prod` in the image`; planting `USER root` → `the container must not run as root`; deleting the `USER` line → `the Dockerfile names no USER, so the image runs as root`. **The first run of the test did *not* catch the `APP_ENV=dev` plant**, because `ENV APP_ENV=prod \` ends in a continuation backslash and `trim()` left `"dev \"`, which is not `"dev"` — so the assertion passed on the exact defect it exists for. The value is now taken as the first whitespace-separated token, and that near-miss is recorded in the test's own comment rather than quietly fixed.
-      **What is still the running container's, stated rather than implied:** whether the image *builds*, whether the process is uid 10001 at runtime, and whether Chromium actually launches with the sandbox in the container. Those need a Docker daemon, and this machine's does not start.
+      **What is still the running container's, stated rather than implied:** whether the image *builds*, whether the process is uid 10001 at runtime, and whether Chromium actually launches with the sandbox in the container. Those need a Docker daemon, and this machine's does not start — so the box stays unticked with the test named as the enforced half.
 - [x] The template's CDN references are rewritten to the server's `/assets/` route, the
       route serves KaTeX and the fonts with the right content types, and a rewrite that
       left a remote reference fails a test.
@@ -1993,7 +2015,7 @@ node scripts/check-no-cdn.mjs
       names the fonts the product actually ships and the image's components.
 - [ ] `docs/OPERATIONS.md` covers the host checklist, deployment, backups with a restore
       drill, monitoring with thresholds, the breach runbook and retention.
-      **PART MEASURED, and the drill's own refusal path is now measured too.** `docs/OPERATIONS.md` exists and carries § The production host, § Deploying a new image, § Backups and the restore drill (A347), § Monitoring and alerting (A348), § The breach runbook (A349) and § Retention (A349); `scripts/restore-drill.sh` is `bash -n` clean. **The drill itself is NOT MEASURED** — it needs a real Postgres and an R2 bucket to run against. What *was* measured is that it fails closed rather than pretending: with no argument it exits **2** with `restore-drill: --dump is required: the drill restores a real backup, not a fixture`, so a drill that was never pointed at a backup cannot report a restore it did not do. That is the property worth having from a script whose output a reader would otherwise take as evidence of a working backup.
+      **PART MEASURED, and the drill's own refusal path is now measured too.** `docs/OPERATIONS.md` exists and carries § The production host, § Deploying a new image, § Backups and the restore drill (A347), § Monitoring and alerting (A348), § The breach runbook (A349) and § Retention (A349); `scripts/restore-drill.sh` is `bash -n` clean. **The drill itself is now MEASURED, and the R2 half of the stated blocker was wrong** — `scripts/restore-drill.sh` takes `--dump`/`--target-url`/`--source-url`/`--tolerance` and needs `psql` and `sqlx`, nothing else; R2 belongs to the *backup* path (`rclone copy` in `docs/OPERATIONS.md`), not the drill. **Run 2026-10-12 against the development database: exit 0**, restoring a 1,088,100-byte `pg_dump -Fc` into a scratch database, `36 installed, 0 pending, 0 missing`, and all sixteen `+sync` tables matching (812 rows) — recorded in `docs/OPERATIONS.md` § Backups and the restore drill. **What remains open is the *production* run** (launch-checklist row 14), which is typed `code + user` because it needs the production host. What *was* measured is that it fails closed rather than pretending: with no argument it exits **2** with `restore-drill: --dump is required: the drill restores a real backup, not a fixture`, so a drill that was never pointed at a backup cannot report a restore it did not do. That is the property worth having from a script whose output a reader would otherwise take as evidence of a working backup.
 - [x] Both store checklists exist, `scripts/check-mobile-no-purchase.sh` passes against the
       built mobile bundle **and fails on an empty directory**, and the policy-risk note
       carries its confirmation step.
