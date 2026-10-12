@@ -253,8 +253,16 @@ would silently corrupt the margin report.
   recompute already runs); `crates/core/src/planner/` (11); and from **12**: the reminder
   engine, the `send_reminder`/`send_push` jobs and the `PushProvider`/`Mailer` delivery
   path. **`renewal_reminder` (Task 8) is a producer into Phase 12's delivery, not a second
-  delivery path** — it enqueues the same `send_push`/`send_reminder` rows Phase 12 built,
-  and its own test asserts the *enqueue*, not the transport.
+  delivery path** — it writes the `reminders` rows Phase 12 built and lets `send_reminder`
+  deliver them, and its own test asserts the *enqueue*, not the transport.
+- **A payment receipt is not a reminder, and the webhook must not enqueue one.** The plan's
+  Task 5 sentence saying the webhook "enqueues the notification" is plan-looseness rather than
+  an interface: `send_push`'s payload is **reminder-id-based** and
+  `reminder_deliveries.reminder_id` is `not null` with `unique (reminder_id, channel, device_id)`,
+  so a receipt would need a `reminders` row nothing else produces — and then it would be subject
+  to the reminder engine's dedupe key, quiet hours and per-channel entitlement, none of which
+  apply to a receipt the student paid for. **The receipt goes through `Mailer` directly.** What
+  *is* Phase 12's delivery path is the renewal reminder above, which genuinely is a reminder.
 - **The SPA** already has `app/src/features/billing/{plans.ts,policy.ts}` (the
   `config/plans.toml` and `config/billing_policy.toml` readers, with `DENY` as the
   parse-failure direction), `app/src/components/ui/LockedFeature.tsx` (`whatKey`,
