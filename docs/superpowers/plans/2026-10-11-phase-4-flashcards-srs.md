@@ -3684,15 +3684,18 @@ git commit -m "docs(phase 4): the API, the derived-schedule property, and both g
       not the card, and the drop is counted.
 - [x] A generation that fails for good refunds the credits exactly once.
 - [ ] `flashcards_per_month` is enforced in the user's local month, via
-      `limits::enforce_batch`, with no hardcoded number.
+      `limits::enforce_batch`, with no hardcoded number. — **the enforcement is real, the named function is not.** `flashcards_per_month` is enforced in the user's own local month and asserted by `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight` (9 passed / 0 failed), with the per-plan number coming from `config/plans.toml` and never a hardcoded literal. But **`limits::enforce_batch` does not exist at HEAD** — Phase 7's `entitlements::check` superseded it by design (A85, A146), and `check.rs:225` refers to it only as the historical shim. So the box stays unticked: a tick for a superseded step hides the supersession, which is exactly the class this project has already been bitten by twice (`daily_chat_count`, and A160).
+
 - [x] Two devices' reviews replay to identical `ease`/`interval_days`/`due_at`, and a
       duplicate review id applies once.
 - [x] The study screen reviews a deck by keyboard and by swipe, and says what it
       costs before charging.
-- [ ] Roadmap gate 5 (accessibility) performed and recorded.
-- [ ] Roadmap gate 6 (Indonesian) performed and recorded.
+- [ ] Roadmap gate 5 (accessibility) performed and recorded. — **NOT MEASURED.** No Phase 4 accessibility measurement exists in any document, and the plan has no Execution notes section for one to live in. The study screen (`app/src/features/study/StudyScreen.tsx`) is one of the three surfaces this project has never measured — see Phase 0's box and Phase 1's, and the handover's findings section. It is a real gap rather than a formality: the study screen is the one a student uses most.
+
+- [x] Roadmap gate 6 (Indonesian) performed and recorded. — **PASS, and the evidence exists even though the plan never recorded it.** `crates/server/tests/flashcards.rs`'s `a_deck_generates_cards_linked_to_their_chunk` runs the whole path on an **Indonesian** source: the card's front is `Apa fungsi three-way handshake?`, the card links to a real chunk of that source (`chunk_id` non-null), and the prompt that produced it is asserted to carry `the same language as the source material`. The retrieval half of gate 6 is `crates/server/tests/indonesian.rs` (4 passed / 0 failed, including the `simple` tsvector config and the query-prefix convention). Recorded here rather than left blank because the gate was in fact performed — by a test whose name does not say so.
+
 - [x] `docs/{API,ARCHITECTURE,ASSUMPTIONS}.md` updated in the same commit as the code.
-- [ ] The full quality gate is green.
+- [x] The full quality gate is green. — **PASS, measured 2026-10-12.** `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; **`cargo test --workspace --no-fail-fast` exit 0**, every target ok, this phase's own suites among them (`flashcards` 22/0, `study` 6/0, core `sm2` 6/0, core `generation_flashcards` 9/0); `npm --prefix app test` 66 files / 604 tests / 0 failed; `npm --prefix app run build` exit 0. This is the first green run of the workspace gate in the project's history.
 
 ---
 
@@ -3701,12 +3704,12 @@ git commit -m "docs(phase 4): the API, the derived-schedule property, and both g
 Phase 4 is the one plan of the five whose file carries no `## Execution notes (Phase 4, as
 built)` section, so its boxes were ticked against the artefacts at HEAD and the commits that
 landed them (`b7345c7`, `ab73ec0`, `0f47a04`, `c16e8f3`, `6574ee6`) rather than against a
-written account. Four boxes stay unticked:
+written account. Two boxes stay unticked, and the other two are now resolved:
 
   - Exit checklist, "`flashcards_per_month` is enforced ... via `limits::enforce_batch`" -- the enforcement itself is real (`crates/server/src/entitlements.rs`, asserted by `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`), but the function this box names does not exist at HEAD: Phase 7's `entitlements::check` superseded it by design (A85, A146), so the named artefact cannot be confirmed.
   - Exit checklist, "Roadmap gate 5 (accessibility) performed and recorded" -- no record: no document in the tree states this phase's accessibility measurement, and the phase's own file has no notes section to carry one.
-  - Exit checklist, "Roadmap gate 6 (Indonesian) performed and recorded" -- no record, for the same reason.
-  - Exit checklist, "The full quality gate is green" -- no record: no execution notes and no commit in the phase's history records its gate run.
+  - Exit checklist, "Roadmap gate 6 (Indonesian) performed and recorded" -- **resolved 2026-10-12: the gate WAS performed, by a test whose name does not say so.** `crates/server/tests/flashcards.rs::a_deck_generates_cards_linked_to_their_chunk` runs the whole path on an Indonesian source, asserts the card links to a real chunk of it, and asserts the prompt carries `the same language as the source material`; the retrieval half is `crates/server/tests/indonesian.rs` (4/0). The box is now ticked above with that evidence, and the reason it was blank for so long is the lesson: a gate recorded only in a test's behaviour, never in the plan, reads as unperformed.
+  - Exit checklist, "The full quality gate is green" -- **resolved 2026-10-12**, and it is now ticked above with the command and the counts. It was genuinely unrecorded: this phase has no Execution notes section, so its gate had nowhere to be written down even though the suites existed.
 
 
 ---
