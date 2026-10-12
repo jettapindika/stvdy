@@ -539,7 +539,7 @@ scripts/smoke-phase10.sh                    # NEW
 - Modify: `crates/core/src/lib.rs`
 - Create: `crates/core/tests/calendar.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/core/tests/calendar.rs`:
 
@@ -626,7 +626,7 @@ fn a_deadline_is_an_all_day_event_in_the_users_zone() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 cargo test -p stvdy-core --test calendar
@@ -634,7 +634,7 @@ cargo test -p stvdy-core --test calendar
 Expected: `error[E0432]: unresolved import stvdy_core::calendar` — the module does not exist
 and neither crate is pinned.
 
-- [ ] **Step 3: Pin the crates**
+- [x] **Step 3: Pin the crates**
 
 In `Cargo.toml` `[workspace.dependencies]`, next to `chrono-tz`:
 
@@ -664,7 +664,7 @@ icalendar.workspace = true
 rrule.workspace = true
 ```
 
-- [ ] **Step 4: Write the module**
+- [x] **Step 4: Write the module**
 
 `crates/core/src/calendar/mod.rs`:
 
@@ -714,14 +714,14 @@ pub fn render_feed(events: &[FeedEvent]) -> String;
 pub fn fold_line(line: &str) -> String;
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 ```
 cargo test -p stvdy-core --test calendar
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(core): the ICS feed, with a stable UID and a SEQUENCE that moves
@@ -736,7 +736,7 @@ feat(core): the ICS feed, with a stable UID and a SEQUENCE that moves
 - Modify: `crates/core/src/calendar/mod.rs`
 - Modify: `crates/core/tests/calendar.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `crates/core/tests/calendar.rs`:
 
@@ -789,14 +789,14 @@ fn a_utc_event_is_taken_as_utc() { /* … */ }
 fn a_malformed_vevent_is_reported_and_the_rest_survive() { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 cargo test -p stvdy-core --test calendar expansion
 ```
 Expected: `cannot find function expand_feed`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Add `pub mod expand;` to `crates/core/src/calendar/mod.rs` (the module is declared here, not
 in Task 1, so Task 1's tree compiles on its own), then write
@@ -861,14 +861,14 @@ sets `limited` when the collection merely *reached* the limit. Ask for `MAX_OCCU
 keep the first `MAX_OCCURRENCES`, and `limited` then means what it says. A232 records
 `error = 'recurrence_truncated'` from that flag and never from a length comparison.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```
 cargo test -p stvdy-core --test calendar
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): bounded recurrence expansion, and the hang it prevents
@@ -882,7 +882,7 @@ feat(core): bounded recurrence expansion, and the hang it prevents
 - Create: `migrations/0030_calendar.sql`
 - Modify: `crates/server/tests/schema.rs`
 
-- [ ] **Step 1: Confirm the number and the trigger rule**
+- [x] **Step 1: Confirm the number and the trigger rule**
 
 ```
 ls migrations/
@@ -896,7 +896,7 @@ adjust this task's filename and every reference to it in this plan.
 Confirm `migrations/0017_sync_triggers.sql` is **not** in this task's diff, and that no new
 table is `+sync`.
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 ```sql
 -- Calendar connections. `calendar_connections` and `events` come from 0013; this adds
@@ -937,7 +937,7 @@ create index on calendar_connections (provider, last_synced_at);
 -- constraint that refuses the row would be a second source of truth for what a plan grants.
 ```
 
-- [ ] **Step 3: Apply it and check the assertions**
+- [x] **Step 3: Apply it and check the assertions**
 
 Add to `crates/server/tests/schema.rs`:
 
@@ -963,7 +963,7 @@ async fn calendar_connections_is_still_not_synced(pool: PgPool) {
 cargo test -p stvdy-server --test schema
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 feat(db): the calendar connection's state, and the poll watermark
@@ -979,7 +979,7 @@ feat(db): the calendar connection's state, and the poll watermark
 - Modify: `crates/server/tests/route_sweep.rs`
 - Create: `crates/server/tests/calendar.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `crates/server/tests/calendar.rs`:
 
@@ -1033,14 +1033,14 @@ async fn the_feed_validates_and_a_regenerated_token_stops_working(pool: PgPool) 
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 cargo test -p stvdy-server --test calendar
 ```
 Expected: `404` for the feed route (it does not exist) and `cannot find function routes`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `crates/server/src/calendar/mod.rs`:
 
@@ -1084,7 +1084,7 @@ Register in `crates/server/src/routes/mod.rs`: `feed` in `public_routes` (beside
 The feed route goes in the **auth limiter** bucket too — it is an unauthenticated database
 lookup (A243).
 
-- [ ] **Step 4: Add the route-sweep rows**
+- [x] **Step 4: Add the route-sweep rows**
 
 In `crates/server/tests/route_sweep.rs`, `exempt_rows()` gains:
 
@@ -1097,14 +1097,14 @@ and `read_only_rows()` gains:
 ro("POST", "/calendar/ics-token/regenerate", "rotating the feed token grants nothing and spends nothing"),
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 ```
 cargo test -p stvdy-server --test calendar
 cargo test -p stvdy-server --test route_sweep
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(server): the ICS feed route and its revocable token
@@ -1121,7 +1121,7 @@ feat(server): the ICS feed route and its revocable token
 - Modify: `crates/server/tests/ssrf.rs`
 - Modify: `crates/server/tests/calendar.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `crates/server/tests/ssrf.rs` gains:
 
@@ -1185,7 +1185,7 @@ async fn an_ics_url_that_is_not_fetchable_is_refused_when_it_is_saved(pool: PgPo
 async fn a_truncated_recurrence_imports_what_it_read_and_records_the_error(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```
 cargo test -p stvdy-server --test ssrf guarded_text
@@ -1193,7 +1193,7 @@ cargo test -p stvdy-server --test calendar ics
 ```
 Expected: `cannot find function fetch_guarded_text`, and `404` for `/calendar/ics`.
 
-- [ ] **Step 3: Add the raw fetch**
+- [x] **Step 3: Add the raw fetch**
 
 In `crates/server/src/integrations/fetch.rs`:
 
@@ -1221,7 +1221,7 @@ re-check, extracted from `ReqwestFetcher::fetch` into a shared
 `async fn guarded_request(url: &str, accept: &str, validators: Option<(&str, &str)>, raw: bool)`
 so there is one redirect loop and not two.
 
-- [ ] **Step 4: Write the importer**
+- [x] **Step 4: Write the importer**
 
 `crates/server/src/calendar/ics_in.rs`:
 
@@ -1264,14 +1264,14 @@ async fn upsert_occurrence(tx: &mut PgConnection, connection: &ConnectionRow, o:
     -> AppResult<()>;
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 ```
 cargo test -p stvdy-server --test ssrf
 cargo test -p stvdy-server --test calendar
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(server): ICS import through the same SSRF guard, with a conditional GET
@@ -1611,7 +1611,7 @@ feat(server): Google two-way sync, incremental, with a 410 fallback
   `crates/server/src/jobs/schedule.rs`, `crates/server/src/calendar/mod.rs`
 - Modify: `crates/server/tests/calendar.rs`, `crates/server/tests/route_sweep.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The poll is a row with a windowed dedupe key (A238): a restart, a second instance or
@@ -1648,14 +1648,14 @@ async fn the_poll_job_is_dedupe_guarded_and_a_manual_sync_is_rate_limited(pool: 
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```
 cargo test -p stvdy-server --test calendar poll
 ```
 Expected: `cannot find function run_scheduler_pass`.
 
-- [ ] **Step 3: Write the handler and the scheduler pass**
+- [x] **Step 3: Write the handler and the scheduler pass**
 
 `crates/server/src/jobs/handlers/calendar.rs`:
 
@@ -1685,7 +1685,7 @@ Sweep rows: `POST /calendar/sync` is `Swept` (feature `GoogleCalendar`, 403 `pla
 `POST /calendar/ics` and `DELETE /calendar/connections/{id}` are `ReadOnly` (an ICS
 connection is available on free, and deleting one is the remedy a refusal names).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```
 cargo test -p stvdy-server --test calendar
@@ -1693,7 +1693,7 @@ cargo test -p stvdy-server --test route_sweep
 cargo test -p stvdy-server --test jobs
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): the calendar poll, as rows the existing worker runs
@@ -1740,14 +1740,14 @@ cargo test -p stvdy-server --test calendar read_only
 Expected: fails on the last block — the update path either refuses the sync's own write or
 fails to update the row.
 
-- [ ] **Step 3: Make it pass**
+- [x] **Step 3: Make it pass**
 
 If the sync's write is refused, the rule has leaked into a trigger or into a shared
 validator. Move it back to the route and the push validator. No production change is
 expected here; the test is the guard, and the failure it catches is a later refactor that
 "tidies" the check into the wrong layer.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```
 cargo test -p stvdy-server --test calendar
@@ -1755,7 +1755,7 @@ cargo test -p stvdy-server --test events
 cargo test -p stvdy-server --test tamper
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 test(server): the sync writes the columns the routes refuse, and the rule stays in the routes
@@ -2231,6 +2231,13 @@ named as moved rather than overwritten silently.
 - **Gate 6's composed browser measurement** at 200% scale, and **gate 5's desktop width**
   (1365×900) — the phone viewport was measured at both scales and both themes; the desktop
   pass was not run.
+
+### Boxes left unticked, and why
+
+  - Task 9 Step 1, "Write the failing test" -- the test it names, `a_calendar_sourced_event_is_read_only_to_a_client_and_writable_by_the_sync`, does not exist at HEAD; the assertions it describes were folded into `crates/server/tests/calendar.rs::an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validator` (`PATCH` 403, `DELETE` 403, `/sync/push` answering `read_only_entity`, and the re-poll renaming the row with `source` still `ics`), which is the test this phase's exit checklist rows 10 and 11 cite, so the named artefact cannot be confirmed.
+  - Task 9 Step 2, "Run it and watch it fail" -- the test this step runs is the one Step 1 names, which is absent, so the failure this step is written to observe was not observed for that test.
+  - Task 11 Step 7, "Roadmap gate 6 — Indonesian end to end" -- the UI half the step requires (a `2026-06-10T01:00Z` class driven onto the 10th in `Asia/Jakarta` in the browser at 200% text) was not done: the server data half is measured (`an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day`, `--test indonesian` 4 passed / 0 failed) and the phase's own gate-6 notes record the step as PARTIAL, so the step is not met.
+  - Task 11 Step 10, "Run the full gate" -- `cargo test --workspace`, one of the eight rows in the step's own table, is not green: it stops at `crates/server/tests/syllabus.rs` (14 passed / 5 failed, Phase 11's exit gate), so the step's table is not satisfied even though its other seven rows are.
 
 ---
 
