@@ -1872,9 +1872,7 @@ Phase 14's work needs to be reproducible, and it names the two build commands
 `just restore-drill` — the four commands an operator runs most, aliased so the documented
 command and the typed command are the same string.
 
-- [ ] **Step 5: Run the whole quality gate**
-
-*(Not ticked: not run by this slice — it is YAML, Markdown and justfile work, and `just check` plus the shell suite is the workspace gate another slice owns. `just check` also needs a reachable Postgres.)*
+- [x] **Step 5: Run the whole quality gate** — **ticked 2026-10-12: run whole, exit 0, with a reachable Postgres.** `just check` runs `check-rust check-web check-shell` and **exited 0** end to end. The counts, from that run: `cargo fmt --all -- --check` clean and `cargo clippy --workspace --all-targets -- -D warnings` clean; **1,134 workspace tests passed / 0 failed** across every target; `npm --prefix app test` **69 files / 632 tests / 0 failed**; `npm --prefix app run build` exit 0; `node scripts/check-no-cdn.mjs` → `no third-party loads in 3 shipped file(s)`; and the shell's own `cargo fmt/clippy --workspace` clean with **71 passed / 0 failed**. **The note below is worth keeping rather than deleting, because the run it predicted is the run that happened:** it said the pair was another slice's and that `just check` needs a reachable Postgres — both true, and the run above is that slice's, on that database. **One defect came out of this run and it was a real one, of the class this project has been bitten by before:** `crates/server/tests/reminders.rs` had two cases with a fixed `fire_at` of `2026-10-12T09:00:00Z` against an unpinned clock, so the suite was green until 09:05 UTC that morning and red from then on — a fixture with an expiry date. Both now pin the clock (`e3acbb5`), which is the convention the same file's quiet-hours case already documented.
 
 ```bash
 just check
@@ -1990,11 +1988,7 @@ node scripts/check-no-cdn.mjs
       names the fonts the product actually ships and the image's components.
 - [ ] `docs/OPERATIONS.md` covers the host checklist, deployment, backups with a restore
       drill, monitoring with thresholds, the breach runbook and retention.
-      **PART MEASURED** — `docs/OPERATIONS.md` exists and carries § The production host,
-      § Deploying a new image, § Backups and the restore drill (A347), § Monitoring and
-      alerting (A348), § The breach runbook (A349) and § Retention (A349), and
-      `scripts/restore-drill.sh` exists. The drill itself was **NOT MEASURED**: it needs a
-      real Postgres and R2 to run against.
+      **PART MEASURED, and the drill's own refusal path is now measured too.** `docs/OPERATIONS.md` exists and carries § The production host, § Deploying a new image, § Backups and the restore drill (A347), § Monitoring and alerting (A348), § The breach runbook (A349) and § Retention (A349); `scripts/restore-drill.sh` is `bash -n` clean. **The drill itself is NOT MEASURED** — it needs a real Postgres and an R2 bucket to run against. What *was* measured is that it fails closed rather than pretending: with no argument it exits **2** with `restore-drill: --dump is required: the drill restores a real backup, not a fixture`, so a drill that was never pointed at a backup cannot report a restore it did not do. That is the property worth having from a script whose output a reader would otherwise take as evidence of a working backup.
 - [x] Both store checklists exist, `scripts/check-mobile-no-purchase.sh` passes against the
       built mobile bundle **and fails on an empty directory**, and the policy-risk note
       carries its confirmation step.
