@@ -80,7 +80,122 @@
   },
   "billing": {
     "planAndUsage": "Paket dan pemakaian",
-    "seePlans": "Lihat paket"
+    "seePlans": "Lihat paket",
+    "buyCredits": "Beli kredit",
+    "packsLoading": "Memuat paket kredit",
+    "packsHint": "Kredit yang kamu beli tidak pernah kedaluwarsa, dan dipakai setelah jatah bulanan.",
+    "packsNeverExpire": "Paket kredit adalah pembelian sekali. Tidak diperpanjang otomatis.",
+    "packCredits_other": "{{count, number}} kredit",
+    "buyPack_other": "Beli {{count, number}} kredit",
+    "subscription": "Langganan",
+    "subscriptionHint": "Paketmu diperpanjang per periode prabayar dan dibayar dengan QRIS.",
+    "history": "Riwayat pembayaran",
+    "historyLoading": "Memuat pembayaranmu",
+    "noPayments": "Belum ada pembayaran",
+    "noPaymentsReason": "Pembayaran muncul di sini setelah kamu membeli paket atau paket kredit.",
+    "historyPack_other": "{{count, number}} kredit",
+    "historyPlan": "{{plan}}, {{period}}",
+    "period": {
+      "monthly": "bulanan",
+      "yearly": "tahunan"
+    },
+    "status": {
+      "pending": "Menunggu",
+      "paid": "Dibayar",
+      "expired": "Kedaluwarsa",
+      "failed": "Gagal",
+      "refunded": "Dana dikembalikan",
+      "review": "Sedang ditinjau"
+    }
+  },
+  "pricing": {
+    "title": "Paket",
+    "subtitle": "Periode prabayar, dibayar dengan QRIS. Semua harga adalah yang ditagih server.",
+    "loading": "Memuat paket",
+    "yearly": "Tahunan",
+    "monthly": "Bulanan",
+    "yearlyHint": "Satu pembayaran untuk 365 hari.",
+    "monthlyHint": "Satu pembayaran untuk 30 hari.",
+    "perMonth": " per bulan",
+    "perYear": " per tahun",
+    "free": "Gratis",
+    "current": "Paketmu",
+    "choose": "Pilih {{plan}}",
+    "creditsIncluded_other": "{{count, number}} kredit per bulan",
+    "studentBanner": "Alamat kampusmu sudah diverifikasi, jadi semua paket diskon {{percent}}%.",
+    "comparison": "Isi setiap paket",
+    "comparisonCaption": "Setiap paket dan batas yang ditetapkannya pada tiap sumbu.",
+    "axis": "Batas",
+    "faq": "Pertanyaan",
+    "faqItems": {
+      "cancel": {
+        "q": "Bisakah saya berhenti?",
+        "a": "Satu periode dibayar di muka, jadi berjalan sampai habis. Mematikan perpanjangan berarti tidak ada periode baru, dan tidak ada yang dihapus selama itu."
+      },
+      "payment": {
+        "q": "Bagaimana cara membayar?",
+        "a": "Dengan QRIS. Pindai kodenya dengan aplikasi bank atau dompet digital apa pun di Indonesia, dan paketmu aktif begitu pembayaran dikonfirmasi."
+      },
+      "mobile": {
+        "q": "Bisakah saya membayar dari ponsel?",
+        "a": "Tidak. Pembayaran dilakukan di web atau aplikasi desktop, lalu paketnya berlaku di semua perangkat yang kamu masuki."
+      },
+      "student": {
+        "q": "Bagaimana mendapatkan harga pelajar?",
+        "a": "Verifikasi alamat kampus Indonesia di Pengaturan. Diskonnya berlaku saat pembayaran, untuk paket yang kamu pilih."
+      }
+    }
+  },
+  "checkout": {
+    "title": "Pembayaran",
+    "subtitle": "Pindai kodenya dengan aplikasi QRIS apa pun. Halaman ini memperbarui sendiri.",
+    "loading": "Memuat tagihanmu",
+    "order": "Yang kamu bayar",
+    "qrLabel": "Kode QRIS untuk pembayaran ini",
+    "reference": "Pesanan {{orderId}}",
+    "expiresIn": "Kode kedaluwarsa dalam {{time}}",
+    "newCode": "Minta kode baru",
+    "retry": "Coba lagi",
+    "viewPlan": "Lihat paketmu",
+    "line": {
+      "credits": "Kredit",
+      "beforeDiscount": "Harga sebelum diskon",
+      "discountStudent": "Diskon pelajar",
+      "discountCode": "Kode {{code}}",
+      "total": "Total"
+    },
+    "state": {
+      "waiting": {
+        "chip": "Menunggu",
+        "title": "Menunggu konfirmasi",
+        "detail": "Kami belum menerima konfirmasi. Biarkan halaman ini terbuka — halaman ini memeriksa sendiri, dan paketmu aktif begitu pembayaran dikonfirmasi."
+      },
+      "paid": {
+        "chip": "Dibayar",
+        "title": "Pembayaran diterima",
+        "detail": "Paketmu aktif di semua perangkat tempat kamu masuk."
+      },
+      "expired": {
+        "chip": "Kedaluwarsa",
+        "title": "Kode ini sudah kedaluwarsa",
+        "detail": "Belum ada pembayaran yang dikonfirmasi untuk kode ini. Minta kode baru dan jumlahnya tetap sama."
+      },
+      "review": {
+        "chip": "Sedang ditinjau",
+        "title": "Kami sedang memeriksa pembayaran ini",
+        "detail": "Jumlah yang kami terima tidak cocok dengan tagihan ini, jadi ada orang yang memeriksanya. Jangan membayar lagi."
+      },
+      "failed": {
+        "chip": "Gagal",
+        "title": "Pembayaran tidak berhasil",
+        "detail": "Tidak ada pembayaran yang dikonfirmasi. Kamu bisa mencoba lagi dari halaman paket."
+      },
+      "offline": {
+        "chip": "Tidak terhubung",
+        "title": "Kami tidak bisa menghubungi Stvdy",
+        "detail": "Kodemu mungkin masih berlaku, jadi tidak ada yang hilang. Periksa koneksimu dan coba lagi."
+      }
+    }
   },
   "plan": {
     "subtitle": "Isi paketmu, pemakaianmu bulan ini, dan biaya setiap tindakan.",
@@ -795,7 +910,80 @@
   },
   "planner": {
     "rebalance": "Seimbangkan ulang mingguku",
-    "rebalanceReason": "Memindahkan dan memecah blok belajar saat satu minggu terlalu padat."
+    "rebalanceReason": "Memindahkan dan memecah blok belajar saat satu minggu terlalu padat.",
+    "subtitle": "Tujuanmu, apa yang masih perlu dipelajari, dan blok belajar yang diusulkan untuk minggu ini.",
+    "noun": "rencana",
+    "views": {
+      "label": "Tampilan penjadwal",
+      "plan": "Rencana",
+      "tasks": "Tugas"
+    },
+    "goals": {
+      "title": "Tujuan",
+      "loading": "Memuat tujuanmu",
+      "empty": {
+        "title": "Belum ada tujuan",
+        "reason": "Tujuan adalah ujian atau tenggat dengan tanggal. Impor silabus dan ujiannya menjadi tujuan, atau tambahkan sendiri.",
+        "action": "Impor silabus"
+      },
+      "past": "Tanggalnya sudah lewat",
+      "daysLeft_other": "Tersisa {{count}} hari"
+    },
+    "prep": {
+      "title": "Persiapan untuk {{goal}}",
+      "loading": "Memuat kemajuan persiapan",
+      "unavailable": "Kemajuan persiapan sedang tidak tersedia.",
+      "coverage": "Topik yang sudah dimulai",
+      "accuracy": "Akurasi kuis",
+      "cardsDue": "Kartu jatuh tempo",
+      "percent": "{{percent}}%",
+      "noTopics": "Belum ada topik",
+      "noQuizzes": "Belum ada kuis",
+      "weak": "Topik lemah",
+      "noWeak": "Belum ada topik lemah dari percobaanmu sejauh ini."
+    },
+    "workload": {
+      "title": "Direncanakan hari ini",
+      "ofLimit": "{{planned}} dari {{limit}} menit",
+      "over": "Hari ini melebihi batas belajar harianmu. Pindahkan atau hapus satu blok sebelum kamu terima.",
+      "under": "Masih di dalam batas belajar harianmu."
+    },
+    "proposal": {
+      "title": "Rencana minggu ini",
+      "what": "rencana",
+      "accept": "Tambahkan blok ini ke kalenderku",
+      "saving": "Menyimpan blok yang kamu simpan"
+    },
+    "suggest": "Usulkan rencana",
+    "suggestWithCost": "Usulkan rencana ({{count}} kredit)",
+    "lockedReason": "Penjadwal membaca kelasmu, tenggatmu dan hasil kuis, lalu mengusulkan blok belajar yang muat di sekitarnya.",
+    "planning": "Menyusun rencana",
+    "failed": "Penjadwal tidak bisa menyelesaikannya: {{message}}",
+    "superseded": "Rencana ini sudah digantikan yang lebih baru.",
+    "deficit": "{{minutes}} menit pekerjaan tidak muat sebelum tenggatmu.",
+    "overloaded_other": "{{count}} hari melebihi batas belajar harianmu.",
+    "pastDeadline": "Tanggal untuk {{goal}} sudah lewat, jadi tidak direncanakan.",
+    "pinnedNote": "Tombol panah memindahkan blok. Blok yang kamu pindahkan tetap persis di tempatmu saat rencana disusun ulang.",
+    "pinned": "Blok yang dipertahankan",
+    "pinnedMark": "Dipertahankan",
+    "moved": "Dipindahkan olehmu",
+    "review": "Ulangan",
+    "grid": {
+      "caption": "Blok belajar antara {{start}} dan {{end}}, di zona waktumu sendiri.",
+      "day": "Hari",
+      "blocks": "Blok",
+      "today": "Hari ini",
+      "empty": "Belum ada rencana",
+      "busy": "Sibuk",
+      "now": "Sekarang",
+      "moveLabel": "{{subject}}, {{start}} sampai {{end}}. Pakai tombol panah untuk memindahkannya."
+    },
+    "refused": {
+      "backwards": "Blok harus selesai setelah dimulai.",
+      "busy": "Itu akan bertabrakan dengan kelas atau acara lain.",
+      "window": "Itu di luar jam belajarmu.",
+      "daily_max": "Itu akan membuat harimu melebihi batas belajar harian."
+    }
   },
   "reports": {
     "loading": "Memuat laporan ini",
@@ -1084,6 +1272,7 @@
       "title": "Notifikasi",
       "channels": "Cara Stvdy menghubungimu",
       "locked": "Tersedia di {{plan}}",
+      "notYet": "Belum tersedia",
       "quiet": "Jam tenang",
       "quietHint": "Tidak ada notifikasi di dalam rentang ini.",
       "quietFrom": "Dari",
@@ -1113,7 +1302,9 @@
     "plan": {
       "title": "Paket dan pemakaian",
       "hint": "Isi paketmu, yang sudah kamu pakai bulan ini, dan biaya setiap tindakan.",
-      "open": "Buka paket dan pemakaian"
+      "open": "Buka paket dan pemakaian",
+      "progressHint": "Lihat apa yang benar-benar sudah kamu pelajari: menit per mata kuliah, aktivitas ulangan dan penguasaan kuis.",
+      "progress": "Lihat kemajuanmu"
     },
     "devices": {
       "title": "Perangkat dan sinkronisasi",
@@ -1180,8 +1371,8 @@
       "priority": "Prioritas",
       "status": "Status",
       "count": "Jumlah",
-      "sources": "Sumber",
-      "difficulty": "Tingkat kesulitan"
+      "difficulty": "Tingkat kesulitan",
+      "source_ids": "Sumber"
     }
   },
   "dashboard": {
@@ -1213,7 +1404,8 @@
     "noMastery": "Belum ada percobaan kuis, jadi belum ada penguasaan yang bisa ditampilkan.",
     "weakTopics": "Topik lemah",
     "weakTopicsHint": "Topik dengan akurasi paling rendah sejauh ini. Pilih tujuan dan perencana akan mengusulkan blok ulangan untuknya.",
-    "shareLabel": "{{title}}: {{percent}} persen dari waktu belajarmu"
+    "shareLabel": "{{title}}: {{percent}} persen dari waktu belajarmu",
+    "lockedReason": "Lihat topik mana yang paling lemah dari kuismu, dan rencanakan ulangannya."
   },
   "reminders": {
     "local": {
@@ -1222,6 +1414,58 @@
       "eventTitle": "Segera mulai",
       "eventBody": "{{title}} mulai dalam {{minutes}} menit.",
       "unknownSubject": "Sesuatu di daftarmu"
+    }
+  },
+  "syllabus": {
+    "title": "Silabus",
+    "subtitle": "Impor silabus mata kuliah dan periksa apa yang terbaca darinya sebelum ada yang disimpan.",
+    "noun": "butir silabus",
+    "loading": "Memuat ruang kerjamu",
+    "noWorkspace": {
+      "title": "Belum ada ruang kerja",
+      "reason": "Silabus disimpan di ruang kerja supaya mata kuliahnya bisa ditemukan lagi. Buat dulu satu.",
+      "action": "Ke ruang kerja"
+    },
+    "upload": {
+      "title": "Impor silabus",
+      "hint": "Unggah PDF-nya atau tempel teksnya. Pembaca mengusulkan pertemuan, tenggat dan ujian, lalu kamu yang memutuskan mana yang disimpan.",
+      "allowance": "{{used}} dari {{limit}} impor terpakai di paketmu",
+      "fileLabel": "Berkas silabus (PDF)",
+      "textLabel": "Atau tempel teksnya",
+      "nameLabel": "Mau disebut apa",
+      "action": "Baca silabusnya",
+      "actionWithCost": "Baca silabusnya ({{count}} kredit)",
+      "review": "Lihat apa yang ditemukan"
+    },
+    "kind": {
+      "class": "Kelas",
+      "deadline": "Tenggat",
+      "exam": "Ujian"
+    },
+    "review": {
+      "title": "Periksa silabusnya",
+      "subtitle": "Setiap butir menampilkan baris asalnya. Hilangkan centang pada yang salah atau sudah ditangani.",
+      "loading": "Membaca silabusnya",
+      "items": "Apa yang ditemukan",
+      "needsCheck_other": "{{count}} butir ditandai perlu diperiksa.",
+      "needsCheckMark": "Perlu diperiksa",
+      "keep": "Simpan ini",
+      "titleLabel": "Judul",
+      "whenLabel": "Tanggal dan waktu",
+      "whenZone": "{{when}} di {{zone}}",
+      "meets": "Pertemuan {{start}}–{{end}}, {{rule}}",
+      "topics": "Topik",
+      "weight": "{{percent}}% dari nilai",
+      "confirm_other": "Konfirmasi dan tambahkan {{count}} butir",
+      "saving": "Menambahkan yang kamu simpan",
+      "written": "Ditambahkan {{events}} acara, {{tasks}} tugas dan {{goals}} tujuan.",
+      "failed": "Silabusnya tidak bisa dibaca: {{message}}",
+      "course": "Mata kuliah: {{name}} ({{code}})",
+      "toPlanner": "Jadwalkan mata kuliah ini",
+      "empty": {
+        "title": "Tidak ada yang ditemukan",
+        "reason": "Dokumen ini tidak menyebut pertemuan, tenggat atau ujian yang bisa dipakai pembaca ini. Belum ada yang disimpan."
+      }
     }
   }
 }

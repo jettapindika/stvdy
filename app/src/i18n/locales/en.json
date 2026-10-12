@@ -81,7 +81,126 @@
   },
   "billing": {
     "planAndUsage": "Plan and usage",
-    "seePlans": "See plans"
+    "seePlans": "See plans",
+    "buyCredits": "Buy credits",
+    "packsLoading": "Loading credit packs",
+    "packsHint": "Credits you buy never expire, and they are spent after the monthly grant.",
+    "packsNeverExpire": "A credit pack is a one-time purchase. It does not renew.",
+    "packCredits_one": "{{count, number}} credit",
+    "packCredits_other": "{{count, number}} credits",
+    "buyPack_one": "Buy {{count, number}} credit",
+    "buyPack_other": "Buy {{count, number}} credits",
+    "subscription": "Subscription",
+    "subscriptionHint": "Your plan renews for a prepaid period and is paid with QRIS.",
+    "history": "Payment history",
+    "historyLoading": "Loading your payments",
+    "noPayments": "No payments yet",
+    "noPaymentsReason": "Payments appear here once you buy a plan or a credit pack.",
+    "historyPack_one": "{{count, number}} credit",
+    "historyPack_other": "{{count, number}} credits",
+    "historyPlan": "{{plan}}, {{period}}",
+    "period": {
+      "monthly": "monthly",
+      "yearly": "yearly"
+    },
+    "status": {
+      "pending": "Pending",
+      "paid": "Paid",
+      "expired": "Expired",
+      "failed": "Failed",
+      "refunded": "Refunded",
+      "review": "Under review"
+    }
+  },
+  "pricing": {
+    "title": "Plans",
+    "subtitle": "Prepaid periods, paid by QRIS. Every price is what the server charges.",
+    "loading": "Loading plans",
+    "yearly": "Yearly",
+    "monthly": "Monthly",
+    "yearlyHint": "One payment for 365 days.",
+    "monthlyHint": "One payment for 30 days.",
+    "perMonth": " per month",
+    "perYear": " per year",
+    "free": "Free",
+    "current": "Your plan",
+    "choose": "Choose {{plan}}",
+    "creditsIncluded_one": "{{count, number}} credit a month",
+    "creditsIncluded_other": "{{count, number}} credits a month",
+    "studentBanner": "Your student address is verified, so every plan is {{percent}}% off.",
+    "comparison": "What each plan includes",
+    "comparisonCaption": "Each plan and the limit it sets on every axis.",
+    "axis": "Limit",
+    "faq": "Questions",
+    "faqItems": {
+      "cancel": {
+        "q": "Can I cancel?",
+        "a": "A period is prepaid, so it runs to its end. Turning off renewal means no new period starts, and nothing is deleted in the meantime."
+      },
+      "payment": {
+        "q": "How do I pay?",
+        "a": "With QRIS. Scan the code with any Indonesian bank or e-wallet app, and your plan starts as soon as the payment is confirmed."
+      },
+      "mobile": {
+        "q": "Can I pay from my phone?",
+        "a": "No. Paying happens on the web or on the desktop app, and the plan then applies to every device you sign in on."
+      },
+      "student": {
+        "q": "How do I get the student price?",
+        "a": "Verify an Indonesian campus address in Settings. The discount applies at checkout, to the plan you choose."
+      }
+    }
+  },
+  "checkout": {
+    "title": "Checkout",
+    "subtitle": "Scan the code with any QRIS app. This page updates by itself.",
+    "loading": "Loading your invoice",
+    "order": "What you are paying for",
+    "qrLabel": "QRIS code for this payment",
+    "reference": "Order {{orderId}}",
+    "expiresIn": "The code expires in {{time}}",
+    "newCode": "Get a new code",
+    "retry": "Try again",
+    "viewPlan": "See your plan",
+    "line": {
+      "credits": "Credits",
+      "beforeDiscount": "Price before discount",
+      "discountStudent": "Student discount",
+      "discountCode": "Code {{code}}",
+      "total": "Total"
+    },
+    "state": {
+      "waiting": {
+        "chip": "Waiting",
+        "title": "Waiting for confirmation",
+        "detail": "We have not received confirmation yet. Keep this page open — it checks by itself, and your plan starts as soon as the payment is confirmed."
+      },
+      "paid": {
+        "chip": "Paid",
+        "title": "Payment received",
+        "detail": "Your plan is active on every device you are signed in on."
+      },
+      "expired": {
+        "chip": "Expired",
+        "title": "This code has expired",
+        "detail": "No payment has been confirmed for this code. Get a new one and the amount stays the same."
+      },
+      "review": {
+        "chip": "Under review",
+        "title": "We are checking this payment",
+        "detail": "The amount we received did not match this invoice, so a person is looking at it. Do not pay again."
+      },
+      "failed": {
+        "chip": "Failed",
+        "title": "The payment did not go through",
+        "detail": "No payment was confirmed. You can try again from the plans page."
+      },
+      "offline": {
+        "chip": "Not connected",
+        "title": "We could not reach Stvdy",
+        "detail": "Your code may still be valid, so nothing is lost. Check your connection and try again."
+      }
+    }
   },
   "plan": {
     "subtitle": "What your plan includes, what you have used this month, and what each action costs.",
@@ -806,7 +925,82 @@
   },
   "planner": {
     "rebalance": "Rebalance my week",
-    "rebalanceReason": "Moves and splits study blocks when a week is overloaded."
+    "rebalanceReason": "Moves and splits study blocks when a week is overloaded.",
+    "subtitle": "Your goals, what they still need, and the study blocks proposed for the week.",
+    "noun": "plans",
+    "views": {
+      "label": "Planner views",
+      "plan": "Plan",
+      "tasks": "Tasks"
+    },
+    "goals": {
+      "title": "Goals",
+      "loading": "Loading your goals",
+      "empty": {
+        "title": "No goals yet",
+        "reason": "A goal is an exam or a deadline with a date. Import a syllabus and its exams become goals, or add one yourself.",
+        "action": "Import a syllabus"
+      },
+      "past": "Date has passed",
+      "daysLeft_one": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left"
+    },
+    "prep": {
+      "title": "Prep for {{goal}}",
+      "loading": "Loading prep progress",
+      "unavailable": "Prep progress is unavailable right now.",
+      "coverage": "Topics started",
+      "accuracy": "Quiz accuracy",
+      "cardsDue": "Cards due",
+      "percent": "{{percent}}%",
+      "noTopics": "No topics yet",
+      "noQuizzes": "No quizzes yet",
+      "weak": "Weak topics",
+      "noWeak": "No weak topic in your attempts so far."
+    },
+    "workload": {
+      "title": "Planned today",
+      "ofLimit": "{{planned}} of {{limit}} minutes",
+      "over": "Today is over your daily study limit. Move a block or drop one before you accept.",
+      "under": "Inside your daily study limit."
+    },
+    "proposal": {
+      "title": "This week's plan",
+      "what": "plan",
+      "accept": "Add these blocks to my calendar",
+      "saving": "Saving the blocks you kept"
+    },
+    "suggest": "Suggest a plan",
+    "suggestWithCost": "Suggest a plan ({{count}} credits)",
+    "lockedReason": "The planner reads your classes, your deadlines and your quiz results, and proposes study blocks that fit around them.",
+    "planning": "Working out a plan",
+    "failed": "The planner could not finish: {{message}}",
+    "superseded": "This plan was replaced by a newer one.",
+    "deficit": "{{minutes}} minutes of work did not fit before your deadline.",
+    "overloaded_one": "{{count}} day is over your daily study limit.",
+    "overloaded_other": "{{count}} days are over your daily study limit.",
+    "pastDeadline": "The date for {{goal}} has already passed, so it was not planned.",
+    "pinnedNote": "Arrow keys move a block. A block you move stays exactly where you put it when the plan is replanned.",
+    "pinned": "Kept block",
+    "pinnedMark": "Kept",
+    "moved": "Moved by you",
+    "review": "Review",
+    "grid": {
+      "caption": "Study blocks between {{start}} and {{end}}, in your own timezone.",
+      "day": "Day",
+      "blocks": "Blocks",
+      "today": "Today",
+      "empty": "Nothing planned",
+      "busy": "Busy",
+      "now": "Now",
+      "moveLabel": "{{subject}}, {{start}} to {{end}}. Use the arrow keys to move it."
+    },
+    "refused": {
+      "backwards": "A block has to end after it starts.",
+      "busy": "That would overlap a class or another event.",
+      "window": "That is outside your study hours.",
+      "daily_max": "That would put the day over your daily study limit."
+    }
   },
   "reports": {
     "loading": "Loading this report",
@@ -1102,6 +1296,7 @@
       "title": "Notifications",
       "channels": "How Stvdy reaches you",
       "locked": "Available on {{plan}}",
+      "notYet": "Not available yet",
       "quiet": "Quiet hours",
       "quietHint": "No notifications inside this window.",
       "quietFrom": "From",
@@ -1131,7 +1326,9 @@
     "plan": {
       "title": "Plan and usage",
       "hint": "What your plan includes, what you have used this month, and what each action costs.",
-      "open": "Open plan and usage"
+      "open": "Open plan and usage",
+      "progressHint": "See what you have actually studied: minutes per course, review activity and quiz mastery.",
+      "progress": "View your progress"
     },
     "devices": {
       "title": "Devices and sync",
@@ -1198,8 +1395,8 @@
       "priority": "Priority",
       "status": "Status",
       "count": "Count",
-      "sources": "Sources",
-      "difficulty": "Difficulty"
+      "difficulty": "Difficulty",
+      "source_ids": "Sources"
     }
   },
   "dashboard": {
@@ -1231,7 +1428,8 @@
     "noMastery": "No quiz attempts yet, so there is no mastery to show.",
     "weakTopics": "Weak topics",
     "weakTopicsHint": "The topics with the lowest accuracy so far. Pick a goal and the planner will propose review blocks for it.",
-    "shareLabel": "{{title}}: {{percent}} percent of your study time"
+    "shareLabel": "{{title}}: {{percent}} percent of your study time",
+    "lockedReason": "See which topics your quizzes are weakest in, and plan review for them."
   },
   "reminders": {
     "local": {
@@ -1240,6 +1438,60 @@
       "eventTitle": "Starting soon",
       "eventBody": "{{title}} starts in {{minutes}} minutes.",
       "unknownSubject": "Something on your list"
+    }
+  },
+  "syllabus": {
+    "title": "Syllabus",
+    "subtitle": "Import a course syllabus and check what was read out of it before anything is saved.",
+    "noun": "syllabus items",
+    "loading": "Loading your workspaces",
+    "noWorkspace": {
+      "title": "No workspace yet",
+      "reason": "A syllabus is filed in a workspace, so the course it belongs to can be found again. Create one first.",
+      "action": "Go to workspaces"
+    },
+    "upload": {
+      "title": "Import a syllabus",
+      "hint": "Upload the PDF or paste the text. The reader proposes meetings, deadlines and exams, and you decide what to keep.",
+      "allowance": "{{used}} of {{limit}} imports used on your plan",
+      "fileLabel": "Syllabus file (PDF)",
+      "textLabel": "Or paste the text",
+      "nameLabel": "What to call it",
+      "action": "Read the syllabus",
+      "actionWithCost": "Read the syllabus ({{count}} credits)",
+      "review": "Read what was found"
+    },
+    "kind": {
+      "class": "Class",
+      "deadline": "Deadline",
+      "exam": "Exam"
+    },
+    "review": {
+      "title": "Check the syllabus",
+      "subtitle": "Every item shows the line it was read from. Untick anything that is wrong or already handled.",
+      "loading": "Reading the syllabus",
+      "items": "What was found",
+      "needsCheck_one": "{{count}} item is marked as needing a check.",
+      "needsCheck_other": "{{count}} items are marked as needing a check.",
+      "needsCheckMark": "Needs a check",
+      "keep": "Keep this",
+      "titleLabel": "Title",
+      "whenLabel": "Date and time",
+      "whenZone": "{{when}} in {{zone}}",
+      "meets": "Meets {{start}}–{{end}}, {{rule}}",
+      "topics": "Topics",
+      "weight": "{{percent}}% of the grade",
+      "confirm_one": "Confirm and add {{count}} item",
+      "confirm_other": "Confirm and add {{count}} items",
+      "saving": "Adding what you kept",
+      "written": "Added {{events}} events, {{tasks}} tasks and {{goals}} goals.",
+      "failed": "The syllabus could not be read: {{message}}",
+      "course": "Course: {{name}} ({{code}})",
+      "toPlanner": "Plan this course",
+      "empty": {
+        "title": "Nothing was found",
+        "reason": "The document states no meetings, deadlines or exams this reader could use. Nothing has been saved."
+      }
     }
   }
 }
