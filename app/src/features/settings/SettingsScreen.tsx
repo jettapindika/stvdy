@@ -226,7 +226,13 @@ export function SettingsScreen() {
                       })
                     }
                   />
-                  <label htmlFor={`channel-${channel}`} className="text-body">
+                  {/* The label is the hit area, and it carries `min-h-11` for the
+                      same reason `LockedFeature`'s link does: measured in Chromium at
+                      390px it was **65.9x22**, so a thumb aimed at the channel name
+                      and landing a few pixels high hit the row `<div>` and toggled
+                      nothing. The checkbox itself is 13x13 by design — the label is
+                      what a finger reaches. */}
+                  <label htmlFor={`channel-${channel}`} className="text-body flex min-h-11 items-center">
                     {t(`settings.channel.${channel}`)}
                   </label>
                   {!granted && minPlan !== null ? (

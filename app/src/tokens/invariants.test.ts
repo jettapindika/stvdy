@@ -137,6 +137,20 @@ describe('design-system invariants', () => {
     expect(tokens).toContain("'--course-tint': tint")
   })
 
+  it('lets a field shrink below its intrinsic size', () => {
+    // An `<input>`'s automatic minimum size is its intrinsic size — the UA's
+    // `size=20` default — and `width: 100%` does not lower it. Phase 14's gate
+    // measured `.field` keeping a min-content width of **422.6px** inside a 350px
+    // flex column at 200% text on a 390px phone, so every field in the app pushed
+    // its container past the viewport and the page scrolled sideways (Workspaces
+    // 498 > 390, Tasks 493 > 390). `min-width: 0` is the rule that makes
+    // `width: 100%` mean what it says, and jsdom cannot measure it — which is why
+    // this is a source assertion, the same technique `shellLayout.test.ts` uses.
+    const body = stylesheet.match(/\.field\s*\{([^}]*)\}/)?.[1]
+    expect(body, '.field must exist in styles.css').toBeTruthy()
+    expect(body).toMatch(/min-width:\s*0/)
+  })
+
   it('bundles a font face for every family the theme names', () => {
     // `--font-mono` silently falls back to system mono if JetBrains Mono is not
     // bundled, and a fallback is exactly what the spec's "bundled locally, no

@@ -414,6 +414,15 @@
 
   .field {
     width: 100%;
+    /* `min-width: 0` is load-bearing, and it is what Phase 14's gate found at 200%
+       text on a 390px phone. An `<input>`'s automatic minimum size is its intrinsic
+       size — the UA's `size=20` default — and `width: 100%` does not lower it: a
+       flex item's `min-width: auto` resolves to the content-based minimum, so the
+       field kept a min-content width of **422.6px** inside a 350px column and the
+       page scrolled sideways. Every field in the app is inside a flex column, so
+       this is the rule that makes `width: 100%` mean what it says. Measured on the
+       Workspaces and Tasks screens, both themes. */
+    min-width: 0;
     min-height: 2.75rem;
     padding: 0.5rem 0.9rem;
     background-color: var(--surface);

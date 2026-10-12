@@ -114,7 +114,7 @@ export function WorkspaceListScreen() {
 
           {list.data !== undefined && list.data.length === 0 && (
             <div className="flex flex-col items-start gap-6 px-4 py-6 sm:flex-row sm:items-center">
-              <BrandIllustration className="w-44 shrink-0 sm:w-52" />
+              <BrandIllustration className="w-44 max-w-full shrink-0 sm:w-52" />
               {/* `padded={false}`: the card supplies the padding, and the
                   illustration sits beside the text, so a second set of padding
                   would push the text off the illustration's left edge. */}
