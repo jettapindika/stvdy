@@ -143,6 +143,19 @@ pub fn multipart(fields: &[(&str, &str, Option<&[u8]>)]) -> (String, Vec<u8>) {
 /// the address is confirmed, so a helper that skipped it would make every suite
 /// test the refusal path instead of the feature.
 pub async fn signed_up(app: &axum::Router, harness: &TestState, email: &str) -> String {
+    signed_up_on(app, harness, email, "macos").await
+}
+
+/// [`signed_up`] with the device platform named.
+///
+/// The platform is a fact about the **device row**, and the billing policy reads it (A144),
+/// so a suite that could only sign up as `macos` could not test the mobile refusal at all.
+pub async fn signed_up_on(
+    app: &axum::Router,
+    harness: &TestState,
+    email: &str,
+    platform: &str,
+) -> String {
     let (status, body) = json(
         app,
         "POST",
@@ -151,7 +164,7 @@ pub async fn signed_up(app: &axum::Router, harness: &TestState, email: &str) -> 
         serde_json::json!({
             "email": email,
             "password": "correct horse battery",
-            "device": { "name": "Laptop", "platform": "macos" }
+            "device": { "name": "Laptop", "platform": platform }
         }),
     )
     .await;
@@ -295,6 +308,172 @@ pub async fn drain_jobs(harness: &TestState) {
             .await
             .expect("counting jobs");
     assert_eq!(remaining, 0, "the worker did not drain the queue");
+}
+
+/// One request a [`StubHttp`] received.
+///
+/// Recorded because the interesting assertions about a client are about what it
+/// *sent*: the path, the auth header and the JSON body are the contract, and a stub
+/// that only returned a body would let a client that posted to the wrong path pass.
+#[derive(Debug, Clone)]
+pub struct StubRequest {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+}
+
+impl StubRequest {
+    /// A header's value, lowercased name, case-insensitive.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// A one-endpoint HTTP server that answers every request with `status` and `body`,
+/// and records what it was asked.
+///
+/// The single copy of the listener `tests/search.rs` used to hand-roll: two copies
+/// would be two places to get the response framing wrong, and the qris suite needs the
+/// same thing. It is enough of the protocol for a `reqwest` client to read one JSON
+/// response, and no more — the point is to exercise the *client's* mapping, not to be
+/// an HTTP server.
+pub struct StubHttp {
+    base_url: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<StubRequest>>>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl StubHttp {
+    /// The base URL to point a client at, with no trailing slash.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Every request received, in order.
+    pub fn requests(&self) -> Vec<StubRequest> {
+        self.requests
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for StubHttp {
+    fn drop(&mut self) {
+        // Aborted rather than leaked: a suite runs many cases, and a listener per case
+        // that outlives the test is a file descriptor per case.
+        self.handle.abort();
+    }
+}
+
+/// Starts a stub answering `status` and `body`.
+pub async fn stub_http_json(status: u16, body: impl Into<String>) -> StubHttp {
+    use tokio::io::AsyncWriteExt;
+
+    let body = body.into();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a stub listener");
+    let address = listener.local_addr().expect("a stub address");
+    let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+
+    let handle = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let request = read_stub_request(&mut socket).await;
+            if let Some(request) = request {
+                if let Ok(mut log) = recorded.lock() {
+                    log.push(request);
+                }
+            }
+            let reason = match status {
+                200 => "OK",
+                400 => "Bad Request",
+                404 => "Not Found",
+                500 => "Internal Server Error",
+                502 => "Bad Gateway",
+                _ => "Status",
+            };
+            let response = format!(
+                "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.flush().await;
+        }
+    });
+
+    StubHttp {
+        base_url: format!("http://{address}"),
+        requests,
+        handle,
+    }
+}
+
+/// Reads one HTTP request: headers to the blank line, then `content-length` bytes.
+///
+/// A request without a `content-length` (a GET) is complete at the blank line. A
+/// malformed one returns `None`, which the caller records as no request rather than
+/// answering something the client did not ask for.
+async fn read_stub_request(socket: &mut tokio::net::TcpStream) -> Option<StubRequest> {
+    use tokio::io::AsyncReadExt;
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        if let Some(end) = find_header_end(&buffer) {
+            break end;
+        }
+        match socket.read(&mut chunk).await {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+    };
+
+    let head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+    let mut lines = head.lines();
+    let request_line = lines.next()?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next()?.to_string();
+    let path = parts.next()?.to_string();
+
+    let mut headers = Vec::new();
+    for line in lines {
+        if let Some((name, value)) = line.split_once(':') {
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
+        }
+    }
+
+    let content_length: usize = headers
+        .iter()
+        .find(|(name, _)| name == "content-length")
+        .and_then(|(_, value)| value.parse().ok())
+        .unwrap_or(0);
+
+    let body_start = header_end + 4;
+    while buffer.len() < body_start + content_length {
+        match socket.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+    }
+
+    Some(StubRequest {
+        method,
+        path,
+        headers,
+        body: String::from_utf8_lossy(&buffer[body_start..]).to_string(),
+    })
+}
+
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
 /// Creates a workspace and ingests one text source into it, returning

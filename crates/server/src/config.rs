@@ -57,6 +57,8 @@ pub struct AppConfig {
     /// silently does nothing is worse than an absent one.
     pub pdfium_lib_path: Option<PathBuf>,
     pub google_login: Option<GoogleLoginConfig>,
+    /// The push transports (A288). Empty when neither vendor is configured.
+    pub push: PushConfig,
     /// The chat and generation model. `None` means no provider is configured.
     pub llm: Option<LlmConfig>,
     pub search: SearchConfig,
@@ -64,6 +66,14 @@ pub struct AppConfig {
     /// before the rollover expires it (the spec's "3-day grace period
     /// (configurable)"). Read by `jobs::handlers::counters`.
     pub grace_period_days: i64,
+    /// The rupiah-per-dollar rate the margin report converts provider cost with (A41).
+    ///
+    /// A configured input rather than a live lookup, because the report is read for a
+    /// *decision* and a rate that moved between two readings of the same month would make two
+    /// reports disagree. It is printed in the report so a reader can check the arithmetic
+    /// against the rate it used, and a rate that is wrong is an env change rather than a
+    /// deploy. Defaults to A41's 17889.
+    pub idr_per_usd: i64,
     /// How long an `upsert` change is kept before `compact_change_log` removes it (A184).
     pub change_log_retention_days: i64,
     /// How often a live calendar connection is polled (A238).
@@ -93,6 +103,13 @@ pub struct AppConfig {
     /// docs, so the entire surface of the unknown is this struct plus
     /// `integrations::payment::mapping` (A291).
     pub qris: Option<QrisConfig>,
+    /// The email suffixes that prove a student (A299), e.g. `.ac.id`.
+    ///
+    /// A list in config rather than a literal in the route: a second campus suffix is an
+    /// env change, not a deploy, and the suffix list is the only thing between this
+    /// endpoint and being a mail amplifier. The comparison is on the **end** of the
+    /// address, so `user@ui.ac.id` matches `.ac.id` and `user@ac.id.evil.example` does not.
+    pub student_email_suffixes: Vec<String>,
     /// The origin the print template's assets (KaTeX, the typefaces) are fetched from,
     /// rewritten into the document before it is printed (A339).
     ///
@@ -177,6 +194,25 @@ pub struct QrisConfig {
     /// says it was paid *before* the expiry (A295).
     pub honor_late_payment: bool,
     pub reconcile_hours: i64,
+}
+
+impl QrisConfig {
+    /// The gateway fee for `amount_idr`, or `None` when no rate is configured.
+    ///
+    /// `None` is the shipped default and it means **"unknown, record nothing"**, which
+    /// is a different fact from a real zero fee: the margin report must be able to say
+    /// it does not know, and a `0` it invented would read as a measurement (A304). The
+    /// arithmetic lives here rather than on the client because it is config, not wire —
+    /// and there is one copy of it, so a gateway-reported fee and a configured one
+    /// cannot be combined two ways.
+    pub fn fee_idr_for(&self, amount_idr: i64) -> Option<i64> {
+        if self.fee_percent == 0.0 && self.fee_fixed_idr == 0 {
+            return None;
+        }
+        // Whole rupiah, truncated, the same integer convention `billing::price` uses.
+        let percent = (amount_idr as f64) * self.fee_percent / 100.0;
+        Some(self.fee_fixed_idr + percent as i64)
+    }
 }
 
 /// Token lifetimes and the verification-link window.
@@ -292,6 +328,49 @@ pub struct GoogleLoginConfig {
     pub client_id: String,
     pub client_secret: SecretString,
     pub redirect_uri: String,
+}
+
+/// APNs' provider-API credentials (A288).
+///
+/// The key is a PKCS#8 EC private key, which is what Apple's `.p8` file holds. It is a
+/// `SecretString` rather than a `PathBuf` because a container has no place to put a file that
+/// is not a mounted secret, and the deployment's secret store hands over the bytes.
+#[derive(Debug, Clone)]
+pub struct ApnsConfig {
+    pub key_p8: SecretString,
+    /// The key's identifier, which is the JWT's `kid`. APNs rejects a token without it.
+    pub key_id: String,
+    /// The Apple Developer team id, which is the JWT's `iss`.
+    pub team_id: String,
+    /// The app's bundle id. APNs refuses a token whose `apns-topic` is not the app the token
+    /// belongs to, so a wrong topic is a `403` that looks like a bad key.
+    pub topic: String,
+    /// The sandbox host, for a build signed with a development profile. The two hosts are
+    /// different certificate chains, so pointing at the wrong one is a `403`.
+    pub sandbox: bool,
+}
+
+/// FCM's HTTP v1 credentials (A288).
+///
+/// `private_key` and `client_email` are unpacked from the service-account JSON at boot rather
+/// than carried as a blob, because the assertion's `iss` is the email and the signer is the
+/// key: a config struct that held the JSON would make every reader parse it again.
+#[derive(Debug, Clone)]
+pub struct FcmConfig {
+    pub project_id: String,
+    pub client_email: String,
+    pub private_key: String,
+}
+
+/// The push transports, each optional.
+///
+/// `None` on a side is a supported deployment and not a degraded one: a dev box with no APNs
+/// key still delivers in-app and email reminders, and the settings screen offers only the
+/// channels that will fire (A288). `Default` is therefore the honest empty configuration.
+#[derive(Debug, Clone, Default)]
+pub struct PushConfig {
+    pub apns: Option<ApnsConfig>,
+    pub fcm: Option<FcmConfig>,
 }
 
 impl AppConfig {
@@ -414,9 +493,11 @@ impl AppConfig {
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),
             google_login: google_login_config(&get)?,
+            push: push_config(&get, &get_or)?,
             llm: llm_config(&get_or, &get),
             search: search_config(&get, &get_or)?,
             grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
+            idr_per_usd: get_i64(&get, "IDR_PER_USD", 17889)?,
             change_log_retention_days: get_i64(&get, "CHANGE_LOG_RETENTION_DAYS", 90)?,
             calendar_poll_interval: {
                 // A zero interval is not "poll constantly": it makes the dedupe window one
@@ -438,6 +519,11 @@ impl AppConfig {
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),
             qris: qris_config(&get, &get_or)?,
+            student_email_suffixes: get_or("STUDENT_EMAIL_SUFFIXES", ".ac.id")
+                .split(',')
+                .map(|suffix| suffix.trim().to_ascii_lowercase())
+                .filter(|suffix| !suffix.is_empty())
+                .collect(),
             // The loopback default is what makes a single-container deployment need no
             // configuration: the renderer and the `/assets` route are the same process. It is
             // built from `BIND_ADDR`'s *port* rather than its address, because `0.0.0.0` is a
@@ -631,6 +717,72 @@ fn google_login_config(
         client_secret: SecretString::from(client_secret),
         redirect_uri,
     }))
+}
+
+/// The push transports (A288), each optional as a whole.
+///
+/// APNs is configured by its four values or not at all: a key without a key id, or a topic
+/// without a team id, is an operator who believes push is on. Half of a pair is a **boot
+/// failure** rather than a silently absent transport — the same reasoning `qris_config`
+/// applies to its credentials, and the opposite of a wrong key, which is caught at
+/// `PushRouter::from_config` and logged.
+///
+/// FCM is configured by the service-account JSON. The two fields the assertion needs are
+/// unpacked here so a malformed blob fails at boot with a message naming the missing field,
+/// rather than at 03:00 with a signing error.
+fn push_config(
+    get: &impl Fn(&str) -> Option<String>,
+    get_or: &impl Fn(&str, &str) -> String,
+) -> anyhow::Result<PushConfig> {
+    let key_p8 = get("APNS_KEY_P8").filter(|value| !value.is_empty());
+    let apns = match key_p8 {
+        None => None,
+        Some(key_p8) => {
+            let require = |name: &str| -> anyhow::Result<String> {
+                get(name)
+                    .filter(|value| !value.is_empty())
+                    .with_context(|| format!("APNS_KEY_P8 is set but {name} is not"))
+            };
+            Some(ApnsConfig {
+                key_p8: SecretString::from(key_p8),
+                key_id: require("APNS_KEY_ID")?,
+                team_id: require("APNS_TEAM_ID")?,
+                topic: require("APNS_TOPIC")?,
+                // The sandbox host is opt-in: a production build that defaulted to sandbox
+                // would deliver nothing and report success, which is the failure mode hardest
+                // to notice.
+                sandbox: get_or("APNS_SANDBOX", "false") == "true",
+            })
+        }
+    };
+
+    let service_account = get("FCM_SERVICE_ACCOUNT_JSON").filter(|value| !value.is_empty());
+    let fcm = match service_account {
+        None => None,
+        Some(raw) => {
+            let parsed: serde_json::Value = serde_json::from_str(&raw)
+                .context("FCM_SERVICE_ACCOUNT_JSON must be the service account's JSON")?;
+            let field = |name: &str| -> anyhow::Result<String> {
+                parsed
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .with_context(|| {
+                        format!("FCM_SERVICE_ACCOUNT_JSON has no {name}; it is what the assertion signs with")
+                    })
+            };
+            Some(FcmConfig {
+                project_id: get("FCM_PROJECT_ID")
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| field("project_id").unwrap_or_default()),
+                client_email: field("client_email")?,
+                private_key: field("private_key")?,
+            })
+        }
+    };
+
+    Ok(PushConfig { apns, fcm })
 }
 
 fn storage_config(

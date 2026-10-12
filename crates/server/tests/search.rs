@@ -24,7 +24,8 @@ use stvdy_server::config::{SearchConfig, SearchTier};
 use stvdy_server::integrations::search::CompositeSearch;
 use stvdy_server::integrations::search::searxng::SearxngSearch;
 use stvdy_server::testing::TestState;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
 
 /// A tier that returns scripted hits and counts how many times it was asked. The
 /// count is the assertion in most of these tests: it is what distinguishes "the
@@ -147,27 +148,6 @@ async fn insert_user(pool: &PgPool, email: &str) -> uuid::Uuid {
         .await
         .unwrap();
     id
-}
-
-/// A one-endpoint HTTP server speaking just enough of the protocol for a tier to
-/// read one JSON response, so the SearXNG mapping can be exercised against the
-/// wire without the real service.
-async fn serve_json(body: String) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut buffer = [0u8; 2048];
-            let _ = socket.read(&mut buffer).await;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = socket.write_all(response.as_bytes()).await;
-        }
-    });
-    (format!("http://{address}"), handle)
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -442,13 +422,12 @@ async fn searxng_maps_results_and_surfaces_its_unresponsive_engines(pool: PgPool
       "unresponsive_engines": [["duckduckgo", "Suspended: too many requests"]]
     }"#
     .to_string();
-    let (base_url, server) = serve_json(body).await;
+    let server = common::stub_http_json(200, body).await;
 
-    let tier = Arc::new(SearxngSearch::new(&base_url).unwrap());
+    let tier = Arc::new(SearxngSearch::new(server.base_url()).unwrap());
     let search = composite(&harness.state.pool, vec![tier.clone()]).with_searxng(tier.clone());
 
     let outcome = search.search("a query", 8).await;
-    server.abort();
 
     assert_eq!(outcome.answered_by.as_deref(), Some("searxng"));
     assert_eq!(outcome.hits.len(), 1);
@@ -471,9 +450,9 @@ async fn an_empty_searxng_answer_is_ok_and_still_reports_the_engines(pool: PgPoo
       "unresponsive_engines": [["startpage", "timeout"], ["mojeek", "timeout"]]
     }"#
     .to_string();
-    let (base_url, server) = serve_json(body).await;
+    let server = common::stub_http_json(200, body).await;
 
-    let tier = Arc::new(SearxngSearch::new(&base_url).unwrap());
+    let tier = Arc::new(SearxngSearch::new(server.base_url()).unwrap());
     let fallback = Arc::new(StubTier::new(
         "fallback",
         vec![hit(
@@ -487,7 +466,6 @@ async fn an_empty_searxng_answer_is_ok_and_still_reports_the_engines(pool: PgPoo
         .with_searxng(tier.clone());
 
     let outcome = search.search("a query", 8).await;
-    server.abort();
 
     assert_eq!(outcome.answered_by.as_deref(), Some("fallback"));
     assert_eq!(outcome.unresponsive, vec!["searxng".to_string()]);
