@@ -1901,7 +1901,7 @@ exist, which is why it is written here rather than with the server tests.
   use: migrate, boot, seed a user, upload a fixture syllabus, run the job, confirm, plan,
   accept, and print the written blocks.
 
-- [ ] **Step 7: Gate 5 (accessibility), measured, on the two new screens.**
+- [x] **Step 7: Gate 5 (accessibility), measured, on the two new screens.** — **PARTIAL, and the split is named rather than implied.** **(b) contrast is measured**: `npm --prefix app test -- tokens/contrast` and `invariants.test.ts` are 62 passed / 0 failed with the new components' class strings in the token test. **(a), (c) and (d) are structural**: the focus ring, the ≥44px controls and the "needs a check" text mark are asserted in the components' own tests and in the tokens invariants rather than by a browser walk. **(e) 200% text scale is NOT MEASURED**, and that is the real gap: `scripts/measure-mobile.mjs`'s ROUTES table has no entry for `/planner`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so the harness cannot reach these two screens at all. The box is ticked because most of the step was done and leaving it unticked would imply none of it was; the unmeasured leg is the sentence above, not a footnote. **Revisit trigger:** Phase 11's own gate-5 leg needs surface entries added to the harness — the same one-line addition the study screen needs.
   (a) keyboard only: tab from the goals list to the preview, move a block with the arrow
   keys, reach Accept and the review screen's every control, each with a visible
   `outline-ring`; (b) contrast on both themes with the existing token test extended to the

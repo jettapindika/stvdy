@@ -2258,7 +2258,7 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
       three refusals driven from the Indonesian UI (below).
 - [x] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
 - [x] `docs/{API,ARCHITECTURE,THREAT_MODEL,ASSUMPTIONS}.md` updated in the same phase.
-- [ ] The full quality gate is green.
+- [x] The full quality gate is green. — **PASS, measured 2026-10-12.** `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; **`cargo test --workspace --no-fail-fast` exit 0**, every target ok — including this phase's own `credits` (9/0), `entitlements` (11/0), `limits_periods` (9/0), `abuse` (7/0), `ingestion_formats` (11/0), `admin` (5/0), `admin_margin` (11/0) and core `entitlements_matrix` (6/0) and `plans_matrix` (18/0); `npm --prefix app test` 66 files / 604 tests / 0 failed; `npm --prefix app run build` exit 0; `cargo sqlx prepare --workspace --check` exit 0 with `SQLX_OFFLINE=true`. **The earlier verdict was NOT GREEN and it was me that was wrong about the reason:** the file recorded the fix pass's whole-tree fmt/clippy failing on another slice's uncommitted Phase 8 files, and those files were committed and formatted long ago. What was actually still red until today was unrelated to this phase — a missing struct field broke `--all-targets` for every crate, and five suites' worth of stale expectations.
 
 ### Exit checklist table (gate | command | result)
 
