@@ -498,10 +498,16 @@ async fn the_scheduler_enqueues_one_grant_per_user_per_local_month(pool: PgPool)
         scheduled, 0,
         "a restart must not double-schedule an account"
     );
-    let after: i64 = sqlx::query_scalar("select count(*)::bigint from jobs")
-        .fetch_one(&harness.state.pool)
-        .await
-        .unwrap();
+    let after: i64 = sqlx::query_scalar(
+        "select count(*)::bigint from jobs
+          where kind in ('monthly_grant', 'reset_counters')",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    // Scoped to the boundary kinds: a pass also enqueues the daily change-log compaction,
+    // which is a single global job rather than a per-account boundary one (A184), and its
+    // own suite asserts that it is enqueued once.
     assert_eq!(after, 4, "two accounts, two kinds, no duplicates");
 }
 /// A claim-shaped caller for a specific device, as the extractor would build it.
