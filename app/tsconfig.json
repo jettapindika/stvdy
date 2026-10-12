@@ -1,7 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // `ES2024.Promise` is here for `Promise.withResolvers`, which a test uses to hold a
+    // request open (`StudyScreen.test.tsx`'s in-flight state). Nothing in `src/` outside
+    // a test uses it: it is Safari 17.4 / Chrome 119, and the shipped bundle's own floor
+    // is whatever the Tauri webview provides — a narrower lib entry rather than bumping
+    // `target`, so the ES2023 surface the app is written against stays the default.
+    "lib": ["ES2023", "ES2024.Promise", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",

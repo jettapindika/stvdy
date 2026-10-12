@@ -254,3 +254,130 @@ describe('a background deck error mid-session', () => {
     expect(screen.getByRole('button', { name: 'Show answer' })).toBeInTheDocument()
   })
 })
+
+describe('the header link back to the workspace', () => {
+  /**
+   * The one control on this screen that is not a `btn`, and it was a text-height
+   * target until Phase 4's accessibility gate measured it.
+   *
+   * The gate walked the study screen in Chromium at 390px for the first time in the
+   * project's history — this phase's box had been unticked since it was written —
+   * and the header's "Back to the workspace" measured **151.3x21**: 21px tall
+   * against the 44px phone floor, and 41px at 200% text, where a text link grows by
+   * its line height rather than to the floor. It is the same defect Phase 7's gate
+   * found on the upgrade link (93x19) and the same remedy: `min-h-11` (2.75rem =
+   * 44px) plus `inline-flex items-center`, the shape eight other text links in the
+   * app already use.
+   *
+   * **jsdom has no layout engine**, so the 44px cannot be asserted here — this file
+   * asserts the classes that decide it, and the number is the gate's own measurement
+   * (recorded in the Phase 4 plan). `min-h-11` alone on an inline element still
+   * paints the line box, and `inline-flex items-center` alone has no height to
+   * centre in, so all three utilities are load-bearing.
+   */
+  it('is a 44px phone target, not a text-height one', async () => {
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/decks/d1') return jsonResponse(200, { deck: DECK, cards: [CARD] })
+      if (path === '/decks/d1/due') {
+        return jsonResponse(200, { cards: [CARD], now: '2026-10-11T09:00:00Z' })
+      }
+      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
+      return jsonResponse(404, {
+        code: 'not_found',
+        message: 'no such route',
+        min_plan: null,
+        limit: null,
+        used: null,
+      })
+    })
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/study/:deckId" element={<StudyScreen />} />
+      </Routes>,
+      { route: '/study/d1' },
+    )
+
+    const link = await screen.findByRole('link', { name: 'Back to the workspace' })
+    expect(link.className).toContain('min-h-11')
+    expect(link.className).toContain('inline-flex')
+    expect(link.className).toContain('items-center')
+  })
+})
+
+describe('gate 5(d): no state is carried by colour alone', () => {
+  /**
+   * The screen's two states, each asserted on the channel a reader who cannot see
+   * colour still receives.
+   *
+   * **Revealed.** The answer's arrival is content, not a tone: the back text and the
+   * four grade buttons appear, each with its own word (`Again`/`Hard`/`Good`/`Easy`)
+   * and each with the number key it answers to in `aria-keyshortcuts`. A revealed
+   * state signalled by the panel changing shade would be invisible here.
+   *
+   * **In flight.** A grade whose request is outstanding disables the four buttons, and
+   * that is the `disabled` attribute — exposed to assistive technology and to the
+   * keyboard, unlike the `opacity: 0.45` the class happens to also apply. Asserted on
+   * the attribute rather than on the class string, because the class is the *paint* and
+   * the attribute is the *state*: the defect this pins is a screen that shows "working"
+   * only by dimming.
+   */
+  it('reveals the answer as content and disables the grades as a state', async () => {
+    // A review that never settles, so the in-flight state can be read.
+    const held = Promise.withResolvers<Response>()
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/decks/d1') return jsonResponse(200, { deck: DECK, cards: [CARD] })
+      if (path === '/decks/d1/due') {
+        return jsonResponse(200, { cards: [CARD], now: '2026-10-11T09:00:00Z' })
+      }
+      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
+      if (path === '/flashcards/c1/review') return held.promise
+      return jsonResponse(404, {
+        code: 'not_found',
+        message: 'no such route',
+        min_plan: null,
+        limit: null,
+        used: null,
+      })
+    })
+
+    const user = userEvent.setup()
+    renderWithProviders(
+      <Routes>
+        <Route path="/study/:deckId" element={<StudyScreen />} />
+      </Routes>,
+      { route: '/study/d1' },
+    )
+
+    // Unrevealed: the answer is not on screen and the grades do not exist, so there
+    // is nothing a reader could mistake for a revealed card.
+    await screen.findByRole('button', { name: 'Show answer' })
+    expect(screen.queryByText('Kumpulan simpul dan sisi.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Good/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Show answer' }))
+    expect(screen.getByText('Kumpulan simpul dan sisi.')).toBeInTheDocument()
+    for (const grade of ['Again', 'Hard', 'Good', 'Easy']) {
+      const button = screen.getByRole('button', { name: new RegExp(grade) })
+      expect(button).toBeEnabled()
+    }
+    expect(screen.getByRole('button', { name: /Good/ })).toHaveAttribute('aria-keyshortcuts', '3')
+
+    await user.click(screen.getByRole('button', { name: /Good/ }))
+    await vi.waitFor(() => {
+      expect(screen.getByRole('button', { name: /Good/ })).toBeDisabled()
+    })
+    // And the card is still named, so "working" is not the only thing on screen.
+    expect(screen.getByText('Card 1 of 1')).toBeInTheDocument()
+
+    // Let the mutation settle so the test does not leave a pending request behind.
+    held.resolve(
+      jsonResponse(200, {
+        applied: true,
+        card: { id: 'c1', ease: 2.5, interval_days: 1, due_at: '2026-10-12T09:00:00Z' },
+      }),
+    )
+  })
+})

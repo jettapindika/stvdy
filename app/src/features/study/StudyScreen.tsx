@@ -197,7 +197,16 @@ export function StudyScreen() {
           {deck.data?.deck.title ?? t('nav.study')}
         </h1>
         {workspaceId.length > 0 && (
-          <Link to={`/workspaces/${workspaceId}`} className="link self-start text-sm sm:self-auto">
+          // `min-h-11 inline-flex items-center` — the shape every other text link in the
+          // app uses (`TodayScreen`, `SettingsScreen`, `States.tsx`), and the one gate 5
+          // requires: a bare `link` is text-height, and this one measured **151.3x21** in
+          // Chromium at 390px, the same defect Phase 7's gate found on the upgrade link
+          // (93x19). `text-sm` is kept because it is the header's own scale; the utilities
+          // are what make the box 44px rather than the line box of an inline element.
+          <Link
+            to={`/workspaces/${workspaceId}`}
+            className="link inline-flex min-h-11 items-center self-start text-sm sm:self-auto"
+          >
             {t('study.backToWorkspace')}
           </Link>
         )}

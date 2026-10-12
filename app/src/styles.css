@@ -716,7 +716,20 @@
   }
 
   /* A link in body copy uses the body-text indigo, because the fill indigo is
-     for surfaces that carry white text. */
+     for surfaces that carry white text.
+
+     **A `.link` that is a control — a standalone action, not a word inside a
+     sentence — also needs `inline-flex min-h-11 items-center`.** The class sets no
+     height, so a bare one paints its line box: Phase 7's gate measured the upgrade
+     link at **93x19** and Phase 4's measured this screen's "Back to the workspace"
+     at **151.3x21**, both against the 44px phone floor, and a `text-sm` link grows
+     by its line height at 200% text (41px, still short). The utilities are not
+     cosmetic: `min-h-11` alone on an inline element still paints the line box, and
+     `inline-flex items-center` alone has no height to centre in. The one place a
+     bare `.link` is correct is *inside prose* (`StyleguideScreen`'s inline example),
+     which WCAG 2.2 SC 2.5.8's inline exception covers — the same reasoning as
+     `button.cite`'s phone-only 44px box above. `scripts/measure-mobile.mjs` is what
+     decides which case a given link is: it measures every one of them. */
   .link {
     color: var(--primary-text);
     text-decoration: none;
