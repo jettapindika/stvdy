@@ -523,8 +523,68 @@ This phase is also where the security posture stops being a claim and becomes a 
 
 ---
 
+## The per-phase hardening workflow (Gate 0, and it precedes every other gate)
+
+A phase is not done when its tasks compile and its own tests pass. Every phase goes through this
+loop **before** its exit checklist is ticked, because the defects that matter are the ones the
+phase's own author could not see: a test that cannot fail, a security control that looks enforced,
+two write paths that disagree.
+
+**Round 1 — adversarially attack the phase's own work.** Not a reread: an attempt to *break* it.
+For every claim the phase makes, ask what would make it false. The classes that have actually found
+defects in this project, one per phase, in the order they were found:
+
+| Class | How to attack it |
+|---|---|
+| A security property stated in a comment or a doc | Feed the case the property forbids and see whether anything refuses. Phase 6's SVG allowlist passed for *element* names while an attribute *value* injected `onload` into a printed PDF. |
+| A control that is configured but not enforced | Disable the enforcement and watch for a test to fail. Phase 7's provider-cost ceiling had no reader at all, and the roadmap called that "worse than none, because it looks like a control". |
+| Two write paths for one fact | Do the same action through both paths and compare the rows and the `change_log`. Phase 9 found four of these in one phase: a push delete that did not cascade, a restore that did not restore the cascade, a calendar-owned event writable through push, and a local apply that did not cascade. |
+| A test that cannot fail | Break the thing it tests and confirm the test goes red. Phase 11's determinism fixture passed with its canonical sort deleted until its inputs were made symmetric. Phase 8's gate found a rule that nothing asserted. |
+| A documented invariant the code contradicts | Compare the document to the code. Phase 10's `rrule` bound, the roadmap's `@page` margin boxes, and the roadmap's `usage_events → users.plan_id` join were all wrong in the doc and right in the code. |
+| A measured claim taken from memory | Re-measure it. Phase 13's own slice reported two suites green that had never run. |
+| An interface assumed rather than read | Read the signature. Phase 8's `decide` has five arguments where the plan said two, and its push route had to call it rather than re-implement it. |
+
+**Rounds 2 and 3 — independent review, until no finding survives.** Dispatch a reviewer that did
+not write the code, give it the phase's diff and its contracts, and ask for findings with file:line
+evidence, grouped by severity. Fix what is real; for every fix, confirm the test or the measurement
+fails without it. Repeat until a round returns nothing above Minor. **Cap: three rounds.** At the
+cap, adjudicate each open finding — park it with a written ruling, or stop if it is load-bearing and
+say so. A finding does not get to disappear by being ignored.
+
+**Then a completion audit, in three parts, each reported separately.**
+
+1. **Deliverables**: every exit-checklist item exists in the tree and does what the phase's table
+   says it does. Not "the file is there" — the behaviour.
+2. **Test quality**: no test that cannot fail, no tautology, no assertion on incidental behaviour,
+   no test that pins a copy of an implementation. Where a check is a source assertion rather than a
+   behavioural one (jsdom has no layout engine, so a layout test must be one), say so and confirm
+   the assertion fails against the pre-fix form.
+3. **Verification coverage**: list the tests that exist and were run, the ones that exist and were
+   **not** run, and the behaviours with no test at all. **Quote each verdict, and never let "likely
+   fine" become "clean"** — an unrun test and a failing test are the same evidence until the run
+   happens.
+
+### Two rules that keep the gates honest
+
+**Never weaken a check to make it pass.** If a test disagrees with the code, one of them is wrong
+about the product; say which and why, and change the one that is wrong. Deleting an assertion,
+relaxing a bound or scoping a test away is not a fix. Every earlier phase in this project shipped at
+least one real defect that only a *later* gate caught, so a phase whose gate finds nothing is a
+phase whose gate was too weak.
+
+**Record what an independent check could not be.** A reviewer, a grader or a measurement is only as
+strong as its isolation from the thing it judges, and in-process verification of a runtime binding
+(a Rust test asserting through the same process's state) cannot be isolated at all. State the
+limitation where the result is recorded rather than letting a passing run imply an independence it
+does not have. A limitation named is worth more than a claim that cannot be audited.
+
+---
+
 ## Verification Gates (apply to every phase)
 
+0. **Gate 0 — the hardening workflow above.** Three review rounds until no finding survives, then
+   the three-part completion audit (deliverables, test quality, verification coverage). A phase
+   whose gate 0 finds nothing has a gate 0 that was too weak, not a phase with no defects.
 1. `cargo fmt --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test`. Clean.
 2. `npm run build` (web) + `npm run tauri build -- --no-bundle` (desktop) compile; from Phase 14 also `tauri ios build` / `tauri android build`.
 3. The phase's own acceptance test from the table above runs and its output is quoted in the phase summary.
