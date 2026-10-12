@@ -504,7 +504,10 @@ pub async fn set_password(state: &AppState, user: AuthUser, new_password: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TestState;
     use chrono::Utc;
+    use sqlx::PgPool;
+    use stvdy_core::entitlements::SubStatus;
 
     /// What stays here after the codec moved to `super::oauth_state`: the payload this flow
     /// builds, which is the part the calendar flow must *not* share. The codec's own tests
@@ -541,5 +544,161 @@ mod tests {
     fn the_issuer_list_accepts_both_google_spellings() {
         assert!(GOOGLE_ISSUERS.contains(&"https://accounts.google.com"));
         assert!(GOOGLE_ISSUERS.contains(&"accounts.google.com"));
+    }
+
+    /// The claims a resolved account is built from, for the two tests below. `aud`, `iss`
+    /// and `exp` are declared because the struct is the token's shape; `resolve_user` reads
+    /// only `sub`, `email` and `email_verified`, and `verify_id_token` is what checks the
+    /// other three against the `Validation`.
+    fn claims(sub: &str, email: &str) -> IdTokenClaims {
+        IdTokenClaims {
+            sub: sub.to_string(),
+            email: email.to_string(),
+            email_verified: Some(true),
+            nonce: None,
+            aud: "client-id".to_string(),
+            iss: "https://accounts.google.com".to_string(),
+            exp: Utc::now().timestamp() + 3600,
+        }
+    }
+
+    /// **A48's rule 1, and it had no test until Phase 1's Step 2 was actually performed.**
+    /// A password account is never silently taken over by a Google login for the same
+    /// address: `resolve_user` must refuse, and refuse with a message that names the way in
+    /// rather than a bare 409, because the student's next move is to sign in and link.
+    ///
+    /// The property is asserted on the *row* as well as the error: an implementation that
+    /// returned `Conflict` after having already written `google_sub` would pass an
+    /// error-only assertion while having done the takeover it claims to prevent.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_password_account_is_not_taken_over_by_a_google_login(pool: PgPool) {
+        let harness = TestState::new(pool);
+        let state = &harness.state;
+        let hash = crate::auth::password::hash("correct horse battery staple").expect("hash");
+
+        let user_id = Uuid::now_v7();
+        sqlx::query(
+            "insert into users (id, email, password_hash, email_verified, email_verified_at, timezone)
+             values ($1, 'taken@example.test', $2, true, now(), 'Asia/Jakarta')",
+        )
+        .bind(user_id)
+        .bind(&hash)
+        .execute(&state.pool)
+        .await
+        .expect("seeding a password account");
+
+        let error = resolve_user(state, &claims("sub-1", "taken@example.test"))
+            .await
+            .expect_err("a Google login must not adopt an account that already has a password");
+
+        match error {
+            AppError::Conflict(message) => {
+                assert!(
+                    message.contains("already has a password"),
+                    "the refusal must name the way in, not just refuse: {message}"
+                );
+            }
+            other => panic!("expected a Conflict, got {other:?}"),
+        }
+
+        // And nothing was linked: the account is still a password account.
+        let linked: Option<String> =
+            sqlx::query_scalar("select google_sub from users where id = $1")
+                .bind(user_id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("reading the row back");
+        assert_eq!(linked, None, "the refusal must not have written google_sub");
+
+        // The second call is the case a row-blind assertion would miss: the first one
+        // returned `Conflict`, so if it had linked the sub, this one would now resolve —
+        // silently signing the student in as whoever controls that Google account.
+        assert!(
+            resolve_user(state, &claims("sub-1", "taken@example.test"))
+                .await
+                .is_err(),
+            "a repeated Google login must not succeed after the refusal"
+        );
+    }
+
+    /// **A48's rule 2.** A Google-only account cannot set a password before its email is
+    /// verified, or the reset path becomes a takeover vector: the address would be a way in
+    /// without ever having been proved to belong to the person using it.
+    ///
+    /// Both directions, because a check that refuses everything would pass the negative case
+    /// alone — and the *row* is asserted afterwards, so an implementation that refused after
+    /// writing the hash does not pass either.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_google_only_account_sets_a_password_only_after_verifying_its_email(pool: PgPool) {
+        let harness = TestState::new(pool);
+        let state = &harness.state;
+
+        let user_id = Uuid::now_v7();
+        sqlx::query(
+            "insert into users (id, email, google_sub, email_verified, timezone)
+             values ($1, 'oidc@example.test', 'sub-9', false, 'Asia/Jakarta')",
+        )
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+        .expect("seeding an unverified Google-only account");
+
+        // Built here rather than read through the extractor: the property under test is
+        // `set_password`'s own check, and a request round trip would put the token, the
+        // device row and the verification gate between the test and the line it asserts.
+        let user = crate::auth::extract::AuthUser {
+            user_id,
+            device_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            email: "oidc@example.test".to_string(),
+            email_verified: false,
+            plan_id: "free".to_string(),
+            timezone: "Asia/Jakarta".to_string(),
+            is_admin: false,
+            student_verified: false,
+            platform: "web".to_string(),
+            subscription_status: SubStatus::None,
+        };
+
+        let error = set_password(state, user.clone(), "a fresh passphrase")
+            .await
+            .expect_err("an unverified account must not be able to set a password");
+        assert!(
+            matches!(error, AppError::EmailNotVerified),
+            "expected EmailNotVerified, got {error:?}"
+        );
+
+        let written: Option<String> =
+            sqlx::query_scalar("select password_hash from users where id = $1")
+                .bind(user_id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("reading the row back");
+        assert_eq!(
+            written, None,
+            "the refusal must not have written a password"
+        );
+
+        // The positive direction: once the address is verified, the same call works.
+        sqlx::query(
+            "update users set email_verified = true, email_verified_at = now() where id = $1",
+        )
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+        .expect("verifying the address");
+        let mut verified = user;
+        verified.email_verified = true;
+        set_password(state, verified, "a fresh passphrase")
+            .await
+            .expect("a verified account may set a password");
+
+        let written: Option<String> =
+            sqlx::query_scalar("select password_hash from users where id = $1")
+                .bind(user_id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("reading the row back");
+        assert!(written.is_some(), "the verified path must actually write");
     }
 }

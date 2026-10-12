@@ -338,11 +338,14 @@ appears in any log line (assert by grepping the test's captured logs).
   verifies the `id_token` (issuer `https://accounts.google.com`, audience = our
   client id, `exp`/`iat`, `nonce`, `email_verified`), then links by `google_sub`
   → verified email → create.
-- [ ] **Step 2: Security rules as tests.** A password account is **never**
+- [x] **Step 2: Security rules as tests.** A password account is **never**
   silently taken over by a Google login with the same address (link requires a
   signed-in session or a confirmation step); a Google-only account cannot set a
   password before verifying its email; a token with an edited plan claim changes
-  nothing downstream.
+  nothing downstream. — **Ticked 2026-10-12: the third clause had a test, the first two had none, and both now do.** The rules were implemented in `crates/server/src/auth/google.rs` from the start (`resolve_user`'s `google_sub.is_none() && password_hash.is_some()` → `Conflict`, and `set_password`'s `EmailNotVerified` gate) and **nothing asserted either one** — the module's tests covered the state payload and the issuer list, which are the two things next to the rules rather than the rules. What exists now, both `#[sqlx::test]` cases beside the code they pin and both **proven to fail on the broken version**:
+  - `a_password_account_is_not_taken_over_by_a_google_login` — seeds a password account, resolves a Google login for the same address, and asserts `Conflict` whose message names the way in. It asserts **the row as well as the error**, and then calls `resolve_user` a second time: an implementation that returned `Conflict` after already writing `google_sub` would pass an error-only assertion while having done the takeover it claims to prevent, and the second call is what catches it. Falsified by disabling the guard: the first call returned `Ok(<uuid>)` — the silent adoption itself — and the test failed on that line.
+  - `a_google_only_account_sets_a_password_only_after_verifying_its_email` — both directions (the refusal, and the verified path writing a hash), with the row read back so a refusal-after-writing does not pass. Falsified by disabling the gate: the unverified call returned `Ok(())`.
+  The third clause is `crates/server/tests/tamper.rs::a_forged_plan_claim_in_the_token_changes_nothing` (Phase 7), which signs a forged `plan`/`devices_max`/`limits` token with the server's own secret so it *authenticates*, and asserts the refusal still carries the free plan's numbers — a bare 422 would not distinguish "the claim was ignored" from "the request was malformed". `crates/server/tests/google.rs`, which this step's **Files** line names, does not exist: the flow needs Google's endpoints, so the two rules are pinned where they live instead of through a round trip that would have to fake the provider.
 - [x] **Step 3: Issue the same pair** via `auth::tokens::issue_pair`, so
   everything downstream (devices, refresh, logout) is unchanged.
 
