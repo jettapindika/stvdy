@@ -445,6 +445,28 @@ jobs:
             apk_note="signed with the operator's direct-channel key (A352), not Play's."
           fi
 
+          # The filenames are read from what the jobs actually uploaded rather than written
+          # out from a pattern. The bundler names its own files (`{productName}_{version}_{arch}`,
+          # with `universal` for the lipo target), and a note that guesses the name of a file
+          # the reader then cannot find is worse than no table. One of each extension, because
+          # the workflow produces one of each; more than one is a failure rather than a choice.
+          # `|| true` inside each substitution: with `set -o pipefail` a glob that matches
+          # nothing makes `ls` exit non-zero, and `set -e` would then abort the step at the
+          # assignment — silently, because the error was already sent to /dev/null. The loop
+          # below is what reports the missing file, and it has to be reached to do that.
+          dmg="$(ls dist/release/*.dmg 2>/dev/null | head -1 || true)"
+          exe="$(ls dist/release/*-setup.exe 2>/dev/null | head -1 || true)"
+          apk="$(ls dist/release/*.apk 2>/dev/null | head -1 || true)"
+          for pair in "dmg:$dmg" "exe:$exe" "apk:$apk"; do
+            if [ -z "${pair#*:}" ]; then
+              echo "::error::no ${pair%%:*} among the uploaded artifacts, so the notes cannot name it"
+              ls -l dist/release
+              exit 1
+            fi
+          done
+          dmg="$(basename "$dmg")"; exe="$(basename "$exe")"; apk="$(basename "$apk")"
+          echo "dmg=$dmg exe=$exe apk=$apk"
+
           # `printf` and not a heredoc: a plain heredoc's body and terminator have to start at
           # column 0, which a YAML block scalar forbids — and the indented body a YAML-safe
           # heredoc does produce would arrive in the notes as a markdown code block. No
@@ -457,9 +479,9 @@ jobs:
             '' \
             '| File | What is missing |' \
             '|---|---|' \
-            "| Stvdy_${VERSION}_universal.dmg | macOS, universal (arm64 + x86_64), **unsigned and unnotarized**: Gatekeeper refuses it on any machine but the one that built it. Right-click → Open, or run: xattr -dr com.apple.quarantine /Applications/Stvdy.app |" \
-            "| Stvdy_${VERSION}_x64-setup.exe | Windows x64, NSIS, **unsigned**: SmartScreen warns on every install. |" \
-            "| Stvdy_${VERSION}_universal*.apk | Android, $apk_note |" \
+            "| $dmg | macOS, universal (arm64 + x86_64), **unsigned and unnotarized**: Gatekeeper refuses it on any machine but the one that built it. Right-click → Open, or run: xattr -dr com.apple.quarantine /Applications/Stvdy.app |" \
+            "| $exe | Windows x64, NSIS, **unsigned**: SmartScreen warns on every install. |" \
+            "| $apk | Android, $apk_note |" \
             '' \
             '**The updater channel is untouched.** createUpdaterArtifacts is false for this build,' \
             'and no latest.json was written or published, so no installed app will be offered it.' \
