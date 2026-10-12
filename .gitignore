@@ -43,3 +43,9 @@ supabase/.temp/
 
 # Vite preview / build scratch
 /app/.vite
+
+# Python bytecode: `stub-llm.py` and `stub-qris.py` are run directly by the smoke
+# scripts, so a cache directory appears the first time either is imported rather
+# than run. It is machine-local and never shipped.
+__pycache__/
+*.pyc
