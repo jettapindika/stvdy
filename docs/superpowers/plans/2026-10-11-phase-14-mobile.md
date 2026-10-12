@@ -298,15 +298,40 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     `https://app.stvdy/.well-known/assetlinks.json`; both feed the same
     `deeplink::classify` path, so no second URL parser exists.
 12. **A321 — The no-purchase-UI check inspects the shipped bundle, and it is a CI job.**
-    `scripts/check-no-purchase-ui.mjs` reads every file of the mobile build and fails on
+    `scripts/check-no-purchase-ui.mjs` reads every file of the store build and fails on
     a denylist plus a `billing_policy.toml` re-assertion. It runs in CI immediately after
     the web build, because a check that is only run by hand is the one that is skipped.
+    **It also refuses to pass on an artifact that is not the store build**, which is the
+    half that makes the rest mean anything: every build stamps its `index.html` with
+    `<meta name="stvdy-build-target" content="store"|"full">`, and a `full` artifact — or
+    one with no stamp — is an offender. That gate exists because the check was written
+    through the opposite state: it read `app/dist` while `app/dist` held the *web* build,
+    whose bytes legitimately contain the checkout route, and a green result would have
+    been read as "the phone build sells nothing". `scripts/check-no-purchase-ui.test.mjs`
+    pins both directions — a clean `full` artifact must fail, an unstamped one must fail,
+    and a `store` stamp must not excuse a purchase path in the bytes.
 13. **A322 — The read-only plan screen is the mobile `/billing` route, and no purchase
     route exists in the mobile router.** On `ios`/`android` the route renders a screen
     that shows the plan name, credits remaining and the usage the app computes, with the
-    neutral `lock.notOnPlan` copy — never a price, never a link. The web/desktop checkout
-    screen is not reachable from the mobile bundle because the route element is chosen at
-    the router, so the checkout component is tree-shaken out of the mobile chunk.
+    neutral `lock.notOnPlan` copy — never a price, never a link. **The checkout component
+    is excluded from the store build at build time, not at run time**, and the distinction
+    is the whole mechanism: `vite.config.ts` defines `__PURCHASE_UI__` (`false` in a store
+    build), `router.tsx` spreads `/pricing` and `/billing/checkout/:paymentId` into the
+    route children behind it, and `PlanUsageScreen` guards `BillingScreen` the same way. A
+    `define` is substituted before the minifier runs, so the branch is provably dead, those
+    screens lose every remaining reference, and `api/queries/billing.ts` — which holds
+    `POST /billing/checkout` — is dropped with them. The original form of this entry said
+    the component was "tree-shaken out because the route element is chosen at the router",
+    and that was false: `billingElementFor` reads `platform.kind()` at **run** time, which
+    keeps both route elements in one chunk. Runtime routing and build-time exclusion are
+    different mechanisms, and only the second removes bytes. Which builds are store builds
+    is decided by the shell: `tauri build` sets `TAURI_ENV_PLATFORM` to the target it is
+    packaging (the host component of the target triple — `ios` for `aarch64-apple-ios`,
+    `android` for `aarch64-linux-android`), so the `frontendDist` directory
+    (`../app/dist`) holds the phone bundle exactly when the shell packages for a phone.
+    `VITE_PLATFORM=mobile` makes the same build into `dist-mobile` without a shell.
+    **Measured:** the store entry chunk contains zero occurrences of `billing/checkout`
+    where the web/desktop one contains five.
 14. **A323 — The 44px target check is measured in real headless Chrome at 390×844.**
     `scripts/measure-mobile.mjs` (`puppeteer-core`, `CHROME_PATH` or the same probe list
     as `crates/server/src/render/chrome.rs`) loads the running app at a phone viewport,
@@ -314,6 +339,25 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     checks contrast on the default dark and light themes from computed colours, and
     re-measures at 200% text scale for clipping/overlap. jsdom cannot do this, which the
     repo's own `a11y.ts` says.
+    **Its coverage is part of the gate, and it is stated rather than left implicit**
+    (Phase 14's Task B). `scripts/measure-mobile.mjs` walks **13 surfaces**
+    at 390×844, both themes, 100% and 200% text: `today`, `workspaces`, `calendar`,
+    `tasks`, `settings`, `plan`, `workspace-sources`, `workspace-chat`,
+    `workspace-studio-flashcards`, `workspace-studio-quiz`, `workspace-studio-report`,
+    `dashboard` and `workspace-chat-proposal`. **Not measured, with the reason:**
+    `/devices`, `/study/:deckId`, `/quiz/:quizId` and `/reports|cheatsheets/:id` are
+    reachable by tap and one entry away, but were outside Task B's named minimum;
+    `/planner`, `/syllabus` and `/syllabus/:draftId` are **not reachable from the tab
+    bar at all** (the only in-app link to `/planner` is inside a syllabus draft), so
+    they need a click path the walk does not have and Phase 11 drives that leg itself;
+    `/pricing`, `/billing` and `/billing/checkout/:paymentId` are Phase 13's gate and
+    run through this harness; the dashboard's weak-topic list renders `LockedFeature`
+    on the fixture's `free` account by design; the auth routes sit outside the
+    signed-in shell; `/styleguide` is linked from nowhere; and nothing native is
+    verifiable on this machine (no Android SDK, no signing identity, no device).
+    The walk is **phone-width by default** — `VIEWPORT_WIDTH`/`VIEWPORT_HEIGHT`/
+    `VIEWPORT_DPR`/`SCALES`/`OUTPUT` override it so gate 5's desktop leg uses this
+    harness rather than a second copy of it.
 15. **A324 — The adaptive UI is width-based, and Phase 14 verifies it rather than
     introducing a second convention.** `useFormFactor` (768/1024px) is the only
     form-factor source. Phase 14 adds a `phone`/`tablet` render test and the measured
@@ -913,8 +957,10 @@ purchase link — proved by reading the bytes, not the component.
 - Test: `scripts/check-no-purchase-ui.test.mjs` (a fixture that must fail)
 
 **Interfaces:**
-- Consumes: `app/dist/**` (the build), `config/billing_policy.toml`.
-- Produces: exit 0 with `no purchase UI in N shipped file(s)`, or exit 1 with a list.
+- Consumes: the **store build** under `app/dist` (`TAURI_ENV_PLATFORM=ios npm run build`,
+  or `npm run build:mobile` for `dist-mobile`), `config/billing_policy.toml`.
+- Produces: exit 0 with `no purchase UI in N shipped file(s)` and the artifact's
+  `stvdy-build-target` stamp, or exit 1 with a list.
 
 - [x] **Step 1: Write the failing test — a planted marker must be caught**
 
@@ -941,19 +987,35 @@ test('a clean bundle passes', () => {
 
 - [x] **Step 3: Implement, in the `check-no-cdn.mjs` shape**
 
-Export `findOffenders(files: Record<string,string>)` and, when run as a script, read
-`app/dist/**`, build the map, and fail on: `Rp` followed by digits, `QRIS`, `Checkout`,
-`Upgrade to`, `POST /billing/checkout`, `buy(`/`checkout(`. It also reads
-`config/billing_policy.toml` and fails if `allow_purchase_ui`, `show_prices` or
-`allow_purchase_cta_in_locked_messages` is `true` for `ios` or `android`.
+Export `findOffenders(files: Record<string,string>)` and, when run as a script, read the
+store build under `app/dist`, build the map, and fail on the forms that *are* a purchase
+path: `Rp`/`IDR` followed by digits, `billing/checkout`, and `buy(`/`checkout(`/`purchase(`.
+It also reads `config/billing_policy.toml` and fails if `allow_purchase_ui`, `show_prices` or
+`allow_purchase_cta_in_locked_messages` is `true` for `ios` or `android`, or if either
+block or key is missing.
+
+**The marker set this plan first named was too wide, and the shipped one is narrower on
+purpose.** `QRIS` and `Upgrade to` are not purchase paths: `Upgrade to {{plan}}` is a locale
+string the mobile policy never renders, and the styleguide's own description of the two
+`LockedFeature` variants names checkout. Flagging them would fail the *correct* build until
+someone added an allowlist, which is how a gate becomes noise and then gets deleted — the
+reasoning `check-no-cdn.mjs` states for looking at loads rather than URLs. The narrower set
+is pinned in both directions by `scripts/check-no-purchase-ui.test.mjs`, which asserts the
+legitimately-shipped strings are **not** offenders as well as that planted ones are.
 
 - [x] **Step 4: Run it**
 
 ```
-npm --prefix app run build
-node scripts/check-no-purchase-ui.mjs     # exit 0, prints the count
+TAURI_ENV_PLATFORM=ios npm --prefix app run build   # the store build, into app/dist
+node scripts/check-no-purchase-ui.mjs               # exit 0, prints the count + the stamp
 node --test scripts/check-no-purchase-ui.test.mjs
 ```
+
+A plain `npm --prefix app run build` writes the **web/desktop** build into the same
+directory, and the check refuses it (`stvdy-build-target="full"`) — which is the honest
+result and the reason the store build is keyed on the shell's own platform variable rather
+than on a convention. See `docs/ARCHITECTURE.md` § Store-absence checks must validate the
+artifact that actually ships.
 
 - [x] **Step 5: Wire it into CI** after the web build job (A321).
 
@@ -1007,8 +1069,15 @@ it('routes /billing to the read-only screen on android', () => {
 `MobilePlanScreen` shows the plan name, credits remaining and the usage numbers the app
 computes (from Phase 13's query), and the neutral `lock.notOnPlan` copy. `router.tsx`
 picks the element: `platform.kind()` in `('ios','android')` → `MobilePlanScreen`, else
-Phase 13's checkout screen. The checkout component is therefore not imported on the
-mobile path, so it is tree-shaken out (A322).
+`PlanUsageScreen`.
+
+**That choice is a run-time one, and it does not remove any bytes.** It is what makes the
+screen testable and correct on a device, and it is *not* what keeps the checkout out of the
+store build: `platform.kind()` is read at run time, so both route elements stay in one
+chunk. The byte-level exclusion is Phase 14's `__PURCHASE_UI__` `define` (A322), added when
+`scripts/check-no-purchase-ui.mjs` was found red on exactly this. The original text of this
+step claimed the component "is therefore not imported on the mobile path, so it is
+tree-shaken out", which was false until that `define` existed.
 
 - [x] **Step 4: Run it**
 
@@ -1165,7 +1234,7 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
 | 6 | **No purchase UI** | `node scripts/check-no-purchase-ui.mjs` | exit 0, prints the file count |
 | 7 | Push token registers | device: log + `push_tokens` row | token present, provider correct |
 | 8 | Deep links round-trip | cold start + warm, `stvdy://` and universal link | both classify to the same intent |
-| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | 44px, contrast both themes, 200% scale all pass |
+| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | 44px, contrast both themes, 200% scale all pass. **13 surfaces** — the list, and the surfaces it does *not* reach with the reason for each, is in A323 above; the two it cannot reach from the tab bar (`/planner`, `/syllabus`) are Phase 11's own gate-5 leg |
 | 10 | Gate 6 | Indonesian phone-shell test | pass, output quoted |
 | 11 | Gate 7 | mobile plan screen + composer hint | no price, computed usage, hint present |
 | 12 | Docs | RELEASE/ARCHITECTURE/ASSUMPTIONS updated | present |
