@@ -403,7 +403,7 @@ pub async fn update(
     let Some(stored) = stored else {
         return Err(AppError::NotFound);
     };
-    if stored.get("source").and_then(Value::as_str) != Some(APP_SOURCE) {
+    if is_calendar_owned(&stored) {
         return Err(calendar_owned());
     }
 
@@ -470,9 +470,9 @@ pub async fn delete_one(
         AppError::Internal(anyhow::anyhow!("beginning an event delete: {error}"))
     })?;
 
-    let source: Option<String> = sqlx::query_scalar(
-        "select source from events
-          where id = $1 and user_id = $2 and deleted_at is null for update",
+    let source: Option<Value> = sqlx::query_scalar(
+        "select to_jsonb(t) from events t
+          where t.id = $1 and t.user_id = $2 and t.deleted_at is null for update",
     )
     .bind(id)
     .bind(user.user_id)
@@ -480,10 +480,10 @@ pub async fn delete_one(
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("reading an event: {error}")))?;
 
-    let Some(source) = source else {
+    let Some(stored) = source else {
         return Err(AppError::NotFound);
     };
-    if source != APP_SOURCE {
+    if is_calendar_owned(&stored) {
         return Err(calendar_owned());
     }
 
@@ -501,13 +501,31 @@ pub async fn delete_one(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Whether a stored event row is owned by a connected calendar (A198).
+///
+/// The **one** predicate for the rule, called by all three writers that must apply it:
+/// `PATCH`/`DELETE /events/:id` here, and `sync::apply`'s patch and delete arms for a
+/// mutation arriving through `POST /sync/push`. The two paths must agree — a pushed edit of
+/// a Google row would otherwise be overwritten by the next incremental sync, silently
+/// reverting what the student typed — and a second copy of the test is how they stop
+/// agreeing.
+///
+/// A row whose `source` is anything but `"app"` is the calendar's. `source` is `not null
+/// default 'app'`, so an absent value cannot occur on a stored row.
+pub(crate) fn is_calendar_owned(row: &Value) -> bool {
+    row.get("source").and_then(Value::as_str) != Some(APP_SOURCE)
+}
+
+/// The refusal's message, shared by the REST route's 403 and the push path's rejection so
+/// the two say the same thing about the same fact.
+pub(crate) const CALENDAR_OWNED_MESSAGE: &str =
+    "this event comes from a connected calendar and is read-only here";
+
 /// The refusal for a row the calendar owns (A198).
 ///
 /// 403 rather than 404, because the event exists and is readable — the client renders it —
 /// and a 404 would read as "deleted". The message names the calendar, because that is the
 /// fact that explains why this one event will not edit while every other one does.
 fn calendar_owned() -> AppError {
-    AppError::ForbiddenWith(
-        "this event comes from a connected calendar and is read-only here".to_string(),
-    )
+    AppError::ForbiddenWith(CALENDAR_OWNED_MESSAGE.to_string())
 }

@@ -346,6 +346,23 @@ async fn apply_patch(
     }
 
     let stored = stored_row(conn, user_id, entity, mutation.id).await?;
+
+    // A row a connected calendar owns is not a client's to write (A198), and the row has to
+    // be read to know: `decide` is pure and has no row, and the payload's `source` is the
+    // client's own claim rather than the stored fact. The predicate is `events.rs`'s, the
+    // same one the REST route uses, so an edit cannot land on one path and be refused on the
+    // other — which is what let a pushed edit of a Google row be silently reverted by the
+    // next incremental sync.
+    if entity == Entity::Event
+        && let Some(stored) = &stored
+        && crate::events::is_calendar_owned(stored)
+    {
+        return Ok(Outcome::Rejected {
+            code: ErrorCode::ReadOnlyEntity,
+            message: crate::events::CALENDAR_OWNED_MESSAGE.to_string(),
+        });
+    }
+
     let mut row = match &stored {
         // A create: there is nothing to merge against, so the patch is the row.
         None => patch.clone(),
@@ -455,6 +472,19 @@ async fn apply_delete(
 ) -> AppResult<Outcome> {
     let rows = match mutation.entity {
         Entity::Task => crate::tasks::tombstone_subtree(conn, user_id, mutation.id).await?,
+        Entity::Event => {
+            let stored = stored_row(conn, user_id, mutation.entity, mutation.id).await?;
+            let Some(stored) = stored else {
+                return Ok(not_found());
+            };
+            if crate::events::is_calendar_owned(&stored) {
+                return Ok(Outcome::Rejected {
+                    code: ErrorCode::ReadOnlyEntity,
+                    message: crate::events::CALENDAR_OWNED_MESSAGE.to_string(),
+                });
+            }
+            tombstone_row(conn, user_id, mutation).await?
+        }
         _ => tombstone_row(conn, user_id, mutation).await?,
     };
     if rows == 0 {
