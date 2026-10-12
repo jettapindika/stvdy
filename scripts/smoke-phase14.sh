@@ -134,14 +134,16 @@ NOTE
 
 if [ "$FAILURES" -gt 0 ]; then
   printf '\n=== FAIL: %s step(s) failed\n' "$FAILURES" >&2
-  cat <<'NOTE'
-Step 3's known failure, so it is not mistaken for a Phase 14 regression: the phone
-measurement reports 22 clipped elements, all at 200% text on Phase 13's five
+  if [ "$FAILURES" -eq 1 ]; then
+    cat <<'NOTE'
+The one failure is step 3, and it is not a Phase 14 regression: the phone measurement
+reports 22 clipped elements, all at 200% text on Phase 13's five
 /billing/checkout/:paymentId states, which Phase 13's own gate-5 table already records as
 reported rather than fixed. Every other measured item passes — 0 undersized, 0 text pairs
 below requirement, 0 overlaps, 0 page-width overflows — and no Phase 14 surface is among
 the 22.
 NOTE
+  fi
   exit "$FAILURES"
 fi
 

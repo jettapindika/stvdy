@@ -17,6 +17,31 @@ Filled by Phase 15, except the policy notes below which constrain earlier phases
 Direct download: signed and notarized macOS universal build, signed Windows
 installer. No Mac App Store, no Microsoft Store.
 
+**The macOS job, and the four commands that make "signed and notarized" a transcript rather
+than an adjective.** Runner: `macos-15`. The job runs
+`tauri build --target universal-apple-darwin` — with `bundle.macOS.hardenedRuntime` and
+`bundle.macOS.entitlements` read from the committed `tauri.conf.json` rather than passed on
+the command line, because two places to change is how one of them ends up stale — then runs
+`scripts/notarize-macos.sh` on the `.dmg` with the notary credentials, then asserts all four
+of these **before it uploads anything**. A release that publishes an unverified artifact is
+worse than one that fails:
+
+```bash
+codesign --verify --deep --strict --verbose=2 "$APP"            # the signature verifies
+spctl -a -vvv -t install "$APP"                                 # Gatekeeper accepts it
+xcrun stapler validate "$DMG"                                   # the ticket is stapled
+lipo -archs "$APP/Contents/MacOS/Stvdy" | grep -q 'x86_64 arm64'  # it is universal
+```
+
+Each one fails for a different reason and none of the four implies another: a valid
+signature with no stapled ticket launches only with a network, a stapled `.dmg` whose
+`.app` is unstapled fails after the user copies the app out, and a single-architecture
+binary passes the first three and fails only on the machine it was not built for.
+`scripts/notarize-macos.sh` is where the double staple happens, and its own two traps are
+documented there: `notarytool submit --wait` exits 0 for a **rejected** submission (so the
+script parses `status: Accepted` and prints the log id otherwise), and the ticket must be
+stapled to the `.app` **before** the dmg is rebuilt.
+
 - macOS: `universal-apple-darwin` target, `codesign` + `notarytool`, hardened
   runtime, minimum macOS 11.0, **and the notarization ticket stapled into both the `.app` and
   the `.dmg`** (A333) — an unstapled dmg fails on a machine with no network.
