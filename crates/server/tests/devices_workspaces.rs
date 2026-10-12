@@ -240,6 +240,49 @@ async fn listing_devices_marks_only_the_caller_current_and_hides_revoked(pool: P
     assert_eq!(devices[0]["current"], true);
 }
 
+/// The Devices screen's "Last synced" traces to a row, and it is not `last_seen_at`.
+///
+/// The two are different claims: `last_seen_at` refreshes on any authenticated request,
+/// while `last_sync_at` is written only by a completed sync pull (A180). A screen that
+/// showed `last_seen_at` would say "synced 2 minutes ago" for a device that has never pulled
+/// anything, which is the one thing the honesty gate forbids — a number that does not trace
+/// to the work it names.
+#[sqlx::test(migrations = "../../migrations")]
+async fn last_synced_is_absent_until_the_device_actually_pulls(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let signed_up = signup(&app, &harness, "synced@example.test", "Fresh Mac").await;
+    let token = token_of(&signed_up);
+    let device = device_of(&signed_up);
+
+    // A fresh device has been seen — signup itself did that — and has synced nothing.
+    let (status, body) = get(&app, "/devices", &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listed = &body["devices"][0];
+    assert_eq!(listed["id"], device.as_str());
+    assert!(
+        !listed["last_seen_at"].is_null(),
+        "signup is a request, so the device has been seen: {body}"
+    );
+    assert!(
+        listed["last_sync_at"].is_null(),
+        "a device that has never pulled must not report a sync time: {body}"
+    );
+
+    // One pull, and now it has.
+    let (status, body) = get(&app, "/sync/pull?cursor=0", &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = get(&app, "/devices", &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body["devices"][0]["last_sync_at"].is_null(),
+        "a completed pull is what sets it (A180): {body}"
+    );
+}
+
 /// A rename is scoped: another user's device id is a 404, your own rename
 /// persists, and an empty or over-long name is rejected before it is written.
 #[sqlx::test(migrations = "../../migrations")]

@@ -42,6 +42,13 @@ pub struct DeviceView {
     pub platform: String,
     pub app_version: Option<String>,
     pub last_seen_at: Option<DateTime<Utc>>,
+    /// When this device last completed a sync pull (A180).
+    ///
+    /// Distinct from `last_seen_at`, which any authenticated request refreshes: the Devices
+    /// screen's "Last synced" is a claim about the *data* on that device, and a device that
+    /// signed in and never pulled has synced nothing. `sync::touch_last_sync` is the only
+    /// writer, and it sets both — so this is `None` exactly until the device's first pull.
+    pub last_sync_at: Option<DateTime<Utc>>,
     pub created_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
     /// True for the device making the request, so the client can mark "this
@@ -66,6 +73,7 @@ struct DeviceRow {
     platform: String,
     app_version: Option<String>,
     last_seen_at: Option<DateTime<Utc>>,
+    last_sync_at: Option<DateTime<Utc>>,
     created_at: Option<DateTime<Utc>>,
     revoked_at: Option<DateTime<Utc>>,
 }
@@ -79,6 +87,7 @@ impl DeviceRow {
             platform: self.platform,
             app_version: self.app_version,
             last_seen_at: self.last_seen_at,
+            last_sync_at: self.last_sync_at,
             created_at: self.created_at,
             revoked_at: self.revoked_at,
         }
@@ -91,7 +100,8 @@ impl DeviceRow {
 /// make the delete button look broken. `devices_max` is counted the same way.
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<DeviceList>> {
     let rows = sqlx::query_as::<_, DeviceRow>(
-        "select id, name, platform, app_version, last_seen_at, created_at, revoked_at
+        "select id, name, platform, app_version, last_seen_at, last_sync_at, created_at,
+                revoked_at
            from devices
           where user_id = $1 and revoked_at is null
           order by created_at asc nulls last, id",
@@ -148,7 +158,8 @@ pub async fn rename(
     let row = sqlx::query_as::<_, DeviceRow>(
         "update devices set name = $3
           where id = $1 and user_id = $2 and revoked_at is null
-      returning id, name, platform, app_version, last_seen_at, created_at, revoked_at",
+      returning id, name, platform, app_version, last_seen_at, last_sync_at, created_at,
+                revoked_at",
     )
     .bind(device_id)
     .bind(user.user_id)
