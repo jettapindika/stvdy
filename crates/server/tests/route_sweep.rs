@@ -277,6 +277,50 @@ fn read_only_rows() -> Vec<Row> {
             "a channel the plan does not grant is refused per channel by the engine, which \
              crates/server/tests/settings.rs asserts with a body (A209)",
         ),
+        // Phase 13's billing routes. All `ReadOnly`, and the reason is the same for all of
+        // them: **buying is the remedy an exhausted account needs**, so gating checkout on
+        // a plan or a balance would lock the door the refusal points at. The platform rule
+        // is a different check (`checkout_allowed`), and `tests/billing.rs` drives it.
+        ro(
+            "GET",
+            "/plans",
+            "reads the matrix the caller's own screen shows; a locked plan must still be \
+             visible to be offered",
+        ),
+        ro(
+            "POST",
+            "/billing/checkout",
+            "buying is the remedy a refusal names; the platform refusal (A151) and the \
+             verified-email rule (A43) are asserted in tests/billing.rs",
+        ),
+        ro(
+            "GET",
+            "/billing/payments/{id}",
+            "reads the caller's own payment row, scoped by user_id in the statement",
+        ),
+        ro(
+            "POST",
+            "/billing/upgrade",
+            "an upgrade is money, not a plan feature: the target plan is priced by \
+             upgrade_delta and the platform rule is checked inside periods::upgrade",
+        ),
+        ro(
+            "POST",
+            "/billing/downgrade",
+            "a downgrade records an intent and changes nothing until the period end (A296); \
+             refusing it would trap a student on a plan they cannot leave",
+        ),
+        ro(
+            "POST",
+            "/billing/student/verify",
+            "sends a verification link; the suffix list bounds the content and the rate \
+             limiter bounds the volume (A299)",
+        ),
+        ro(
+            "POST",
+            "/billing/student/confirm",
+            "spends a single-use token the caller holds; the token is the authorisation",
+        ),
     ]
 }
 
@@ -490,6 +534,14 @@ fn exempt_rows() -> Vec<Row> {
             "GET",
             "/admin/margin",
             "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
+        ),
+        exempt(
+            "POST",
+            "/webhooks/qris",
+            "the gateway's callback: no session and no bearer token, and the signature over \
+             the raw body is the authorisation (A292/A309). Its refusals — 401 on a bad \
+             signature, 404 on an unknown order, 502 with no gateway — are asserted in \
+             tests/webhooks.rs",
         ),
     ]
 }
@@ -1009,6 +1061,33 @@ impl Fixture {
             .await
             .unwrap();
         }
+
+        // The syllabus row `POST /workspaces/{id}/syllabus` asserts a refusal for.
+        //
+        // It has to be here, and it has to be `kind = 'syllabus'`, because that is what
+        // `entitlements::snapshot` counts for `Feature::SyllabusImport` (`sources … and
+        // kind = 'syllabus'`). Without it the count reads 0 against free's
+        // `syllabus_imports_total = 1`, `counted` passes, and the refusal comes from
+        // `affordable` instead — a 402 the sweep row does not assert, so the row fails. The
+        // row's own comment claims the *count* refuses, and `counted` running before
+        // `affordable` is what makes that true.
+        //
+        // `sources_total` is deliberately not the axis: free caps it at 20 and the loop above
+        // already fills it, so `POST /workspaces/{id}/sources` keeps refusing on the count it
+        // always did and this row does not change its reason.
+        sqlx::query(
+            "insert into sources
+                (id, user_id, workspace_id, kind, title, file_key, file_size, mime, status)
+             values ($1, $2, $3, 'syllabus', 'Silabus', $4, 16, 'text/plain', 'ready')",
+        )
+        .bind(Uuid::now_v7())
+        .bind(user_id)
+        .bind(workspace_id)
+        .bind(format!("users/{user_id}/sources/syllabus.txt"))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
         sqlx::query(
             "insert into chunks (source_id, idx, content, content_hash, embedder)
              values ($1, 0, 'the material the generator reads', 'hash', 'test')",
