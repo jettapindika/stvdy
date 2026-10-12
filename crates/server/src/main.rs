@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         ics_fetch: providers.ics_fetch,
         payment: providers.payment,
         push: providers.push,
+        calendar: providers.calendar,
         jobs: jobs::Queue::new(),
     };
 
@@ -183,7 +184,39 @@ async fn fetch_embedder_model() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Resolves on the signal a supervisor actually sends.
+///
+/// `ctrl_c` alone is SIGINT: what a terminal sends, and **not** what a container runtime
+/// sends. `docker stop`, Kubernetes and systemd's default `KillSignal` all send **SIGTERM**,
+/// wait out their grace period and then SIGKILL. A handler listening only for SIGINT therefore
+/// never resolves in the image, so the graceful shutdown this function exists for does not
+/// happen — the container is killed mid-request after the timeout, which reads as a slow
+/// shutdown rather than as a missing handler.
+///
+/// Whichever arrives first wins. SIGTERM is unix-only; Windows has no SIGTERM and stopping a
+/// service is a different mechanism, so `ctrl_c` is the whole handler there.
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        // A handler that cannot be installed is not a reason to refuse to serve: the
+        // fallback is SIGINT, which is what this process had before SIGTERM was handled.
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not install a SIGTERM handler; SIGINT only");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
     tracing::info!("shutdown signal received");
 }

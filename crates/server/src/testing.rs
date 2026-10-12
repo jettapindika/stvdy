@@ -105,6 +105,10 @@ pub fn config() -> AppConfig {
             // window would otherwise change what the sync suites compact.
             ("CHANGE_LOG_RETENTION_DAYS", "90"),
             ("CHANGE_LOG_TOMBSTONE_RETENTION_DAYS", "180"),
+            // Pinned for the same reason as the two above, and with a sharper consequence: a
+            // developer whose `.env` set this to 0 would make every deletion suite purge on
+            // the first pass and the grace-window assertions vacuous.
+            ("ACCOUNT_DELETION_GRACE_DAYS", "7"),
             // A gateway is configured here because `TestState` hands out a
             // `TestGateway` handle: `AppState::payment` and `config.qris` are two halves of
             // one question — "is there a gateway" — and a state with the handle and no
@@ -253,6 +257,10 @@ pub fn state(pool: PgPool) -> AppState {
         // actually verified something. `TestState` keeps a handle to the same object.
         payment: Some(Arc::new(TestGateway::new())),
         push: Arc::new(crate::integrations::push::PushRouter::default()),
+        // `None`, the same shape `llm` and `renderer` take: a suite that drives a Google sync
+        // installs its own fake with `TestState::with_calendar`, and a suite that forgets one
+        // gets the honest "no client is configured" rather than a double nobody scripted.
+        calendar: None,
         jobs: Queue::new(),
     }
 }
@@ -440,6 +448,7 @@ impl TestState {
                 // `channels_available` omits `push`, and no test accidentally depends on a
                 // vendor it did not script.
                 push: Arc::new(crate::integrations::push::PushRouter::default()),
+                calendar: None,
                 jobs: Queue::new(),
             },
             storage,
@@ -552,10 +561,30 @@ impl TestState {
     /// client exists: `GET /calendar/google/connect` and its callback answer 404 rather
     /// than redirecting to a half-configured client. Asserting that 404 needs a state
     /// *without* the client, which is why the default test config has one.
+    ///
+    /// Both halves move together — the config's client and the `CalendarApi` handle — for the
+    /// reason [`with_push`](Self::with_push) gives: "is the calendar integration available" is
+    /// one question, and a state whose config carried a client while the handle was absent
+    /// would be a state that cannot exist in production.
     pub fn without_google_calendar(mut self) -> Self {
         let mut config = (*self.state.config).clone();
         config.google_calendar = None;
         self.state.config = Arc::new(config);
+        self.state.calendar = None;
+        self
+    }
+
+    /// The same state with a fake calendar client, so the Google sync runs without a network.
+    ///
+    /// The only way Task 7's pass is assertable at all: the real client's every call is a
+    /// request to Google, and no credential for one exists on a test machine. The fake records
+    /// what it was asked — the calendar id, the cursor, the refresh token it was handed — which
+    /// is what lets a test assert that the sync was *incremental* rather than merely successful.
+    pub fn with_calendar(
+        mut self,
+        calendar: Arc<dyn stvdy_core::traits::calendar::CalendarApi>,
+    ) -> Self {
+        self.state.calendar = Some(calendar);
         self
     }
 
