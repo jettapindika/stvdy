@@ -195,17 +195,47 @@ const TASK = {
 }
 
 /**
+ * One event, so the calendar's grid renders a block and the block's controls are
+ * measured. An empty week measures the empty state, and the controls that matter
+ * on that screen only exist once an event is in the window. The title is
+ * Indonesian and long on purpose: a string that fits proves nothing.
+ */
+const EVENT = {
+  id: 'e1',
+  workspace_id: null,
+  kind: 'study',
+  title: 'Belajar kriptografi untuk ujian hari Jumat',
+  starts_at: '2026-10-14T09:00:00Z',
+  ends_at: '2026-10-14T10:00:00Z',
+  source: 'manual',
+  task_id: null,
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+}
+
+/** One calendar connection, so the connections panel renders a row rather than its empty state. */
+const CONNECTION = {
+  id: 'c1',
+  provider: 'ics',
+  account_email: null,
+  status: 'ok',
+  error: null,
+  last_synced_at: '2026-10-11T08:00:00Z',
+  study_calendar_id: null,
+}
+
+/**
  * The phone surfaces this walks, by the taps a phone takes to reach them.
  *
- * The tab bar's five labels are the five destinations. `/calendar` is absent
- * because it is a `NotBuiltRoute` — there is no screen to measure — and `/billing`
- * is reached the way a phone reaches it, through Settings, which is also the
- * assertion that it is reachable at all: a screen nothing links to would otherwise
- * be measured by URL and would pass while being invisible to a user.
+ * The tab bar's five labels are the five destinations, and `/billing` is reached
+ * the way a phone reaches it — through Settings — which is also the assertion that
+ * it is reachable at all: a screen nothing links to would otherwise be measured by
+ * URL and would pass while being invisible to a user.
  */
 const SURFACES = [
   { name: 'today', steps: [{ nav: 'Today' }] },
   { name: 'workspaces', steps: [{ nav: 'Work' }] },
+  { name: 'calendar', steps: [{ nav: 'Calendar' }] },
   { name: 'tasks', steps: [{ nav: 'Tasks' }] },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
@@ -234,7 +264,12 @@ const ROUTES = {
   '/workspaces': () => ({ workspaces: [] }),
   '/tasks': () => ({ tasks: [TASK] }),
   '/settings': () => ({ settings: SETTINGS_ROW, timezone: USER.timezone }),
-  '/events': () => ({ events: [] }),
+  // The calendar reads these five; a missing one 404s and the walk measures the
+  // failure state instead of the screen.
+  '/events': () => ({ events: [EVENT] }),
+  '/calendar/connections': () => ({ connections: [CONNECTION] }),
+  '/calendar/ics-token': () => ({ ics_feed_token: 'feed-token-1' }),
+  '/calendar/google/connect': () => ({ url: 'https://accounts.google.com/o/oauth2/v2/auth' }),
   '/sessions': () => ({ sessions: [] }),
   '/devices': () => ({ devices: [] }),
 }
