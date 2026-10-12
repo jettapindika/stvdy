@@ -267,7 +267,10 @@ async fn charge_turn(state: &AppState, user: &AuthUser, turn: &mut Turn) -> Resu
         // The two kinds stay distinct because they are two different sentences: a spent
         // balance and a reached usage ceiling are not the same fact, and the model is the one
         // that has to say the true one to the student.
-        Err(AppError::Entitlement { code, .. }) if code == "insufficient_credits" => {
+        Err(AppError::Entitlement {
+            code: "insufficient_credits",
+            ..
+        }) => {
             // `AppError::Entitlement` deliberately carries `limit`/`used` and not a balance,
             // so the numbers come from `entitlements::snapshot`. One extra read on the path
             // that is about to tell the student to top up is worth an accurate sentence.

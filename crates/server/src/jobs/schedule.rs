@@ -130,7 +130,7 @@ pub async fn reminder_pass(state: &AppState) -> AppResult<u64> {
           order by u.id
           limit $2",
     )
-    .bind(&window)
+    .bind(window)
     .bind(REMINDER_BATCH)
     .fetch_all(&state.pool)
     .await

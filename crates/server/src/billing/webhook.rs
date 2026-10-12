@@ -56,16 +56,16 @@ pub async fn handle(
     // not trust; when `QRIS_WEBHOOK_IPS` is set, an operator has arranged for the peer
     // address to be meaningful. An empty list means "not configured", which is not the
     // same as "allow everything" — the signature is still required either way.
-    if let Some(qris) = state.config.qris.as_ref() {
-        if !qris.webhook_ips.is_empty() {
-            let peer = peer_ip(&headers);
-            if !peer.is_some_and(|ip| qris.webhook_ips.contains(&ip)) {
-                tracing::warn!(
-                    ?peer,
-                    "a callback from outside QRIS_WEBHOOK_IPS was refused"
-                );
-                return Err(AppError::Unauthorized);
-            }
+    if let Some(qris) = state.config.qris.as_ref()
+        && !qris.webhook_ips.is_empty()
+    {
+        let peer = peer_ip(&headers);
+        if !peer.is_some_and(|ip| qris.webhook_ips.contains(&ip)) {
+            tracing::warn!(
+                ?peer,
+                "a callback from outside QRIS_WEBHOOK_IPS was refused"
+            );
+            return Err(AppError::Unauthorized);
         }
     }
 

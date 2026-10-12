@@ -200,7 +200,6 @@ async fn a_poisoned_source_does_not_create_a_task(pool: PgPool) {
     )
     .fetch_one(&harness.state.pool)
     .await
-    .map(|(id, tool, state)| (id, tool, state))
     .unwrap();
     assert_eq!(tool, "create_task");
     assert_eq!(

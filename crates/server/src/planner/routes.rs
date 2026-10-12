@@ -237,19 +237,22 @@ pub struct ProposalView {
     pub updated_at: DateTime<Utc>,
 }
 
+/// The raw `plan_proposals` row, in the column order [`ProposalView`] destructures it.
+type ProposalRow = (
+    Uuid,
+    Uuid,
+    String,
+    Option<Value>,
+    Option<i32>,
+    Option<Value>,
+    Option<String>,
+    Option<String>,
+    DateTime<Utc>,
+    DateTime<Utc>,
+);
+
 async fn load_proposal(state: &AppState, user_id: Uuid, id: Uuid) -> AppResult<ProposalView> {
-    let row: Option<(
-        Uuid,
-        Uuid,
-        String,
-        Option<Value>,
-        Option<i32>,
-        Option<Value>,
-        Option<String>,
-        Option<String>,
-        DateTime<Utc>,
-        DateTime<Utc>,
-    )> = sqlx::query_as(
+    let row: Option<ProposalRow> = sqlx::query_as(
         "select id, goal_id, status, proposal, deficit_min, warnings, prompt_version, error,
                 created_at, updated_at
            from plan_proposals where id = $1 and user_id = $2",

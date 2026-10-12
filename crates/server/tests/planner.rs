@@ -399,11 +399,7 @@ async fn a_failed_plan_generation_refunds_the_two_credits(pool: PgPool) {
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(
-        refunded,
-        i64::from(cost),
-        "exactly one refund of the charge"
-    );
+    assert_eq!(refunded, cost, "exactly one refund of the charge");
 
     // The boot sweep recovers nothing a second time: `credits_spent > 0` is the guard, and
     // the claim that zeroed it is what makes this a no-op.
@@ -425,7 +421,7 @@ async fn a_failed_plan_generation_refunds_the_two_credits(pool: PgPool) {
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(refunded_after, i64::from(cost), "still exactly one refund");
+    assert_eq!(refunded_after, cost, "still exactly one refund");
 }
 
 /// A failed syllabus extraction gives back the eight credits the upload charged.
@@ -484,11 +480,7 @@ async fn a_failed_extraction_refunds_the_eight_credits(pool: PgPool) {
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(
-        refunded,
-        i64::from(cost),
-        "exactly one refund of the charge"
-    );
+    assert_eq!(refunded, cost, "exactly one refund of the charge");
 
     let recovered = stvdy_server::credits::refund_pending(
         &harness.state.pool,
@@ -640,16 +632,18 @@ async fn the_accepted_plan_respects_busy_time_study_hours_the_daily_max_and_the_
 
     // --- Assert on the WRITTEN events, not the proposal ---------------------
 
-    let written: Vec<(DateTime<Utc>, DateTime<Utc>, Option<Uuid>, String, String)> =
-        sqlx::query_as(
-            "select starts_at, ends_at, goal_id, title, source from events
+    // The columns the assertion below destructures: the block's window, its goal (null for a
+    // review block), and the title/source it was written with.
+    type WrittenBlock = (DateTime<Utc>, DateTime<Utc>, Option<Uuid>, String, String);
+    let written: Vec<WrittenBlock> = sqlx::query_as(
+        "select starts_at, ends_at, goal_id, title, source from events
               where user_id = $1 and kind = 'study_block' and deleted_at is null
               order by starts_at, id",
-        )
-        .bind(user_id)
-        .fetch_all(&harness.state.pool)
-        .await
-        .unwrap();
+    )
+    .bind(user_id)
+    .fetch_all(&harness.state.pool)
+    .await
+    .unwrap();
     assert!(!written.is_empty(), "the accept wrote the blocks");
 
     let tz: chrono_tz::Tz = "Asia/Jakarta".parse().unwrap();

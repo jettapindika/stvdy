@@ -160,14 +160,18 @@ struct Account {
     subjects: Vec<Subject>,
 }
 
+/// The raw `users`/`user_settings` row behind an [`Account`]: the timezone, the three
+/// quiet/study hours (all nullable), and the channel list the column defaults to `["web"]`.
+type AccountRow = (
+    String,
+    Option<i32>,
+    Option<i32>,
+    Option<i32>,
+    sqlx::types::Json<Vec<ReminderChannel>>,
+);
+
 async fn load_account(state: &AppState, user_id: Uuid) -> Result<Option<Account>, Failure> {
-    let row: Option<(
-        String,
-        Option<i32>,
-        Option<i32>,
-        Option<i32>,
-        sqlx::types::Json<Vec<ReminderChannel>>,
-    )> = sqlx::query_as(
+    let row: Option<AccountRow> = sqlx::query_as(
         "select u.timezone,
                     s.quiet_start_hour,
                     s.quiet_end_hour,

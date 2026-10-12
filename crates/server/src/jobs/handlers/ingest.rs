@@ -82,11 +82,13 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
         state,
         source_id,
         user_id,
-        &kind,
-        file_key.as_deref(),
-        url.as_deref(),
-        &title,
-        &mime,
+        IngestBody {
+            kind: &kind,
+            file_key: file_key.as_deref(),
+            url: url.as_deref(),
+            title: &title,
+            mime: &mime,
+        },
     )
     .await
     {
@@ -526,16 +528,33 @@ async fn set_status(
     Ok(())
 }
 
+/// The source's body, as `ingest` reads it: which shape the parse takes (`kind`), the
+/// stored object's key and/or the fetched URL, and the title and mime the parse uses.
+///
+/// Grouped because the five are the claimed row's body columns and travel together from
+/// the one call site; `kind` and `mime` are the pair that decides a parse, and `file_key`
+/// and `url` are the pair that says where the bytes are.
+struct IngestBody<'a> {
+    kind: &'a str,
+    file_key: Option<&'a str>,
+    url: Option<&'a str>,
+    title: &'a str,
+    mime: &'a str,
+}
+
 async fn ingest(
     state: &AppState,
     source_id: Uuid,
     user_id: Uuid,
-    kind: &str,
-    file_key: Option<&str>,
-    url: Option<&str>,
-    title: &str,
-    mime: &str,
+    body: IngestBody<'_>,
 ) -> Result<usize, Failure> {
+    let IngestBody {
+        kind,
+        file_key,
+        url,
+        title,
+        mime,
+    } = body;
     let pages = match kind {
         // A syllabus is stored as either a PDF or pasted text — the upload decides which and
         // records it in `sources.mime` — so its parse is the one it was uploaded as. The

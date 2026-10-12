@@ -366,32 +366,31 @@ async fn activate_subscription(
 
     // An upgrade: the plan changes and the dates do not, because the student already paid
     // for the time being switched.
-    if let Some(live) = &live {
-        if live.current_period_end > paid_at && live.plan_id != plan.as_str() {
-            sqlx::query("update subscriptions set plan_id = $2, provider = $3 where id = $1")
-                .bind(live.id)
-                .bind(plan.as_str())
-                .bind(provider)
-                .execute(&mut *conn)
-                .await
-                .map_err(|error| {
-                    AppError::Internal(anyhow::anyhow!("switching the subscription plan: {error}"))
-                })?;
+    if let Some(live) = &live
+        && live.current_period_end > paid_at
+        && live.plan_id != plan.as_str()
+    {
+        sqlx::query("update subscriptions set plan_id = $2, provider = $3 where id = $1")
+            .bind(live.id)
+            .bind(plan.as_str())
+            .bind(provider)
+            .execute(&mut *conn)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!("switching the subscription plan: {error}"))
+            })?;
 
-            sqlx::query("update payments set subscription_id = $2 where id = $1")
-                .bind(payment.id)
-                .bind(live.id)
-                .execute(&mut *conn)
-                .await
-                .map_err(|error| {
-                    AppError::Internal(anyhow::anyhow!("linking the payment: {error}"))
-                })?;
+        sqlx::query("update payments set subscription_id = $2 where id = $1")
+            .bind(payment.id)
+            .bind(live.id)
+            .execute(&mut *conn)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("linking the payment: {error}")))?;
 
-            return Ok(Applied::Activated {
-                plan,
-                period_end: live.current_period_end,
-            });
-        }
+        return Ok(Applied::Activated {
+            plan,
+            period_end: live.current_period_end,
+        });
     }
 
     // A296: extend from a live period end, or start a fresh period at `paid_at`.

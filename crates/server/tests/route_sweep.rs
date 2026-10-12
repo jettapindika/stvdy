@@ -1672,7 +1672,7 @@ impl Fixture {
             ("POST", "/calendar/sync") => {
                 // The refusal is on the plan, before any connection is read, so the body is
                 // irrelevant to the answer — which is the order a counted refusal must take.
-                json(&app, "POST", "/calendar/sync", token, serde_json::json!({})).await
+                json(app, "POST", "/calendar/sync", token, serde_json::json!({})).await
             }
             // The consent flow's first leg. A plain authenticated GET: the refusal is the
             // plan matrix's and it fires before anything is minted, so there is no body and

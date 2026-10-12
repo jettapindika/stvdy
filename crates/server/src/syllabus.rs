@@ -322,15 +322,18 @@ struct DraftRow {
     error: Option<String>,
 }
 
+/// The raw `syllabus_drafts` row, in the column order [`DraftRow`] destructures it.
+type DraftValues = (
+    Uuid,
+    Uuid,
+    Uuid,
+    String,
+    Option<serde_json::Value>,
+    Option<String>,
+);
+
 async fn load_draft(state: &AppState, user_id: Uuid, draft_id: Uuid) -> AppResult<DraftRow> {
-    let row: Option<(
-        Uuid,
-        Uuid,
-        Uuid,
-        String,
-        Option<serde_json::Value>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let row: Option<DraftValues> = sqlx::query_as(
         "select id, workspace_id, source_id, status, extraction, error
                from syllabus_drafts
               where id = $1 and user_id = $2",

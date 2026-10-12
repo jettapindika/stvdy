@@ -317,6 +317,24 @@ pub struct Spent {
     pub remaining: i64,
 }
 
+/// What to spend, and on what: the action the ledger names, the credits it costs, the
+/// daily caps it is counted against, and whether the usage row is a call on the account's
+/// own model key.
+///
+/// The four travel together — a caller that has an action has the other three — and
+/// `spend_in`'s remaining parameters are the session, so grouping these four keeps the
+/// signature short enough that a transposed pair of arguments cannot compile.
+pub struct Charge<'a> {
+    /// The `usage_events.action`, and the `usage:`-prefixed reason on the ledger row.
+    pub action: &'a str,
+    /// The credits to charge.
+    pub credits: i64,
+    /// The daily caps, checked under the same lock as the balance.
+    pub daily_caps: [Option<DailyCap>; 2],
+    /// Whether the row is a call made on the account's own key (A156).
+    pub byok: bool,
+}
+
 /// Spends `credits` for `action`, returning the usage row and the new balance.
 ///
 /// The advisory lock is taken **first**, before any read of the ledger: without
@@ -347,7 +365,16 @@ pub async fn spend(
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a spend: {error}")))?;
     let spent = spend_in(
-        &mut tx, state, user_id, plan, action, credits, daily_caps, byok,
+        &mut tx,
+        state,
+        user_id,
+        plan,
+        Charge {
+            action,
+            credits,
+            daily_caps,
+            byok,
+        },
     )
     .await?;
     tx.commit()
@@ -373,11 +400,14 @@ pub async fn spend_in(
     state: &AppState,
     user_id: Uuid,
     plan: stvdy_core::config::PlanId,
-    action: &str,
-    credits: i64,
-    daily_caps: [Option<DailyCap>; 2],
-    byok: bool,
+    charge: Charge<'_>,
 ) -> AppResult<Spent> {
+    let Charge {
+        action,
+        credits,
+        daily_caps,
+        byok,
+    } = charge;
     if credits < 0 {
         return Err(AppError::Internal(anyhow::anyhow!(
             "a spend must not be negative (action {action}, credits {credits})"

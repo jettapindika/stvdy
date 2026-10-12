@@ -386,10 +386,10 @@ pub async fn stub_http_json(status: u16, body: impl Into<String>) -> StubHttp {
     let handle = tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let request = read_stub_request(&mut socket).await;
-            if let Some(request) = request {
-                if let Ok(mut log) = recorded.lock() {
-                    log.push(request);
-                }
+            if let Some(request) = request
+                && let Ok(mut log) = recorded.lock()
+            {
+                log.push(request);
             }
             let reason = match status {
                 200 => "OK",

@@ -23,10 +23,10 @@ use uuid::Uuid;
 mod common;
 use common::{json, signed_up};
 
-/// The confirm path's bounds are the **tool's**, not the route's (30 cards / 20 questions in
-/// `crates/core/src/agent/tools.rs` against 50/50 in the routes). A proposal cannot reach the
-/// route's bound, so a test asserting it would exercise an unreachable branch — see
-/// `an_edit_is_validated_by_the_same_contract` for the bound that actually fires.
+// The confirm path's bounds are the **tool's**, not the route's (30 cards / 20 questions in
+// `crates/core/src/agent/tools.rs` against 50/50 in the routes). A proposal cannot reach the
+// route's bound, so a test asserting it would exercise an unreachable branch — see
+// `an_edit_is_validated_by_the_same_contract` for the bound that actually fires.
 
 /// The app plus a signed-up account whose plan grants `Feature::AgentAction`.
 ///

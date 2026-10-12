@@ -279,10 +279,10 @@ impl ApnsPush {
             .token
             .lock()
             .map_err(|_| PushError::Transport("the provider token lock is poisoned".to_string()))?;
-        if let Some((token, minted)) = guard.as_ref() {
-            if minted.elapsed() < PROVIDER_TOKEN_TTL {
-                return Ok(token.clone());
-            }
+        if let Some((token, minted)) = guard.as_ref()
+            && minted.elapsed() < PROVIDER_TOKEN_TTL
+        {
+            return Ok(token.clone());
         }
         let token = self.provider_token(now)?;
         *guard = Some((token.clone(), Instant::now()));
@@ -447,10 +447,10 @@ impl FcmPush {
             let guard = self.token.lock().map_err(|_| {
                 PushError::Transport("the OAuth token lock is poisoned".to_string())
             })?;
-            if let Some((token, fetched)) = guard.as_ref() {
-                if fetched.elapsed() < OAUTH_TOKEN_TTL {
-                    return Ok(token.clone());
-                }
+            if let Some((token, fetched)) = guard.as_ref()
+                && fetched.elapsed() < OAUTH_TOKEN_TTL
+            {
+                return Ok(token.clone());
             }
         }
 
