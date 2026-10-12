@@ -1,5 +1,15 @@
 # Release
 
+**This is the normative release document** (A354). Every operational procedure lives either here
+or in `docs/OPERATIONS.md`, and nowhere else:
+
+- **This file** is what is distributed, under which policy, with which pinned components, and
+  what must be true before a release is published — the release process, the store checklists and
+  the launch checklist.
+- **`docs/OPERATIONS.md`** is the day-two runbook: the production host checklist, the deploy
+  sequence, backups and the restore drill, monitoring, the breach runbook and retention. It is
+  the shorter document on purpose, because it is the one an operator opens during an incident.
+
 Filled by Phase 15, except the policy notes below which constrain earlier phases.
 
 ## Desktop distribution
@@ -8,12 +18,20 @@ Direct download: signed and notarized macOS universal build, signed Windows
 installer. No Mac App Store, no Microsoft Store.
 
 - macOS: `universal-apple-darwin` target, `codesign` + `notarytool`, hardened
-  runtime, minimum macOS 11.0.
-- Windows: `nsis` installer, `perMachine` install mode, code-signed.
-- Updater: arrives with the release pipeline, because it needs a signing keypair
-  and an HTTPS endpoint for signed manifests. It is deliberately not registered
-  before then. The plugin panics at startup if its config is absent, and an
-  updater that cannot check for updates is a fake capability.
+  runtime, minimum macOS 11.0, **and the notarization ticket stapled into both the `.app` and
+  the `.dmg`** (A333) — an unstapled dmg fails on a machine with no network.
+- Windows: `nsis` installer, `perMachine` install mode, code-signed, **SHA-256, with an RFC 3161
+  timestamp** (A334). Without a certificate the installer builds unsigned and SmartScreen warns
+  on every install; that is a recorded degraded state, not a defect.
+- Updater: `tauri-plugin-updater` 2.13.3, **desktop only** — the plugin's own platform matrix is
+  `ios: none, android: none`, so a mobile build that enabled the capability would fail to compile
+  rather than expose an API that does nothing, and mobile updates ship through TestFlight and
+  Play. The manifest endpoint and the minisign public key live in `tauri.conf.json`'s
+  `plugins.updater`; the **private** key is a GitHub Actions secret used by `release.yml` only, and
+  `scripts/verify-release-artifacts.sh` refuses to run if it is present in its environment (A332).
+  Until the operator pastes their real public key, the committed placeholder means every signature
+  fails to verify — a safe-but-useless updater, not a startup panic. The update is offered, never
+  applied silently, and the panel renders only what the manifest carried (A336).
 
 ## Mobile distribution
 
@@ -208,6 +226,145 @@ must be stated in the UI before confirmation.
 
 `Export my data` produces JSON + Markdown + ICS.
 
+## Release process
+
+The sequence, with the commands. **A release is a tag, not a branch**: tags are not commits, and a
+pipeline that trusts a green badge from a branch can ship a commit CI never saw (A345).
+
+### 1. Land everything, and let CI be green on the commit
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+just check-shell                    # src-tauri is outside the workspace, so this is separate
+npm --prefix app test
+npm --prefix app run build
+node scripts/check-no-cdn.mjs
+node scripts/check-no-purchase-ui.mjs
+node scripts/check-no-purchase-ui.test.mjs
+bash scripts/check-mobile-no-purchase.sh
+```
+
+`check-shell` depends on `check-web` on purpose: `generate_context!()` panics at compile time when
+`app/dist` is missing, and `dist/` is gitignored.
+
+### 2. Bump the version, in the two places that must agree
+
+`Cargo.toml`'s `[workspace.package] version` and `src-tauri/tauri.conf.json`'s `version` (A353 —
+see § Versioning for which of the two a hotfix may ship alone). `crates/server/tests/release.rs`
+asserts the two are equal, so a bump that misses one fails the suite rather than the release.
+
+### 3. Tag, and push the tag
+
+```bash
+git tag v0.2.0            # the shell's version; `server-v…` for a server-only hotfix
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` triggers on `v*`. Its **first job** re-runs the step-1 checks on
+the tagged commit; a failure there stops the release before anything is built. Then three build
+jobs (macOS universal, Windows NSIS, the Android APK for the direct channel), each uploading its
+artifacts **and its `.sig` files** — a job that produced an archive and not its signature is a
+failure, and the workflow asserts the `.sig` exists rather than trusting the bundler's exit code.
+
+### 4. The manifest, and the round trip
+
+`latest.json` is generated with one entry per `{{target}}/{{arch}}` pair, each carrying the
+`signature` (the contents of the `.sig`) and the artifact's `url`, and it is signed with the same
+minisign key. The workflow then **downloads the published manifest back over HTTPS and verifies
+its signature against the committed public key**, failing if that round trip does not hold — the
+manifest is the artifact the whole channel rests on.
+
+### 5. Verify the artifacts before publishing
+
+The last step of every job runs the gate against what it just produced:
+
+```bash
+scripts/verify-release-artifacts.sh --macos   --dir <bundle dir>
+scripts/verify-release-artifacts.sh --windows --dir <bundle dir>
+scripts/verify-release-artifacts.sh --manifest --manifest-dir <dist dir>
+scripts/verify-release-artifacts.sh --version --tag v0.2.0
+```
+
+**This is the step that makes the exit gate mechanical rather than a claim**: a job that produced
+an unsigned installer or an unstapled dmg fails here, before the artifact is published. Every mode
+is fail-closed — a check that cannot read what it needs is a `FAIL`, never a skip — and the script
+**refuses to run at all (exit 2) when `TAURI_SIGNING_PRIVATE_KEY` or its password is in its
+environment**, because a verification tool that can sign cannot establish the one property it
+exists to establish (A332).
+
+> **The consequence for the workflow, stated so it is not discovered by a failing release:** the
+> signing secret must be scoped to the signing **step**, never to the job. A job-wide secret is how
+> the key ends up in the environment of every later step — which is exactly the drift A332 forbids,
+> and the verifier refuses rather than tolerating it.
+
+### 6. Publish, and record
+
+Attach the artifacts to the GitHub Release, publish `latest.json` and its `.sig` to the static
+endpoint `plugins.updater.endpoints` names, and record the run URL in the launch checklist
+(`docs/RELEASE.md` § Launch checklist). Then deploy the image — § Server deployment below.
+
+### What degrades without a certificate, and what that costs
+
+Every row is the user's to obtain; `docs/superpowers/HANDOVER.md` is the live list, and this
+document does not restate it.
+
+| Missing | What still builds | What it costs |
+|---|---|---|
+| Apple Developer ID certificate | a universal `.app`/`.dmg`, unsigned | Runs **only** on the machine that built it (Gatekeeper trusts a locally built app) and is blocked on every other Mac. **Not distributable** |
+| notarytool credentials | a signed but unstapled dmg | A first launch needs a network round trip to Apple; offline, it fails with the "cannot be opened" dialog |
+| Windows Authenticode certificate | the NSIS installer, unsigned | SmartScreen warns on every install. The warning is per-publisher reputation, so it does not decay |
+| a real minisign keypair | everything, with a placeholder `pubkey` | Every signature fails to verify — a safe-but-useless updater. The plugin requires `plugins.updater` to exist, so the honest alternative is no updater at all |
+| a production host | every artifact | Nothing can be *deployed*. A45 forbids the trial VPS, and putting the manifest endpoint or the QRIS webhook behind it is the specific mistake that row names |
+
+## Server deployment
+
+The image is the deployment unit: API, job worker and scheduler are three tasks in one process
+(`crates/server/src/main.rs`), so one container is the whole server. `docs/OPERATIONS.md` is the
+step-by-step version, and this section is the summary of what a release has to be true of.
+
+**The environment.** `.env.example` is the contract. Production sets `APP_ENV=prod` (which requires
+`JWT_SECRET` of at least 32 characters and a `WEB_ORIGIN`), `DATABASE_URL`, `ENCRYPTION_KEY_HEX`,
+`STORAGE_BACKEND=s3` with the R2 values (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION=auto`,
+`S3_FORCE_PATH_STYLE=false`; A331), `SEARXNG_URL` pointing at the **separate** search service
+(A344), and the image's own defaults for `CHROME_PATH`, `PDFIUM_LIB_PATH`, `FASTEMBED_CACHE_DIR`,
+`SOFFICE_BIN` and `ASSETS_DIR` (A337-A343).
+
+**The migration is a step, not a side effect.** `--migrate-only` runs to completion and exits
+without binding a port; it runs **once, before any replica starts** (A346). That is a deployment
+contract rather than a convenience: `main.rs` migrates on every boot with no lock of its own, so
+two replicas starting together race, and the one that loses serves traffic against a schema it has
+not verified.
+
+```bash
+docker run --rm --network host -e DATABASE_URL="$DATABASE_URL" stvdy-server:<tag> --migrate-only
+docker run -d --name stvdy --shm-size=1g --tmpfs /tmp <env…> -p 8080:8080 stvdy-server:<tag>
+```
+
+`--shm-size` and a writable `/tmp` are both required by Chromium's sandbox (A338).
+
+**The reverse proxy.** TLS termination, `WEB_ORIGIN` pointed at the web build's origin, **buffering
+off on the SSE route** (the heartbeat exists precisely because proxies close idle streams), and
+`GET /assets/` public — the requester is headless Chromium printing a document, and every file is a
+vendored upstream release with no user data in it (A339).
+
+**Object storage.** R2, presigned reads only, no public bucket: `GET /sources/:id/file` already
+hands out short-lived scoped URLs, and a public bucket would make the presigning decorative (A331).
+
+**Before deploying, run the image check on the host.** "Works in CI" and "works on this host" are
+different claims, and the second is the one that ships:
+
+```bash
+IMAGE=stvdy-server:<tag> DATABASE_URL="$DATABASE_URL" bash scripts/release-image.sh
+```
+
+It compares the running Chromium to the `Dockerfile`'s pin, checks pdfium, LibreOffice and a
+non-empty model cache, runs `--migrate-only`, boots the server, probes `/health` and the four
+`/assets/` paths, and then runs the PDF acceptance test **inside the container** — the same test
+CI's `image` job runs, against the image's own browser. A pass proves the print assets resolved,
+because a missing KaTeX leaves every formula as literal LaTeX.
+
 ## The server image bakes a pinned Chromium
 
 **There is now a `Dockerfile`** (Phase 15, Task 6), and it is the authority for what the image
@@ -281,3 +438,39 @@ PPN handling must be settled before launch.
 
 `CARGO_PKG_VERSION` for the server and shell, the same value in
 `tauri.conf.json`. Mobile build numbers are bumped per store submission.
+
+**The server and the shell are versioned independently, and the tag names which one ships**
+(A353). They are separate binaries with separate release cadences, and clients are not
+recallable — so a server-only fix must be able to ship alone, and an update prompt for a fix
+that does not touch the client is noise.
+
+| Artifact | Versioned by | Reported by | Shipped by |
+|---|---|---|---|
+| The **shell** (desktop app) | `src-tauri/tauri.conf.json` `version`, plus `CARGO_PKG_VERSION` of `src-tauri` | the bundle's own metadata; the Settings → Updates panel shows what the manifest said | a `v*` tag, through the macOS/Windows jobs |
+| The **server** | the workspace `Cargo.toml`'s `[workspace.package] version` | `GET /health`'s `version` field | the image, from the same repository at its own cadence |
+| **Mobile** | the same shell version, plus a build number bumped per submission | the store | TestFlight / Play — **not** the Tauri updater |
+
+So a release tag names the shell, and a server-only hotfix is tagged `server-v…` and skips the
+client jobs. The workflow asserts the three values agree and fails with all three printed, and
+`scripts/verify-release-artifacts.sh --version` is the same check on demand — it accepts a
+`server-v…` tag against the workspace version **alone**, because the shell is not part of that
+release. `crates/server/tests/release.rs::the_version_is_the_workspace_version` binds
+`tauri.conf.json`'s version to the workspace version, so a bump that misses one fails the suite
+rather than the release.
+
+**What a hotfix may ship alone: the server.** The client cannot be recalled, and a client release
+for a server-only fix asks every installed copy to download and reinstall for no change. The
+reverse is not true: a client fix needs a release, and an installed copy gets it only by accepting
+the update the manifest offers.
+
+## Day-two operations
+
+Backups and the restore drill, monitoring and alerting, the breach runbook, retention windows,
+the production host checklist and the step-by-step deploy sequence are all in
+**`docs/OPERATIONS.md`** (A354). They are there rather than here because this document is the
+release's, and that one is the operator's — during an incident the shorter document is the one
+that gets read.
+
+Three things in it are launch prerequisites rather than nice-to-haves, and the launch checklist
+rows name them: the restore drill (row 14), the uptime check and alert routing (row 15), and the
+breach runbook's two blanks (row 16).
