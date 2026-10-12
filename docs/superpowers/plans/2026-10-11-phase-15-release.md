@@ -846,9 +846,7 @@ action that shows the adapter's progress. Every string goes through `t()` in bot
 `en.json` and `id.json` (A104's contract; `i18n.test.ts` fails on a key present in one
 file only, and on a placeholder mismatch between them).
 
-- [ ] **Step 5: Run the web tests and the build**
-
-*(Not ticked: no recorded green run of this pair at the time — `task-B-report.md` records the full suite as red on peers' in-flight `app/**` work, and only the two `-- UpdatesPanel`/`-- SettingsScreen` filters as green.)*
+- [x] **Step 5: Run the web tests and the build** — **ticked 2026-10-12: both green, and the reason it was left unticked no longer holds.** `npm --prefix app test` → **69 files / 632 tests / 0 failed**; `npm --prefix app run build` → exit 0 (`dist/assets/index-H47mblYz.js`, 785.91 kB / 230.17 kB gzip). The note below records why it was blank at the time — the full suite was red on peers' in-flight `app/**` work and only two filtered runs were green — and that is now the same reason it is worth ticking: the pair has been run whole, not filtered.
 
 ```bash
 npm --prefix app test
@@ -1459,9 +1457,7 @@ match std::env::args().nth(1).as_deref() {
 it; the download is the side effect. It does **not** require a database, so the build
 stage can run it before Postgres exists — which is what Task 6's Step 4 depends on.
 
-- [ ] **Step 3: Run the tests**
-
-*(Not ticked: no artefact for this run as its own step — the same command's `8 passed; 0 failed` is recorded in `task-B-report.md` under Task 1's step 7, which is where it is ticked.)*
+- [x] **Step 3: Run the tests** — **ticked 2026-10-12, and re-measured rather than inherited.** `cargo test -p stvdy-server --test release` → **8 passed / 0 failed**: `a_signed_manifest_verifies_and_a_mutated_one_does_not`, `the_bundle_creates_updater_artifacts_and_names_a_public_key`, `the_updater_is_desktop_only`, `the_macos_bundle_pins_hardened_runtime_and_the_minimum_version`, `the_windows_installer_is_per_machine_and_sha256_timestamped`, `the_version_is_the_workspace_version`, `an_unknown_argument_is_refused`, `migrate_only_exits_zero_without_binding`. The note below says the same `8 passed` was recorded under Task 1's Step 7 and that this step had no artefact of its own; it has one now.
 
 ```bash
 cargo test -p stvdy-server --test release

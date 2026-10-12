@@ -15,32 +15,33 @@ nothing in a phase's own file list owned them:
 | **The Play account-deletion URL** | The public **page** does not exist. The route behind it does: `DELETE /account` ships with the app | Google Play requires a public deletion URL for any app with account creation. The page is a deployment artefact rather than code, and it needs the production host — `docs/RELEASE.md` G2 is typed `user` for that reason |
 | **The iOS build number** | ~~No build version in the config~~ — **fixed**: `bundle.iOS.bundleVersion` and `bundle.macOS.bundleVersion` are now `"1"`. Note the key is **per-platform**: `bundle.bundleVersion` is not in the CLI schema's `BundleConfig` at all (`app/node_modules/@tauri-apps/cli/config.schema.json`, `IosConfig`/`MacConfig` each define `bundleVersion` as "translates to CFBundleVersion"), so the top-level form would be rejected or silently ignored. Bumping the build number is now a one-line diff rather than a shell-version bump | A second submission without a higher build number is rejected as a duplicate |
 
-The first two are the same feature, and **it is implemented in the working tree and being verified as this was written** — `crates/server/src/account.rs`, `crates/server/src/jobs/handlers/purge_accounts.rs`, `migrations/0037_account_purge.sql`, the two routes, the Settings Data section, and the retention/checklist documents corrected. It is not yet committed, and its acceptance commands were the first casualty of the disk filling up (a link that died with `errno=28`), so treat it as **unverified** until its own report lands. What will remain for it afterwards is not code: the **public Play deletion URL** needs the production host, and the Apple/Google review notes need your accounts.
+The first two are the same feature, and **it is implemented and committed** — `crates/server/src/account.rs`, `crates/server/src/jobs/handlers/purge_accounts.rs`, `migrations/0037_account_purge.sql`, the two routes, the Settings Data section, and the retention/checklist documents corrected (`c049b43`, A355). What remains for it is not code: the **public Play deletion URL** needs the production host, and the Apple/Google review notes need your accounts.
 
 The gap was a product-scope decision rather than a task: it needed the retention/purge machinery, a confirm step, and copy that says what is deleted. **A160 is the reason it went unowned** — Phase 7's plan re-tagged the `## Account` heading away from itself on the grounds that the work "belongs with the release prerequisites", and no phase's file list then picked it up, so it sat as a promise in `docs/API.md`, `docs/OPERATIONS.md`'s retention table and `docs/EULA.md` § 9 while nothing implemented it.
 
 ## One environment note worth acting on
 
-**The machine is nearly out of disk, and it has already cost verification.** `/System/Volumes/Data` had **105 MB free at its worst** and sits around **7 GB free** now; the repository's `target/` is about **80 GB** and `src-tauri/target/` another **16 GB**. Four things died on it: Phase 13's test run with `No space left on device`, Phase 15's one local `docker build`, the Docker daemon itself (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB), and a `cargo test` link step with `ld: write() failed, errno=28`. A failed link is the disk, not the source — the signature is the library compiling clean while the test binary fails to link.
+**The machine ran out of disk twice, and the second time the cause was found.** `/System/Volumes/Data` hit **105 MB free** early in the session and **117 MB** again on 2026-10-12, and both times a `cargo test` link died with `ld: write() failed, errno=28`. A failed link is the disk, not the source — the signature is the library compiling clean while the test binary fails to link. The other casualties were Phase 13's test run, Phase 15's one local `docker build`, and the Docker daemon itself (`docker info` fails; `~/Library/Containers/com.docker.docker` is 6.2 GB).
 
-**What I have already reclaimed, and what is left:**
+**The cause, and it is not the size of the workspace.** `target/debug/deps` was **98 GB**, and most of it was **duplicate artifacts of the same crate built under different flag sets** — `cargo test --workspace` and `cargo test -p <crate>` produce different hashes, and each keeps a full rlib plus a linked test binary. `libstvdy_server-*.rlib` alone was **27 files, 3.3 GB**, and there were **420 linked test binaries over 10 MB, 31 GB**. `cargo clean -p stvdy-server -p stvdy-core -p stvdy-sync` removed **645,667 files / 151 GB** in 105 seconds and left the third-party dependency cache intact, so the rebuild is the three workspace crates rather than the world.
 
-| Freed | How | Cost |
-|---|---|---|
-| 2.7 GB | `rm -rf target/release` | none — nothing in this session builds the release profile except the image build, which needs Docker |
-| 1.2 GB | `rm -rf src-tauri/target/release` | none, same reason |
-| 14 GB + 2 GB | `rm -rf target/debug/incremental src-tauri/target/debug/incremental` | rebuild time only; rustc regenerates it. **It regrows** — I have cleared it twice — so expect to do it again |
-
-**What is left to take, and it is the big one:** `target/debug/deps` is **~78 GB** and `src-tauri/target/debug/deps` **~7 GB**. The only safe way to take them back is `cargo clean`, which forces a full rebuild.
-
-**Note the two target directories — a `cargo clean` in the repo root does not touch the shell's.** `src-tauri` is its own workspace root (deliberately: `tauri_build::build()` must not run during `cargo clippy --workspace`), so its 16 GB survives a root `cargo clean` and needs its own:
+**What to run when it fills again** — and this is the cheap one, unlike a full `cargo clean`:
 
 ```bash
-cd /Users/mac/Documents/Coding/project/Stvdy && cargo clean
-cd /Users/mac/Documents/Coding/project/Stvdy/src-tauri && cargo clean
+cd /Users/mac/Documents/Coding/project/Stvdy
+cargo clean -p stvdy-server -p stvdy-core -p stvdy-sync
+rm -rf target/debug/incremental src-tauri/target/debug/incremental
 ```
 
-**The order that costs only time:** stop every slice, then the two `cargo clean`s, then one `cargo test --workspace` — exit-checklist item 1 for every phase, and it took this session's whole afternoon to get it green once. Do a `cargo clean` while slices are building and every live invocation fails on the `target/` lock, which reads as a code failure rather than a disk one. Two more things outside the repo are yours to judge: `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB, not this project's — the embedder uses `FASTEMBED_CACHE_DIR`).
+**The incremental directories regrow and are always safe to delete** (rustc regenerates them; the cost is rebuild time only) — 3.9 GB and 278 MB on the second pass, and they had been cleared twice before that.
+
+**Note the two target directories — a `cargo clean` in the repo root does not touch the shell's.** `src-tauri` is its own workspace root (deliberately: `tauri_build::build()` must not run during `cargo clippy --workspace`), so its target survives a root `cargo clean` and needs its own:
+
+```bash
+cd /Users/mac/Documents/Coding/project/Stvdy/src-tauri && cargo clean -p stvdy-shell
+```
+
+**The order that costs only time:** stop every slice, then the clean, then one `cargo test --workspace`. A `cargo clean` while slices are building fails every live invocation on the `target/` lock, which reads as a code failure rather than a disk one. Two more things outside the repo are yours to judge: `~/Library/Caches/com.spotify.client` (3.1 GB) and `~/.cache/huggingface` (5.7 GB, not this project's — the embedder uses `FASTEMBED_CACHE_DIR`).
 
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 

@@ -429,8 +429,13 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     `FAIL: no nav a labelled "Work"` after the first surface. `bc7eed8` added a
     one-step label alias and the leg now completes (80 combinations at 1365×900).
     The first real desktop run found three things, none of them the rem class and
-    none of them fixed here: the sidebar's nav items measure **215×40** — under 44px
-    in height at 100% text, both themes, on every surface; `button.cite` is 36.4×15.2
+    none of them fixed here — and **the first is not a violation, which the sentence
+    below now says because as written it read as an open defect**: the sidebar's nav
+    items measure **215×40**. That is above the **32px** floor the spec applies at
+    desktop widths and below the **44px** one it applies at phone width, and the
+    sidebar only exists at desktop widths (`Shell.tsx`'s `{!isPhone && <Sidebar />}`,
+    `hidden … md:flex`) — so 40px is the correct bar for it and the walk's own
+    `MIN_TARGET` switches to 32 for exactly this reason. `button.cite` is 36.4×15.2
     at 100% — the line-height of the prose it sits in (15.2 against 15.225), so it is a
     mark *inside* a sentence rather than a control beside it, which WCAG 2.2 SC 2.5.8's
     exception list covers (the 8px-gap clause cannot be met by something set between two
@@ -1296,7 +1301,7 @@ to die.
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_android` → pass. A device
 build confirms a real share delivers a readable URI (prerequisite).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — **ticked: the commit landed, and its contents were re-checked before ticking.** `83dc02d` carries 15 files, and the shape the note below describes is exactly what it shows: `ShareIntake.kt` added (166 lines) with `ShareIntakeActivity.kt` and the plugin's `src/intake.rs` deleted, the hand-written intent filters in `AndroidManifest.xml`, and `tests/share_android.rs` added. **Re-run here: `cargo test --manifest-path src-tauri/Cargo.toml --test share_android` → 4 passed / 0 failed** (`every_file_association_declares_a_concrete_mime_type`, `the_manifest_offers_the_app_for_every_declared_file_association`, `the_kotlin_intake_writes_the_inbox_the_shell_reads`, `the_sidecar_keys_are_the_readers_field_names`).
 
 ```
 git commit -am "Phase 14 Task 5: Android share intake with an immediate durable copy"
@@ -1939,6 +1944,13 @@ and account rows it cannot reach rather than skipping them.
   3048 text pairs, 0 below requirement, 0 overlaps, 0 page-width overflows, lowest contrast
   4.97:1**, at 390×844 both themes and 100%/200% text. The walk's only failures are **22
   clipped elements on Phase 13's five checkout surfaces at 200% text** (see below).
+  **Re-measured 2026-10-12, at the walk's current size — 24 surfaces, 96 combinations, 1232
+  targets, 3380 pairs, 1188 keyboard Tab stops (0 unreached, 0 without a ring, 0 trapping) —
+  and the 22 clipped elements are gone: 0 clipped, 0 overlapped on every surface at both
+  scales, exit 0.** The counts moved because the surface list grew (the four `study`
+  surfaces are Phase 4's); the clipped count moved because Phase 13's fix landed after this
+  run, and the paragraph below that calls them "not this task's defect and not hidden" was
+  right at the time and is now closed rather than outstanding.
 - Gate 6: `npm --prefix app test -- a11y` → **12 passed, 0 failed**, including the Indonesian
   phone-shell case (`renders the Indonesian workspace list on the phone shell with no clipped
   control`, ✓ 33ms).
