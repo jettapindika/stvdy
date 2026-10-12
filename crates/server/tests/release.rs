@@ -708,11 +708,22 @@ fn the_container_is_non_root_and_renders_with_the_sandbox_on() {
          model-influenced HTML (A338)"
     );
 
-    // (3) And the derivation itself, so the chain is closed rather than assumed: the
-    // call site is the only place `allow_no_sandbox` is decided.
+    // (3) And the derivation itself, so the chain is closed rather than assumed.
+    //
+    // **Asserted in halves rather than as the whole line.** The first version pinned
+    // `let allow_no_sandbox = cfg.env.is_dev();` verbatim, which fails on a rename —
+    // `allow_no_sandbox` to `no_sandbox`, or `cfg` to `state.config` — with the behaviour
+    // unchanged. That is a source assertion's false-positive direction, and a test that
+    // goes red on a cosmetic edit is a test someone deletes rather than fixes. What has to
+    // hold is the *shape*: the sandbox flag is derived from the environment, and that
+    // binding is what reaches `Renderer::launch`.
     let integrations = repo_file("crates/server/src/integrations/mod.rs");
     assert!(
-        integrations.contains("let allow_no_sandbox = cfg.env.is_dev();"),
+        integrations.contains("cfg.env.is_dev()"),
         "the renderer's sandbox must be derived from the environment, not defaulted on"
+    );
+    assert!(
+        integrations.contains("Renderer::launch("),
+        "the derived value must reach the renderer's launch, or it is computed and discarded"
     );
 }

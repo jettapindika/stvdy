@@ -701,4 +701,70 @@ mod tests {
                 .expect("reading the row back");
         assert!(written.is_some(), "the verified path must actually write");
     }
+    /// **The deleted-account arm of `resolve_user`, which is the reason the two lookups
+    /// select `deleted_at` instead of filtering it out.**
+    ///
+    /// The function's own comment states the mechanism: filtering `deleted_at` would take
+    /// both paths to their insert, and the insert would fail on the unique index over
+    /// `users.email` — a 500 for a student who deleted their account, which is the worst
+    /// possible answer to a deliberate act. So the arm exists to answer `403 account_deleted`
+    /// with the date the purge runs.
+    ///
+    /// **Two arms, and the second is the one a single test would miss.** A Google login can
+    /// match by `google_sub` *or* by email; both queries select `deleted_at`, so both refuse,
+    /// and a fix applied to one and not the other would look correct against whichever case
+    /// was written. The assertions are on the variant and on `purges_at` being in the future
+    /// (the grace window), because a refusal that named a date already past would be a
+    /// different bug.
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn a_deleted_account_cannot_sign_in_through_google(pool: PgPool) {
+        let harness = TestState::new(pool);
+        let state = &harness.state;
+        let deleted_at = Utc::now() - chrono::Duration::hours(1);
+
+        // (a) matched by `google_sub`.
+        let by_sub = Uuid::now_v7();
+        sqlx::query(
+            "insert into users (id, email, google_sub, email_verified, email_verified_at, timezone, deleted_at)
+             values ($1, 'gone-sub@example.test', 'sub-gone', true, now(), 'Asia/Jakarta', $2)",
+        )
+        .bind(by_sub)
+        .bind(deleted_at)
+        .execute(&state.pool)
+        .await
+        .expect("seeding a deleted Google account");
+
+        // (b) matched by email, with no `google_sub` — the second arm, reached only when the
+        // subject lookup misses.
+        let by_email = Uuid::now_v7();
+        sqlx::query(
+            "insert into users (id, email, google_sub, email_verified, email_verified_at, timezone, deleted_at)
+             values ($1, 'gone-email@example.test', null, true, now(), 'Asia/Jakarta', $2)",
+        )
+        .bind(by_email)
+        .bind(deleted_at)
+        .execute(&state.pool)
+        .await
+        .expect("seeding a deleted passwordless account");
+
+        for (sub, email, label) in [
+            ("sub-gone", "gone-sub@example.test", "by google_sub"),
+            ("sub-new", "gone-email@example.test", "by email"),
+        ] {
+            match resolve_user(state, &claims(sub, email)).await {
+                Err(AppError::AccountDeleted { purges_at }) => {
+                    // The refusal names when the purge runs, and it is the grace window from
+                    // `deleted_at` — a date already past would be a different bug.
+                    assert!(
+                        purges_at > Utc::now(),
+                        "{label}: purges_at must be in the future, got {purges_at}"
+                    );
+                }
+                // `Ok` is the failure this test exists for: it means a deleted account was
+                // signed in. A different error would mean the arm fired for the wrong reason.
+                Ok(user_id) => panic!("{label}: a deleted account was signed in as {user_id}"),
+                Err(other) => panic!("{label}: expected AccountDeleted, got {other:?}"),
+            }
+        }
+    }
 }
