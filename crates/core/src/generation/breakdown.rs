@@ -73,12 +73,9 @@ pub fn parse_proposal(raw: &str, parent_title: &str) -> Result<Proposal, Generat
         }
     })?;
 
-    if file.subtasks.is_empty() {
-        // The model answered the question it was asked and the answer was "no subtasks".
-        // Retrying would spend a second call to be told the same thing.
-        return Err(GenerationError::Empty);
-    }
-
+    // A zero-subtask reply is the count rule's business, not an `Empty`: the module asks for
+    // 3-8, and a reply outside that range is what the one retry exists to fix. Treating it as
+    // `Empty` would make the most degenerate reply the only one that is not retried.
     let mut warnings = Vec::new();
     let parent = normalize(parent_title);
     let mut subtasks = Vec::with_capacity(file.subtasks.len());

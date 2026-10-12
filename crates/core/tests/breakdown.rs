@@ -257,11 +257,14 @@ fn the_proposal_serialises_with_the_field_names_the_client_reads() {
     );
 }
 
-/// A reply with no subtasks at all is not worth a second call: the model answered the
-/// question it was asked and the answer was "nothing".
+/// A reply with no subtasks is the same violation as one with two: the count rule catches it
+/// and the reply is retried. It is deliberately *not* `GenerationError::Empty`, which is not
+/// retryable — that would make the most degenerate reply the only one the server never asks
+/// the model to fix.
 #[test]
-fn an_empty_proposal_is_not_retryable() {
+fn an_empty_proposal_is_a_count_violation_and_is_retried() {
     let error = parse(r#"{"subtasks":[],"total_estimate_min":0}"#).unwrap_err();
-    assert!(matches!(error, GenerationError::Empty));
-    assert!(!is_retryable(&error));
+    assert!(matches!(error, GenerationError::Schema(_)), "{error:?}");
+    assert!(is_retryable(&error));
+    assert!(error.to_string().contains("3-8"), "{error}");
 }

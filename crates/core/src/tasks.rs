@@ -117,15 +117,9 @@ pub fn order_tasks(rows: &mut [TaskRow]) {
     rows.sort_by_key(order_key);
 }
 
-/// The order key, written once because three callers sort by it — this module's two and,
-/// through the SQL it is repeated in, the server's `GET /tasks`.
-///
-/// Due first (undated last), then priority, then position, then `created_at`, then the id.
-/// Deterministic to the end: the id breaks every tie, because two tasks can share a due date
-/// to the second and a batch insert shares `created_at` to the microsecond, which is exactly
-/// how Phase 5's questions came back shuffled (A196, A100). Two devices that hold the same
-/// rows therefore put them in the same sequence without talking to each other, which is what
-/// "the order is a total order" buys.
+/// The order key: due (undated last), priority, position, `created_at`, id. Written once
+/// because three callers sort by it — this module's two, and the SQL it is repeated in by
+/// `crates/server/src/tasks.rs`.
 fn order_key(row: &TaskRow) -> (u8, DateTime<Utc>, i32, i32, DateTime<Utc>, Uuid) {
     let (dated, due) = match row.due_at {
         // An undated task is not the most urgent thing the student has, so "no due date"
