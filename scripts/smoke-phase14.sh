@@ -48,23 +48,35 @@ APP_URL="${APP_URL:-http://localhost:5173}"
 # **`app/dist` is restored to the web build on the way out, whatever happened.**
 #
 # Step 2 leaves a *store* bundle there, because that is the artifact the absence check has
-# to inspect — and `app/dist` is `frontendDist`, so anything that builds the desktop app
-# afterwards would package the phone bundle. That is not cosmetic: the store build defines
-# `__PURCHASE_UI__` false at build time (A322), so a desktop app built from it has **no
-# checkout screen at all** and a paying student cannot buy. The window between this script
-# finishing and someone noticing is exactly the window a release gets cut in.
+# to inspect. `app/dist` is `frontendDist`, and two kinds of consumer read it *without*
+# rebuilding:
 #
-# `check-shell` is the other consumer, and it fails loudly rather than silently (its
-# doctests panic with `frontendDist … but this path doesn't exist` if the directory is
-# missing mid-run), which is why the restore covers the store case and the trap covers an
-# early exit.
+#   - `check-shell`'s doctests, which fail loudly if the directory is **absent** —
+#     `tauri::generate_context!()` panics at compile time with `frontendDist … but this
+#     path doesn't exist`. That is the failure that has actually cost a gate run here.
+#   - the two absence checks themselves, where a stale **store** bundle makes
+#     `check-no-purchase-ui.mjs` green about bytes the current build did not produce.
+#
+# **Not `tauri build` itself, which is worth stating because it is the obvious worry:** it
+# runs `beforeBuildCommand: "npm run build"` and `isStoreBuild` is true only when
+# `TAURI_ENV_PLATFORM` is `ios`/`android`, so a desktop build regenerates `dist` as `full`
+# and never packages the leftover store bundle. An earlier version of this comment claimed
+# otherwise and was wrong.
+#
+# So the trap rebuilds in **both** bad states — the directory missing (the store build
+# failed, or this script died between `rm -rf app/dist` and the build) and the directory
+# holding a store bundle. The first case is the one an earlier version of this trap missed,
+# because it tested `[ -f … ] && grep … store` and so did nothing when `dist` was absent.
 restore_web_build() {
   local status=$?
-  if [ -f "$ROOT/app/dist/index.html" ] &&
-    grep -oq 'stvdy-build-target" content="store"' "$ROOT/app/dist/index.html"; then
-    printf '\n=== restoring app/dist to the web build (step 2 left a store bundle)\n'
+  local stamp=''
+  if [ -f "$ROOT/app/dist/index.html" ]; then
+    stamp="$(grep -o 'stvdy-build-target" content="[a-z]*"' "$ROOT/app/dist/index.html" || true)"
+  fi
+  if [ ! -f "$ROOT/app/dist/index.html" ] || [ "$stamp" = 'stvdy-build-target" content="store"' ]; then
+    printf '\n=== restoring app/dist to the web build (step 2 left it store or absent)\n'
     npm --prefix app run build >/dev/null 2>&1 ||
-      printf 'WARNING: could not rebuild app/dist as the web build; it still holds the store\nbundle, so a desktop build from here would ship no checkout screen\n' >&2
+      printf 'WARNING: could not rebuild app/dist as the web build; it is store or absent,\nso `check-shell` will fail on a missing frontendDist and the absence checks will\nread bytes the current build did not produce\n' >&2
   fi
   return "$status"
 }

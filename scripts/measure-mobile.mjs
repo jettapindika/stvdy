@@ -2009,6 +2009,15 @@ async function openSurface(page, surface) {
     // written against the phone ("Work", "More") finds nothing at desktop width. Retrying
     // with the other form is what lets one `SURFACES` table be walked at both viewports,
     // which is what gate 5's second leg needs; the phone labels stay exactly as written.
+    //
+    // **The five destinations are under change, and this table navigates by their labels.**
+    // An in-flight redesign makes them `Today / Workspaces / Study / Planner / More` —
+    // Tasks and Calendar become views *inside* Planner, and Study gains a tab it never had
+    // (`TabBar.tsx`'s comment). Every `{ nav: 'Tasks' }` step in `SURFACES` breaks the day
+    // that lands, and the failure reads as a missing label rather than a moved route. The
+    // fix is one alias per moved destination here, or rewriting those steps to reach Tasks
+    // through Planner — deliberately not done in advance, because guessing at a design
+    // that is still moving is how a table ends up wrong in a way nobody can date.
     const aliases = { Work: 'Workspaces', More: 'Settings' }
     const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
