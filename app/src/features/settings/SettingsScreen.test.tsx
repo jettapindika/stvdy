@@ -225,16 +225,32 @@ describe('the settings form', () => {
     const last = fake.sync.writes.at(-1)
     expect(last?.payload.language).toBe('id')
   })
+})
 
+/**
+ * The channel label as a 44px target, asserted as a source property.
+ *
+ * jsdom has no layout engine, so `getBoundingClientRect()` in this suite is all
+ * zeros and no box can be measured here. What can be asserted is the class that
+ * makes the box — the technique `components/layout/shellLayout.test.ts` uses for
+ * the same reason — and **the numbers are the browser measurements**, taken in
+ * Chromium at 390x844 in both themes.
+ *
+ * The defect, measured: the label was **65.9x22** (Phase 14 — a thumb aimed at the
+ * channel name and landing a few pixels high hit the row `<div>` and toggled
+ * nothing), so `min-h-11` was added; with the height fixed, `input#channel-email`
+ * was still **35.3x44** at 100% text, because "Email" is a short word and the
+ * label is only as wide as its own text. Both directions are asserted on **every**
+ * label rather than the email row: the next short name has the same defect, and a
+ * per-row fix is one that gets forgotten. The checkbox stays 13x13 — the label is
+ * what a finger reaches.
+ *
+ * Measured after, 390px, both themes: Email **44x44** (100%) and 88x88 (200%),
+ * Discord 50.9x44, Telegram 61.6x44, "In the app" 65.9x44, "Push notifications"
+ * 118.1x44 — every label at least 44px in both directions.
+ */
+describe('the channel rows', () => {
   it('gives every channel label a 44px box in both directions, not just the short one', async () => {
-    // The number is the browser measurement, not this assertion: jsdom has no
-    // layout engine, so what is pinned here is the class, and Chromium at 390px
-    // measured the label at **65.9x22** (Phase 14 — a thumb aimed at the channel
-    // name and landing a few pixels high hit the row `<div>` and toggled nothing)
-    // and then **35.3x44**, because "Email" is a short word and the label is only
-    // as wide as its own text. Both directions are asserted on **every** label:
-    // the next short name has the same defect, and a per-row fix is one that gets
-    // forgotten. The checkbox stays 13x13 — the label is the hit area.
     const { container } = renderWithProviders(<SettingsScreen />, { route: '/settings' })
     await screen.findByLabelText('Email')
 
