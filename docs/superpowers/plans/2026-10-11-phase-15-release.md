@@ -1971,18 +1971,27 @@ node scripts/check-no-cdn.mjs
       alerting (A348), § The breach runbook (A349) and § Retention (A349), and
       `scripts/restore-drill.sh` exists. The drill itself was **NOT MEASURED**: it needs a
       real Postgres and R2 to run against.
-- [ ] Both store checklists exist, `scripts/check-mobile-no-purchase.sh` passes against the
+- [x] Both store checklists exist, `scripts/check-mobile-no-purchase.sh` passes against the
       built mobile bundle **and fails on an empty directory**, and the policy-risk note
       carries its confirmation step.
-      **PART MEASURED** — both checklists exist (`docs/RELEASE.md` § Store submission
-      checklists: § Apple — App Store / TestFlight and § Google — Play, with
-      § The confirmation step, and the date under § Store policy risk). The empty-directory
-      half of the check is verified: `node scripts/check-no-purchase-ui.mjs` against an empty
-      `app/dist` answers `no shipped files were inspected — an empty build proves nothing
-      about purchase UI`, exit 1. The other half is **NOT MEASURED** — the only bundle built
-      here is the web/desktop one (`stvdy-build-target="full"`), so
-      `scripts/check-mobile-no-purchase.sh` refuses it rather than passing it, and no store
-      build was produced.
+      **MEASURED 2026-10-12, both halves, and the reason it was PART MEASURED was an
+      ordering mistake rather than a missing artefact.** The script inspects `app/dist`
+      because that is what `frontendDist` points at, and `app/dist` held the web build —
+      so it *correctly* refused. Building the artifact it wants is
+      `TAURI_ENV_PLATFORM=ios npm --prefix app run build`, which lands the store bundle in
+      `dist` with `stvdy-build-target="store"`; the script then answers **exit 0**,
+      `no purchase UI ships in app/dist`. The empty-directory half: `node
+      scripts/check-no-purchase-ui.mjs` against an empty directory answers `no shipped
+      files were inspected — an empty build proves nothing about purchase UI`, **exit 1**.
+      **The byte-level numbers, re-measured** (they have moved since the note below was
+      written, because the bundle grew): store entry chunk **771,398 bytes with 0
+      occurrences** of `billing/checkout`; web entry chunk **785,916 bytes with 5**. Both
+      checklists exist (`docs/RELEASE.md` § Store submission checklists: § Apple — App
+      Store / TestFlight and § Google — Play, with § The confirmation step, and the date
+      under § Store policy risk). What the script says it does *not* inspect is worth
+      quoting rather than paraphrasing — the native layer, the store metadata, and the
+      account-deletion behaviour — because those are the rows a store review reaches and
+      no build-time check can.
 - [x] `README.md` has Deploying, Release and Mobile sections that point at the normative
       documents rather than restating them.
 - [x] `docs/RELEASE.md` carries the release process, the store checklists, the launch
