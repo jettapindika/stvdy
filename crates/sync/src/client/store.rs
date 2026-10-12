@@ -101,5 +101,12 @@ pub trait LocalStore: Send {
     /// and a pending offline write from a revoked device must not be replayed by the next
     /// account that signs in on this machine; a 410 means the cursor is older than
     /// retained history and the cache is rebuilt from zero (A166).
+    ///
+    /// Note what the second caller therefore does: a resync drops the queued writes too,
+    /// because A166's reaction is this one call and the outbox is part of what it empties.
+    /// A 410 needs the device to have been offline past the retention window (90 days by
+    /// default), so the window for losing an unsent write is narrow — but it is real, and
+    /// splitting this into "clear the cache" and "clear everything" is the change that
+    /// would close it.
     fn wipe(&mut self) -> Result<(), StoreError>;
 }
