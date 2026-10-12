@@ -142,6 +142,244 @@ impl Entity {
             Op::Delete => !self.is_append_only() && self != Entity::UserSettings,
         }
     }
+
+    /// The columns of this entity's table that travel to a client, in the order a
+    /// pull ships them.
+    ///
+    /// This is the pull's leak surface, and it is a positive list on purpose: a
+    /// column added to a table and not added here is *not* shipped, so the failure
+    /// mode of forgetting is a missing field rather than a leaked one (A168).
+    ///
+    /// Three exclusions are load-bearing rather than tidy:
+    ///   - `user_id` is the caller's own and redundant on every row.
+    ///   - `sources.file_key` and `sources.preview_key` are internal object-storage
+    ///     keys whose client-facing form is a signed URL (`GET /sources/:id/file`),
+    ///     so shipping them would write a storage layout into every device's cache.
+    ///   - a cheatsheet's `blocks_key`/`html_key`/`pdf_key` are the same kind of
+    ///     internal key: the client fetches the document through its route, not by
+    ///     reading the key out of the row.
+    ///
+    /// `updated_at` is included because the client needs it for tombstone handling
+    /// and the "Last synced" display; `created_at` and `deleted_at` for the same
+    /// reason. `user_settings` has no `id` column — the row *is* the user — so its
+    /// list starts at the setting fields.
+    pub fn payload_columns(self) -> &'static [&'static str] {
+        match self {
+            Entity::Workspace => &["id", "name", "created_at", "updated_at", "deleted_at"],
+            Entity::Source => &[
+                "id",
+                "workspace_id",
+                "kind",
+                "title",
+                "url",
+                "file_size",
+                "mime",
+                "status",
+                "error",
+                "read_only",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Message => &[
+                "id",
+                "workspace_id",
+                "role",
+                "content",
+                "citations",
+                "used_web",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Deck => &[
+                "id",
+                "workspace_id",
+                "title",
+                "source_ids",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Flashcard => &[
+                "id",
+                "deck_id",
+                "front",
+                "back",
+                "chunk_id",
+                "ease",
+                "interval_days",
+                "due_at",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::FlashcardReview => &[
+                "id",
+                "flashcard_id",
+                "rating",
+                "reviewed_at",
+                "device_id",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Quiz => &[
+                "id",
+                "workspace_id",
+                "title",
+                "difficulty",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::QuizQuestion => &[
+                "id",
+                "quiz_id",
+                "kind",
+                "prompt",
+                "options",
+                "answer",
+                "explanation",
+                "chunk_id",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::QuizAttempt => &[
+                "id",
+                "quiz_id",
+                "question_id",
+                "user_answer",
+                "correct",
+                "answered_at",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Report => &[
+                "id",
+                "workspace_id",
+                "title",
+                "outline",
+                "body_md",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Cheatsheet => &[
+                "id",
+                "workspace_id",
+                "title",
+                "scope",
+                "exam_date",
+                "depth",
+                "source_ids",
+                "status",
+                "error",
+                "template_version",
+                "page_count",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Event => &[
+                "id",
+                "workspace_id",
+                "kind",
+                "title",
+                "starts_at",
+                "ends_at",
+                "external_id",
+                "etag",
+                "connection_id",
+                "source",
+                "task_id",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Task => &[
+                "id",
+                "workspace_id",
+                "parent_id",
+                "title",
+                "notes",
+                "due_at",
+                "estimate_min",
+                "priority",
+                "status",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::Goal => &[
+                "id",
+                "workspace_id",
+                "title",
+                "target_date",
+                "source_ids",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::StudySession => &[
+                "id",
+                "workspace_id",
+                "task_id",
+                "started_at",
+                "duration_min",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+            Entity::UserSettings => &[
+                "study_start_hour",
+                "study_end_hour",
+                "max_study_min_per_day",
+                "block_len_min",
+                "break_min",
+                "reminder_channels",
+                "updated_at",
+            ],
+            Entity::PendingAction => &[
+                "id",
+                "tool",
+                "args",
+                "status",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
+        }
+    }
+
+    /// How this entity's mutations carry their data on the push side.
+    ///
+    /// The wire type is unchanged (`payload: Option<Value>`); this says which shape
+    /// the value has, and it lives here so both ends read one copy (A176).
+    pub fn payload_shape(self) -> PayloadShape {
+        match self {
+            // A task and an event are edited concurrently from several devices, so a
+            // mutation carries the patch and the row the client edited from, which is
+            // what makes the disjointness of two writers' changed sets computable
+            // (A176/A177).
+            Entity::Task | Entity::Event => PayloadShape::PatchWithBase,
+            // Everything else is written whole: an append-only row is immutable, and
+            // a settings row is a single account-wide record.
+            _ => PayloadShape::Row,
+        }
+    }
+}
+
+/// The shape of a push mutation's `payload`, per entity (A176).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadShape {
+    /// The full row.
+    Row,
+    /// `{"patch": {…}, "base": {…}|null}`: the changed keys and the row they were
+    /// changed from, with `base: null` meaning create.
+    PatchWithBase,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
