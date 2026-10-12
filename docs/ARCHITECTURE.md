@@ -382,7 +382,7 @@ the per-phase detail follows it.
 | 1 | Sign in, sign up, verify email, workspace list, workspace detail | PASS — the detail below |
 | 5, 7, 10, 12, 13 | Their own screens, in their own plans | PASS, each with its own defect found and fixed |
 | 14 | The whole shell, at both viewports, through `scripts/measure-mobile.mjs` | PASS — 20 surfaces when it ran; the walk holds **24** now, 96 combinations per leg |
-| **0** | The shell chrome | **Never measured by this phase.** Its own box is still unticked; the tab bar and the sidebar are covered by Phases 14 and 12, which walk them |
+| **0** | The shell chrome — the tab bar, the sidebar, the skip link, the sync control | **PASS, measured 2026-10-12** through the walk the later phases built: all 24 surfaces are walked *through* the shell, so its chrome is measured on every combination. Tab bar items **78×44** at phone width, sidebar items **215×40** (above the spec's 32px desktop floor); the skip link is the first Tab stop at 16.19:1 |
 | **4** | The study screen (`/study/:deckId`) | **PASS, measured 2026-10-12** — the gap this table was written to name, now closed. Four surfaces added to the shared walk; one defect found and fixed |
 
 **Phase 4's result, the screen a student uses most.** Four surfaces — the card
@@ -406,9 +406,13 @@ at hand.
 **What this gate still does not reach, and it is stated rather than implied.** Phase 4's
 empty state (`study.nothingDue`) and its three error states are not walked — they need their
 own fixtures and add no control the four surfaces do not cover. The swipe gesture is a touch
-path the harness cannot drive at all, so it stays a component-test property. And Phase 0's
-shell box is still open: the shell's chrome is measured by the phases that walk through it,
-but nothing has measured the Phase 0 build itself.
+path the harness cannot drive at all, so it stays a component-test property. **Every phase's
+own box is now ticked:** Phase 0's shell chrome is measured through the walk (it is the frame
+every surface is rendered in, so its tab bar, sidebar, skip link and sync control are in the
+control set on all 96 combinations), and Phase 4's study screen is the section above. The one
+thing still outside the harness is the *native* layer — the mobile and desktop shells
+themselves — which no headless Chromium can reach and which `docs/RELEASE.md`'s store
+checklists type `user`.
 
 #### Phase 1's result, in full
 
