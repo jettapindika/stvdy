@@ -65,6 +65,17 @@ const NON_SYNC_TABLES: &[&str] = &[
     // confirms it, and only the confirmed items reach `events`, `tasks` and `goals`. No
     // `Entity` variant exists for it, so it must carry no trigger (A251).
     "syllabus_drafts",
+    // Phase 11. The planner's proposal is server-owned for the same reason: it is a
+    // suggestion the student previews, and only the accepted blocks become `events`. No
+    // `Entity` variant exists for it, so it must carry no trigger (A252).
+    "plan_proposals",
+    // Phase 12. Reminders are server-owned scheduling state (A283): the client's local
+    // notifications are computed from *synced* events, tasks and settings, and this table
+    // exists so a reminder still fires when no client is running. No `Entity` variant
+    // exists for either, and `0017_sync_triggers.sql` must stay the last trigger-attaching
+    // migration — a trigger here would move that boundary for a table no client pushes.
+    "reminders",
+    "reminder_deliveries",
 ];
 
 async fn insert_user(pool: &PgPool) -> Uuid {
@@ -139,6 +150,98 @@ async fn every_sync_table_has_the_sync_columns(pool: PgPool) {
             );
         }
     }
+}
+
+/// The resolution columns the confirm path writes, asserted by name (A273).
+///
+/// A missing `expires_at` is a lazy-expiry query that never matches, which is silent: the
+/// row simply reads `pending` forever and the student's card never goes away. A *nullable*
+/// one is the same failure one step later — `expires_at <= now()` against null is null, not
+/// true — which is why the nullability is asserted and not just the column's existence.
+#[sqlx::test(migrations = "../../migrations")]
+async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
+    let columns: Vec<(String, String)> = sqlx::query_as(
+        "select column_name, is_nullable from information_schema.columns
+         where table_schema = 'public' and table_name = 'pending_actions'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query columns");
+
+    for required in [
+        "expires_at",
+        "resolved_at",
+        "resolved_by_device_id",
+        "result",
+        "error",
+        "message_id",
+    ] {
+        assert!(
+            columns.iter().any(|(name, _)| name == required),
+            "pending_actions is missing {required} (has {:?})",
+            columns.iter().map(|(name, _)| name).collect::<Vec<_>>()
+        );
+    }
+
+    let nullable = columns
+        .iter()
+        .find(|(name, _)| name == "expires_at")
+        .map(|(_, nullable)| nullable.as_str())
+        .expect("expires_at is present");
+    assert_eq!(
+        nullable, "NO",
+        "a nullable expires_at makes the lazy expiry a three-valued comparison (A274)"
+    );
+
+    // The two columns whose value outlives the row they name: a device that is revoked and
+    // a message that is deleted must leave the resolution readable rather than take it with
+    // them, which is what `on delete set null` buys and `on delete cascade` would not.
+    let cascades: Vec<(String, String, i8)> = sqlx::query_as(
+        "select a.attname, rt.relname, c.confdeltype::int8
+           from pg_constraint c
+           join pg_class t on t.oid = c.conrelid
+           join pg_class rt on rt.oid = c.confrelid
+           join unnest(c.conkey) as key(attnum) on true
+           join pg_attribute a on a.attrelid = t.oid and a.attnum = key.attnum
+          where t.relname = 'pending_actions' and c.contype = 'f'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query foreign keys");
+
+    // `n` is `ON DELETE SET NULL` in `pg_constraint.confdeltype`; `c` would be cascade.
+    for (column, table) in [
+        ("resolved_by_device_id", "devices"),
+        ("message_id", "messages"),
+    ] {
+        let found = cascades
+            .iter()
+            .find(|(name, _, _)| name == column)
+            .unwrap_or_else(|| panic!("{column} has no foreign key"));
+        assert_eq!(found.1, table, "{column} must reference {table}");
+        assert_eq!(
+            found.2, b'n' as i8,
+            "{column} must be `on delete set null`, not cascade: the resolution has to \
+             outlive the device or the message it names"
+        );
+    }
+
+    // The index the lazy expiry and the pending list both read. Asserted by definition
+    // rather than by name, because a rename is not the failure this catches — a missing or
+    // wrongly-ordered index is.
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "select indexdef from pg_indexes
+          where schemaname = 'public' and tablename = 'pending_actions'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("query indexes");
+    assert!(
+        indexes
+            .iter()
+            .any(|def| def.contains("(user_id, status, expires_at)")),
+        "no (user_id, status, expires_at) index: {indexes:?}"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -340,6 +443,19 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // index on `source_id` is what makes a retried extraction overwrite rather than
         // append.
         "syllabus_drafts",
+        // Phase 11. The planner's proposal: the roadmap's conflict table names "planner
+        // output" among the server-owned entities that are "read-only for clients except via
+        // their dedicated endpoints", which is what `GET /plans/{id}` is. Not a `+sync`
+        // table (A252) — the accepted blocks reach every device as `events`, and the
+        // proposal itself never syncs.
+        "plan_proposals",
+        // Phase 12. The reminder engine's output: one row per (subject, local date) so the
+        // same reminder cannot be registered by three devices (A284/A285), and one row per
+        // delivery attempt. Not `+sync` tables (A283): a reminder is server-owned scheduling
+        // state, the client's own notifications are computed from the synced inputs, and
+        // `0017_sync_triggers.sql` stays the last trigger-attaching migration.
+        "reminders",
+        "reminder_deliveries",
     ];
 
     let mut known: BTreeSet<String> = SYNC_TABLES
@@ -388,6 +504,158 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         undocumented.is_empty(),
         "tables exist that are neither in the spec nor a documented deviation: {undocumented:?}"
     );
+}
+
+/// Inserts one reminder and returns its id. The columns are the migration's own, so a
+/// rename here is a compile-or-fail rather than a silent drift.
+async fn insert_reminder(pool: &PgPool, user: Uuid, dedupe_key: &str) -> Uuid {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "insert into reminders (id, user_id, kind, subject_key, local_date, fire_at, dedupe_key)
+         values ($1, $2, 'task_due', 'subject', '2026-10-11', now(), $3)",
+    )
+    .bind(id)
+    .bind(user)
+    .bind(dedupe_key)
+    .execute(pool)
+    .await
+    .expect("insert reminder");
+    id
+}
+
+/// The two uniqueness rules the delivery dedupe rests on (A285), asserted as constraints
+/// rather than as prose: one reminder per key, and one delivery per (reminder, channel,
+/// device) — with the two-index split that makes an email delivery unique too.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_reminder_dedupe_constraints_exist(pool: PgPool) {
+    let user = insert_user(&pool).await;
+    let device = insert_device(&pool, user).await;
+    let reminder = insert_reminder(&pool, user, "task_due:subject:2026-10-11").await;
+
+    // The second device with the same key loses, and it loses *quietly*: `POST /reminders`
+    // runs exactly this statement, so a conflict that raised would be a 500 for the second
+    // phone rather than a `{applied: false}`.
+    let duplicate: Option<Uuid> = sqlx::query_scalar(
+        "insert into reminders (user_id, kind, subject_key, local_date, fire_at, dedupe_key)
+         values ($1, 'task_due', 'subject', '2026-10-11', now(), $2)
+         on conflict (dedupe_key) do nothing
+         returning id",
+    )
+    .bind(user)
+    .bind("task_due:subject:2026-10-11")
+    .fetch_optional(&pool)
+    .await
+    .expect("a duplicate key must be a no-op rather than an error");
+    assert!(duplicate.is_none(), "the second writer must lose");
+
+    // A second key is a second reminder: the index is on the key, not on the user.
+    let other = insert_reminder(&pool, user, "task_due:subject:2026-10-12").await;
+    assert_ne!(reminder, other);
+
+    let delivery = |channel: &'static str, device: Option<Uuid>| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "insert into reminder_deliveries (reminder_id, channel, device_id, status)
+                 values ($1, $2, $3, 'sent')",
+            )
+            .bind(reminder)
+            .bind(channel)
+            .bind(device)
+            .execute(&pool)
+            .await
+        }
+    };
+
+    // One delivery per channel per device: the second attempt for the same push is refused,
+    // which is what makes a retried job record one attempt rather than two.
+    delivery("push", Some(device)).await.expect("first push");
+    assert!(
+        delivery("push", Some(device)).await.is_err(),
+        "a second push to the same device must be refused"
+    );
+
+    // The same channel with no device — email, in-app — is unique through the second partial
+    // index rather than through a coalesced sentinel uuid.
+    delivery("email", None).await.expect("first email");
+    assert!(
+        delivery("email", None).await.is_err(),
+        "a second email delivery must be refused"
+    );
+
+    // A different channel on the same device is a different delivery, and so is the same
+    // channel on another device.
+    delivery("web", Some(device)).await.expect("web");
+    let second_device = insert_device(&pool, user).await;
+    delivery("push", Some(second_device))
+        .await
+        .expect("another device is another delivery");
+}
+
+/// The paired check makes a half-specified reminder impossible rather than relying on every
+/// reader to notice, and `kind` is deliberately free text so a producer that is not the core
+/// engine (A300's renewal reminders) does not need a migration.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_skipped_reminder_must_carry_its_reason(pool: PgPool) {
+    let user = insert_user(&pool).await;
+
+    let insert = |status: &'static str, reason: Option<&'static str>, kind: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "insert into reminders (user_id, kind, subject_key, local_date, fire_at,
+                                        dedupe_key, status, skip_reason)
+                 values ($1, $2, 'subject', '2026-10-11', now(), $3, $4, $5)",
+            )
+            .bind(user)
+            .bind(kind)
+            .bind(format!("{kind}:{status}:{reason:?}"))
+            .bind(status)
+            .bind(reason)
+            .execute(&pool)
+            .await
+        }
+    };
+
+    // A skipped reminder must say why: a reminder that silently never arrives is what the
+    // student reports as "reminders are broken", and the reason is the only thing that
+    // distinguishes "quiet hours moved it" from "the token is dead".
+    assert!(
+        insert("skipped", None, "task_due").await.is_err(),
+        "skipped without a reason must be refused"
+    );
+    // And a reason without a skip is a row claiming a skip that did not happen.
+    assert!(
+        insert("pending", Some("quiet_hours"), "task_due")
+            .await
+            .is_err(),
+        "a pending reminder must not carry a skip reason"
+    );
+    insert("skipped", Some("quiet_hours"), "task_due")
+        .await
+        .expect("a skipped reminder with its reason");
+    insert("pending", None, "task_due").await.expect("pending");
+    insert("sent", None, "task_due").await.expect("sent");
+
+    // The vocabulary is closed for the two columns the engine owns.
+    assert!(
+        insert("delivered", None, "task_due").await.is_err(),
+        "an unknown status must be refused"
+    );
+    let unknown_origin = sqlx::query(
+        "insert into reminders (user_id, kind, subject_key, local_date, fire_at, dedupe_key, origin)
+         values ($1, 'task_due', 'subject', '2026-10-11', now(), 'origin-check', 'robot')",
+    )
+    .bind(user)
+    .execute(&pool)
+    .await;
+    assert!(unknown_origin.is_err(), "an unknown origin must be refused");
+
+    // `kind` is not closed: A300 routes Phase 13's renewal reminders through this table, and
+    // a check constraint here would make a new producer a migration.
+    insert("pending", None, "renewal")
+        .await
+        .expect("a producer's own kind");
 }
 
 #[sqlx::test(migrations = "../../migrations")]
