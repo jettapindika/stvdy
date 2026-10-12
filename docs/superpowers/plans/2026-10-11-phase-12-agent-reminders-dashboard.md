@@ -714,7 +714,7 @@ Timestamps are RFC3339 **with an offset** (`"2026-10-13T19:00:00+07:00"`), parse
 `DateTime<Utc>`; a bare date or a naive time is `ToolError::Invalid`, and the message names
 the expected shape because it is read by the model.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The registry and the prompt cannot drift: `prompts/base.v2.md`'s
@@ -777,23 +777,23 @@ fn an_unknown_argument_is_refused() { /* … */ }
 fn a_timestamp_without_an_offset_is_refused() { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test agent_tools` → `error[E0432]: unresolved import
 stvdy_core::agent`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 The schemas are built with `serde_json::json!` next to the structs they describe, so a
 field added to a struct without its schema is a two-line diff a reviewer sees. `specs()`
 takes the plan decision as a `bool` rather than a plan id: core does not know what a plan
 is, and the server already has the answer from the engine.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test agent_tools`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the ten tools, their argument contracts, and the read/write split
@@ -855,7 +855,7 @@ pub fn gate(call: &ToolCall, ctx: &GateContext) -> GateDecision;
 pub fn tool_result(call: &ToolCall, decision: &GateDecision) -> ChatMsg;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The check order is the contract, and each case is reachable: a provider with no tool
@@ -900,21 +900,21 @@ fn a_refusal_is_answered_not_dropped() { /* … */ }
 fn the_gate_is_deterministic() { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test agent_gate`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `gate` takes the already-decided booleans and never reads config, entitlements or the
 database: it is the *shape* of the decision, and `crates/server/src/entitlements.rs` is
 where the plan question is answered (A271).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test agent_gate`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the tool gate, and a refusal the model can repeat
@@ -985,7 +985,7 @@ impl ScriptedLlm {
 }
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The trait's shape is the roadmap's, and the double honours it.
@@ -1014,21 +1014,21 @@ async fn the_tool_double_emits_its_call_and_claims_support() {
 async fn the_default_double_still_claims_no_tool_support() { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test tool_doubles`
 
-- [ ] **Step 3: Write the trait and the doubles**
+- [x] **Step 3: Write the trait and the doubles**
 
 `PushMessage.data` being a `BTreeMap` is load-bearing and gets a comment: an APNs payload
 and an FCM `data` block are compared in tests, and `HashMap`'s order would make the
 assertion flaky rather than wrong — the worst kind.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test tool_doubles`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the push trait, and a double that can actually call a tool
@@ -1045,7 +1045,7 @@ feat(core): the push trait, and a double that can actually call a tool
 **Interfaces:**
 - Produces: the six columns A273 names, and the index the pending list needs.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `crates/server/tests/schema.rs`, extend `every_sync_table_has_the_sync_columns`'s
 neighbour with a column assertion, so a dropped column fails rather than 500s later:
@@ -1064,11 +1064,11 @@ async fn pending_actions_has_the_resolution_columns(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-server --test schema pending_actions_has_the_resolution_columns`
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 The header must state, in the migration itself, why it sits after `0017` and why the
 trigger array is untouched (A273), because the next person to read `0017`'s "MUST ALWAYS BE
@@ -1101,11 +1101,11 @@ alter table pending_actions alter column expires_at set not null;
 create index on pending_actions (user_id, status, expires_at);
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 `cargo test -p stvdy-server --test schema`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(db): a pending action remembers when it expires and what it produced
@@ -1167,7 +1167,7 @@ the check runs before the row is looked up, so `Fixture::call`'s driver arm need
 per-row body. `Fixture` gains an `action_id` (one `insert into pending_actions` for the
 caller, `expires_at = now() + interval '30 minutes'`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The list is scoped, and another account's proposal is a 404 rather than an empty list.
@@ -1194,20 +1194,20 @@ async fn a_second_reject_is_a_conflict(pool: PgPool) { /* … */ }
 async fn the_resolution_names_the_device_that_made_it(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch them fail**
+- [x] **Step 2: Run it and watch them fail**
 
 `cargo test -p stvdy-server --test actions`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `claim` takes a `&mut PgTransaction` rather than a pool, so the call site cannot forget to
 put the claim and the execution in one transaction (A275): the type is the reminder.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test actions`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): pending actions that expire, and a reject that cannot happen twice
@@ -1282,7 +1282,7 @@ pub async fn confirm(
 ) -> AppResult<Json<serde_json::Value>>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The exit gate's first half: a proposal created by the agent turn is executed by a
@@ -1326,21 +1326,21 @@ fn the_executor_contains_no_dml() {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test actions`
 
-- [ ] **Step 3: Write the executor and move the service functions**
+- [x] **Step 3: Write the executor and move the service functions**
 
 `create_flashcards` and `create_quiz` confirm into the deck and quiz create functions, which
 spend `flashcard_batch_10`/`quiz_10` and enqueue their jobs — the same spend path as the
 Studio panel, so a confirm cannot be cheaper than the button.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test actions`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): a confirm runs the route's own function, inside the claim
@@ -1411,7 +1411,7 @@ pub fn action(pending_action_id: uuid::Uuid, tool: &str, args: &serde_json::Valu
 3. `insert_message` for the assistant turn runs when the answer is non-empty **or** at least
    one tool call was handled (A281).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// A READ tool runs inline, its result reaches the model, and nothing is written.
@@ -1466,23 +1466,23 @@ async fn a_tool_only_turn_persists_its_message(pool: PgPool) { /* … */ }
 async fn the_proposal_records_the_turn_it_came_from(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test agent` → the first failure is the `action` event never
 arriving, because the arm at `routes.rs:330` still logs and drops.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 The read tools' results are `serde_json::Value` and are rendered into the `tool_result` as
 compact JSON. The `find_free_slots` arm reads the caller's `events` between the two bounds
 and the `user_settings` study window; it does **not** call the planner, because the planner
 proposes blocks and this answers a question about the calendar.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test agent`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): the agent turn — reads execute, writes propose, and both are answered
@@ -1499,7 +1499,7 @@ feat(server): the agent turn — reads execute, writes propose, and both are ans
 **Interfaces:**
 - Consumes: `ScriptedLlm::tool_calling`, `ScriptedLlm::requests`, the chat route.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 The fixture is a real document, ingested through the ordinary path so the retrieved chunk
 is real, and its text is the injection:
@@ -1549,21 +1549,21 @@ fn no_tool_can_confirm_a_proposal() {
 async fn a_poisoned_proposal_is_visible_and_pending(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test agent_injection`
 
-- [ ] **Step 3: Make them pass**
+- [x] **Step 3: Make them pass**
 
 Nothing new is needed if Tasks 1–7 are right, and that is the point: if any of these need a
 new mechanism, the mechanism is the bug. The only expected work is making the fixture's
 ingestion deterministic (`ScriptedLlm` for the summary call, a fixed clock).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test agent_injection`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 test(server): a poisoned document cannot make the assistant write
@@ -1635,7 +1635,7 @@ pub fn in_quiet_hours(local_hour: u8, quiet: Option<(u8, u8)>) -> bool;
 pub fn quiet_end(from: DateTime<Utc>, tz: Tz, quiet: (u8, u8)) -> Option<DateTime<Utc>>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The key is the subject and the local date, never the fire instant (A284). Two devices
@@ -1679,11 +1679,11 @@ fn a_done_subject_and_a_channelless_user_produce_nothing() { /* … */ }
 fn the_plan_is_deterministic() { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-core --test reminders`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 No `Utc::now()` anywhere: `now` is an argument, exactly as the planner's is (contract § 6).
 A purity sweep mirrors `crates/core/tests/planner_purity.rs`, in
@@ -1692,11 +1692,11 @@ A purity sweep mirrors `crates/core/tests/planner_purity.rs`, in
 clock read here is a reminder whose time moves between two runs and a `HashMap` is a plan
 whose order changes between two runs.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test reminders`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the reminder engine — one key, quiet hours, and a DST-safe fire time
@@ -1734,7 +1734,7 @@ async fn the_dedupe_constraints_exist(pool: PgPool) { /* … */ }
 
 `cargo test -p stvdy-server --test schema`
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 ```sql
 -- Reminders: server-owned scheduling state (A283). Deliberately NOT +sync: the client's
@@ -1778,11 +1778,11 @@ create unique index on reminder_deliveries (reminder_id, channel)
   where device_id is null;
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 `cargo test -p stvdy-server --test schema`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(db): reminders and their deliveries, with the dedupe the exit gate needs
@@ -1832,7 +1832,7 @@ no refusal to sweep, because every plan grants at least one channel — which is
 asserting, so the plan-matrix test in `crates/core` is where that is checked and not a route
 row.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The exit gate's reminder half. Two devices compute the same due time an hour apart, and
@@ -1858,21 +1858,21 @@ async fn an_ack_is_per_device(pool: PgPool) { /* … */ }
 async fn a_quiet_hours_deferral_moves_the_time_and_keeps_the_key(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test reminders`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `local_date(fire_at, tz)` is `fire_at.with_timezone(&tz).date_naive()` — the *client's* local
 date, because the client computed `fire_at` from its own synced view. The server re-derives
 it from `users.timezone` so both producers agree even if a client's zone is stale.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test reminders`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): a reminder that cannot be registered twice
@@ -1923,7 +1923,7 @@ impl FcmPush {
 
 `Cargo.toml`: `reqwest`'s feature list gains `"http2"` (A288).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// APNs' provider token is ES256 with `kid`, `iss` and `iat`, and it is short-lived.
@@ -1956,12 +1956,12 @@ fn the_fcm_assertion_names_the_token_endpoint_and_scope() { /* … */ }
 fn an_unconfigured_platform_is_not_available() { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test push` → `error[E0433]: failed to resolve: use of
 undeclared crate or module push`.
 
-- [ ] **Step 3: Write the module and the manifest change**
+- [x] **Step 3: Write the module and the manifest change**
 
 `PushConfig` is env-driven and optional: `APNS_KEY_P8` + `APNS_KEY_ID` + `APNS_TEAM_ID` +
 `APNS_TOPIC`, and `FCM_SERVICE_ACCOUNT_JSON` + `FCM_PROJECT_ID`. `jsonwebtoken` 11.1.0 is
@@ -1969,11 +1969,11 @@ already a dependency with `rust_crypto` (verified in the workspace manifest), wh
 ES256 and RS256 — no new crate. `reqwest` gains `http2` for APNs, and the comment says why:
 without it the request is HTTP/1.1 and APNs answers nothing useful.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test push`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): APNs and FCM behind the push trait, and the http2 the APNs path needs
@@ -2022,7 +2022,7 @@ pub const REMINDER_TICK: Duration = Duration::from_secs(300);
 pub async fn reminder_pass(state: &AppState) -> AppResult<u64>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// A due reminder is delivered once, and the second run sends nothing: the claim is atomic
@@ -2061,22 +2061,22 @@ async fn a_partial_failure_does_not_resend_the_rest(pool: PgPool) { /* … */ }
 async fn the_tick_is_idempotent_within_its_window(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test reminder_jobs` → the dispatch arm is missing, so the job
 fails `unknown job kind send_reminder`.
 
-- [ ] **Step 3: Write the handler, the two arms, and the tick**
+- [x] **Step 3: Write the handler, the two arms, and the tick**
 
 `devices.last_seen_at` is written in Phase 8's pull transaction, which is the only place a
 device proves it is alive. That is the input A285's rule reads, and it is why the column
 finally has a writer.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test reminder_jobs`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): the reminder jobs — derived once, claimed once, delivered once
@@ -2152,16 +2152,16 @@ async fn the_topic_breakdown_needs_the_plan_that_grants_it(pool: PgPool) {
 
 `cargo test -p stvdy-server --test dashboard`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Two routes rather than one with a flag, so the sweep can drive a real refusal and the screen
 can render a locked card for the part that is locked while the rest of the dashboard works.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test dashboard`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): the dashboard, from rows and nothing else
@@ -2418,6 +2418,13 @@ watch for in particular:
 - **`devices.last_seen_at`.** Phase 8 noted the column had no writer; Task 13 gives it one
   in the pull transaction. If Phase 8 already wrote it, this phase reads it and the write
   stays where Phase 8 put it.
+
+### Boxes left unticked, and why
+
+  - Task 10 Step 1, "Write the failing test" -- neither of the two tests it names exists at HEAD: `the_reminder_tables_are_documented_and_not_synced` and `the_dedupe_constraints_exist`. The properties are asserted under the suite's own names (`crates/server/tests/schema.rs::the_reminder_dedupe_constraints_exist`, plus the `documented` rows for `reminders` and `reminder_deliveries` and `non_sync_tables_have_no_triggers`), so the named artefacts cannot be confirmed.
+  - Task 10 Step 2, "Run it and watch it fail" -- the test this step runs is the one Step 1 names, which is absent, so the failure this step is written to observe was not observed for that test.
+  - Task 14 Step 1, "Write the failing test" -- none of the five tests it names exists at HEAD (`every_number_is_the_count_the_fixture_inserted`, `a_topic_with_no_attempts_is_absent`, `another_users_rows_are_not_counted`, `the_window_is_the_users_local_days`, `the_topic_breakdown_needs_the_plan_that_grants_it`); the dashboard suite shipped under its own names (`the_window_is_the_students_local_days`, `another_accounts_rows_are_not_counted`, `a_weak_topic_needs_evidence_and_an_unattempted_topic_is_absent`, `the_free_half_works_and_the_advanced_half_is_refused`, `the_quiz_total_counts_quizzes_not_answers`, `a_question_with_no_source_is_absent_from_mastery`), so the named artefacts cannot be confirmed.
+  - Task 14 Step 2, "Run them and watch them fail" -- the tests this step runs are the five Step 1 names, none of which exists.
 
 ## Self-Review
 
