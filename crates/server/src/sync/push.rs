@@ -19,7 +19,9 @@ use axum::extract::State;
 use serde_json::Value;
 use stvdy_core::config::PlansFile;
 use stvdy_core::entitlements::{Feature, PlanFacts, UsageSnapshot, check_with};
-use stvdy_sync::proto::{Entity, ErrorCode, Mutation, MutationResult, PushRequest, PushResponse};
+use stvdy_sync::proto::{
+    Entity, ErrorCode, Mutation, MutationResult, Op, PushRequest, PushResponse,
+};
 
 use crate::auth::extract::AuthUser;
 use crate::error::{AppError, AppResult};
@@ -142,7 +144,9 @@ pub fn push_features(entity: Entity) -> &'static [Feature] {
 ///    server's;
 /// 4. the read-only account state — a device the plan has put over `devices_max` may
 ///    read, not write;
-/// 5. the entitlement engine, once per feature [`push_features`] names.
+/// 5. the entity's own field rules — [`validated`], which is the **same** function the REST
+///    route calls, so a rule cannot hold on one path and not the other;
+/// 6. the entitlement engine, once per feature [`push_features`] names.
 ///
 /// `plans` and `facts` are the matrix and the caller's client facts, passed in because
 /// the engine is pure (see the module docs). `device_read_only` is the flag from the
@@ -167,6 +171,12 @@ pub fn decide(
     }
     if device_read_only {
         return Err(Decision::ReadOnlyAccount.rejected());
+    }
+    if let Err(reject) = validated(mutation) {
+        return Err(MutationResult::Rejected {
+            code: reject.code.to_string(),
+            message: reject.message,
+        });
     }
     for feature in push_features(mutation.entity) {
         if let Err(error) = check_with(plans, facts, snapshot, *feature) {
@@ -283,6 +293,23 @@ pub async fn apply_batch(
             Replay::Fresh => {}
         }
 
+        // 3a-bis. `user_settings`' primary key is the caller's own id, and the apply keys
+        // the row by the session and ignores the mutation's id — so a forged id would be
+        // accepted and silently do nothing, which reads as success. Refused here because
+        // this is the first place the session's user is known; `decide` stays pure (A200).
+        if mutation.entity == Entity::UserSettings
+            && mutation.op == Op::Upsert
+            && let Some(payload) = mutation.payload.as_ref()
+            && let Err(reject) =
+                crate::settings::validate_settings_push(user.user_id, mutation.id, payload)
+        {
+            results.push(MutationResult::Rejected {
+                code: reject.code.to_string(),
+                message: reject.message,
+            });
+            continue;
+        }
+
         // 3b. Phase 7's decision, not a copy of it (A150).
         if let Err(result) = decide(
             &state.config.plans,
@@ -357,6 +384,54 @@ pub async fn apply_batch(
     })?;
 
     Ok(PushResponse { results })
+}
+
+/// The entity's own field rules, run for a pushed mutation.
+///
+/// Every arm is the **same function the REST route calls** — `tasks::validate_task`,
+/// `events::validate_event`, `study::validate_session`, `settings::validate_settings_push` —
+/// so "may this row exist" has one answer on both paths. A second implementation here would
+/// be a second answer, and the two would disagree the first time one of them was edited.
+///
+/// The three entities with no arm are the ones the spec's offline scope names but this phase
+/// does not: a `FlashcardReview` and a `QuizAttempt` were validated by their own routes in
+/// Phase 5, and adding a rule here is that phase's decision to make, not this one's.
+///
+/// The op matters: a `Task`/`Event` **create** is a payload with `base: null` (A176), and a
+/// create must state the fields a row needs. A delete carries no payload at all, so it is not
+/// validated — a tombstone has no fields to check.
+fn validated(mutation: &Mutation) -> Result<(), crate::tasks::Reject> {
+    let Some(payload) = mutation.payload.as_ref() else {
+        return Ok(());
+    };
+    if mutation.op == Op::Delete {
+        return Ok(());
+    }
+
+    match mutation.entity {
+        Entity::Task => {
+            let is_create = payload.get("base").is_none_or(Value::is_null);
+            crate::tasks::validate_task(mutation.id, payload, is_create).map(|_| ())
+        }
+        Entity::Event => {
+            let is_create = payload.get("base").is_none_or(Value::is_null);
+            crate::events::validate_event(payload, is_create).map(|_| ())
+        }
+        // The mutation's own `client_ts` is what the bound compares against (A204): the
+        // device's report of when it wrote the row is the field the contract already
+        // carries, and reading a clock here would make the decision impure.
+        Entity::StudySession => {
+            crate::study::validate_session(payload, mutation.client_ts, mutation.client_ts)
+                .map(|_| ())
+        }
+        // `user_settings` is validated in `apply_batch` instead, by
+        // `settings::validate_settings_push`: its first rule is that the mutation's id
+        // equals the caller's own user id (A200), and `decide` is pure — it has no session
+        // to compare against. One validator, one call site, and this arm is the honest
+        // statement that the field rules cannot be the whole answer for this entity.
+        Entity::UserSettings => Ok(()),
+        _ => Ok(()),
+    }
 }
 
 /// Whether a payload carries one of the entity's server-derived fields.

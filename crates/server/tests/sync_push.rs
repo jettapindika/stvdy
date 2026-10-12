@@ -990,8 +990,88 @@ async fn a_patch_that_omits_deleted_at_does_not_resurrect(pool: PgPool) {
     assert_eq!(row["title"], "Judul asli", "{row}");
 }
 
+/// Every field Phase 9 added to a task or a settings row survives the push.
+///
+/// This is the assertion that would have caught the gap the plan's "what already exists"
+/// missed: `Entity::payload_columns` is both the pull's allowlist **and** what
+/// `apply::write_columns` intersects a payload against, so a column absent from it is
+/// silently dropped by the write. The response still says `applied`, which is the worse of
+/// the two failures — the client is told its edit landed and nothing changed.
+///
+/// `position` is the case that matters most: without it a batch of subtasks comes back
+/// shuffled (A196), and without the quiet hours and the language the choice a student made
+/// on their phone never reaches their laptop (A202).
+#[sqlx::test(migrations = "../../migrations")]
+async fn every_field_phase_nine_added_survives_a_push(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) = account(&app, &harness, "new-columns@example.test").await;
+
+    let task = Uuid::now_v7();
+    let batch = serde_json::json!([
+        mutation(
+            Uuid::now_v7(),
+            "task",
+            "upsert",
+            task,
+            patch(serde_json::json!({
+                "title": "Kerjakan latihan",
+                "status": "todo",
+                "priority": 2,
+                "position": 3,
+            })),
+        ),
+        mutation(
+            Uuid::now_v7(),
+            "user_settings",
+            "upsert",
+            user_id,
+            serde_json::json!({
+                "quiet_start_hour": 22,
+                "quiet_end_hour": 7,
+                "language": "id",
+                "theme": "dark",
+            }),
+        ),
+    ]);
+
+    let (status, body) = push(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for result in body["results"].as_array().expect("results") {
+        assert_eq!(result["status"], "applied", "{body}");
+    }
+
+    let position: i32 = sqlx::query_scalar("select position from tasks where id = $1")
+        .bind(task)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(position, 3, "a pushed `position` must reach the column");
+
+    let row = sqlx::query_as::<_, (Option<i32>, Option<i32>, String, String)>(
+        "select quiet_start_hour, quiet_end_hour, language, theme
+           from user_settings where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (Some(22), Some(7), "id".to_string(), "dark".to_string()),
+        "a pushed settings field must reach the column"
+    );
+}
+
 /// A settings push upserts the caller's single row and keys the change by the user id,
 /// matching what `log_change_by_user` writes (A179).
+///
+/// The mutation's `id` is the caller's own user id, because that is what the table's primary
+/// key is and what the contract's `Mutation.id` therefore has to be (A200). A mutation naming
+/// anyone else is refused rather than applied to the caller — the apply keys the row by the
+/// session and ignores the id, so a forged one would be accepted and silently do nothing,
+/// which reads as success.
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_settings_push_upserts_the_callers_row(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -1008,7 +1088,7 @@ async fn a_settings_push_upserts_the_callers_row(pool: PgPool) {
                 Uuid::now_v7(),
                 "user_settings",
                 "upsert",
-                Uuid::now_v7(),
+                user_id,
                 serde_json::json!({ "study_start_hour": hour }),
             )]),
         )

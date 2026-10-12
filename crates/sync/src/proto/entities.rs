@@ -309,6 +309,10 @@ impl Entity {
                 "estimate_min",
                 "priority",
                 "status",
+                // A196: the order a breakdown proposed, and the client's to set. Without it
+                // in this list a push of it is silently dropped by `write_columns` and a
+                // pull never ships it, so subtasks come back shuffled on the second device.
+                "position",
                 "created_at",
                 "updated_at",
                 "deleted_at",
@@ -340,6 +344,13 @@ impl Entity {
                 "block_len_min",
                 "break_min",
                 "reminder_channels",
+                // A202: a choice made on the phone is the choice the laptop uses, which is
+                // what a synced settings row is for. Absent from this list, a push of any of
+                // them is dropped by `write_columns` and a pull never ships them.
+                "quiet_start_hour",
+                "quiet_end_hour",
+                "language",
+                "theme",
                 "updated_at",
             ],
             Entity::PendingAction => &[

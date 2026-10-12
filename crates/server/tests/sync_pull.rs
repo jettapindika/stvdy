@@ -540,6 +540,78 @@ async fn a_settings_change_is_keyed_by_the_user_id(pool: PgPool) {
     );
 }
 
+/// The fields Phase 9 added ship in a pull, which is the other half of the same allowlist.
+///
+/// A push that lands a column and a pull that never ships it is a device that writes a value
+/// it cannot read back on any other device: the settings a phone chose would stay on the
+/// phone, and a breakdown's subtask order would not survive the trip. Asserted through the
+/// real route rather than against the list, because the list is only interesting for what it
+/// does to a payload.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_fields_phase_nine_added_ship_in_a_pull(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, _) = account(&app, &harness, "new-columns@example.test").await;
+
+    let task = insert_task(&harness.state.pool, user_id, "Kerjakan latihan").await;
+    sqlx::query("update tasks set position = 2 where id = $1")
+        .bind(task)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    sqlx::query("insert into user_settings (user_id) values ($1)")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "update user_settings
+            set quiet_start_hour = 22, quiet_end_hour = 7, language = 'id', theme = 'dark'
+          where user_id = $1",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json(
+        &app,
+        "GET",
+        "/sync/pull?cursor=0",
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let task_change = changes(&body)
+        .iter()
+        .find(|change| change["id"] == task.to_string())
+        .expect("the task change");
+    assert_eq!(
+        task_change["data"]["position"], 2,
+        "`position` must ship, or a breakdown's order dies on the second device: {task_change}"
+    );
+
+    let settings = changes(&body)
+        .iter()
+        .find(|change| change["entity"] == "user_settings")
+        .expect("the settings change");
+    for (field, expected) in [
+        ("quiet_start_hour", serde_json::json!(22)),
+        ("quiet_end_hour", serde_json::json!(7)),
+        ("language", serde_json::json!("id")),
+        ("theme", serde_json::json!("dark")),
+    ] {
+        assert_eq!(
+            settings["data"][field], expected,
+            "{field} must ship, or the choice never leaves the device that made it: {settings}"
+        );
+    }
+}
+
 /// A limit of 0 is a 400, and a limit over the cap is clamped rather than refused.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_page_size_is_validated_and_clamped(pool: PgPool) {

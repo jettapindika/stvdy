@@ -658,6 +658,241 @@ fn a_push_of_derived_card_fields_is_rejected() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Forge a calendar-owned event, a settings row for someone else, or a session that never
+// happened
+// ---------------------------------------------------------------------------------------
+
+/// The push path's account, device and token, plus the mutation body builder.
+async fn push_account(
+    app: &axum::Router,
+    harness: &TestState,
+    email: &str,
+) -> (String, Uuid, Uuid) {
+    let token = signed_up(app, harness, email).await;
+    let user_id = user_id_of(harness, email).await;
+    let device_id: Uuid = sqlx::query_scalar("select id from devices where user_id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    (token, user_id, device_id)
+}
+
+/// One mutation, in the shape `POST /sync/push` accepts.
+fn pushed(
+    entity: &str,
+    op: &str,
+    id: Uuid,
+    payload: serde_json::Value,
+    client_ts: chrono::DateTime<Utc>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "mutation_id": Uuid::now_v7(),
+        "entity": entity,
+        "op": op,
+        "id": id,
+        "payload": payload,
+        "client_ts": client_ts.to_rfc3339(),
+    })
+}
+
+async fn push_batch(
+    app: &axum::Router,
+    token: &str,
+    device_id: Uuid,
+    mutations: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    json(
+        app,
+        "POST",
+        "/sync/push",
+        token,
+        serde_json::json!({ "device_id": device_id, "mutations": mutations }),
+    )
+    .await
+}
+
+/// A forged external event through push, which is the path a patched client would use
+/// because it skips the REST validator's `403` (A198).
+///
+/// `events` is client-writable, so the allowlist does not stop this: the entity's own
+/// validator does. The REST route and this path call the **same** function, which is what
+/// makes the two refusals one rule rather than two.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_pushed_event_with_a_google_source_is_rejected(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) =
+        push_account(&app, &harness, "forged-event@example.test").await;
+    let now = Utc::now();
+
+    // Each calendar-owned column is its own mutation, because a validator that checked only
+    // `source` would pass a payload that sets `external_id` and silently break the next
+    // incremental sync's `(connection_id, external_id)` match.
+    for (field, value) in [
+        ("source", serde_json::json!("google")),
+        ("external_id", serde_json::json!("abc123")),
+        ("etag", serde_json::json!("W/\"1\"")),
+        ("connection_id", serde_json::json!(Uuid::now_v7())),
+    ] {
+        let mut patch = serde_json::json!({
+            "kind": "class",
+            "title": "Dari Google",
+            "starts_at": "2026-11-02T09:00:00Z",
+            "ends_at": "2026-11-02T11:00:00Z",
+        });
+        patch[field] = value;
+        let batch = serde_json::json!([pushed(
+            "event",
+            "upsert",
+            Uuid::now_v7(),
+            serde_json::json!({ "patch": patch, "base": serde_json::Value::Null }),
+            now,
+        )]);
+
+        let (status, body) = push_batch(&app, &token, device_id, batch).await;
+        assert_eq!(status, StatusCode::OK, "{field}: {body}");
+        assert_eq!(
+            body["results"][0]["status"], "rejected",
+            "{field} must be refused: {body}"
+        );
+        assert_eq!(
+            body["results"][0]["code"], "read_only_entity",
+            "{field} is a server-owned field, which is what the push path calls one (A198): {body}"
+        );
+    }
+
+    let stored: i64 = sqlx::query_scalar("select count(*)::bigint from events where user_id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0, "a refused mutation writes nothing");
+}
+
+/// The settings row's primary key is the user's id, so a mutation whose `id` is someone
+/// else's is refused rather than applied to the caller (A200).
+///
+/// The refusal has to happen: `apply::apply_settings` keys the row by the session's user and
+/// **ignores** the mutation's id, so without this check a forged id would be accepted and
+/// silently do nothing — which is exactly what a successful write looks like.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_pushed_settings_row_for_another_user_id_is_rejected(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) =
+        push_account(&app, &harness, "forged-settings@example.test").await;
+    let now = Utc::now();
+
+    let other = Uuid::now_v7();
+    let batch = serde_json::json!([pushed(
+        "user_settings",
+        "upsert",
+        other,
+        serde_json::json!({ "study_start_hour": 3 }),
+        now,
+    )]);
+    let (status, body) = push_batch(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "rejected", "{body}");
+    assert_eq!(body["results"][0]["code"], "validation", "{body}");
+
+    // And nothing was written to the caller's row.
+    let stored: Option<i32> =
+        sqlx::query_scalar("select study_start_hour from user_settings where user_id = $1")
+            .bind(user_id)
+            .fetch_optional(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, None, "a refused settings push writes nothing");
+
+    // A payload naming `user_id` is refused rather than ignored, and the caller's own id is
+    // accepted — so the refusal above is the id rule and not a check that refuses everything.
+    let batch = serde_json::json!([pushed(
+        "user_settings",
+        "upsert",
+        user_id,
+        serde_json::json!({ "study_start_hour": 3, "user_id": user_id }),
+        now,
+    )]);
+    let (status, body) = push_batch(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "rejected", "{body}");
+    assert_eq!(body["results"][0]["code"], "validation", "{body}");
+
+    let batch = serde_json::json!([pushed(
+        "user_settings",
+        "upsert",
+        user_id,
+        serde_json::json!({ "study_start_hour": 3 }),
+        now,
+    )]);
+    let (status, body) = push_batch(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+    let stored: i32 =
+        sqlx::query_scalar("select study_start_hour from user_settings where user_id = $1")
+            .bind(user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 3);
+}
+
+/// The session bound holds on the push path, which is the path an offline timer uses (A204).
+///
+/// The comparison is against the mutation's own `client_ts`, so a session that reports more
+/// minutes than elapsed between its start and the device's own clock is refused, while a
+/// legitimate session pushed hours later is not.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_pushed_session_beyond_its_elapsed_time_is_rejected(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let (token, user_id, device_id) =
+        push_account(&app, &harness, "forged-session@example.test").await;
+
+    let started = "2026-10-12T09:00:00Z";
+    let client_ts: chrono::DateTime<Utc> = "2026-10-12T09:05:00Z".parse().unwrap();
+
+    let batch = serde_json::json!([pushed(
+        "study_session",
+        "upsert",
+        Uuid::now_v7(),
+        serde_json::json!({ "started_at": started, "duration_min": 600 }),
+        client_ts,
+    )]);
+    let (status, body) = push_batch(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "rejected", "{body}");
+    assert_eq!(body["results"][0]["code"], "validation", "{body}");
+
+    let stored: i64 =
+        sqlx::query_scalar("select count(*)::bigint from study_sessions where user_id = $1")
+            .bind(user_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 0, "a refused session writes nothing");
+
+    // The other direction: the same shape with an honest duration is applied, so the refusal
+    // above is the bound and not a check that refuses every session.
+    let honest: chrono::DateTime<Utc> = "2026-10-12T09:45:00Z".parse().unwrap();
+    let batch = serde_json::json!([pushed(
+        "study_session",
+        "upsert",
+        Uuid::now_v7(),
+        serde_json::json!({ "started_at": started, "duration_min": 45 }),
+        honest,
+    )]);
+    let (status, body) = push_batch(&app, &token, device_id, batch).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["status"], "applied", "{body}");
+}
+
+// ---------------------------------------------------------------------------------------
 // Exceed `web_searches_per_day` / `chat_msgs_per_day`
 // ---------------------------------------------------------------------------------------
 
