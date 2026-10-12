@@ -40,6 +40,8 @@ not exist or "fix" an accepted risk by adding client-side checks that provide no
 | Payment integrity | Getting a plan without paying | `payments` + gateway webhook (server) |
 | Content (uploaded sources, chunks, embeddings) | IP, or another user's corpus | Object storage + `chunks` (server); **never synced to clients** |
 | Service availability / cost ceiling | Denial of service, or financial drain | `provider_cost_ceiling_usd`, rate limits (server) |
+| **The update channel** (the published `latest.json`, the artifacts it points at, and the minisign key that signs it) | **Every installed desktop copy at once.** An attacker who can serve a manifest the app accepts does not need to compromise a user: the user's own app downloads and runs the attacker's binary, with the user's privileges. This is the highest-value asset in the product, and it did not exist before Phase 15 | `src-tauri/tauri.conf.json` `plugins.updater.pubkey` (compiled into the app); the **private** key is a GitHub Actions secret, never in the repository (A332) |
+| **The server image and the print assets it serves** | A forged image is the whole server; a swapped print asset is a document the product prints as if it were its own | Built from this repository by `Dockerfile`; every asset is SHA-256-pinned in `assets/checksums.txt` and verified by `scripts/fetch-print-assets.sh` before it is written (A339) |
 
 ---
 
@@ -123,6 +125,39 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 **Reading this table:** the "fails" rows are the product's actual security boundary. The "succeeds"
 rows are not bugs; they are the price of shipping a local-first client, and each is bounded to
 consequences the attacker inflicts on themselves.
+
+### The update channel is not a row in the table above
+
+**Forge an update manifest → Fails.** Enforced by the minisign signature verified against the
+public key compiled into the app (A332), and exercised on every commit rather than on release
+day: `crates/server/tests/release.rs::a_signed_manifest_verifies_and_a_mutated_one_does_not`
+signs a fixture manifest with a test keypair and asserts the verifier accepts it, rejects a
+one-byte mutation, rejects an absent signature, and rejects a signature from a key that is not
+ours.
+
+It is deliberately **not** a row of the table, and that is a structural decision rather than an
+oversight: the table answers "what can a *modified client* do", and this attacker has not
+modified anything. They control a *response* — a DNS answer, a host, a CDN — and the client they
+attack is the genuine, unmodified, correctly signed one. Filing it under client modification
+would also be actively harmful here, because `every_section_5_fails_row_has_a_case` reads this
+document and requires each "**Fails.**" row to have a case in `crates/server/tests/tamper.rs` —
+whose subject is the server's HTTP boundary, where an update manifest is not a request. The
+enforcement is real and tested; it just lives in a different suite.
+
+**The trust chain, in the order it can be attacked.** The app is trusted because the OS
+verified its code signature; the code signature is trusted because a certificate authority
+issued it to the operator; an *update* is trusted because the manifest is signed by a minisign
+key whose public half is compiled into the installed app. Every link is either a file in this
+repository (the public key, the artifact paths, `scripts/verify-release-artifacts.sh`) or an
+operator secret that must never enter it (the private key, the notarization credentials). The
+weak link is the last one, and it is R7 below.
+
+**What the client does *not* have to get right, and why that matters.** The manifest's `url` is
+not authenticated by the endpoint — the response is not signed — so the signature is what ties
+the announced version to the bytes. `tauri-plugin-updater` compares the version in the
+signature's *trusted comment* against the version the endpoint announced, and `verify` checks
+the global signature that covers that comment before it is read. A manifest whose `url` points
+at an older, genuinely signed release therefore fails rather than downgrading the user.
 
 ---
 
@@ -228,6 +263,38 @@ asked the same question — not who.
 *Revisit if:* the cached key ever incorporates user-scoped data (a workspace filter, a private
 document), which would turn a shared cache into a cross-tenant channel.
 
+**R7 — The update key is a single point of trust.** A compromised minisign private key forges an
+update that **every installed copy accepts and runs**, with the user's privileges, and the app has
+no way to tell it from a genuine one. This is the largest single-point failure in the product: it is
+strictly worse than having no updater, because it *looks* like a control, and there is no partial
+version of the failure — one key, one release, every install.
+
+**There is no client-side defence, and saying so is the point.** The client is the thing being
+replaced, so it cannot be the check. Any mechanism inside the app is executed by the forged binary.
+The defence is entirely custody, and it is a **process** rather than a test — the one gate in this
+phase that a suite cannot close:
+
+1. The private key and its password are GitHub Actions secrets, and `release.yml` is the **only**
+   place they are used (A332).
+2. `scripts/verify-release-artifacts.sh` **refuses to run** with `TAURI_SIGNING_PRIVATE_KEY` in its
+   environment, because a verification tool that can sign cannot establish the one property it
+   exists to establish. That refusal is what keeps the key off a developer's machine by habit
+   rather than by discipline.
+3. The public key is committed in `src-tauri/tauri.conf.json`, so the trust anchor is reviewable in
+   a diff.
+4. Rotation requires a **release**, not a config change: installed apps verify against the key
+   compiled into them, so a new key reaches an install only through an update signed by the old one.
+   If the old key is the thing that was compromised, there is no in-band path — the remedy is
+   revoking distribution, a new signing identity, and telling users to reinstall. The procedure and
+   the acceptable key storage are in `docs/RELEASE.md`.
+
+*Bounded because:* the attack requires the operator's private key, which is not in the repository,
+not in a build artifact, and not on any machine that runs the verifier.
+*Revisit if:* the key is ever copied to a developer machine or a second workflow; if a second
+person needs to sign a release; or if the operator cannot say where the key is stored. Any of the
+three turns a custody problem into an exposure, and the trigger is a conversation rather than a
+test failure — which is why it is written here.
+
 ---
 
 ## 7. Tamper resistance by platform
@@ -262,6 +329,11 @@ The design never depends on this column. It is recorded so that no phase mistake
 
 | Check | Phase | Test |
 |---|---|---|
+| The update manifest's signature verifies, and a mutation of it is rejected | 15 | `crates/server/tests/release.rs::a_signed_manifest_verifies_and_a_mutated_one_does_not` — a fixture keypair signs a manifest shaped like the plugin's dynamic response; the case asserts the valid signature verifies, a **one-byte mutation** does not, an absent signature does not, an empty signature does not, and a signature from a **different key** does not. The last of those is the forged-manifest case the phase exists to prevent, and the earlier negatives cannot see it: the bytes are genuine and the signature is well-formed, it is simply not ours. It reproduces `tauri-plugin-updater` 2.13.3's own path (`base64 → utf8 → minisign_verify::PublicKey/Signature::decode → verify(…, allow_legacy = true)`) rather than calling a helper of our own, because a test that verified with a different function would prove something about that function |
+| The bundle produces updater artifacts, names a public key, and the permission is desktop-only | 15 | `release.rs::the_bundle_creates_updater_artifacts_and_names_a_public_key` (`createUpdaterArtifacts`, exactly one HTTPS endpoint carrying `{{target}}`/`{{arch}}`/`{{current_version}}`, no `dangerous_insecure_transport_protocol`, a non-blank `pubkey`, `passive` install mode) and `release.rs::the_updater_is_desktop_only` (the permission is in `capabilities/desktop.json` and **not** in `default.json`/`mobile.json`) |
+| A published artifact is signed, notarized and stapled before it is released | 15 | `scripts/verify-release-artifacts.sh --macos/--windows/--manifest` — the machine-readable half of the same facts, run by the release job against what it just produced, and refusing to run at all when `TAURI_SIGNING_PRIVATE_KEY` is present (A332, A333, A334) |
+| The print assets are served, not fetched, so a sealed container renders math | 15 | `crates/server/tests/assets.rs` (the post-rewrite HTML carries no CDN origin and does contain the base URL for each of the four files) and `crates/server/tests/pdf.rs --ignored`, run **inside the image** by CI's `image` job and by `scripts/release-image.sh` on the host — the PDF's extracted text contains no raw `$`, which is what a missing KaTeX would leave behind (A339, A340) |
+| A backup restores, and its data comes back | 15 | `scripts/restore-drill.sh` — restores the newest dump into a scratch database, requires `sqlx migrate info` to report every migration installed and none pending or missing, and compares the sixteen `+sync` tables' row counts against the live database (A347). Run before launch and quarterly after, with its output recorded in `docs/OPERATIONS.md` |
 | Every handler goes through entitlements; no bypass | 7 | `crates/server/tests/route_sweep.rs` — `every_registered_route_is_classified` extracts every registered `(method, path)` pair from `crates/server/src` and compares the table **both ways**, and `every_swept_route_refuses_an_exhausted_account` drives each `Swept` row through the real router asserting its exact `(status, code)`. `no_file_outside_the_entitlements_layer_reads_a_plan_limit` greps the tree for a plan-limit read and for the single reader of `provider_cost_ceiling_usd` |
 | Every row of §5 marked "fails" is actually rejected | 7 | `crates/server/tests/tamper.rs` — one case per row, asserting the exact error code; `every_section_5_fails_row_has_a_case` reads `docs/THREAT_MODEL.md` and fails when a "fails" row has no case (13 rows today) |
 | No cross-tenant leakage through `change_log` or pull | 8 | `crates/server/tests/sync_pull.rs::a_pull_never_contains_another_accounts_seq` (the pull's `seq` set is asserted against each account's own `change_log`), `the_payload_loader_cannot_be_pointed_at_another_users_row` (a planted foreign `entity_id` loads no payload, so the change ships `data: null` rather than another account's row), and `crates/server/tests/sync_convergence.rs::two_accounts_never_cross` — which asserts on the **`seq` values each store ever applied**, not on the absence of a 200, and first asserts both stores applied something so the loop cannot pass by iterating nothing |
