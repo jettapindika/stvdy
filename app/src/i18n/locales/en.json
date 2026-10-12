@@ -798,6 +798,10 @@
     "composer": {
       "title": "Composer honesty",
       "description": "The line under every chat composer, and the grounding toggle above it. Both are part of the composer rather than a tooltip: a warning nobody has to open is one most people never read."
+    },
+    "sync": {
+      "title": "Sync status",
+      "description": "The control the shell shows in both form factors: a row at the foot of the sidebar, and a chip in the tab bar's band on a phone. The state is a word plus a tone, so it reads correctly in monochrome, and the tones are the chips above. It is a link to the Devices screen, which is why Devices needs no sixth nav item."
     }
   },
   "planner": {

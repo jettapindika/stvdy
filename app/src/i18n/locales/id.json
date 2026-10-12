@@ -787,6 +787,10 @@
     "composer": {
       "title": "Kejujuran composer",
       "description": "Baris di bawah setiap composer chat, dan tombol dasar di atasnya. Keduanya bagian dari composer, bukan tooltip: peringatan yang tidak wajib dibuka adalah peringatan yang jarang dibaca."
+    },
+    "sync": {
+      "title": "Status sinkron",
+      "description": "Kontrol yang ditampilkan shell di kedua bentuk: satu baris di kaki bilah samping, dan chip di pita bilah tab pada ponsel. Statusnya berupa kata ditambah warna, jadi tetap terbaca tanpa warna, dan warnanya adalah chip di atas. Kontrol ini tautan ke layar Perangkat, karena itu Perangkat tidak perlu jadi item navigasi keenam."
     }
   },
   "planner": {
