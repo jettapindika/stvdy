@@ -10,11 +10,11 @@
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
-use stvdy_core::generation::syllabus::{
-    parse_syllabus, review_items, ReviewKind, MAX_EVIDENCE_WORDS, MAX_MEETINGS,
-    REVIEW_FLAG_CONFIDENCE,
-};
 use stvdy_core::generation::GenerationError;
+use stvdy_core::generation::syllabus::{
+    MAX_EVIDENCE_WORDS, MAX_MEETINGS, REVIEW_FLAG_CONFIDENCE, ReviewKind, parse_syllabus,
+    review_items,
+};
 
 fn jakarta() -> Tz {
     "Asia/Jakarta".parse().unwrap()
@@ -407,7 +407,7 @@ fn a_meeting_that_crosses_midnight_ends_the_next_day() {
 #[test]
 fn a_rule_that_wants_more_than_a_semester_holds_is_refused() {
     use chrono::TimeZone as _;
-    use stvdy_core::generation::syllabus::{expand_meeting, MAX_OCCURRENCES};
+    use stvdy_core::generation::syllabus::{MAX_OCCURRENCES, expand_meeting};
 
     // A daily rule over a 180-day horizon wants ~180 rows, well past the semester cap: the
     // student would have to delete them by hand, so the confirm refuses and the item is

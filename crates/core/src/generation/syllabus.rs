@@ -16,7 +16,7 @@ use chrono_tz::Tz;
 use rrule::{RRule, Unvalidated};
 use uuid::Uuid;
 
-use super::{strip_code_fence, GenerationError};
+use super::{GenerationError, strip_code_fence};
 
 /// The most items one reply may carry. Above what any real syllabus states, so a model that
 /// ignores the module cannot fill the review screen with rows the student has to delete.

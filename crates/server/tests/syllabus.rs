@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use axum::http::StatusCode;
 use axum::Router;
+use axum::http::StatusCode;
 use chrono::{DateTime, TimeZone as _, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;

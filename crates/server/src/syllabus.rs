@@ -22,11 +22,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use axum::Json;
+use axum::Router;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::Json;
-use axum::Router;
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use serde_json::json;
@@ -34,11 +34,11 @@ use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
 use stvdy_core::generation::syllabus::{
-    expand_meeting, parse_syllabus, review_items, ReviewItem, ReviewKind, SyllabusFile,
+    ReviewItem, ReviewKind, SyllabusFile, expand_meeting, parse_syllabus, review_items,
 };
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
-use crate::entitlements::{require_writable_row, ReadOnlyRow};
+use crate::entitlements::{ReadOnlyRow, require_writable_row};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
