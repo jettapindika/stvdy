@@ -1707,3 +1707,114 @@ account-deletion behaviour — those are checklist rows in `docs/RELEASE.md` § 
 submission checklists. And it does not prove the tree it read is the tree that was
 *submitted*: `scripts/check-mobile-no-purchase.sh <artifact.ipa>` closes that gap by running
 the same check against the packaged archive, and that is the form A4 records.
+
+## Native shims chosen
+
+Five native mechanisms carry the phone build, and the split between them is the platform's
+rather than a preference. **Each is marked with what the tree holds at the time of
+writing** — `landed` when the file exists, `in-flight` when it does not — because the
+difference between "the decision is recorded" and "the code is in the tree" is the one a
+later reader must not have to guess.
+
+### The push plugin, and its fallback (A310) — landed
+
+`src-tauri/src/push.rs` holds the whole surface that knows a plugin exists:
+`provider_for`, `validate_token` and `register`, and the `PushToken` the SPA `PUT`s to
+`/devices/{id}/push-token` (A329). The plugin itself is the pinned community crate
+`tauri-plugin-notifications` (Choochmeque) **0.5.0-rc.14** with its `push-notifications`
+feature, target-gated to iOS/Android in `src-tauri/Cargo.toml` so a desktop build does not
+link it.
+
+**The fallback is the same seam, not a second design.** The official
+`tauri-plugin-notification` provably cannot receive remote push — its iOS delegate skips
+`UNPushNotificationTrigger` and its Android manifest registers no
+`com.google.firebase.MESSAGING_EVENT` service — which is why a community crate is pinned at
+all. If it regresses before submission, the replacement is a **custom plugin** and
+`push.rs` is the only file that changes: `provider_for` and `validate_token` are pure and
+asserted on macOS by `tests/push.rs`, deliberately outside any `cfg`, because a provider
+string the server's `PUSH_PROVIDERS` rejects sits in `push_tokens` and never delivers —
+a failure no device would reveal. The capability matrix budgets for the custom plugin
+regardless, so the fallback is a known cost rather than a surprise.
+
+### The one custom plugin (A311) — in-flight
+
+`src-tauri/plugins/mobile/` is one crate for the native work no plugin layer can do: the
+iOS `BGTaskScheduler` registration and handlers, the Android `WorkManager` worker, the FCM
+service seam and the Android `ACTION_SEND`/`ACTION_VIEW` intake. It exists because three
+separate crates would be three copies of the same `setup()` hook and Rust entry point; the
+split is by **platform mechanism** (an app-extension target cannot be a plugin, a push
+crate is not a scheduler) rather than by convenience. `intake.rs` and `scheduler.rs` are
+its two halves, and `tests/scheduler.rs` pins the seam.
+
+**In the tree, uncommitted and not yet registered.** The crate is present
+(`src-tauri/plugins/mobile/`, with its `Cargo.toml`, `build.rs`, the Rust modules, the
+Kotlin half `android/…/MobilePlugin.kt` and the scheduler test) and depends on
+`stvdy-shell`, but it is untracked in git and `src-tauri/src/lib.rs` does not yet call
+`tauri_plugin_stvdy_mobile::init()`, so no build wires it in. The design above is what the
+tree holds; the wiring is a sibling's in-flight work.
+
+### The Share Extension and the App Group (A312) — in-flight
+
+The iOS Share Extension is a hand-wired **app-extension target**, not a plugin: a Share
+Extension cannot launch its host app (`NSExtensionContext.open(_:)` is supported only by
+the Today and iMessage extension points), so it writes the shared file or URL into an
+**App Group** shared container and the main app imports it on the next foreground. The App
+Group identifier is `group.app.stvdy`, the only shared-container name in the tree, and it
+is asserted unique.
+
+**Not in the tree yet.** `bundle.iOS.template` (`gen/apple/project.yml.template`) is present
+and Tauri has no `bundle` key for an app-extension target, so the target is added by
+rendering a custom XcodeGen `project.yml` over the generated one — but the extension target
+itself and the `group.app.stvdy` entitlement are not there yet, and the Android half of the
+intake is the plugin's `intake.rs` rather than an extension. The three intake channels
+(A313) are: iOS "Open in…" document associations delivered via `RunEvent::Opened`, the
+Share Extension writing to the App Group, and Android `bundle.fileAssociations[]` with a
+concrete `mimeType` delivering a `content://` URI — which is copied into app storage
+immediately, because an `ACTION_GET_CONTENT` grant is transient and dies with the receiving
+activity (A314).
+
+### The scheduler seam (A315) — in-flight
+
+`src-tauri/plugins/mobile/src/scheduler.rs` calls `stvdy_shell_lib::sync::sync_once`
+**directly, never the webview**: iOS submits a `BGAppRefreshTaskRequest` and a
+`BGProcessingTaskRequest` to `BGTaskScheduler`, Android enqueues one unique periodic
+`WorkManager` request, and both call the shell's own pass. A background window has no
+guarantee a webview exists, and one killed mid-run would make a sync depend on a UI — so
+`tests/scheduler.rs` asserts **structurally** that the seam module does not reference
+`tauri::WebviewWindow` and emits no frontend event, in this crate and in the Kotlin and
+Swift halves. JS observes the result on the next foreground through the Phase 8 sync-status
+surface.
+
+**The seam's source and its test are present, but inside the same uncommitted crate** as
+A311 above, so the assertion has not been run against a registered plugin. The design is
+pinned and the file exists; "in-flight" is the honest word until the crate is committed and
+wired.
+
+**The scheduler is best-effort and its inaccuracy is documented (A317).** iOS scheduling
+is discretionary and Android periodic work is inexact and ≥15 min; the interval is clamped
+up to the minimum rather than rejected, because a caller who asked for five minutes should
+get the shortest honest schedule rather than a `WorkManager` throw on a device nothing
+tests. Push delivery is treated the same way (A316): an opportunistic hint, never a
+schedule, so the app **always re-syncs on foreground** and tap-to-open is the only
+guaranteed JS surface.
+
+### The bundle inspection (A321) — landed
+
+`scripts/check-no-purchase-ui.mjs` reads every file of the store build and fails on a
+purchase denylist plus a re-assertion of `config/billing_policy.toml`; it runs in CI
+immediately after the web build, because a check only ever run by hand is the one that gets
+skipped. **It refuses to pass on an artifact that is not the store build** — every build
+stamps its `index.html` with `<meta name="stvdy-build-target" content="store"|"full">`, and
+a `full` artifact, or one with no stamp, is an offender. The full reasoning, the two counts
+it produces and the tree it must read are in § Store-absence checks must validate the
+artifact that actually ships above; `docs/RELEASE.md` § Mobile distribution is where the
+release procedure points at it.
+
+### What is not verifiable here, and is named rather than assumed
+
+No device, no signing identity, no Android SDK and no store account exist on this machine.
+So the simulator bundle, the classifier's unit tests and the browser measurement are the
+reachable halves; APNs/FCM registration, the share-extension import, a background window
+firing, a screen-reader traversal and the TestFlight/Play upload are `user` or `blocked`
+rows in `docs/RELEASE.md` § Mobile test checklist, not claims. `scripts/smoke-phase14.sh`
+runs the machine half and prints the rest by name.

@@ -1399,48 +1399,112 @@ and gates 5/6/7 are run on a phone viewport with quoted output.
 - Consumes: everything above.
 - Produces: the exit checklist evidence and the docs.
 
-- [ ] **Step 1: Write the failing test — Indonesian on the phone shell**
+- [x] **Step 1: Write the failing test — Indonesian on the phone shell**
+
+**Written, with two deviations from the snippet, both because the snippet names helpers the
+tree does not have in that shape.** `installFakePlatform`'s signature is
+`installFakePlatform(kind, options)` — the platform kind is a positional string, not a
+`{ kind, width }` object — and the viewport is a separate helper, `stubViewport(width)`, the
+one `App.test.tsx` and `router.test.tsx` already use; a third way to inject a width would be
+a second convention for a question the harness already answers. The assertion is on
+`findByRole('heading', { name: 'Ruang belajar' })` rather than `findByText('Ruang kerja')`:
+the rendered string is `nav.workspaces` = **"Ruang belajar"**, and `Ruang kerja` is not in
+`id.json`. The case is in `app/src/features/a11y.test.tsx`, renders `WorkspaceListScreen` at
+390px on a fake `ios` platform in Indonesian, asserts the string by accessible name, and
+runs `expectNoA11yViolations` on the container.
 
 ```tsx
 it('renders the Indonesian workspace list on the phone shell with no clipped control', async () => {
-  i18n.changeLanguage('id')
-  installFakePlatform({ kind: 'ios', width: 390 })
-  renderWithProviders(<WorkspaceListScreen />, { route: '/workspaces' })
-  expect(await screen.findByText('Ruang kerja')).toBeInTheDocument()
-  await expectNoA11yViolations(document.body)
+  installFakePlatform('ios')
+  stubViewport(390)
+  await i18n.changeLanguage('id')
+  mockFetch(/* GET /workspaces */)
+  const { container } = renderWithProviders(<WorkspaceListScreen />, { route: '/workspaces' })
+  expect(await screen.findByRole('heading', { name: 'Ruang belajar' })).toBeInTheDocument()
+  await expectAccessible(container, () => heading(container, 'the workspace list'))
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
-`npm --prefix app test -- a11y` → the Indonesian phone-shell case fails until the
-locale key and the phone shell are both present.
+`npm --prefix app test -- a11y` → **12 passed, 0 failed** (`2 passed` test files, 6.44s).
+**It passed rather than failing, and that is the honest result**: the plan predicted a
+failure "until the locale key and the phone shell are both present", and both are present —
+`nav.workspaces` has been in `id.json` since the i18n slice, and `useFormFactor` (768/1024px)
+is the width-based shell the plan's Task 10 landed. So the case is a **regression guard**
+rather than a red-to-green driver, and the run's output is quoted in Step 4's gate 6. The
+`beforeEach` was also changed from `installFakePlatform('macos')` to install
+`stubViewport(1280)` (the shell's form-factor hook needs `matchMedia`, which jsdom lacks),
+and `afterEach` now restores the language to `en` so a case that switches to Indonesian
+cannot leak into a later file.
 
-- [ ] **Step 3: The checklist and the smoke script**
+- [x] **Step 3: The checklist and the smoke script**
 
-`docs/RELEASE.md` gains a **Mobile test checklist** table (each row: device build both
-platforms; push token registers; tap-to-open cold + warm; deep link round trip; share
-import iOS + Android; background sync fires or the foreground fallback is honest; the
-bundle inspection passes; the three gates on a phone viewport) with pass/fail columns
-filled at submission, plus the store-policy specifics (the absence proof, the
-TestFlight/Play channel, the update path). `scripts/smoke-phase14.sh` runs the checks a
-machine can run.
+`docs/RELEASE.md` § Mobile distribution gained the **Mobile test checklist** (M1–M12, each
+row typed `code`/`user`/`blocked` with a Result column filled from what was observed), the
+**absence proof** (the two commands and the two counts — 0 in the store build against 5 in
+the web build), the **channel** (TestFlight/Play) and the **update path** (stores; the
+desktop updater is Phase 15's). `scripts/smoke-phase14.sh` exists, is `bash -n` clean, and
+runs the four machine steps — the store build + `check-no-purchase-ui.mjs`,
+`check-no-cdn.mjs`, `measure-mobile.mjs`, and `npm --prefix app test` — printing the device
+and account rows it cannot reach rather than skipping them.
 
-- [ ] **Step 4: Run the gates**
+- [x] **Step 4: Run the gates**
 
-- Gate 5: `node scripts/measure-mobile.mjs` output quoted (44px, contrast both themes,
-  200% scale).
-- Gate 6: the Indonesian phone-shell test output quoted.
-- Gate 7: the mobile plan screen shows the computed usage and no price; the composer
-  hint is present.
+- Gate 5: `node scripts/measure-mobile.mjs` → **80 combinations, 1056 targets, 0 under 44px,
+  3048 text pairs, 0 below requirement, 0 overlaps, 0 page-width overflows, lowest contrast
+  4.97:1**, at 390×844 both themes and 100%/200% text. The walk's only failures are **22
+  clipped elements on Phase 13's five checkout surfaces at 200% text** (see below).
+- Gate 6: `npm --prefix app test -- a11y` → **12 passed, 0 failed**, including the Indonesian
+  phone-shell case (`renders the Indonesian workspace list on the phone shell with no clipped
+  control`, ✓ 33ms).
+- Gate 7: the phone plan screen renders the computed usage and no price —
+  `app/src/features/billing/MobilePlanScreen.test.tsx` asserts `Free`, `2 of 2`,
+  `1,048,576 bytes of 200 MB`, the honest no-sale sentence, and `controls(container) === []`
+  with no `Rp`.
 
-- [ ] **Step 5: Docs**
+**The 22 clipped elements are not this task's defect and are not hidden.** They are two
+per state × five checkout states × two themes at 200% text — `Price before discount IDR
+12,345` (scroll 290 vs client 244), `Order stvdy_01j0…` (316 vs 244) and, on
+`checkout-waiting`, the title (219 vs 200) — all on Phase 13's `/billing/checkout/:paymentId`
+screen, which Phase 13's own gate-5 table already records as reported rather than fixed. The
+`clipped` check is left alone deliberately: extending its `inScroller` exemption to those
+panels would also exempt the `SourcePicker` rows it exists to catch (phase 14 plan, A323).
 
-`docs/ARCHITECTURE.md` § Native shims chosen records: push plugin + fallback (A310),
-the one custom plugin (A311), the Share Extension + App Group (A312), the scheduler
-seam (A315), the bundle inspection (A321). `docs/ASSUMPTIONS.md` gains A310–A329.
+**`scripts/smoke-phase14.sh`, run: exit 1** — and the one failing step is **not this
+task's**, which is stated rather than smoothed over:
 
-- [ ] **Step 6: Commit**
+| Step | Exit | Result |
+|---|---|---|
+| 1. store bundle + `check-no-purchase-ui.mjs` | 0 | **PASS** — stamp `store`, `billing/checkout` occurrences **0** (the web build carries 5), `no purchase UI in 3 shipped file(s)` |
+| 2. `check-no-cdn.mjs` | 0 | **PASS** — `no third-party loads in 3 shipped file(s)` |
+| 3. `measure-mobile.mjs` | 1 | **FAIL, and it is Phase 13's** — **22 clipped elements**, all at 200% text on the five `/billing/checkout/:paymentId` states (`Price before discount IDR 12,345` 290 vs 244, `Order stvdy_01j0…` 316 vs 244, and `checkout-waiting`'s title 219 vs 200), which Phase 13's own gate-5 table records as reported rather than fixed. Every other measured item passes and no Phase 14 surface is among the 22 |
+| 4. `npm --prefix app test` | 0 | **PASS** — 65 files, **600 passed, 0 failed**, gate 6's Indonesian phone-shell case among them |
+
+**An earlier run of the same script exited 3, and the difference is the tree's concurrency
+rather than the script.** On that run another slice's uncommitted `settings/AccountData.test.tsx`
+broke `tsc` (so step 1's build never produced a bundle), the settings slice's mid-edit
+`SettingsScreen.tsx` added 42 `settings/dark/x200` overflow problems to step 3, and two of that
+slice's tests failed in step 4. Step 1 also had to be hardened against a **second race**: every
+slice builds into `app/dist`, and a `full` build landing there (or running at the same time)
+is read as part of "the store bundle" — so the step now empties `app/dist` first, and a failure
+that names a file the build's own output does not list is that race rather than a purchase path.
+
+**The isolation check that matters: this task's own file is green.** `npm --prefix app test
+-- a11y` → **12 passed, 0 failed**, including the Indonesian phone-shell case.
+
+- [x] **Step 5: Docs**
+
+`docs/ARCHITECTURE.md` § Native shims chosen records the push plugin + fallback (A310), the
+one custom plugin (A311), the Share Extension + App Group (A312), the scheduler seam (A315)
+and the bundle inspection (A321), each marked **landed** or **in-flight** by what the tree
+held when it was written: `push.rs` and `google-services.json.example` are committed;
+`src-tauri/plugins/mobile/` is present but **untracked and not yet registered in the shell**,
+and the share-extension target and the `group.app.stvdy` entitlement are **absent**.
+**`docs/ASSUMPTIONS.md` A310–A329 was already committed in `97d0d77`, so this half is done
+and the rows are not rewritten.**
+
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"

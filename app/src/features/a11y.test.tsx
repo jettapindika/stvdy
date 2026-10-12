@@ -12,10 +12,11 @@ import { StudyScreen } from '@/features/study/StudyScreen'
 import { TodayScreen } from '@/features/today/TodayScreen'
 import { WorkspaceListScreen } from '@/features/workspaces/WorkspaceListScreen'
 import { WorkspaceScreen } from '@/features/workspaces/WorkspaceScreen'
-import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
+import { installFakePlatform, jsonResponse, mockFetch, stubViewport } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
 import { expectNoA11yViolations } from '@/test/a11y'
 import { setAccessToken } from '@/lib/tokens'
+import i18n from '@/i18n'
 
 /**
  * The accessibility gate on the real screens, not just the gallery.
@@ -176,10 +177,18 @@ const USAGE_BODY = {
 beforeEach(() => {
   installFakePlatform('macos')
   setAccessToken('access-1')
+  // The shell's form-factor hook reads `matchMedia`, which jsdom does not have;
+  // without a width the whole app throws on render. Desktop by default, because
+  // most of these screens are the ones the shell hosts at a laptop width.
+  stubViewport(1280)
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  // The i18n instance is a module singleton, so a case that switches to
+  // Indonesian would leak that choice into every later file. The setup module
+  // boots it in English, and this restores that.
+  await i18n.changeLanguage('en')
 })
 
 describe('screen accessibility', () => {
@@ -196,6 +205,29 @@ describe('screen accessibility', () => {
       return notFound()
     })
     const { container } = renderWithProviders(<WorkspaceListScreen />, { route: '/workspaces' })
+    await expectAccessible(container, () => heading(container, 'the workspace list'))
+  })
+
+  it('renders the Indonesian workspace list on the phone shell with no clipped control', async () => {
+    // The phone shell and the Indonesian locale are the two things this case
+    // exercises that no other case here does: a 390px viewport (the shell's
+    // `phone` form factor, where the sidebar is hidden by CSS and the tab bar
+    // replaces it) and Bahasa Indonesia. The string is the one the screen
+    // actually renders (`nav.workspaces`), asserted by accessible name so a
+    // renamed key fails here rather than silently passing.
+    installFakePlatform('ios')
+    stubViewport(390)
+    await i18n.changeLanguage('id')
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/workspaces') return jsonResponse(200, { workspaces: [WORKSPACE] })
+      return notFound()
+    })
+
+    const { container } = renderWithProviders(<WorkspaceListScreen />, { route: '/workspaces' })
+
+    expect(await screen.findByRole('heading', { name: 'Ruang belajar' })).toBeInTheDocument()
+    expect(container.textContent).toContain('Ruang belajarmu')
     await expectAccessible(container, () => heading(container, 'the workspace list'))
   })
 
