@@ -1816,7 +1816,7 @@ Replace `## Calendar (Phase 10)`'s placeholder with the real section: the eight 
 (never surfaced as an HTTP status to the client, because the client is not the one holding
 the token), and one paragraph naming the two-scope consent (A234).
 
-- [ ] **Step 2: `docs/SYNC.md`**
+- [x] **Step 2: `docs/SYNC.md`**
 
 Add a row to the conflict table for calendar-sourced events: `events` whose `source != 'app'`
 are **server-owned for the calendar columns** and read-only to a client on both write paths,
@@ -1825,7 +1825,7 @@ field-merge rule. Note that the sync writes through plain SQL and is deliberatel
 subject to the client rule (A240), and that the ICS/Google rows carry no new `+sync` table,
 so `0017_sync_triggers.sql` is unchanged.
 
-- [ ] **Step 3: `docs/ARCHITECTURE.md`**
+- [x] **Step 3: `docs/ARCHITECTURE.md`**
 
 Add `## Calendar (Phase 10)`: the three pieces and why the split is where it is (the feed is
 a pure function of rows; the import is parse + a bounded expand + one upsert keyed on the
@@ -1834,7 +1834,7 @@ hang it prevents (A232); the guard shared with ingestion and why `ChainFetcher` 
 entry point for a feed (A233); the conditional GET and the `change_log` churn it avoids
 (A239); and the scope pair that makes the conflict policy structural (A234).
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`**
+- [x] **Step 4: `docs/ASSUMPTIONS.md`**
 
 Append A230–A249 as rows in the pinned-decisions table. Add to "Schema deviations" one row
 for `0030_calendar.sql`'s nine columns on `calendar_connections`. Note under "Crate-list
@@ -1842,7 +1842,7 @@ deviations" that `icalendar`/`rrule` are now **pinned in `Cargo.toml`**, not onl
 here — the deviation row was aspirational until this phase — and that `icalendar` needs its
 non-default `parser` feature for the import half.
 
-- [ ] **Step 5: `docs/THREAT_MODEL.md`**
+- [x] **Step 5: `docs/THREAT_MODEL.md`**
 
 - § 2 Assets: add `ICS feed tokens` — "read the user's own calendar feed; a capability URL",
   living in `users.ics_feed_token` (plaintext, because the settings screen must be able to
