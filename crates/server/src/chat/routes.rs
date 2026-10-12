@@ -21,7 +21,7 @@ use stvdy_core::entitlements::Feature;
 use stvdy_core::traits::llm::{ChatMsg, ChatRequest, Role, StreamEvent};
 
 use crate::auth::extract::VerifiedUser;
-use crate::chat::{prompt, retrieve, sse, web};
+use crate::chat::{agent, prompt, retrieve, sse, web};
 use crate::credits;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -35,6 +35,19 @@ const MAX_TOKENS: u32 = 1500;
 /// The action name used in `usage_events` and the credit ledger, so a cost
 /// report can separate chat from generation.
 const ACTION: &str = "chat_message";
+
+/// How many provider calls one turn may make when tool results keep coming back.
+///
+/// One is the turn itself; the rest are the rounds a tool result causes. Four is enough for
+/// "list my tasks, then tell me what is due, then summarise it" — the deepest chain a single
+/// question plausibly needs — and it is a *bound* rather than a policy, because the failure it
+/// prevents is unbounded: a model that calls a read tool in every round would spend the
+/// student's window, and their `agent_turn` charge is per turn rather than per call (A282), so
+/// the cost of a loop is paid in latency and context rather than in credits.
+///
+/// `MAX_PROPOSALS_PER_TURN` caps the proposals a turn may make (A278); this caps the rounds,
+/// because a read loop produces no proposals at all and would otherwise never stop.
+const MAX_TOOL_ROUNDS: usize = 4;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -110,11 +123,24 @@ pub async fn chat(
     // The provider check is here for the same reason: a server with no
     // `LLM_BASE_URL` can never succeed on retry, so charging for it would take a
     // credit for a request that could not have worked.
-    let provider = state.llm.clone().ok_or_else(|| {
-        AppError::Provider(
-            "no model provider is configured on this server (LLM_BASE_URL is unset)".to_string(),
-        )
-    })?;
+    //
+    // **BYOK is resolved once, here** (A302). When the account has its own key and its plan
+    // grants BYOK, that provider is used and the spend below is skipped: the student paid
+    // their own provider, so charging them an allowance for it would be charging twice. The
+    // handle is passed down rather than re-resolved, because a request half on one provider
+    // and half on another is a bug that shows up as a strange bill.
+    let byok = crate::billing::byok::provider_for(&state, &user).await?;
+    let using_own_key = byok.is_some();
+
+    let provider = match byok {
+        Some(provider) => provider,
+        None => state.llm.clone().ok_or_else(|| {
+            AppError::Provider(
+                "no model provider is configured on this server (LLM_BASE_URL is unset)"
+                    .to_string(),
+            )
+        })?,
+    };
 
     let chat_cap = credits::daily_chat_cap(&state, &user);
     let search_cap = credits::daily_search_cap(&state, &user);
@@ -193,26 +219,57 @@ pub async fn chat(
     // The daily cap is enforced inside this call, under the same lock, because a
     // separate check and spend can interleave and let two requests through on the
     // last slot.
-    let spent = credits::spend(
-        &state,
-        user.user_id,
-        user.effective_plan(),
-        ACTION,
-        total_cost,
-        // Both caps, in this one transaction. The search cap is only armed when a
-        // search actually ran and was not a cache hit, because that is the case it
-        // governs: an uncached search consumes `web_searches_per_day`, and a repeat
-        // of a cached question does not (A40).
-        [
-            Some(chat_cap),
-            if search_cost > 0 {
-                Some(search_cap)
-            } else {
-                None
-            },
-        ],
-    )
-    .await?;
+    //
+    // **A BYOK turn does not pay for the model call** (A302): the student paid their own
+    // provider. It does still pay for a **web search**, because that is our provider and our
+    // cost — skipping it would let a BYOK account hammer the search path for free and would
+    // leave `web_searches_per_day` uncounted for exactly the accounts with the largest
+    // allowance. So the amount is the search's, and the row is marked `byok` so the model's
+    // cost stays out of our margin (A156).
+    let charged = if using_own_key {
+        search_cost
+    } else {
+        total_cost
+    };
+
+    // The daily cap is enforced inside this call, under the same lock, because a
+    // separate check and spend can interleave and let two requests through on the
+    // last slot.
+    //
+    // A turn with nothing to charge — a BYOK turn with no search, or a free turn with a
+    // cached search — opens its usage row instead. Both branches answer the same `Spent`, so
+    // the rest of this request, including the `usage` event the client renders, is one code
+    // path.
+    // A BYOK turn with nothing to charge — no search — opens its usage row directly. Every
+    // other case goes through `spend`, which writes the usage row and, when `charged` is
+    // zero, writes no ledger row at all: the balance check passes and the bucket loop has
+    // nothing to take. So there is one writer for a charged turn and one for a BYOK one, and
+    // no path where a row is labelled by what the *caller* happened to be doing.
+    let spent = if using_own_key && charged == 0 {
+        credits::begin_byok_usage(&state.pool, user.user_id, user.effective_plan(), ACTION).await?
+    } else {
+        credits::spend(
+            &state,
+            user.user_id,
+            user.effective_plan(),
+            ACTION,
+            charged,
+            // Both caps, in this one transaction. The search cap is only armed when a
+            // search actually ran and was not a cache hit, because that is the case it
+            // governs: an uncached search consumes `web_searches_per_day`, and a repeat
+            // of a cached question does not (A40).
+            [
+                Some(chat_cap),
+                if search_cost > 0 {
+                    Some(search_cap)
+                } else {
+                    None
+                },
+            ],
+            using_own_key,
+        )
+        .await?
+    };
     let remaining = spent.remaining;
     let usage_event_id = spent.usage_event_id;
 
@@ -262,7 +319,13 @@ pub async fn chat(
     // History is deliberately just the prompt plus the user's turn: the prompt
     // carries the sources, and replaying prior turns would send a second copy of
     // the whole context on every request.
-    let request = ChatRequest {
+    //
+    // The tool list is the plan's (A272): four READ tools always, the six WRITE ones only
+    // with `Feature::AgentAction`. Sending no tools at all — which is what this route did
+    // before this phase — is not a safer default: it means a paid account's model cannot
+    // read the student's own tasks either.
+    let tools = agent::tool_specs(&state, &user).await;
+    let mut request = ChatRequest {
         model: String::new(),
         messages: vec![
             ChatMsg {
@@ -274,20 +337,37 @@ pub async fn chat(
                 content: message,
             },
         ],
-        tools: Vec::new(),
+        tools,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
         json_mode: false,
     };
 
+    // The first provider call happens **before** the response body starts, so a provider that
+    // is down is an HTTP error rather than an `error` event inside a 200 stream. Later rounds
+    // (the ones a tool result causes) happen inside the stream, where the only way to report a
+    // failure is an `error` event.
     let stream = provider
-        .stream(request)
+        .stream(request.clone())
         .await
         .map_err(|error| AppError::Provider(error.to_string()))?;
 
     let state_for_stream = state.clone();
     let user_id = user.user_id;
     let prompt_version_for_stream = prompt_version.clone();
+
+    // The agent's per-turn state, moved into the stream. `gate_context` carries the two
+    // answers `gate` cannot compute itself (A271): whether the provider can call tools at all,
+    // and whether the plan grants the six WRITE tools (A272).
+    let user_for_stream = user.clone();
+    let provider_for_stream = provider.clone();
+    let mut gate_context = stvdy_core::agent::gate::GateContext {
+        supports_tools: provider.supports_tools(),
+        agent_actions: agent::agent_actions_granted(&state, &user).await,
+        proposals_so_far: 0,
+    };
+    let mut turn = agent::Turn::new(using_own_key);
+    let mut tool_messages: Vec<ChatMsg> = Vec::new();
 
     let events = async_stream::stream! {
         let mut answer = String::new();
@@ -296,44 +376,139 @@ pub async fn chat(
         // emitted, so a fabricated one is dropped before the user sees it rather
         // than disappearing when the persisted copy replaces the live turn.
         let mut emitted = 0usize;
+        // Which provider call this is. A tool result needs a second call so the model can
+        // read it: a READ tool that ran and whose answer never reached the model is a tool
+        // the student paid for and did not get.
+        let mut round = 0usize;
+        // The receiver for the round being read. `select!` pins each future it polls on its own
+        // stack, so a plain `&mut Receiver` is enough and no `tokio::pin!` is needed — which
+        // matters here because the binding is *reassigned* between rounds.
+        let mut stream = stream;
 
-        tokio::pin!(stream);
         loop {
-            let next = tokio::select! {
-                next = stream.recv() => next,
-                () = tokio::time::sleep(sse::HEARTBEAT) => {
-                    yield Ok(sse::heartbeat());
-                    continue;
-                }
-            };
-
-            match next {
-                Some(StreamEvent::Token(text)) => {
-                    answer.push_str(&text);
-
-                    // Emit only up to the last complete marker. The hold-back is
-                    // at most a marker's length, so this does not delay ordinary
-                    // prose.
-                    let safe = stvdy_core::citations::streamable_end(&answer);
-                    if safe > emitted {
-                        let slice = &answer[emitted..safe];
-                        let visible = stvdy_core::citations::strip_unknown(slice, &labels);
-                        if !visible.is_empty() {
-                            yield Ok(sse::token(&visible));
-                        }
-                        emitted = safe;
+            // Whether anything in *this* round needs the model to see it. A proposal does not
+            // (the card is the next step, not the model); a read result and a refusal do.
+            let mut needs_model = false;
+            loop {
+                let next = tokio::select! {
+                    next = stream.recv() => next,
+                    () = tokio::time::sleep(sse::HEARTBEAT) => {
+                        yield Ok(sse::heartbeat());
+                        continue;
                     }
+                };
+
+                match next {
+                    Some(StreamEvent::Token(text)) => {
+                        answer.push_str(&text);
+
+                        // Emit only up to the last complete marker. The hold-back is
+                        // at most a marker's length, so this does not delay ordinary
+                        // prose.
+                        let safe = stvdy_core::citations::streamable_end(&answer);
+                        if safe > emitted {
+                            let slice = &answer[emitted..safe];
+                            let visible = stvdy_core::citations::strip_unknown(slice, &labels);
+                            if !visible.is_empty() {
+                                yield Ok(sse::token(&visible));
+                            }
+                            emitted = safe;
+                        }
+                    }
+                    Some(StreamEvent::Usage(reported)) => {
+                        usage = Some(reported);
+                    }
+                    Some(StreamEvent::ToolCall(call)) => {
+                        // The one place a tool call becomes an effect (A271). The route holds
+                        // no tool logic: it hands the call to the gate and then to
+                        // `agent::handle`, which runs a read inline, turns a write into a
+                        // proposal plus a card, or answers a refusal.
+                        //
+                        // A failure here is **not** fatal to the turn: the answer is already
+                        // streaming, and aborting it would replace a partial answer with an
+                        // error event for a tool the student never asked about. It is logged
+                        // and answered to the model as a result-shaped message, so the model
+                        // can say something true rather than continuing as if the tool had
+                        // succeeded.
+                        match agent::handle(
+                            &state_for_stream,
+                            &user_for_stream,
+                            workspace_id,
+                            user_message_id,
+                            &call,
+                            &mut gate_context,
+                            &mut turn,
+                        )
+                        .await
+                        {
+                            Ok(agent::AgentOutcome::Answered(result)) => {
+                                // A read ran, so the model has something to read back.
+                                needs_model = true;
+                                tool_messages.push(result);
+                            }
+                            Ok(agent::AgentOutcome::Proposed { pending_action_id, result }) => {
+                                yield Ok(sse::action(pending_action_id, &call.name, &call.arguments));
+                                // A proposal needs no follow-up round: the card is already on
+                                // the wire and the student, not the model, is what happens
+                                // next. Asking the model again would spend a second call to
+                                // hear it repeat itself.
+                                tool_messages.push(result);
+                            }
+                            Ok(agent::AgentOutcome::Refused(result)) => {
+                                // A refusal does: the model is the only thing that can tell the
+                                // student why in their own language, which is the whole point
+                                // of answering a refusal instead of dropping the call (A271).
+                                needs_model = true;
+                                tool_messages.push(result);
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, tool = %call.name, "handling a tool call failed");
+                                tool_messages.push(ChatMsg {
+                                    role: Role::User,
+                                    content: format!(
+                                        "The call to `{}` ({}) failed and produced no result.",
+                                        call.name, call.id
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    Some(StreamEvent::Done) | None => break,
                 }
-                Some(StreamEvent::Usage(reported)) => {
-                    usage = Some(reported);
+            }
+
+            // No call to answer, or the bound is reached: the turn is over. The bound is
+            // what stops a model that calls a tool in every round from spending the student's
+            // window on one question — `MAX_PROPOSALS_PER_TURN` caps the proposals, and this
+            // caps the *rounds*, because a read loop produces no proposals at all.
+            if !needs_model || round + 1 >= MAX_TOOL_ROUNDS {
+                if needs_model {
+                    tracing::warn!(
+                        rounds = round + 1,
+                        "the tool-round bound was reached with results still pending"
+                    );
                 }
-                Some(StreamEvent::ToolCall(_)) => {
-                    // Tools are Phase 12. A call now would be a model doing
-                    // something the server cannot yet honour, so it is dropped
-                    // rather than streamed to a client that cannot act on it.
-                    tracing::warn!("ignoring a tool call: tools arrive in Phase 12");
+                break;
+            }
+
+            // The next round: the model's own text, then what each tool answered. The role is
+            // `Assistant` for the text and `User` for the results, which is the only shape
+            // `ChatMsg` carries — a `tool` role would be a change to a trait the roadmap fixes
+            // (`gate::tool_result` says the same thing from the other side).
+            round += 1;
+            request.messages.push(ChatMsg {
+                role: Role::Assistant,
+                content: answer.clone(),
+            });
+            request.messages.append(&mut tool_messages);
+
+            match provider_for_stream.stream(request.clone()).await {
+                Ok(next) => stream = next,
+                Err(error) => {
+                    tracing::error!(%error, "the provider call after a tool result failed");
+                    yield Ok(sse::error(&AppError::Provider(error.to_string())));
+                    break;
                 }
-                Some(StreamEvent::Done) | None => break,
             }
         }
 
@@ -380,13 +555,19 @@ pub async fn chat(
         }
 
         // Persisted after the stream, so a client that disconnects mid-answer
-        // leaves a user message and no half-answer. A blank answer is not
-        // persisted either: an empty assistant turn is worse than none.
+        // leaves a user message and no half-answer.
+        //
+        // The rule is narrowed rather than dropped (A281): a turn that handled at least one
+        // tool call persists its message **even when the text is empty**, because such a turn
+        // is not empty — it produced a confirmation card, and the card needs a message to
+        // hang on. `content = ''` is what the client renders the card beside. A turn with
+        // neither text nor a handled call is still not persisted: an empty assistant turn is
+        // worse than none.
         //
         // Every exit path must emit exactly one terminator. Returning here without
         // one would leave a client waiting for a `done` that never arrives, since
         // the contract makes `done` the end of the turn.
-        if cleaned.trim().is_empty() {
+        if cleaned.trim().is_empty() && !turn.handled {
             tracing::warn!(%user_message_id, "the model returned an empty answer");
             yield Ok(sse::error(&AppError::Provider(
                 "the model returned an empty answer".to_string(),
@@ -405,7 +586,14 @@ pub async fn chat(
             {
                 Ok(message_id) => {
                     yield Ok(sse::citations(&resolved));
-                    yield Ok(sse::usage(total_cost, remaining));
+                    // The turn's own price, which is `chat_message` plus `agent_turn` when a
+                    // tool call was handled (A282). The message spend above already reported
+                    // its own `remaining`; the agent's charge happened later, inside the
+                    // stream, so its balance is the honest one to report.
+                    yield Ok(sse::usage(
+                        total_cost + turn.extra_cost,
+                        turn.remaining.unwrap_or(remaining),
+                    ));
                     yield Ok(sse::done(message_id, answered_with_web));
                 }
                 Err(error) => {

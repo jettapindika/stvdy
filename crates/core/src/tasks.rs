@@ -51,6 +51,25 @@ pub enum TaskStatus {
     Done,
 }
 
+impl TaskStatus {
+    /// The status on the wire, which is the value `tasks.status` stores and the string the
+    /// `list_tasks` and `update_task` schemas enumerate. A rename here is a wire change.
+    ///
+    /// `as_str()` rather than a serde round-trip, because every sibling enum in
+    /// `crate::agent::tools` has one (`ToolName`, `EventKind`, `QuizDifficulty`, `QuizTypes`)
+    /// and the agent's `list_tasks` binds this string into a SQL parameter. The
+    /// `#[serde(rename_all = "lowercase")]` above stays: `crates/core/tests/agent_tools.rs`
+    /// asserts the two agree, so a fourth variant fails that test whichever of the two is
+    /// edited.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Todo => "todo",
+            TaskStatus::Doing => "doing",
+            TaskStatus::Done => "done",
+        }
+    }
+}
+
 /// A field rule a task row did not satisfy. Every message names the bound, because it is the
 /// reason a push is rejected and the text the client shows.
 #[derive(Debug, thiserror::Error)]

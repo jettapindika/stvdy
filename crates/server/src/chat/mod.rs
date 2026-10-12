@@ -1,5 +1,6 @@
-//! Retrieval and streaming chat.
+//! Retrieval, streaming chat, and the agent's turn.
 
+pub mod agent;
 pub mod prompt;
 pub mod retrieve;
 pub mod routes;

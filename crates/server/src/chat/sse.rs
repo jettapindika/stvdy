@@ -82,6 +82,26 @@ pub fn error(error: &crate::error::AppError) -> Event {
         .unwrap_or_else(|_| fallback())
 }
 
+/// `event: action` for a WRITE tool's proposal (A277).
+///
+/// The body is the roadmap § 4 shape and nothing else: `{"pending_action_id", "tool", "args"}`.
+/// Adding a `cost` field would be a contract change made by a phase plan — the card reads the
+/// action's price from `app/src/features/billing/plans.ts`, the same source every other cost
+/// on screen comes from.
+///
+/// The event is emitted at the moment the proposal row exists, so the client can render the
+/// card immediately rather than waiting for `done`: a turn that proposed something may
+/// produce no further tokens at all (A281), and a card that arrived only with `done` would
+/// leave the student watching an empty turn.
+pub fn action(pending_action_id: uuid::Uuid, tool: &str, args: &serde_json::Value) -> Event {
+    let body = serde_json::json!({
+        "pending_action_id": pending_action_id,
+        "tool": tool,
+        "args": args,
+    });
+    Event::default().event("action").data(body.to_string())
+}
+
 /// A comment line. `Event::default().comment` is what makes the proxy see bytes
 /// without the client seeing an event.
 pub fn heartbeat() -> Event {
