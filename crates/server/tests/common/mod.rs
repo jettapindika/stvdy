@@ -284,17 +284,34 @@ pub fn parse_sse(body: &str) -> Vec<SseEvent> {
     events
 }
 
-/// Runs the job worker until the queue is empty, bounded so a stuck job fails the
-/// test loudly rather than hanging it.
+/// Runs the job worker until it has nothing left to do, bounded so a stuck job fails
+/// the test loudly rather than hanging it.
+///
+/// **A retryable failure is re-queued, not dropped**, and the retry is delayed by the
+/// worker's own exponential backoff (`jobs::MAX_ATTEMPTS` attempts, each waiting
+/// `2^attempts` seconds — roughly thirty seconds of real time for the whole ladder). A
+/// test that installs `ScriptedLlm::failing` therefore has a job that stays `queued` until
+/// the last attempt is exhausted and the row turns `failed`, so the deadline below has to
+/// cover that ladder: a fixed ten-second budget aborts the worker while the job is still
+/// waiting on its own backoff, and the assertion then fires on a job that is neither stuck
+/// nor finished, only sleeping.
+///
+/// The assertion is still "the worker ran until it had nothing left to do": a handler that
+/// deadlocks, or a job that never reaches a terminal state, still runs past the deadline
+/// with a row in `queued` or `running` and fails the test.
 pub async fn drain_jobs(harness: &TestState) {
     let worker = stvdy_server::jobs::worker::spawn(harness.state.clone());
-    for _ in 0..200 {
+    let deadline = std::time::Instant::now() + drain_budget();
+    loop {
         let queued: i64 =
             sqlx::query_scalar("select count(*) from jobs where status in ('queued', 'running')")
                 .fetch_one(&harness.state.pool)
                 .await
                 .expect("counting jobs");
         if queued == 0 {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
             break;
         }
         harness.state.jobs.wake();
@@ -308,6 +325,19 @@ pub async fn drain_jobs(harness: &TestState) {
             .await
             .expect("counting jobs");
     assert_eq!(remaining, 0, "the worker did not drain the queue");
+}
+
+/// How long [`drain_jobs`] lets the worker run.
+///
+/// The worker's retry ladder is `1 << attempts` seconds per attempt, so the worst case a
+/// test can ask for is the full `MAX_ATTEMPTS` ladder; the sum plus a generous margin for
+/// scheduling is the budget. Derived from the product's own constant rather than a magic
+/// number, so a change to the retry policy cannot quietly make this too short.
+fn drain_budget() -> std::time::Duration {
+    let backoff_secs: u64 = (1..=stvdy_server::jobs::MAX_ATTEMPTS)
+        .map(|attempt| 1_u64 << attempt.min(10))
+        .sum();
+    std::time::Duration::from_secs(backoff_secs + 30)
 }
 
 /// One request a [`StubHttp`] received.

@@ -576,12 +576,16 @@ async fn a_kept_meeting_becomes_one_event_per_occurrence(pool: PgPool) {
     let draft_id = upload(&app, &token, workspace_id, "Kuliah Senin 08:00").await;
     drain_jobs(&harness).await;
 
+    // Index 0 is the Lecture: `ReviewItem::index` is the item's position in the reply's own
+    // document order (meetings first, then deadlines, then exams), and the review list is
+    // only *sorted* by confidence — the index does not move. Lecture is the meeting whose
+    // rule carries `COUNT=4`, so it is the one that becomes four events.
     let (status, body) = json(
         &app,
         "POST",
         &format!("/syllabus/{draft_id}/confirm"),
         &token,
-        serde_json::json!({ "items": [{ "index": 4, "keep": true }] }),
+        serde_json::json!({ "items": [{ "index": 0, "keep": true }] }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -605,7 +609,7 @@ async fn a_kept_meeting_becomes_one_event_per_occurrence(pool: PgPool) {
         "POST",
         &format!("/syllabus/{draft_id}/confirm"),
         &token,
-        serde_json::json!({ "items": [{ "index": 4, "keep": true }] }),
+        serde_json::json!({ "items": [{ "index": 0, "keep": true }] }),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -725,9 +729,23 @@ async fn an_exam_with_no_date_is_refused_rather_than_invented(pool: PgPool) {
             .single()
             .unwrap()
     );
-    assert!(
-        source_ids.is_empty(),
-        "a workspace with no sources gives a goal no topics"
+    // The workspace has one source: the syllabus the student just uploaded. A goal with no
+    // source of its own defaults to **every live source in the workspace** (`write_exam`), and
+    // that set includes the syllabus — the planner reads a goal's topics from its sources, so
+    // excluding the syllabus would leave a fresh exam with nothing to schedule. The old
+    // assertion here was `source_ids.is_empty()`, on the belief that an upload's own source is
+    // not a source the student "has"; it never held, and the planner test that depends on the
+    // syllabus being a topic source (`planner_jakarta`) is why it must not.
+    let syllabus_source: Uuid =
+        sqlx::query_scalar("select id from sources where workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        source_ids,
+        vec![syllabus_source],
+        "the goal carries the workspace's one source, the syllabus itself"
     );
 }
 
@@ -795,7 +813,29 @@ async fn a_kept_exam_goal_carries_the_workspaces_sources(pool: PgPool) {
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
-    assert_eq!(source_ids, vec![source_id]);
+    // The goal carries **every** live source in the workspace: the text source the student
+    // uploaded for topics, and the syllabus source the upload itself wrote. The old assertion
+    // expected only the text source, which assumed the syllabus is not a source the goal can
+    // draw topics from — but `write_exam` defaults to the whole live set, and the planner
+    // reads a goal's topics from exactly those sources (`topics_for`), so a fresh exam whose
+    // only source is the syllabus still has a topic to schedule.
+    let mut expected: Vec<Uuid> =
+        sqlx::query_scalar("select id from sources where workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_all(&harness.state.pool)
+            .await
+            .unwrap();
+    expected.sort();
+    let mut actual = source_ids.clone();
+    actual.sort();
+    assert_eq!(
+        actual, expected,
+        "the goal carries the workspace's sources, the syllabus among them"
+    );
+    assert!(
+        source_ids.contains(&source_id),
+        "the source the student uploaded is one of them: {source_ids:?}"
+    );
 }
 
 /// A source from another workspace cannot be attached to a goal: the topics would be ones the
@@ -939,6 +979,10 @@ async fn a_students_edit_replaces_the_extraction(pool: PgPool) {
     let draft_id = upload(&app, &token, workspace_id, "Kuliah Senin 08:00").await;
     drain_jobs(&harness).await;
 
+    // The indices are the reply's own document order: meetings 0–1, deadlines 2–3, exam 4.
+    // Index 2 is Tugas 1, the deadline the student edits; index 3 is Tugas 2, the deadline
+    // they drop. (Index 0 is the Lecture meeting, whose keep would write events, not the
+    // single task this test is about.)
     let (status, body) = json(
         &app,
         "POST",
@@ -946,8 +990,8 @@ async fn a_students_edit_replaces_the_extraction(pool: PgPool) {
         &token,
         serde_json::json!({
             "items": [
-                { "index": 0, "keep": true, "title": "Tugas 1 (revisi)", "when": "2026-11-13T16:59:00Z" },
-                { "index": 1, "keep": false }
+                { "index": 2, "keep": true, "title": "Tugas 1 (revisi)", "when": "2026-11-13T16:59:00Z" },
+                { "index": 3, "keep": false }
             ]
         }),
     )
@@ -970,9 +1014,13 @@ async fn a_students_edit_replaces_the_extraction(pool: PgPool) {
         )
     );
 
-    // The dropped item exists in no table.
-    let tasks: i64 = count(&harness, "tasks", workspace_id).await;
-    assert_eq!(tasks, 1);
+    // The dropped item exists in no table, and nothing but the one edited task was written.
+    let (events, tasks, goals) = rows_written(&harness, workspace_id).await;
+    assert_eq!(
+        (events, tasks, goals),
+        (0, 1, 0),
+        "one edited task, and Tugas 2 wrote nothing"
+    );
 }
 
 /// **Nothing is written until the student confirms.**
