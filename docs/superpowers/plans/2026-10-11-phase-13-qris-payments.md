@@ -1687,6 +1687,47 @@ numbers; what B1's docs changed when they arrived (the diff should be `mapping.r
 signature arm, and env — if it is more, this plan was wrong and the notes say where); and
 anything a later phase inherits that this one could not know.
 
+### A cross-phase gap this phase's work made visible (owning phase: 14)
+
+**`scripts/check-no-purchase-ui.mjs` inspects the web build while naming it "the mobile
+build", and that is a Phase 14 build gap rather than a Phase 13 defect.** It is recorded
+here because this phase is what made it visible: the pricing and checkout screens added
+the route path `/billing/checkout` to the bundle, and the check's third marker is exactly
+that string. Before Phase 13 the marker was not present, so the check was green for the
+wrong reason.
+
+The cause is not a stray string. A322 says the checkout component is "tree-shaken out of
+the mobile chunk" because the route element is chosen at the router, but
+`billingElementFor` reads `platform.kind()` at **runtime** — runtime routing keeps both
+route elements in one chunk, and only a build-time exclusion removes bytes. There is also
+no mobile chunk to be clean: `src-tauri/tauri.conf.json` has one `frontendDist:
+"../app/dist"` and no per-platform `frontendDist`, so every platform installs the same
+bytes.
+
+**The ruling (Main):** take the build-time-exclusion option, not a narrowed marker set.
+Narrowing a marker because the code trips it would make the check agree with the code
+while the property stayed false, which is a control that looks enforced. Until the mobile
+artifact exists, the check **stays red on the web `dist` on purpose** and must print
+which artifact it inspected and whether that is the one a store receives. The rule is
+written up in `docs/ARCHITECTURE.md` ("Store-absence checks must validate the artifact
+that actually ships").
+
+**What this phase does establish:** the *runtime* property holds and is asserted — on
+`ios`/`android` `/billing` renders `MobilePlanScreen`, and `PricingScreen` states the
+fact with zero amounts, zero `button`/`a` elements and no checkout text, with the price
+fields absent rather than zeroed. The byte-level absence is the half that does not hold.
+
+### The checkout total is the server's number, proved by a planted row
+
+Gate 7(d) is the clause this phase owns hardest, and the assertion that carries it is
+written so it can fail: `CheckoutScreen.test.tsx` feeds a payment whose `amount_idr` does
+not follow from its own `amount_before_discount_idr` and `discount_percent` (5555 against
+12345 at 50%), and asserts the screen renders 5,555 and not 6,172. A screen that
+re-derived the total fails; a screen that renders `payments.amount_idr` passes. That is
+what A298 requires, because `billing::price` is the one function that decides the amount
+and a client-side second implementation of it is a support ticket at best.
+
+
 ## Self-Review
 
 **Spec coverage, item by item.** `docs/SPEC.md` § Payments: "trait `PaymentProvider`
