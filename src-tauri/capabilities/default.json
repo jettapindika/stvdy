@@ -7,7 +7,7 @@
     "core:default",
     "os:default",
     "opener:default",
-    "notification:default",
+    "notifications:default",
     "dialog:default",
     "fs:default",
     "deep-link:default"

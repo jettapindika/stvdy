@@ -30,6 +30,13 @@
 # BGTaskSchedulerPermittedIdentifiers + UIBackgroundModes, App Group
 # entitlements). Ignoring it would silently drop hand-written native files.
 
+# The Android build's CLI forwarder, written by the release workflows before Gradle runs.
+# The generated Gradle `rust` plugin invokes `node tauri …` with its working directory set to
+# `src-tauri/`, and Node resolves that argument as a path rather than a module, so a file with
+# this name has to exist there. It is generated because it is a workaround for another
+# project's template: a committed one would outlive the bug it exists for.
+/src-tauri/tauri.js
+
 # Mobile signing and service credentials (A328). `google-services.json` is the
 # Android Google Services plugin's project credential; a committed one is a leaked
 # key. `src-tauri/google-services.json.example` documents the shape and is tracked.

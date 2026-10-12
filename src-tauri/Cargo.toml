@@ -26,7 +26,28 @@ tauri-build = { version = "2.7.2", features = [] }
 [dependencies]
 tauri = { version = "2.12.3", features = ["protocol-asset"] }
 tauri-plugin-deep-link = "2.6.1"
-tauri-plugin-notification = "2.6.0"
+# Notifications, on every platform, from one plugin (A310 as revised).
+#
+# `tauri-plugin-notifications` (Choochmeque) is a fork of the official
+# `tauri-plugin-notification` that adds remote push, and it is a **superset**: it
+# carries the same `notify`/`schedule`/`cancel`/`create_channel` surface the local
+# reminder path needs, on desktop as well as mobile.
+#
+# **The official plugin had to go, and not for tidiness.** Both crates declare the
+# Android namespace `app.tauri.notification`, and AGP 9 refuses to merge a manifest
+# that two libraries claim: `Namespace 'app.tauri.notification' is used in multiple
+# modules and/or libraries: :tauri-plugin-notifications, :tauri-plugin-notification`.
+# With both linked, **no APK can be assembled at all** — found by building one, on
+# run 38239252653's Android leg and reproduced locally. Since the push half is the
+# one the official plugin provably cannot do (its iOS delegate skips
+# `UNPushNotificationTrigger` and its Android manifest registers no FCM service),
+# the fork is the one that stays.
+#
+# `push-notifications` is **not** a default feature. Without it the plugin's
+# registration code is not compiled at all and `registerForPushNotifications`
+# returns an error, so the Android build would ship no FCM dependency and the iOS
+# build no APNs registration — a receive path that compiles and never receives.
+tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
 tauri-plugin-dialog = "2.8.2"
 tauri-plugin-fs = "2.7.0"
 tauri-plugin-opener = "2.7.1"
@@ -108,17 +129,6 @@ tauri-plugin-haptics = "2.4.2"
 # native halves, and a desktop build that linked them would compile Swift and Kotlin
 # for platforms it cannot run on.
 tauri-plugin-stvdy-mobile = { path = "plugins/mobile" }
-# Push receive (A310). Mobile-only for two reasons: the plugin's own matrix says
-# Windows is not yet available, and the seam's pure half (`push::provider_for`,
-# `push::validate_token`) is deliberately compiled and tested on macOS, so the
-# dependency must not follow the shell onto the desktop — a seam that only builds
-# on a phone is a seam nobody can test.
-#
-# `push-notifications` is **not** a default feature. Without it the plugin's
-# registration code is not compiled at all and `registerForPushNotifications`
-# returns an error, so the Android build would ship no FCM dependency and the iOS
-# build no APNs registration — a receive path that compiles and never receives.
-tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
 
 [features]
 default = ["custom-protocol"]

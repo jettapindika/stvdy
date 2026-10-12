@@ -3,11 +3,6 @@ import { listen } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
 import { check, type Update } from '@tauri-apps/plugin-updater'
@@ -217,17 +212,34 @@ export function desktopPlatform(kind: PlatformKind): NativePlatform {
     },
 
     notifications: {
+      // One plugin on every platform (A310 as revised): the community
+      // `tauri-plugin-notifications` replaced the official `tauri-plugin-notification`,
+      // which cannot receive remote push and which declares the same Android namespace —
+      // linking both means no APK can be assembled at all.
+      //
+      // These are `invoke` calls rather than the plugin's JS package because the fork's
+      // npm wrapper is not published for this version; the click listener in
+      // `mobile.ts` was already invoked this way.
       async requestPermission() {
-        if (await isPermissionGranted()) return true
-        return (await requestPermission()) === 'granted'
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) === true) {
+          return true
+        }
+        return (await invoke<string>('plugin:notifications|request_permission')) === 'granted'
       },
       async notify(title, body) {
-        if (await isPermissionGranted()) sendNotification({ title, body })
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
+          return
+        }
+        await invoke('plugin:notifications|notify', { options: { title, body } })
       },
-      // Desktop cannot schedule (the plugin ignores it), so deliver now. Server
-      // push and in-app delivery are the real desktop reminder channels.
+      // Desktop cannot schedule (notify-rust raises the toast when it is asked to), so
+      // deliver now. Server push and in-app delivery are the real desktop reminder
+      // channels.
       async schedule(title, body) {
-        if (await isPermissionGranted()) sendNotification({ title, body })
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
+          return
+        }
+        await invoke('plugin:notifications|notify', { options: { title, body } })
       },
     },
 

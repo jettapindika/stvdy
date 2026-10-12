@@ -1,10 +1,5 @@
 import { addPluginListener, invoke } from '@tauri-apps/api/core'
 import { impactFeedback, notificationFeedback } from '@tauri-apps/plugin-haptics'
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 import { desktopPlatform, type NativePlatform } from './desktop'
@@ -30,23 +25,26 @@ export function mobilePlatform(kind: PlatformKind): NativePlatform {
     ...base,
 
     notifications: {
-      async requestPermission() {
-        if (await isPermissionGranted()) return true
-        return (await requestPermission()) === 'granted'
-      },
-      async notify(title, body) {
-        if (await isPermissionGranted()) sendNotification({ title, body })
-      },
+      // `requestPermission` and `notify` are the desktop implementation, spread above: one
+      // plugin serves every platform now (A310 as revised), so only the difference is here.
+      ...base.notifications,
       async schedule(title, body, at) {
-        if (!(await isPermissionGranted())) return
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
+          return
+        }
         // Local scheduling survives app restarts and works offline, which is why
         // the client schedules reminders from synced data rather than waiting
         // for the server.
-        await invoke('plugin:notification|notify', {
+        //
+        // `date`, not `at`: this plugin's `Schedule::At` names the instant `date`
+        // (`src/models.rs`), where the official plugin's JS wrapper took `at`. The two
+        // are forks of one another, which is exactly why the field names are close
+        // enough to be a silent no-op if they are mixed up.
+        await invoke('plugin:notifications|notify', {
           options: {
             title,
             body,
-            schedule: { at: at.toISOString(), allowWhileIdle: true },
+            schedule: { date: at.toISOString(), allowWhileIdle: true },
           },
         })
       },

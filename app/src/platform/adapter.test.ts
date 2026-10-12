@@ -216,3 +216,49 @@ describe('the push adapter', () => {
     expect(listener.unregister).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * The local-notification path, and the one field that would fail silently.
+ *
+ * One plugin serves every platform now (A310 as revised), so the payload shape is the
+ * SPA's half of a contract with `tauri-plugin-notifications`' Rust deserializer. The
+ * plugin is a fork of the official one, and the official one's JS wrapper named the
+ * instant `at` while the fork's `Schedule::At` names it `date` — a mix-up that produces
+ * no error, just a notification that never fires. So the assertion is on the key.
+ */
+describe('the local-notification adapter', () => {
+  it('schedules a phone reminder with the field the plugin deserializes', async () => {
+    invokeMock.mockResolvedValue(true)
+    const at = new Date('2026-10-16T06:00:00.000Z')
+
+    await mobilePlatform('ios').notifications.schedule('Due', 'Hand in the essay', at)
+
+    expect(invokeMock).toHaveBeenCalledWith('plugin:notifications|notify', {
+      options: {
+        title: 'Due',
+        body: 'Hand in the essay',
+        schedule: { date: at.toISOString(), allowWhileIdle: true },
+      },
+    })
+  })
+
+  it('delivers a desktop reminder now, because notify-rust cannot schedule one', async () => {
+    invokeMock.mockResolvedValue(true)
+
+    await desktopPlatform('macos').notifications.schedule('Due', 'Hand in the essay', new Date())
+
+    expect(invokeMock).toHaveBeenCalledWith('plugin:notifications|notify', {
+      options: { title: 'Due', body: 'Hand in the essay' },
+    })
+  })
+
+  it('sends nothing when permission was refused', async () => {
+    invokeMock.mockResolvedValue(false)
+    invokeMock.mockClear()
+
+    await mobilePlatform('android').notifications.schedule('Due', 'body', new Date())
+    await desktopPlatform('macos').notifications.notify('Due', 'body')
+
+    expect(invokeMock).not.toHaveBeenCalledWith('plugin:notifications|notify', expect.anything())
+  })
+})

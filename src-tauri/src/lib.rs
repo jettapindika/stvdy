@@ -52,7 +52,16 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
+        // Notifications, on every platform, from one plugin (A310 as revised): the
+        // community `tauri-plugin-notifications` is a superset of the official
+        // `tauri-plugin-notification`, and the official one cannot receive remote push —
+        // its iOS delegate skips `UNPushNotificationTrigger` and its Android manifest
+        // registers no FCM service. The two cannot coexist at all: both declare the
+        // Android namespace `app.tauri.notification` and AGP 9 refuses to merge a
+        // manifest two libraries claim, so linking both means **no APK can be
+        // assembled**. Registered unconditionally now, because the local-notification
+        // surface it also serves exists on the desktop too.
+        .plugin(tauri_plugin_notifications::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -95,19 +104,6 @@ pub fn run() {
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         builder = builder.plugin(tauri_plugin_haptics::init());
-        // Push receive (A310). Registered only on the platforms that have a push
-        // provider, because the dependency itself is declared only there — and
-        // because a plugin registered without its capability permission is a
-        // runtime failure `cargo test` cannot see (`capabilities/mobile.json`).
-        //
-        // Note the name: this is the pinned community plugin
-        // `tauri-plugin-notifications` (Choochmeque), **not** the official
-        // `tauri-plugin-notification` registered above. The official one cannot
-        // receive remote push — its iOS delegate skips `UNPushNotificationTrigger`
-        // and its Android manifest registers no FCM service — so both are present
-        // and they do different jobs: the official one raises a *local*
-        // notification, this one receives a *remote* one.
-        builder = builder.plugin(tauri_plugin_notifications::init());
     }
 
     // The shell's pass, handed to the mobile plugin below (A311/A315).
