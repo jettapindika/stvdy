@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 // `Row` is required for `row.get::<T, _>("column")`; a trait object's methods resolve
 // without an import, but a `PgRow`'s do not.
+use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -66,9 +67,17 @@ pub struct CreateDeckBody {
     pub count: u32,
 }
 
+/// The deck as every deck route serialises it.
+///
+/// `pub(crate)` because the agent's confirm path returns it too: a confirmed `create_flashcards`
+/// proposal answers with the same body `POST /decks` answers with (A276), so the card can show
+/// what the student just got without a second JSON shape to keep in step.
 #[derive(Debug, Serialize)]
-struct DeckJson {
-    id: Uuid,
+pub(crate) struct DeckJson {
+    /// The only field the crate reads: the confirm path needs the id to name the row in the
+    /// generation job's payload. Everything else is for the client and stays private, so the
+    /// JSON shape has exactly one writer.
+    pub(crate) id: Uuid,
     workspace_id: Uuid,
     title: String,
     source_ids: Vec<Uuid>,
@@ -79,8 +88,13 @@ struct DeckJson {
     created_at: DateTime<Utc>,
 }
 
+/// A due card as the study queue serialises it.
+///
+/// `pub(crate)` because [`due_in`] is the one due-cards query and the agent's
+/// `get_due_flashcards` tool returns the same rows the screen does (A276). The fields stay
+/// private: only this module builds one.
 #[derive(Debug, Serialize)]
-struct CardJson {
+pub(crate) struct CardJson {
     id: Uuid,
     deck_id: Uuid,
     front: String,
@@ -98,6 +112,49 @@ pub async fn create_deck(
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<CreateDeckBody>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a deck: {error}")))?;
+
+    let (deck, cost) = create_in(&mut tx, &state, &user, workspace_id, body).await?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing the deck: {error}")))?;
+
+    enqueue_generation(&state, deck.id, user.user_id, cost).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "deck": deck })),
+    ))
+}
+
+/// Creates the deck row and charges for it, in the caller's transaction.
+///
+/// **The one implementation of "create a deck".** `POST /workspaces/:id/decks` calls it, and
+/// so does `crate::actions::execute` for a confirmed `create_flashcards` proposal (A276), so
+/// a confirmed deck costs exactly what the Studio button costs and the two cannot drift
+/// apart on validation, on the source-readiness check or on the batch price.
+///
+/// The count, the charge and the row commit together, because the monthly limit depends on
+/// the count: in separate transactions a second request reads a count the first has not
+/// committed yet, and two concurrent requests both pass on the last slot. `reserve_in` is
+/// that sequence — the per-user advisory lock, the matrix decision against a snapshot read
+/// under the lock, the charge, then this closure's row.
+///
+/// The job's enqueue is deliberately **not** here: it runs after the commit, through
+/// [`enqueue_generation`], so both callers queue it the same way and neither can enqueue a
+/// job for a row whose transaction rolled back.
+pub(crate) async fn create_in(
+    conn: &mut sqlx::PgConnection,
+    state: &AppState,
+    user: &AuthUser,
+    workspace_id: Uuid,
+    body: CreateDeckBody,
+) -> AppResult<(DeckJson, i64)> {
     let title = body.title.trim().to_string();
     if title.is_empty() || title.chars().count() > 120 {
         return Err(AppError::Validation(
@@ -128,7 +185,7 @@ pub async fn create_deck(
     }
     let source_ids = source_ids;
 
-    workspaces::owned_name(&state, user.user_id, workspace_id).await?;
+    workspaces::owned_name(state, user.user_id, workspace_id).await?;
 
     // Every source must be this user's, in this workspace, and finished ingesting:
     // generating from a source whose chunks do not exist yet would produce a deck
@@ -141,7 +198,7 @@ pub async fn create_deck(
     .bind(&source_ids)
     .bind(workspace_id)
     .bind(user.user_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("checking the deck's sources: {error}")))?;
     if ready != source_ids.len() as i64 {
@@ -157,34 +214,16 @@ pub async fn create_deck(
     let batches = (i64::from(body.count) + CARDS_PER_BATCH - 1) / CARDS_PER_BATCH;
     let cost = batches * state.config.plans.credits.flashcard_batch_10;
 
-    // The count, the charge and the deck row commit together, because the limit depends
-    // on the count: in separate transactions a second request reads a count the first has
-    // not committed yet, and two concurrent requests both pass on the last slot.
-    // `reserve_in` is that sequence — the per-user advisory lock, the matrix decision
-    // against a snapshot read under the lock, the charge, then this closure's row — so
-    // the three routes that reserve something share one implementation instead of three
-    // copies that can drift.
-    //
-    // Neither daily cap applies to generation: the plan matrix caps flashcards per
-    // **month** (`flashcards_per_month`, the feature below) and has no per-day card
-    // allowance, so the two slots the chat path uses are both empty inside `reserve_in`.
-    // Passing the chat cap would silently cap decks at `chat_msgs_per_day`.
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a deck: {error}")))?;
-
     // Bound before the closure so `async move` captures references rather than the values
-    // the handler still needs below (the deck's JSON body, the job payload).
+    // the caller still needs below (the deck's JSON body, the job payload).
     let user_id = user.user_id;
     let title_ref = title.as_str();
     let source_ids_ref = source_ids.as_slice();
 
     let (_, (deck_id, created_at)) = crate::entitlements::reserve_in(
-        &mut tx,
-        &state,
-        &user,
+        conn,
+        state,
+        user,
         Some(Feature::FlashcardBatch { n: body.count }),
         GENERATE_ACTION,
         cost,
@@ -221,36 +260,6 @@ pub async fn create_deck(
     )
     .await?;
 
-    tx.commit()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing the deck: {error}")))?;
-
-    // The job is enqueued after the spend and after the row exists, so a failure
-    // here leaves a deck the user can see failing rather than a charge with no
-    // trace. The refund happens because a deck that will never generate must not
-    // keep the credits.
-    if let Err(error) = jobs::enqueue(
-        &state.pool,
-        &state.jobs,
-        GENERATE_ACTION,
-        serde_json::json!({ "deck_id": deck_id }),
-        None,
-    )
-    .await
-    {
-        crate::jobs::handlers::generate::fail_and_refund(
-            &state,
-            deck_id,
-            user.user_id,
-            cost as i32,
-            "the generation job could not be queued",
-        )
-        .await;
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "enqueueing the generation job: {error}"
-        )));
-    }
-
     // Built from `DeckJson`, the same type every other route serialises, so the
     // 201 body cannot drift from `GET /decks/:id`. The hand-built body omitted
     // `created_at`, which the SPA's `Deck` declares: a false type assertion.
@@ -266,10 +275,43 @@ pub async fn create_deck(
         created_at,
     };
 
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "deck": deck })),
-    ))
+    Ok((deck, cost))
+}
+
+/// Queues a deck's generation, refunding the charge if the queue refuses it.
+///
+/// **The one implementation of "queue a deck's generation".** The route and the agent's
+/// confirm path both call it (A276), so the compensation is the same on both: a deck that
+/// will never generate must not keep the credits, and a second refund path would be a second
+/// answer to what a failed generation refunds.
+pub(crate) async fn enqueue_generation(
+    state: &AppState,
+    deck_id: Uuid,
+    user_id: Uuid,
+    cost: i64,
+) -> AppResult<()> {
+    if let Err(error) = jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        GENERATE_ACTION,
+        serde_json::json!({ "deck_id": deck_id }),
+        None,
+    )
+    .await
+    {
+        crate::jobs::handlers::generate::fail_and_refund(
+            state,
+            deck_id,
+            user_id,
+            i32::try_from(cost).unwrap_or(i32::MAX),
+            "the generation job could not be queued",
+        )
+        .await;
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "enqueueing the generation job: {error}"
+        )));
+    }
+    Ok(())
 }
 
 /// `GET /workspaces/:id/decks`, newest first, tombstones excluded.
@@ -357,22 +399,52 @@ pub async fn due_cards(
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
     let now = state.clock.now();
 
-    let cards = sqlx::query(
+    let cards = due_in(&state.pool, user.user_id, Some(deck_id), now, limit).await?;
+    Ok(Json(serde_json::json!({ "cards": cards, "now": now })))
+}
+
+/// The one due-cards query, for one deck or for every deck the caller owns.
+///
+/// `GET /decks/:id/due` calls it with `Some(deck_id)`, and the agent's
+/// `get_due_flashcards` READ tool calls it with the tool's own `deck_id` — which is
+/// `Option<Uuid>` because "what is due" without naming a deck is the question a student
+/// actually asks (A276). One statement, two callers, so the tool's queue is the screen's
+/// queue.
+///
+/// Ownership is the join through `decks`, not a check the caller remembers: a `deck_id` that
+/// is not the caller's returns no rows rather than another account's cards, which is the
+/// cross-tenant read `chunks` needed the same join to avoid. The route's `owned_deck` call
+/// above is what turns that empty answer into a 404, and the tool does not need a 404 — it
+/// needs the truth, which is "no cards".
+///
+/// Ordered by `(due_at, id)` so a refetch cannot reshuffle the queue under the student's
+/// finger.
+pub(crate) async fn due_in(
+    pool: &PgPool,
+    user_id: Uuid,
+    deck_id: Option<Uuid>,
+    now: DateTime<Utc>,
+    limit: i64,
+) -> AppResult<Vec<CardJson>> {
+    let rows = sqlx::query(
         "select f.id, f.deck_id, f.front, f.back, f.chunk_id, f.ease, f.interval_days, f.due_at
            from flashcards f
-          where f.deck_id = $1 and f.deleted_at is null and f.due_at <= $2
+           join decks d on d.id = f.deck_id
+          where d.user_id = $1 and d.deleted_at is null
+            and ($2::uuid is null or f.deck_id = $2)
+            and f.deleted_at is null and f.due_at <= $3
           order by f.due_at asc, f.id asc
-          limit $3",
+          limit $4",
     )
+    .bind(user_id)
     .bind(deck_id)
     .bind(now)
     .bind(limit)
-    .fetch_all(&state.pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("loading due cards: {error}")))?;
 
-    let cards: Vec<CardJson> = cards.iter().map(card_from_row).collect();
-    Ok(Json(serde_json::json!({ "cards": cards, "now": now })))
+    Ok(rows.iter().map(card_from_row).collect())
 }
 
 #[derive(Debug, Deserialize)]

@@ -17,6 +17,7 @@ use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 // `Row` is required for `row.get::<T, _>("column")`.
+
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -81,9 +82,13 @@ pub struct CreateQuizBody {
     pub types: String,
 }
 
+/// The quiz as every quiz route serialises it.
+///
+/// `pub(crate)` because the agent's confirm path returns it too (A276).
 #[derive(Debug, Serialize)]
-struct QuizJson {
-    id: Uuid,
+pub(crate) struct QuizJson {
+    /// The only field the crate reads: the confirm path needs the id for the job payload.
+    pub(crate) id: Uuid,
     workspace_id: Uuid,
     title: String,
     /// Nullable in the schema (`0010_quizzes_attempts.sql`), and null for a quiz
@@ -132,6 +137,47 @@ pub async fn create_quiz(
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<CreateQuizBody>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a quiz: {error}")))?;
+
+    let (quiz, cost) = create_in(&mut tx, &state, &user, workspace_id, body).await?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing the quiz: {error}")))?;
+
+    enqueue_generation(&state, quiz.id, user.user_id, cost).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "quiz": quiz })),
+    ))
+}
+
+/// Creates the quiz row and charges for it, in the caller's transaction.
+///
+/// **The one implementation of "create a quiz".** `POST /workspaces/:id/quizzes` calls it,
+/// and so does `crate::actions::execute` for a confirmed `create_quiz` proposal (A276), so a
+/// confirmed quiz costs exactly what the Studio panel costs — the same batch price, the same
+/// monthly count, the same source-readiness check. A confirm that was cheaper than the
+/// button would be a price list the student could not read off the screen.
+///
+/// The count, the charge and the reserving row commit together, because the monthly limit
+/// depends on the count: in separate transactions a second request reads a count the first
+/// has not committed yet, and two concurrent requests both pass on the last slot.
+///
+/// The job's enqueue is deliberately **not** here: it runs after the commit, through
+/// [`enqueue_generation`], so both callers queue it the same way.
+pub(crate) async fn create_in(
+    conn: &mut sqlx::PgConnection,
+    state: &AppState,
+    user: &AuthUser,
+    workspace_id: Uuid,
+    body: CreateQuizBody,
+) -> AppResult<(QuizJson, i64)> {
     let title = body.title.trim().to_string();
     if title.is_empty() || title.chars().count() > 120 {
         return Err(AppError::Validation(
@@ -174,7 +220,7 @@ pub async fn create_quiz(
     }
     let source_ids = source_ids;
 
-    workspaces::owned_name(&state, user.user_id, workspace_id).await?;
+    workspaces::owned_name(state, user.user_id, workspace_id).await?;
 
     // Every source must be this user's, in this workspace, and finished ingesting:
     // generating from a source whose chunks do not exist yet would produce a quiz with
@@ -187,7 +233,7 @@ pub async fn create_quiz(
     .bind(&source_ids)
     .bind(workspace_id)
     .bind(user.user_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("checking the quiz's sources: {error}")))?;
     if ready != source_ids.len() as i64 {
@@ -202,23 +248,8 @@ pub async fn create_quiz(
     let batches = (i64::from(body.count) + QUESTIONS_PER_BATCH - 1) / QUESTIONS_PER_BATCH;
     let cost = batches * state.config.plans.credits.quiz_10;
 
-    // The count, the charge and the reserving row commit together, because the limit
-    // depends on the count: in separate transactions a second request reads a count the
-    // first has not committed yet, and two concurrent requests both pass on the last slot.
-    // `reserve_in` is that sequence — the per-user advisory lock, the matrix decision
-    // against a snapshot read under the lock, the charge, then this closure's row.
-    //
-    // Neither daily cap applies to generation: the plan matrix caps quizzes per **month**
-    // (`quizzes_per_month`, the feature below) and has no per-day quiz allowance, so the
-    // two slots the chat path uses are both empty inside `reserve_in`.
-    let mut tx = state
-        .pool
-        .begin()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a quiz: {error}")))?;
-
     // Bound before the closure so `async move` captures references rather than the values
-    // the handler still needs below (the quiz's JSON body, the job payload).
+    // the caller still needs below (the quiz's JSON body, the job payload).
     let user_id = user.user_id;
     let title_ref = title.as_str();
     let source_ids_ref = source_ids.as_slice();
@@ -226,9 +257,9 @@ pub async fn create_quiz(
     let types_ref = body.types.as_str();
 
     let (_, (quiz_id, created_at)) = crate::entitlements::reserve_in(
-        &mut tx,
-        &state,
-        &user,
+        conn,
+        state,
+        user,
         // One quiz per request whatever it holds (A94); `n` only prices it.
         Some(Feature::CreateQuiz { n: body.count }),
         GENERATE_ACTION,
@@ -266,34 +297,6 @@ pub async fn create_quiz(
     )
     .await?;
 
-    tx.commit()
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing the quiz: {error}")))?;
-
-    // The job is enqueued after the commit, so a failure here leaves a quiz the user can
-    // see failing rather than a charge with no trace.
-    if let Err(error) = jobs::enqueue(
-        &state.pool,
-        &state.jobs,
-        GENERATE_ACTION,
-        serde_json::json!({ "quiz_id": quiz_id }),
-        None,
-    )
-    .await
-    {
-        crate::jobs::handlers::generate_quiz::fail_and_refund(
-            &state,
-            quiz_id,
-            user.user_id,
-            cost as i32,
-            "the generation job could not be queued",
-        )
-        .await;
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "enqueueing the generation job: {error}"
-        )));
-    }
-
     // Built from `QuizJson`, the same type every other route serialises, so the 201 body
     // cannot drift from `GET /quizzes/:id`.
     let quiz = QuizJson {
@@ -312,10 +315,42 @@ pub async fn create_quiz(
         created_at,
     };
 
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "quiz": quiz })),
-    ))
+    Ok((quiz, cost))
+}
+
+/// Queues a quiz's generation, refunding the charge if the queue refuses it.
+///
+/// **The one implementation of "queue a quiz's generation".** The route and the agent's
+/// confirm path both call it (A276), so the compensation is the same on both: a quiz that
+/// will never generate must not keep the credits.
+pub(crate) async fn enqueue_generation(
+    state: &AppState,
+    quiz_id: Uuid,
+    user_id: Uuid,
+    cost: i64,
+) -> AppResult<()> {
+    if let Err(error) = jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        GENERATE_ACTION,
+        serde_json::json!({ "quiz_id": quiz_id }),
+        None,
+    )
+    .await
+    {
+        crate::jobs::handlers::generate_quiz::fail_and_refund(
+            state,
+            quiz_id,
+            user_id,
+            i32::try_from(cost).unwrap_or(i32::MAX),
+            "the generation job could not be queued",
+        )
+        .await;
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "enqueueing the generation job: {error}"
+        )));
+    }
+    Ok(())
 }
 
 /// `GET /workspaces/:id/quizzes`, newest first, tombstones excluded.
