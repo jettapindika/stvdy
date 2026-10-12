@@ -127,6 +127,17 @@ and refuses the fallback; the same value must be in the server's CORS policy onl
 **browser** serves the SPA — the three Tauri webview origins are always allowed
 (`crates/server/src/routes/mod.rs`).
 
+**A Tauri APK carries its frontend inside the native library, not in `assets/`.**
+`tauri::generate_context!()` embeds the bundle through `rust-embed`, so
+`check-mobile-no-purchase.sh path/to.apk` has to recover it from
+`lib/<abi>/libstvdy_shell_lib.so` before it can scan anything — scanning the archive's members
+finds only `assets/tauri.conf.json` and the dexopt profile. `scripts/extract-embedded-assets.mjs`
+does the recovery (`[name][brotli stream]` per file, `rust-embed` 8.13.0's layout, verified on a
+real 11 MB library) and **fails closed**: a library whose bundle cannot be read is a failure,
+not a skip. Until it existed the APK mode failed on **every** real artifact, which is a gate
+that cannot pass on the thing it gates — found by building one whose bundle was stamped `full`
+and carried six `billing/checkout` strings, exactly what the gate is for.
+
 ### The channel, and the update path (A325)
 
 - **iOS — TestFlight, then App Store review.** The channel is App Store Connect; the

@@ -215,9 +215,39 @@ elif [ -f "$target" ]; then
     cannot_check "unzip is not on PATH, so the archive $label cannot be inspected (this is not a pass)"
   mkdir -p "$scratch/extracted"
   unzip -qq -o "$target" -d "$scratch/extracted" || fail "could not extract $label with unzip"
-  members=$(find "$scratch/extracted" -type f | wc -l | tr -d ' ')
-  dist="$scratch/extracted"
-  inspected="the archive $label ($members member file(s), extracted; the paths below read app/dist/<member>)"
+
+  # A **Tauri** app does not ship its frontend as archive members. `generate_context!()`
+  # embeds it into the native library through `rust-embed`, so an Android APK carries the
+  # bundle inside `lib/<abi>/libstvdy_shell_lib.so` and its `assets/` directory holds only
+  # `tauri.conf.json` and the dexopt profile. Scanning the members therefore finds no
+  # `index.html` and this script failed on **every** real APK — a gate that could not pass
+  # on the artifact it exists to gate. Found by building one: the APK in question was
+  # stamped `full` and carried six `billing/checkout` strings.
+  #
+  # So when the archive carries a Tauri library, the assets are recovered from it and the
+  # scan runs on those bytes. The extractor **fails closed** — a library whose bundle
+  # cannot be read is a failure, not a skip, for the same reason an empty directory is.
+  embedded_lib="$(find "$scratch/extracted" -type f -name 'libstvdy_shell_lib.so' 2>/dev/null | head -1)"
+  if [ -n "$embedded_lib" ]; then
+    command -v node >/dev/null 2>&1 ||
+      cannot_check "node is not on PATH, so the assets embedded in $label cannot be read (this is not a pass)"
+    mkdir -p "$scratch/embedded"
+    extractor="$script_dir/extract-embedded-assets.mjs"
+    [ -f "$extractor" ] ||
+      cannot_check "missing $extractor — the embedded assets of a Tauri artifact cannot be read without it"
+    if ! extractor_output=$(node "$extractor" "$embedded_lib" "$scratch/embedded" 2>&1); then
+      printf '%s\n' "$extractor_output" >&2
+      fail "the web assets embedded in $label could not be recovered, so nothing was inspected (this is not a pass)"
+    fi
+    printf '%s\n' "$extractor_output" >&2
+    members=$(find "$scratch/extracted" -type f | wc -l | tr -d ' ')
+    dist="$scratch/embedded"
+    inspected="the archive $label ($members member file(s), extracted; the bundle recovered from $(basename "$embedded_lib"))"
+  else
+    members=$(find "$scratch/extracted" -type f | wc -l | tr -d ' ')
+    dist="$scratch/extracted"
+    inspected="the archive $label ($members member file(s), extracted; the paths below read app/dist/<member>)"
+  fi
 else
   fail "TARGET is neither a directory nor a file: $label"
 fi

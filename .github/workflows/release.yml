@@ -113,7 +113,7 @@ jobs:
       # that skipped them would be trusting a branch's result for a tag.
       - run: TAURI_ENV_PLATFORM=ios npm --prefix app run build
       - run: node scripts/check-no-purchase-ui.mjs
-      - run: node --test scripts/check-no-purchase-ui.test.mjs
+      - run: node --test scripts/check-no-purchase-ui.test.mjs scripts/extract-embedded-assets.test.mjs
       - run: bash scripts/check-mobile-no-purchase.sh
 
   gate-shell:

@@ -278,7 +278,7 @@ jobs:
       # a phone installs. An absent stamp fails too — a pass on an artifact the
       # check cannot identify is not evidence about what a store receives.
       - run: node scripts/check-no-purchase-ui.mjs
-      - run: node --test scripts/check-no-purchase-ui.test.mjs
+      - run: node --test scripts/check-no-purchase-ui.test.mjs scripts/extract-embedded-assets.test.mjs
 
   desktop:
     name: desktop build (${{ matrix.os }})
