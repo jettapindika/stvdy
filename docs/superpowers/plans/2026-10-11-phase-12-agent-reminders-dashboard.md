@@ -2374,28 +2374,28 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 
 | # | Gate | Command | Result |
 |---|---|---|---|
-| 1 | Formatting | `cargo fmt --all -- --check` | |
-| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | |
-| 3 | Rust tests | `cargo test --workspace` | |
+| 1 | Formatting | `cargo fmt --all -- --check` | **PASS** — clean, exit 0 |
+| 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **PASS** — clean, exit 0 (was red with twelve lints until `31900fb`) |
+| 3 | Rust tests | `cargo test --workspace` | **NOT MEASURED** — `cargo test --workspace` cannot complete: it stops at the first failing binary, `crates/server/tests/syllabus.rs` (**14 passed / 5 failed**, Phase 11's exit gate, still being diagnosed), so it says nothing about the Phase 12 suites. Those are counted individually in rows 9–22 |
 | 4 | Web tests | `npm --prefix app test` | **585 passed, 0 failed** (this slice's directories: 187) |
 | 5 | Web build | `npm --prefix app run build` | **PASS** (`tsc --noEmit && vite build`) |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | **PASS** — "no third-party loads in 3 shipped file(s)" |
-| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | |
-| 8 | Shell trio | `just check-shell` | |
-| 9 | **Exit gate, part 1** — a WRITE tool creates `pending_actions`, and confirming on device B executes it | `cargo test -p stvdy-server --test actions` | |
-| 10 | **Exit gate, part 2** — a reminder is deduped across devices | `cargo test -p stvdy-server --test reminders` | |
-| 11 | **Exit gate, part 3** — the dashboard metrics are right | `cargo test -p stvdy-server --test dashboard` | |
-| 12 | The agent turn: reads execute, writes propose, refusals are answered | `cargo test -p stvdy-server --test agent` | |
-| 13 | **The phase's real risk** — a poisoned document cannot write | `cargo test -p stvdy-server --test agent_injection` | |
-| 14 | The reminder engine, contract § 6's discipline | `cargo test -p stvdy-core --test reminders` | |
-| 15 | The reminder engine is pure (no clock, no HashMap) | `cargo test -p stvdy-core --test reminders_purity` | |
-| 16 | The jobs: delivered once, most recently active device, partial failure | `cargo test -p stvdy-server --test reminder_jobs` | |
-| 17 | The push payloads and error classes | `cargo test -p stvdy-server --test push` | |
-| 18 | The tool registry and the argument contracts | `cargo test -p stvdy-core --test agent_tools` | |
-| 19 | The gate | `cargo test -p stvdy-core --test agent_gate` | |
-| 20 | The two doubles | `cargo test -p stvdy-core --test tool_doubles` | |
-| 21 | Route sweep (8 new rows, 2 drivers) | `cargo test -p stvdy-server --test route_sweep` | |
-| 22 | Schema (2 new `documented` rows, 6 new columns) | `cargo test -p stvdy-server --test schema` | |
+| 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | **NOT MEASURED** — not run: the offline SQL cache would have to be regenerated against a tree whose `crates/**` was being edited by other slices, and the check describes the SQL the schema now expects rather than Phase 12's suites |
+| 8 | Shell trio | `just check-shell` | **NOT MEASURED** — not run |
+| 9 | **Exit gate, part 1** — a WRITE tool creates `pending_actions`, and confirming on device B executes it | `cargo test -p stvdy-server --test actions` | **PASS** — 12 passed / 0 failed (`cargo test -p stvdy-server --test actions`) |
+| 10 | **Exit gate, part 2** — a reminder is deduped across devices | `cargo test -p stvdy-server --test reminders` | **PASS** — 5 passed / 0 failed (`cargo test -p stvdy-server --test reminders`) |
+| 11 | **Exit gate, part 3** — the dashboard metrics are right | `cargo test -p stvdy-server --test dashboard` | **PASS** — 10 passed / 0 failed (`cargo test -p stvdy-server --test dashboard`) |
+| 12 | The agent turn: reads execute, writes propose, refusals are answered | `cargo test -p stvdy-server --test agent` | **PASS** — 10 passed / 0 failed (`cargo test -p stvdy-server --test agent`) |
+| 13 | **The phase's real risk** — a poisoned document cannot write | `cargo test -p stvdy-server --test agent_injection` | **PASS** — 5 passed / 0 failed (`cargo test -p stvdy-server --test agent_injection`) |
+| 14 | The reminder engine, contract § 6's discipline | `cargo test -p stvdy-core --test reminders` | **PASS** — 11 passed / 0 failed (`cargo test -p stvdy-core --test reminders`) |
+| 15 | The reminder engine is pure (no clock, no HashMap) | `cargo test -p stvdy-core --test reminders_purity` | **PASS** — 3 passed / 0 failed (`cargo test -p stvdy-core --test reminders_purity`) |
+| 16 | The jobs: delivered once, most recently active device, partial failure | `cargo test -p stvdy-server --test reminder_jobs` | **PASS** — 11 passed / 0 failed (`cargo test -p stvdy-server --test reminder_jobs`) |
+| 17 | The push payloads and error classes | `cargo test -p stvdy-server --test push` | **PASS** — 7 passed / 0 failed (`cargo test -p stvdy-server --test push`) |
+| 18 | The tool registry and the argument contracts | `cargo test -p stvdy-core --test agent_tools` | **PASS** — 12 passed / 0 failed (`cargo test -p stvdy-core --test agent_tools`) |
+| 19 | The gate | `cargo test -p stvdy-core --test agent_gate` | **PASS** — 10 passed / 0 failed (`cargo test -p stvdy-core --test agent_gate`) |
+| 20 | The two doubles | `cargo test -p stvdy-core --test tool_doubles` | **PASS** — 8 passed / 0 failed (`cargo test -p stvdy-core --test tool_doubles`) |
+| 21 | Route sweep (8 new rows, 2 drivers) | `cargo test -p stvdy-server --test route_sweep` | **PASS** — 4 passed / 0 failed (`cargo test -p stvdy-server --test route_sweep`) |
+| 22 | Schema (2 new `documented` rows, 6 new columns) | `cargo test -p stvdy-server --test schema` | **PASS** — 27 passed / 0 failed (`cargo test -p stvdy-server --test schema`) |
 | 23 | Gate 5 — accessibility | `node scripts/measure-mobile.mjs` at 390×844 | **PASS at 390×844 with a defect fixed** — 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast **4.97:1**, 0 under 44px, 0 clipped, 0 overlapped. The dashboard scrolled sideways **at 100% text** (423 > 390, 15 elements past the edge) before `f38305c`. **At 1365×900: PASS on both Phase 12 surfaces** — 8 combinations, 168 targets, 496 text pairs, 0 contrast failures, 0 page overflow, 0 overlap. Three findings, all outside this phase's screens and all named below rather than fixed here |
 | 24 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test indonesian` | **PASS, both halves.** Server half **4 passed / 0 failed, 0 ignored** (measured by Main on the current tree; the vector arm uses the real embedder and the mechanism is asserted separately, so neither is vacuous). UI half driven in a real browser with `navigator.languages = ['id-ID','id']` set before boot: `<html lang="id">`, no locale key rendered on either screen — and it caught a real defect (`f4bfecf`: five of the card's twelve labels rendered `agent.field.due_at` where a reader expects "Tenggat"). The rendered sentences are quoted in the execution notes |
 | 25 | Gate 7 — honesty | the five statements in Task 16 | **(a)–(e) all checked.** (c) re-asserted by grepping the shipped bundle, not by reading the component: `AI can make mistakes. Check the citations.` → **1 match** in `app/dist/assets/index-Eov9DdnN.js` (the single entry chunk), and `AI bisa salah. Periksa kutipannya.` → **1 match** in the same file |
