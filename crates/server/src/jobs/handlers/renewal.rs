@@ -397,10 +397,14 @@ mod tests {
 
     #[test]
     fn a_dst_transition_day_uses_the_offset_in_force_then() {
-        // Berlin is on CET (UTC+1) on 2026-10-26, before the 25 October change to CEST…
-        // the change is on 25 October, so the 26th is already CET: 09:00+01:00 = 08:00Z.
+        // `end()` is 2026-11-01T17:00Z, which is 18:00+01:00 in Berlin (CET: the change has
+        // already happened), so the local end date is the 1st and seven days before is the
+        // 25th. That date *is* the transition day - Berlin goes 03:00 CEST -> 02:00 CET on
+        // 2026-10-25 - so 09:00 that morning is already CET: 09:00+01:00 = 08:00Z. The 24th
+        // would have been +02:00 (07:00Z), so this case still exercises the offset in force
+        // *after* the change rather than the one before it.
         let instant = boundary_instant("Europe/Berlin", end(), 7);
-        assert_eq!(instant.to_rfc3339(), "2026-10-26T08:00:00+00:00");
+        assert_eq!(instant.to_rfc3339(), "2026-10-25T08:00:00+00:00");
     }
 
     #[test]
