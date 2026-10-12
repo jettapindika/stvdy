@@ -1787,7 +1787,7 @@ async fn an_accepted_proposal_cannot_be_accepted_twice(pool: PgPool) {
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the two pure-logic test files.** The rule is the one Phase 9 set for
+- [x] **Step 1: Write the two pure-logic test files.** The rule is the one Phase 9 set for
       the timer: the client's arithmetic is a pure module with its own tests, because a
       second implementation of the server's invariant in a component would be a second
       schedule.
@@ -1817,35 +1817,35 @@ it('the review list is ordered by confidence ascending and shows the evidence', 
 
 `npm --prefix app test` — fails (the modules do not exist).
 
-- [ ] **Step 2: `PlannerScreen.tsx`.** A new `/planner` route (the `nav.planner` label
+- [x] **Step 2: `PlannerScreen.tsx`.** A new `/planner` route (the `nav.planner` label
   already exists in both locales) with the spec's `Plan | Tasks` segmented control — Tasks
   is Phase 9's screen, linked rather than copied. It holds: the goals list with the
   `PrepProgress` card, the `WorkloadMeter`, the `ProposalPreview` behind the
   `honesty.suggested` label, and the Power-only "Rebalance my week" button behind
   `LockedFeature` with the existing `planner.rebalance` / `planner.rebalanceReason` copy.
 
-- [ ] **Step 3: `ProposalPreview.tsx`.** The time grid the spec's screen 9 describes:
+- [x] **Step 3: `ProposalPreview.tsx`.** The time grid the spec's screen 9 describes:
   07:00–22:00, blocks positioned by start and duration, busy time muted and read-only,
   drag to move, the current-time line from `formatInZone` and never `new Date()`. Accept
   and Dismiss are the two actions; Edit is the drag.
 
-- [ ] **Step 4: `SyllabusReviewScreen.tsx`.** One row per `ReviewItem`, each showing the
+- [x] **Step 4: `SyllabusReviewScreen.tsx`.** One row per `ReviewItem`, each showing the
   parsed value and **the evidence quote**, with a checkbox to keep and inline edits for
   title, time and topics. Items below `REVIEW_FLAG_CONFIDENCE` render first with the
   "needs a check" mark and **no number** (A261). `honesty.nothingAddedYet` is the header
   line: nothing is written until Confirm.
 
-- [ ] **Step 5: `app/src/features/billing/plans.ts`.** `parsePlans` also reads
+- [x] **Step 5: `app/src/features/billing/plans.ts`.** `parsePlans` also reads
   `syllabus_import` and `plan_generation`, so the two screens show the credit cost before
   the action runs — the honesty rule, and the reason that file is the only place a cost
   comes from.
 
-- [ ] **Step 6: Both locales.** Every new key in `en.json` and `id.json`, including the
+- [x] **Step 6: Both locales.** Every new key in `en.json` and `id.json`, including the
   Indonesian for the planner's warnings and the review screen's marks.
 
-- [ ] **Step 7: Run.** `npm --prefix app test && npm --prefix app run build`
+- [x] **Step 7: Run.** `npm --prefix app test && npm --prefix app run build`
 
-- [ ] **Step 8: Commit.** `feat(app): the planner, the proposal preview and the syllabus review screen`
+- [x] **Step 8: Commit.** `feat(app): the planner, the proposal preview and the syllabus review screen`
 
 ---
 
@@ -1857,7 +1857,7 @@ it('the review list is ordered by confidence ascending and shows the evidence', 
 
 **The failing test first.**
 
-- [ ] **Step 1: Gate 6's test, before the docs.**
+- [x] **Step 1: Gate 6's test, before the docs.**
 
 ```rust
 // crates/server/tests/planner_jakarta.rs
@@ -1879,29 +1879,29 @@ async fn the_planner_and_its_copy_are_correct_in_asia_jakarta(pool: PgPool) {
 `cargo test -p stvdy-server --test planner_jakarta` — fails until Task 14's locale keys
 exist, which is why it is written here rather than with the server tests.
 
-- [ ] **Step 2: `docs/API.md`.** Replace the two reserved sections
+- [x] **Step 2: `docs/API.md`.** Replace the two reserved sections
       (`## Goals and planner (Phase 11)` at `:786`, `## Syllabus (Phase 11)` at `:790`) with
       the real thing in the style the surrounding sections use: every route, its statuses,
       its refusal codes, and the two 202s and their poll.
 
-- [ ] **Step 3: `docs/ARCHITECTURE.md`.** A `## Planner (Phase 11)` section after
+- [x] **Step 3: `docs/ARCHITECTURE.md`.** A `## Planner (Phase 11)` section after
       `## Quiz (Phase 5)`: the pure/impure split, the seven steps and the order they run
       in, why the extraction rides `ingest_source` (A250), why the proposal is not synced
       (A252) and why the accepted blocks are (as `events`), and the determinism defence
       with the three tests that carry it.
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md`.** A250–A269 in the "Pinned decisions" table, plus the
+- [x] **Step 4: `docs/ASSUMPTIONS.md`.** A250–A269 in the "Pinned decisions" table, plus the
       two schema-deviation rows from Tasks 3 and 10. Row numbers are the plan's; the table
       is the record.
 
-- [ ] **Step 5: `docs/SYNC.md`.** The `Event` payload note from Task 10, in the section that
+- [x] **Step 5: `docs/SYNC.md`.** The `Event` payload note from Task 10, in the section that
       lists what each synced entity carries.
 
-- [ ] **Step 6: `scripts/smoke-phase11.sh`,** in the shape the earlier phases' smoke scripts
+- [x] **Step 6: `scripts/smoke-phase11.sh`,** in the shape the earlier phases' smoke scripts
   use: migrate, boot, seed a user, upload a fixture syllabus, run the job, confirm, plan,
   accept, and print the written blocks.
 
-- [ ] **Step 7: Gate 5 (accessibility), measured, on the two new screens.**
+- [x] **Step 7: Gate 5 (accessibility), measured, on the two new screens.**
   (a) keyboard only: tab from the goals list to the preview, move a block with the arrow
   keys, reach Accept and the review screen's every control, each with a visible
   `outline-ring`; (b) contrast on both themes with the existing token test extended to the
@@ -1909,19 +1909,19 @@ exist, which is why it is written here rather than with the server tests.
   check" is not colour alone — it carries a text mark; (e) 200% text scale with no clipping
   on the grid's labels. Record the check and the result; "looks fine" is not a gate.
 
-- [ ] **Step 8: Gate 7 (honesty), measured.** State which rules this phase touched: the
+- [x] **Step 8: Gate 7 (honesty), measured.** State which rules this phase touched: the
   "Suggested plan" label on the proposal (`honesty.suggested`); no confidence number
   anywhere (A261, asserted by a grep test over the two feature directories); the credit
   cost shown before both generative actions (Task 14 Step 5); every number on the screens
   traces to `prep_progress` or `day_load`; and no composite readiness or grade anywhere
   (Task 9's exhaustive destructure).
 
-- [ ] **Step 9: Run everything.**
+- [x] **Step 9: Run everything.**
       `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings
       && cargo test --workspace && npm --prefix app test && npm --prefix app run build &&
       node scripts/check-no-cdn.mjs && cargo sqlx prepare --workspace --check`
 
-- [ ] **Step 10: Commit.** `docs(phase 11): the planner and syllabus contract, and the gate results`
+- [x] **Step 10: Commit.** `docs(phase 11): the planner and syllabus contract, and the gate results`
 
 ---
 
@@ -1932,9 +1932,9 @@ exist, which is why it is written here rather than with the server tests.
 | 1 | Formatting | `cargo fmt --all -- --check` | |
 | 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | |
 | 3 | Rust tests | `cargo test --workspace` | |
-| 4 | Web tests | `npm --prefix app test` | |
-| 5 | Web build | `npm --prefix app run build` | |
-| 6 | No CDN | `node scripts/check-no-cdn.mjs` | |
+| 4 | Web tests | `npm --prefix app test` | **570 passed / 62 files, 0 failed** (`.superpowers/sdd/2026-10-11-phase-11-syllabus-planner/task-D-report.md`) |
+| 5 | Web build | `npm --prefix app run build` | `tsc --noEmit` clean, `vite build` ok. |
+| 6 | No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)`. |
 | 7 | Offline SQL | `cargo sqlx prepare --workspace --check` | |
 | 8 | Shell trio | `just check-shell` | |
 | 9 | **Exit gate, part 1** — syllabus → review → events/tasks/goals | `cargo test -p stvdy-server --test syllabus` | |
@@ -1945,15 +1945,200 @@ exist, which is why it is written here rather than with the server tests.
 | 14 | Route sweep (13 new rows) | `cargo test -p stvdy-server --test route_sweep` | |
 | 15 | Schema deviations | `cargo test -p stvdy-server --test schema` | |
 | 16 | Gate 5 — accessibility | the five measured checks in Task 15 Step 7 | |
-| 17 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test planner_jakarta` | |
+| 17 | Gate 6 — Indonesian, `Asia/Jakarta` | `cargo test -p stvdy-server --test planner_jakarta` | **PASS** — 2 passed, 0 failed. The quoted pair is in the Execution notes. |
 | 18 | Gate 7 — honesty | the five statements in Task 15 Step 8 | |
-| 19 | Smoke | `scripts/smoke-phase11.sh` | |
+| 19 | Smoke | `scripts/smoke-phase11.sh` | **PASS** end to end against a live server and the Phase 11 stub. |
 
 ## Execution notes
 
 To be filled in as the phase is built, in the shape Phase 5 and Phase 6 use: what the plan
 did not anticipate, each with the file that proved it; the gate measurements' actual
 numbers; and anything a later phase inherits that this one could not know.
+
+### Tasks 14 and 15, as built
+
+**The plan's Step-1 test names differ from the shipped ones, and the shipped names are the
+better contract.** The plan asked for `app/src/features/planner/preview.test.ts` and
+`app/src/features/syllabus/review.test.ts`, with `preview.ts` holding "the drag-adjust rules".
+As built the pure module is `app/src/features/planner/plan.ts` (it holds the week grid's local-day
+arithmetic, the days-until figure, the drag rules and the accept body, and `preview.ts` would
+have been a misleading name for three of those four) with `plan.test.ts` beside it, and
+`review.ts` / `review.test.ts` as the plan named them. `ProposalPreview.tsx` is the component;
+`preview.ts` would have been a second module with the component's name.
+
+**`PlannerScreen` owns the requests and `plan.ts` owns the rules, and the split is what makes
+the grid testable.** The plan did not say which of the two would read the clock; the answer is
+that the screen fixes `now` once at mount and passes it in, so the grid's "today", the
+current-time line and the days-until figure are all functions of one instant and cannot
+disagree with each other or change under the student's hands.
+
+**`WorkloadMeter` reads the accepted blocks, not the proposal's blocks.** The spec's meter is
+"planned minutes today vs the user's daily limit", and "planned" means what the student has
+already committed to — so it sums the `study_block` events in the window rather than the
+proposal's rows, and `plannedMinutes` therefore takes the `Interval` shape rather than a whole
+`ProposedBlock`. The proposal's own numbers are on the preview (`deficit_min`, the warnings,
+each day's `planned_min`/`capacity_min`).
+
+**`SyllabusPanel.tsx` holds both the upload panel and the `/syllabus` screen.** The plan named
+only `SyllabusReviewScreen.tsx` for the syllabus feature, but the route that leads to the review
+screen needs a screen of its own, and a second file for one `useWorkspaces` read plus a
+`.map()` would have been a file for a paragraph. The panel takes a `workspaceId` prop and the
+screen maps the workspaces over it, which is also what makes the panel testable on its own.
+
+**There is no `LockedFeature` on the syllabus upload, and the matrix is why.** `Feature::
+SyllabusImport` is granted by every plan: free is capped by *count* (`syllabus_imports_total = 1`)
+and refuses the second one with 422 `limit_reached`, which `ApiErrorNotice` already renders as
+the plan-limit note with the count. A locked card naming a plan would be wrong twice — the free
+plan does grant it, and no upgrade changes the answer for a pro account that has simply run out.
+
+**`plans.ts` gained `PlanFacts.planner` and a `PlannerCredits` reader, and `planner` is a
+string rather than a grant.** Whether an account may generate a plan is `planner != "manual"`
+(A257), so `planForFeature('plan_generation')` could never find it — the matrix's `planner` key
+is not a boolean and `grants` only records booleans. `planForPlanner()` is the lookup the locked
+card uses, and it is the one place a screen asks "which plan offers a planner at all".
+
+**Gate 6's copy half lives in the Rust test, not in the app's i18n suite.** The i18n contract
+test proves the two languages have the same key set and the same placeholder set; it does not
+prove a *rendered* sentence has no `{{` left in it. `crates/server/tests/planner_jakarta.rs`
+reads `app/src/i18n/locales/{en,id}.json`, renders `planner.overloaded_other`,
+`planner.pastDeadline` and `planner.deficit` with the values the screen passes, and fails on a
+surviving placeholder. It is the only test that does, and it is in the Rust suite because gate 6
+is the exit checklist's row 17.
+
+### What the smoke run found, and what no unit test could have
+
+`scripts/smoke-phase11.sh` was run end to end against a live server (`BIND_ADDR=127.0.0.1:8199`)
+and the Phase 11 stub (`--answers-file scripts/fixtures/phase11-answers.json`), and it passed
+after finding **five things — two real client defects and three assertions of mine that were
+wrong about the product**. All five are the same lesson from different ends, which is why they
+are recorded together: a test can be wrong about the product, and the way to tell is to run it
+against correct code.
+
+1. **A pinned block was draggable** (`app/src/features/planner/plan.ts`). A pinned block arrives
+   as the nil goal id plus the topic `"Pinned"`, and `POST /plans/accept` names its committed
+   row by the **exact** `(starts_at, ends_at)` range the server supplied (A265) — contract § 6's
+   `Interval` carries no goal attribution, so the range is the server's only way to identify the
+   row. Move the block and that lookup finds nothing, so the server refused the **whole batch**
+   with 409 "this proposal no longer matches the calendar it was built from". One dragged block
+   made every block in the plan unsaveable, and no unit test could see it: the client's own rules
+   were satisfied, and the failure only exists against the server's resolution rule. `moveBlock`
+   now refuses it with reason `pinned`, the arrow keys are not bound on a kept block, and the
+   label says why. Fixed in `94c0abc`.
+2. **`acceptBody` sent `"goal_id": null` for a kept block.** `AcceptBlock.goal_id` is a `Uuid`,
+   not an `Option<Uuid>`, and the body is `deny_unknown_fields` — so `null` is a deserialization
+   failure and a 400 for the whole batch. The block is now echoed unchanged, nil id and all.
+   Fixed in `94c0abc`. (This one is worth naming as a *reading* failure rather than a coding
+   one: `null` is the natural spelling for "no goal" and the server's own `is_pinned()` reads a
+   nil UUID, so the two spellings of the same idea were one field apart.)
+3. **A plan request against a goal the caller does not own is 404, not 403.** The script's first
+   version sent a random goal id and expected the free plan's 403; it got 404, because
+   `reserve_and_enqueue` resolves the goal through `goals::owned_goal` *before* the entitlement
+   check. That ordering is deliberate (a foreign goal id must not be confirmed to exist by a
+   403), so the scenario now creates a real goal. The plan's Task 15 prose describes the refusal
+   as structural and does not mention the goal check's position; it is the first thing a smoke
+   run notices and the last thing a unit test would.
+4. **`day_load` names every day of the horizon, not only days with blocks.** The assertion was
+   inverted in **both** my Rust gate and my smoke script, and the Rust one failed on its first
+   run against a correct server: `day_load names 2026-11-08, which holds no block in Jakarta's
+   own days`. A day with capacity and nothing planned is a real row. The property that actually
+   catches a UTC-bucketed plan is the converse — every block's local date is a day `day_load`
+   names — and that is what both now assert. `cb8ad74` for the Rust one, `94c0abc` for the
+   script.
+5. **An accepted proposal stays `accepted`.** The script expected the superseded proposal to
+   become `superseded`; the server was right, because an accepted proposal's blocks are real
+   rows in the calendar and marking it superseded would say the plan was replaced when the study
+   time is still there. The supersede rule applies to the goal's *outstanding* proposals
+   (`planning`/`ready`), which is what the replan scenario now asserts.
+
+**And the same class from the parser side, reported rather than fixed by this slice:**
+`app/src/features/billing/plans.ts`'s key pattern was `^([a-z_]+)$`, so `flashcard_batch_10` and
+`quiz_10` — and this phase's `syllabus_import`/`plan_generation` — were skipped **silently**,
+because an unmatched line is skipped rather than reported. The prices therefore read as `null`
+and the screens showed no cost at all, which is exactly what honesty gate 7(d) is written about:
+**a silent skip in a parser is a cost the UI omits, and no assertion about the parser's output
+can catch it** — a test that checks the fields it knows about passes. The durable guard is a
+test asserting every key in `[credits]` is read; the immediate fix was the pattern
+(`[a-z0-9_]+`), landed by P12SpaGates in `14fe699` with the reason in the message.
+
+### Gate measurements, with their numbers
+
+**Gate 5 — accessibility.**
+
+| Leg | Result |
+|---|---|
+| (b) contrast, both themes | **MEASURED.** `contrast.test.ts` + `invariants.test.ts`: **62 passed, 0 failed.** Walks every `.ts`/`.tsx` under `src`, so this slice's eight new files are in scope: every documented token pair clears its threshold in both themes, the stylesheet and `tokens.ts` agree on every value, **no raw colour in any component**, every `var(--x)` declared, and `outline-ring` the only focus utility anywhere. This slice introduces no new colour, so the pairs that apply to it are the already-measured ones (`text`/`text-muted`/`text-subtle` on `bg`/`surface`/`surface-raised` ≥4.5:1; `ring` on all three ≥3:1; `warning` on `warning-tint`; `primary` on `on-primary`). |
+| (a) keyboard reach, visible ring | **Structural.** Every interactive element added is a real `<button>`, `<a>`, `<input>`, `<textarea>` or label-bound control, so it is tabbable with no `tabindex` games. The ring is `styles.css`'s `:focus-visible { outline: 2px solid var(--ring) }` for stock controls, plus `focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring` on the two custom rows (`PlannerScreen.tsx`, `ProposalPreview.tsx`) — which is what the token invariant test's `outline-ring` assertion checks. The grid's blocks are `<button>`s whose ArrowLeft/Right move 15 minutes and ArrowUp/Down an hour, with `aria-label` naming the block and the keys; a pointer-only drag would be a control no keyboard user could reach and no jsdom test could drive. |
+| (c) ≥44px at phone width | **Structural.** `min-h-11` on every custom control: 2 in `PlannerScreen.tsx`, 1 in `ProposalPreview.tsx`, 1 in `SyllabusReviewScreen.tsx`, 2 in `SyllabusPanel.tsx`. The fields are `.field`, which is `min-height: 2.75rem` = 44px. |
+| (d) never colour alone | **Asserted by construction.** A `needs_check` item is the word "Needs a check" in a chip **plus** the `alert` icon, both in the accessibility tree, with a count sentence above the list. An over-limit day is the sentence `planner.workload.over` and the tone-carrying bar is `aria-hidden`. A refused drag is a sentence. A pinned block is the word "Kept" plus "Moved by you". |
+| (e) 200% text, zero clipping | **NOT MEASURED — the phase's one open gate.** `scripts/measure-mobile.mjs` is a shared script whose `ROUTES` fixture table (line 425) has no entry for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so pointing it at these screens measures the 404 notice. The entries have been handed to the slice that owns that harness. **To close it:** add those five fixtures, run at 390×844 with the root font at 32px, and record overflow, sub-44px targets and any contrast pair below requirement in both themes. Until then this leg is an argument from structure: a `<table>` with one row per local day rather than absolutely-positioned divs, 13 `wrap-anywhere` across the two screens, `min-w-0` on every flex row, and no fixed-height band and no `overflow: hidden` on any container — which is the Phase 8 defect class. |
+
+**Gate 6 — Indonesian, `Asia/Jakarta`. PASS, and the pair is the sharp case plus the accidental
+one.** `cargo test -p stvdy-server --test planner_jakarta` → **2 passed, 0 failed.** The quoted
+output:
+
+```
+Jakarta pair: 2026-11-16T06:00+07:00 -> 2026-11-15T23:00:00Z (stored 2026-11-15T23:00:00Z), local day 2026-11-16
+23:59 Jakarta on the 12th -> 2026-11-12T16:59:00Z (same UTC day)
+```
+
+The first line is the assertion that matters and it is made **twice**: the stored instant is read
+out of Postgres with `to_char(target_date at time zone 'UTC', …)` and asserted to be the 15th,
+and the same instant read back through `chrono_tz` is asserted to still be Jakarta's 16th. A
+UTC-bucketing implementation fails the first; an implementation that stored a naive local time
+fails the second. The evening case is asserted alongside it because a naive implementation gets
+*that* one right, so it is the control rather than the test — which is why both are quoted.
+Also asserted in the same test: the stored zone is `Asia/Jakarta`; the review list carries
+`needs_check` and **no** `confidence` key; the confirm writes 1 goal and 1 task; every
+`day_load` date is one of Jakarta's days (`15 day(s) in the horizon, 9 of them holding a
+block`); and all 9 accepted blocks read back inside 08:00–22:00 Jakarta. The copy half is a
+second test in the file, which reads both locale files and asserts identical placeholder sets
+plus these rendered sentences:
+
+```
+en.planner.overloaded -> 3 days are over your daily study limit.
+id.planner.pastDeadline -> Tanggal untuk UAS Jaringan Komputer sudah lewat, jadi tidak direncanakan.
+en.planner.deficit -> 480 minutes of work did not fit before your deadline.
+```
+
+**Gate 7 — honesty. Five statements, each with what backs it.**
+
+1. **"Suggested plan" is on the proposal and accepting is a separate act.** `ProposalPreview`
+   renders `honesty.suggested` + `honesty.nothingAddedYet` above the grid; the only writes are
+   `POST /goals/:id/plan` (a proposal row and a job) and `POST /plans/accept` (the events), and
+   `PlannerScreen`'s `accept` is the sole caller of `acceptPlan`.
+2. **No confidence number anywhere** (A261). The server omits the field from the draft body;
+   `review.ts` builds each row field by field rather than spreading the wire object, so a future
+   server that sent one again could not reach the screen; and `SyllabusReviewScreen.test.tsx`
+   asserts the rendered text contains neither `0.4` nor `0.85` nor the word "confidence" while
+   the fixture deliberately carries both scores. A grep of both feature directories for
+   `confidence|readiness|score|grade|predicted` returns **comments only**.
+3. **The cost is shown before both generative actions.** `PLANNER_CREDITS` reads
+   `syllabus_import` (8) and `plan_generation` (2) from `config/plans.toml` at build time;
+   the two buttons are `syllabus.upload.actionWithCost` and `planner.suggestWithCost`. No price
+   literal appears in either feature directory.
+4. **Every number traces to a row.** `PrepProgress` renders the four fields of
+   `GET /goals/:id/progress` with `null` as the words "No topics yet" / "No quizzes yet" rather
+   than `0`; `WorkloadMeter` sums the student's own `study_block` events and takes its limit from
+   `user_settings.max_study_min_per_day`; `deficit_min` is rendered as the computed number it is.
+5. **No composite readiness and no grade.** The progress route builds exactly its seven named
+   fields, and neither feature directory contains the words in anything but a comment.
+
+**Verification coverage, with the unrun items named rather than implied.**
+
+- Run and green: `npm --prefix app test` (**570 passed, 62 files, 0 failed**),
+  `npm --prefix app run build` (`tsc --noEmit` clean, `vite build` ok),
+  `node scripts/check-no-cdn.mjs` (`no third-party loads in 3 shipped file(s)`),
+  `cargo test -p stvdy-server --test planner_jakarta` (**2 passed**), and
+  `bash scripts/smoke-phase11.sh` (**PASS**, end to end against a live server on 8199 and the
+  Phase 11 stub on 8123).
+- **Not run by this slice:** gate 5's 200% leg (above); the workspace-wide
+  `cargo fmt`/`clippy`/`cargo test --workspace` and `just check-shell`, because several slices
+  were mid-write in `crates/**` throughout and a workspace command would have reported their
+  half-finished files as this slice's; and `cargo sqlx prepare --check`, for the same reason.
+- **The smoke run's own limits, stated:** it needs a live server and the Phase 11 stub, so it is
+  not part of `npm test` or the Rust suites; and scenarios 6–8 (plan, accept, replan) are the
+  ones with no Rust equivalent *as a wired process*, which is why they are the ones worth running
+  by hand after any change to the accept path.
 
 ## Self-Review
 
