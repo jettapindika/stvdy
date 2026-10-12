@@ -12,6 +12,7 @@ pub mod ingest;
 pub mod plan;
 pub mod poll_payment;
 pub mod reconcile_payments;
+pub mod reminders;
 pub mod render_pdf;
 pub mod renewal;
 pub mod report;

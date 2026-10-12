@@ -118,6 +118,14 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // four boundaries per period per account, and the `dedupe_key` — which names the
         // account, the period end and the boundary — is what makes each of them once-only.
         "renewal_reminder" => crate::jobs::handlers::renewal::run(state, job).await,
+        // The reminder pair (A287). `send_reminder` is the producer and is per account: it
+        // derives the account's due reminders through the pure engine, registers them
+        // (`on conflict (dedupe_key) do nothing`) and claims the ones that are due, then
+        // enqueues one `send_push` per claimed reminder. `send_push` is the delivery and is
+        // per reminder, so a delivery that fails is retried for *that* reminder rather than
+        // for every reminder the account has.
+        "send_reminder" => crate::jobs::handlers::reminders::run(state, job).await,
+        "send_push" => crate::jobs::handlers::reminders::deliver(state, job).await,
         // Permanent: no retry will invent a handler for a kind this binary does
         // not know, which is what an old row from a newer version looks like.
         other => Err(jobs::Failure::permanent(format!(

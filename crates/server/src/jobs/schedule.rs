@@ -49,6 +49,18 @@ const BOUNDARY_KINDS: [&str; 2] = ["reset_counters", "monthly_grant"];
 /// event that must not wait fifteen.
 pub const PAYMENT_TICK: Duration = Duration::from_secs(300);
 
+/// How often the reminder pass runs (A287).
+///
+/// Five minutes is the resolution of a reminder, and the number is deliberately the same as
+/// [`PAYMENT_TICK`]: both are "a student-facing event on a minute scale", and two different
+/// five-minute constants would be two things to keep in step for no gain. It is *not*
+/// [`SCHEDULE_INTERVAL`]: a monthly boundary job does not want to run three times as often.
+pub const REMINDER_TICK: Duration = Duration::from_secs(300);
+
+/// Accounts one reminder pass enqueues for. Bounded, and idempotent inside its window, so a
+/// second pass covers the rest rather than one pass reading every account.
+const REMINDER_BATCH: i64 = 500;
+
 /// Spawns the scheduler. The `JoinHandle` is returned so `main` can keep it alive and a
 /// test can abort it.
 pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
@@ -56,12 +68,14 @@ pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
         tracing::info!(
             interval_secs = SCHEDULE_INTERVAL.as_secs(),
             payment_secs = PAYMENT_TICK.as_secs(),
+            reminder_secs = REMINDER_TICK.as_secs(),
             "job scheduler started"
         );
         let mut boundary = tokio::time::interval(SCHEDULE_INTERVAL);
         let mut payments = tokio::time::interval(PAYMENT_TICK);
+        let mut reminders = tokio::time::interval(REMINDER_TICK);
         loop {
-            // Both ticks complete immediately on the first pass, which is deliberate: a
+            // Every tick completes immediately on the first pass, which is deliberate: a
             // process that starts mid-month still schedules the accounts whose boundary it
             // missed, and one that starts mid-outage starts asking the gateway at once.
             tokio::select! {
@@ -76,9 +90,79 @@ pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
                     Ok(enqueued) => tracing::debug!(enqueued, "enqueued the payment passes"),
                     Err(error) => tracing::warn!(%error, "enqueuing the payment passes failed"),
                 },
+                _ = reminders.tick() => match reminder_pass(&state).await {
+                    Ok(0) => {}
+                    Ok(enqueued) => tracing::debug!(enqueued, "scheduled reminder derivations"),
+                    Err(error) => tracing::warn!(%error, "the reminder pass failed"),
+                },
             }
         }
     })
+}
+
+/// One reminder pass: enqueue a `send_reminder` for each account that does not have one
+/// waiting in this window (A287).
+///
+/// The key is `"send_reminder:<user_id>:<utc window>"`, which is the whole of the idempotence
+/// — a scheduler restart, a second instance, a double tick and an overlapping pass all produce
+/// the same key inside one window, so the unique index on `jobs.dedupe_key` turns every
+/// duplicate into a no-op. The window is `floor(now / REMINDER_TICK)` and is stated as a
+/// **watermark in UTC seconds** rather than a local-time fact, deliberately: local-date
+/// arithmetic lives in `crates/core/src/reminders.rs` and nowhere else, so nothing here has to
+/// know a user's zone to decide whether it already ran.
+///
+/// The `not exists` guard is the other half, exactly as [`pass`] and [`calendar_pass`] do it:
+/// it keeps a pass from *examining* an account that already has a derivation queued, so the
+/// batch covers the rest of the accounts rather than re-enqueuing the same ones.
+///
+/// Public because it is the unit the tests drive: waiting five minutes for a tick would be a
+/// timing test.
+pub async fn reminder_pass(state: &AppState) -> AppResult<u64> {
+    let window = reminder_window(state);
+    let accounts: Vec<Uuid> = sqlx::query_scalar(
+        "select u.id
+           from users u
+          where u.deleted_at is null
+            and not exists (
+                  select 1 from jobs j
+                   where j.status in ('queued', 'running')
+                     and j.dedupe_key = 'send_reminder:' || u.id::text || ':' || $1::text)
+          order by u.id
+          limit $2",
+    )
+    .bind(&window)
+    .bind(REMINDER_BATCH)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing accounts to remind: {error}")))?;
+
+    let mut enqueued = 0u64;
+    for user_id in accounts {
+        jobs::enqueue(
+            &state.pool,
+            &state.jobs,
+            "send_reminder",
+            serde_json::json!({ "user_id": user_id }),
+            Some(&format!("send_reminder:{user_id}:{window}")),
+        )
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing send_reminder: {error}")))?;
+        enqueued += 1;
+    }
+    if enqueued > 0 {
+        tracing::info!(enqueued, "scheduled reminder derivations");
+    }
+    Ok(enqueued)
+}
+
+/// `floor(now / REMINDER_TICK)`, the reminder pass's dedupe window.
+///
+/// A UTC second count rather than a local date, and the file's header says why: the pass is a
+/// producer of rows and its idempotence is a watermark, while every local-time decision belongs
+/// to the pure engine. A windowed key also means a pass that runs a second after the last one
+/// is a no-op, which a per-date key would not give.
+pub fn reminder_window(state: &AppState) -> i64 {
+    state.clock.now().timestamp() / REMINDER_TICK.as_secs().max(1) as i64
 }
 
 /// One payment pass: enqueue the poller and the sweep, idempotent by their windows.

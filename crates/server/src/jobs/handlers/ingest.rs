@@ -100,8 +100,14 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
                 && let Err(failure) = extract_syllabus(state, source_id, user_id).await
             {
                 // The draft says what went wrong even while the job is going to be retried,
-                // for the same reason the source does: the client is polling it.
-                mark_draft_failed(&state.pool, source_id, &failure.message).await;
+                // for the same reason the source does: the client is polling it. A failure
+                // with no retry left also gives back the eight credits the upload charged —
+                // the same two-arm refund the quiz path has (A253).
+                if final_attempt(&failure, job.attempts) {
+                    fail_draft_and_refund(state, source_id, &failure.message).await;
+                } else {
+                    mark_draft_failed(&state.pool, source_id, &failure.message).await;
+                }
                 set_status(&state.pool, source_id, "failed", Some(&failure.message)).await?;
                 return Err(failure);
             }
@@ -115,10 +121,25 @@ pub async fn run(state: &AppState, job: &ClaimedJob) -> Result<(), Failure> {
             // went wrong even while the job is going to be retried, and the final
             // failure has to leave the same readable text.
             set_status(&state.pool, source_id, "failed", Some(&failure.message)).await?;
-            mark_draft_failed(&state.pool, source_id, &failure.message).await;
+            // A parse failure that will never succeed is the same charge-with-nothing-
+            // delivered the extraction's own failure is, so the refund arm is here too.
+            if final_attempt(&failure, job.attempts) {
+                fail_draft_and_refund(state, source_id, &failure.message).await;
+            } else {
+                mark_draft_failed(&state.pool, source_id, &failure.message).await;
+            }
             Err(failure)
         }
     }
+}
+
+/// Whether this failure is the last one the job gets.
+///
+/// A transient failure on the last allowed attempt is final in every way that matters to the
+/// student: no retry is coming, so the charge must come back. The same predicate the quiz
+/// handler uses, kept here as one function because it is asked twice.
+fn final_attempt(failure: &Failure, attempts: i32) -> bool {
+    !failure.retryable || attempts >= crate::jobs::MAX_ATTEMPTS
 }
 
 /// The source kind that carries an extraction step (A250).
@@ -368,6 +389,110 @@ async fn mark_draft_failed(pool: &sqlx::PgPool, source_id: Uuid, error: &str) {
     {
         tracing::error!(%source_id, %record_error, "could not record the draft's failure");
     }
+}
+
+/// Marks the draft failed **and gives back exactly what the upload charged**, once.
+///
+/// The same shape `generate_quiz::fail_and_refund` uses, for the same reason: the upload
+/// charged eight credits before the model was ever called, so a failure with no retry left is
+/// a charge with nothing delivered. The guard is `credits_spent > 0`, consumed by the claim
+/// that zeroes it — a second call (a retried job or the boot sweep) refunds nothing because
+/// there is nothing left to refund.
+///
+/// The draft is left terminal in every case. When the refund insert cannot be written, an
+/// infrastructure failure rather than a business one, the charge is kept (`credits_spent > 0`,
+/// "charged and not delivered, refund pending") and the status change still commits, because
+/// this is only ever called on the final attempt: a rollback would leave the draft
+/// `extracting` with no retry left to resolve it.
+/// `credits::refund_pending(RefundTarget::SyllabusDraft)` recovers the charge at the next
+/// boot.
+async fn fail_draft_and_refund(state: &AppState, source_id: Uuid, message: &str) {
+    let mut tx = match state.pool.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %source_id, "could not begin the draft failure transaction");
+            return;
+        }
+    };
+
+    let claimed: Option<(Uuid, i32)> = sqlx::query_as(
+        "update syllabus_drafts
+            set status = 'failed', error = $2, credits_spent = 0, updated_at = now()
+          where source_id = $1 and credits_spent > 0 and status <> 'confirmed'
+         returning user_id, credits_spent",
+    )
+    .bind(source_id)
+    .bind(message)
+    .fetch_optional(&mut *tx)
+    .await
+    .ok()
+    .flatten();
+
+    let Some((user_id, credits)) = claimed else {
+        // Either the draft was already failed, it never had a charge, or it has been
+        // confirmed — a confirmed draft's rows are the student's and must not be touched.
+        // Make sure the status is right, then stop.
+        if let Err(error) = sqlx::query(
+            "update syllabus_drafts
+                set status = 'failed', error = $2, updated_at = now()
+              where source_id = $1 and status not in ('failed', 'confirmed')",
+        )
+        .bind(source_id)
+        .bind(message)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(%error, %source_id, "could not mark the draft failed");
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(%error, %source_id, "could not commit the draft failure");
+        }
+        return;
+    };
+
+    // The ledger row is issued inside the same transaction as the claim that zeroed
+    // `credits_spent`, so a crash between the two cannot charge a student for an extraction
+    // they never received with no retry left to fix it. The refund runs under a savepoint
+    // because Postgres aborts a transaction on any failed statement.
+    if let Err(error) = sqlx::query("savepoint refund").execute(&mut *tx).await {
+        tracing::error!(%error, %source_id, "could not open the refund savepoint");
+        return;
+    }
+
+    if let Err(error) =
+        crate::credits::refund_in(&mut tx, user_id, i64::from(credits), source_id, "refund").await
+    {
+        tracing::error!(%error, %source_id, "could not refund a failed extraction; the charge stays pending for recovery");
+
+        if let Err(rollback_error) = sqlx::query("rollback to savepoint refund")
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(%rollback_error, %source_id, "could not roll back the failed refund insert");
+            return;
+        }
+        if let Err(restore_error) =
+            sqlx::query("update syllabus_drafts set credits_spent = $2 where source_id = $1")
+                .bind(source_id)
+                .bind(credits)
+                .execute(&mut *tx)
+                .await
+        {
+            tracing::error!(%restore_error, %source_id, "could not restore the pending charge");
+            return;
+        }
+        if let Err(commit_error) = tx.commit().await {
+            tracing::error!(%commit_error, %source_id, "could not commit the draft failure");
+        }
+        return;
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %source_id, "could not commit the draft failure");
+        return;
+    }
+
+    tracing::warn!(%source_id, credits, "extraction failed permanently; credits refunded");
 }
 
 async fn set_status(

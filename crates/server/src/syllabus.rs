@@ -257,14 +257,20 @@ pub async fn create(
                 // poll the moment the upload is accepted, and so a job that never runs leaves
                 // a draft stuck in `extracting` — a state the client can see and report,
                 // rather than a 404 that looks like the upload was lost.
+                //
+                // `credits_spent` is the guard a permanent extraction failure refunds
+                // through (A253): the eight credits are charged in this same transaction, so
+                // the draft carries the amount the refund owes.
                 let draft_id: Uuid = sqlx::query_scalar(
-                    "insert into syllabus_drafts (user_id, workspace_id, source_id, status)
-                     values ($1, $2, $3, 'extracting')
+                    "insert into syllabus_drafts
+                       (user_id, workspace_id, source_id, status, credits_spent)
+                     values ($1, $2, $3, 'extracting', $4)
                      returning id",
                 )
                 .bind(user_id)
                 .bind(workspace_id)
                 .bind(source_id)
+                .bind(cost as i32)
                 .fetch_one(&mut *conn)
                 .await
                 .map_err(|error| {
@@ -352,7 +358,7 @@ async fn load_draft(state: &AppState, user_id: Uuid, draft_id: Uuid) -> AppResul
 /// The timezone a user's own rows are read in. `users.timezone` is validated at signup, so
 /// the fallback is unreachable rather than a policy: it exists so a stored value the tz
 /// database does not know cannot turn every read into a 500.
-fn zone(timezone: &str) -> Tz {
+pub(crate) fn zone(timezone: &str) -> Tz {
     timezone.parse().unwrap_or(chrono_tz::Asia::Jakarta)
 }
 
