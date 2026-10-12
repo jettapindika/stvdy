@@ -11,6 +11,7 @@ pub mod embedder;
 pub mod llm;
 pub mod mailer;
 pub mod payment;
+pub mod push;
 pub mod search;
 pub mod storage;
 pub mod testing;
@@ -26,6 +27,7 @@ pub use payment::{
     GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
     WebhookKind,
 };
+pub use push::{PushError, PushMessage, PushPlatform, PushProvider};
 pub use search::{
     FetchError, FetchedPage, PageFetcher, SearchError, SearchHit, SearchProvider, SourceKind,
 };

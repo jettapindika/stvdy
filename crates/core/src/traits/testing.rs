@@ -21,13 +21,14 @@ use tokio::sync::mpsc;
 use super::clock::Clock;
 use super::embedder::{EmbedError, Embedder};
 use super::llm::{
-    ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, StreamEvent, Usage,
+    ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, StreamEvent, ToolCall, Usage,
 };
 use super::mailer::{Email, MailError, Mailer};
 use super::payment::{
     GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
     WebhookKind,
 };
+use super::push::{PushError, PushMessage, PushPlatform, PushProvider};
 use super::storage::{Storage, StorageError};
 
 /// The dimension the hash embedder reports, matching `chunks.embedding`.
@@ -232,6 +233,14 @@ pub struct ScriptedLlm {
     /// When set, every call fails with `LlmError::Provider` and this message:
     /// a provider that is down stays down for the duration of a test.
     failure: Option<String>,
+    /// When set, this provider *supports tools* and emits exactly these calls,
+    /// after any scripted tokens.
+    ///
+    /// `supports_tools()` reads this field rather than a flag beside it, so the
+    /// claim and the emission cannot disagree: a double that says it can call a
+    /// tool always has the calls it would make, and the injection test's
+    /// anti-vacuity rests on that (A279).
+    tools: Option<Vec<ToolCall>>,
     requests: Mutex<Vec<ChatRequest>>,
 }
 
@@ -241,6 +250,7 @@ impl ScriptedLlm {
             responses: Mutex::new(responses),
             tokens: None,
             failure: None,
+            tools: None,
             requests: Mutex::new(Vec::new()),
         }
     }
@@ -255,6 +265,7 @@ impl ScriptedLlm {
             responses: Mutex::new(Vec::new()),
             tokens: Some(tokens),
             failure: None,
+            tools: None,
             requests: Mutex::new(Vec::new()),
         }
     }
@@ -265,6 +276,26 @@ impl ScriptedLlm {
             responses: Mutex::new(Vec::new()),
             tokens: None,
             failure: Some(message.to_string()),
+            tools: None,
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A provider that supports tools and emits these calls, in order, after any
+    /// scripted tokens. `supports_tools()` is true for this instance.
+    ///
+    /// This is the double the injection test's anti-vacuity depends on: without
+    /// it a "no task was created" assertion passes with the gate deleted, because
+    /// nothing ever called a tool (A279). An empty list is a legitimate instance
+    /// too — a provider that supports tools and whose model chose not to call
+    /// one — which is why the claim is derived from this field and not from the
+    /// list being non-empty.
+    pub fn tool_calling(calls: Vec<ToolCall>) -> Self {
+        Self {
+            responses: Mutex::new(Vec::new()),
+            tokens: None,
+            failure: None,
+            tools: Some(calls),
             requests: Mutex::new(Vec::new()),
         }
     }
@@ -286,21 +317,36 @@ impl ScriptedLlm {
         Ok(())
     }
 
-    fn next_response(&self) -> Result<String, LlmError> {
-        if let Some(message) = &self.failure {
-            return Err(LlmError::Provider(message.clone()));
+    /// The calls this instance emits, if it is a tool-calling one.
+    fn scripted_calls(&self) -> Result<Vec<ToolCall>, LlmError> {
+        Ok(self.tools.clone().unwrap_or_default())
+    }
+
+    /// A provider that is down stays down: every call fails with the same error.
+    fn check_failure(&self) -> Result<(), LlmError> {
+        match &self.failure {
+            Some(message) => Err(LlmError::Provider(message.clone())),
+            None => Ok(()),
         }
+    }
+
+    /// The next queued response, or `None` when none is left.
+    fn take_response(&self) -> Result<Option<String>, LlmError> {
         let mut responses = self
             .responses
             .lock()
             .map_err(|_| LlmError::Provider("scripted llm lock poisoned".into()))?;
         if responses.is_empty() {
-            return Err(LlmError::Provider(
-                "scripted llm has no queued response left".into(),
-            ));
+            return Ok(None);
         }
-        Ok(responses.remove(0))
+        Ok(Some(responses.remove(0)))
     }
+}
+
+/// The error a double returns when its script ran out: a test that asked for one more
+/// response than it queued has a bug, and this is the message that names it.
+fn exhausted() -> LlmError {
+    LlmError::Provider("scripted llm has no queued response left".into())
 }
 
 #[async_trait::async_trait]
@@ -310,38 +356,54 @@ impl LlmProvider for ScriptedLlm {
     }
 
     fn supports_tools(&self) -> bool {
-        false
+        self.tools.is_some()
     }
 
     async fn complete(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
         self.record(req)?;
-        let text = self.next_response()?;
+        self.check_failure()?;
+        let tool_calls = self.scripted_calls()?;
+        let text = match self.take_response()? {
+            Some(text) => text,
+            // A tool-only turn is a legitimate reply, and the chat route persists
+            // its assistant message for exactly this shape (A281): the model asked
+            // for a tool and said nothing, which is what the injection fixture's
+            // first round looks like.
+            None if !tool_calls.is_empty() => String::new(),
+            None => return Err(exhausted()),
+        };
         Ok(ChatResponse {
             text,
-            tool_calls: Vec::new(),
+            tool_calls,
             usage: Usage::default(),
         })
     }
 
     async fn stream(&self, req: ChatRequest) -> Result<ChatStream, LlmError> {
         self.record(req)?;
+        self.check_failure()?;
+        let calls = self.scripted_calls()?;
 
         let scripted: Vec<String> = match &self.tokens {
             Some(tokens) => tokens.clone(),
-            None => {
-                let text = self.next_response()?;
-                // One token per whitespace-delimited segment, separators
-                // included, so concatenating the tokens reproduces the scripted
-                // text exactly.
-                text.split_inclusive(char::is_whitespace)
-                    .map(str::to_string)
-                    .collect()
-            }
+            None => match self.take_response()? {
+                Some(text) => {
+                    // One token per whitespace-delimited segment, separators
+                    // included, so concatenating the tokens reproduces the scripted
+                    // text exactly.
+                    text.split_inclusive(char::is_whitespace)
+                        .map(str::to_string)
+                        .collect()
+                }
+                None if !calls.is_empty() => Vec::new(),
+                None => return Err(exhausted()),
+            },
         };
         let tokens = scripted;
-        // Capacity covers every token plus `Done`, so no send is dropped and no
-        // spawned task or runtime is needed: a double must work in a plain test.
-        let (sender, receiver) = mpsc::channel(tokens.len() + 1);
+        // Capacity covers every token, every call and `Done`, so no send is dropped
+        // and no spawned task or runtime is needed: a double must work in a plain
+        // test.
+        let (sender, receiver) = mpsc::channel(tokens.len() + calls.len() + 1);
         for token in tokens {
             if sender
                 .try_send(StreamEvent::Token(token.to_string()))
@@ -350,8 +412,74 @@ impl LlmProvider for ScriptedLlm {
                 break;
             }
         }
+        // The calls follow the text, which is the order a provider streams them in:
+        // a model that explains and then asks for a tool.
+        for call in calls {
+            let _ = sender.try_send(StreamEvent::ToolCall(call));
+        }
         let _ = sender.try_send(StreamEvent::Done);
         Ok(receiver)
+    }
+}
+
+/// A push provider that records every attempt, including a failed one.
+///
+/// The attempt is recorded even when the send fails, because `reminder_deliveries` records
+/// the attempt: a double that hid a failed send would let a test assert a delivery that
+/// never happened, or worse, assert that no delivery row was written when one was.
+#[derive(Debug)]
+pub struct ScriptedPush {
+    platform: PushPlatform,
+    sends: Mutex<Vec<(String, PushMessage)>>,
+    /// When set, every send fails with this error.
+    failure: Option<PushError>,
+}
+
+impl ScriptedPush {
+    /// A provider that succeeds and records what it was asked to send.
+    pub fn new(platform: PushPlatform) -> Self {
+        Self {
+            platform,
+            sends: Mutex::new(Vec::new()),
+            failure: None,
+        }
+    }
+
+    /// A provider whose every send fails with `error`, so a test can tell a dead token
+    /// from an unreachable vendor.
+    pub fn failing(platform: PushPlatform, error: PushError) -> Self {
+        Self {
+            platform,
+            sends: Mutex::new(Vec::new()),
+            failure: Some(error),
+        }
+    }
+
+    /// Every `(token, message)` this double was handed, in order.
+    pub fn sends(&self) -> Vec<(String, PushMessage)> {
+        self.sends
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait::async_trait]
+impl PushProvider for ScriptedPush {
+    fn platform(&self) -> PushPlatform {
+        self.platform
+    }
+
+    async fn send(&self, token: &str, msg: PushMessage) -> Result<(), PushError> {
+        let mut sends = self
+            .sends
+            .lock()
+            .map_err(|_| PushError::Transport("scripted push lock poisoned".into()))?;
+        sends.push((token.to_string(), msg));
+        match &self.failure {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 }
 
