@@ -1555,3 +1555,46 @@ attach the block to and there is no goal picker yet, so a call would have to inv
 Every chart carries a **text equivalent**: each figure has a sentence beside it stating the same
 fact in words, so the screen is readable without the bars and works with a screen reader and at
 200% text scale at once.
+
+## Store-absence checks must validate the artifact that actually ships
+
+A check that asserts a property **absent** from a build is only as good as the build it
+inspects, and the two shipped checks in this repo differ in exactly that respect.
+
+`scripts/check-no-cdn.mjs` may read the web `app/dist`, because that build *is* the
+artifact on every platform: the desktop shell bundles it and the phone bundles it, so a
+remote origin found there is a remote origin found everywhere.
+
+`scripts/check-no-purchase-ui.mjs` may **not**. Its property — a store build ships no
+price, no purchase CTA and no route to a checkout — is **platform-conditional**:
+`config/billing_policy.toml` permits all three on web and desktop and forbids all three on
+`ios` and `android`. Reading the web `dist` therefore proves nothing about the phone
+artifact, and the check is currently inspecting the web build while naming it "the mobile
+build". Its markers are honest for a mobile artifact and merely *present* in the web one:
+the router must register `billing/checkout/:paymentId` and the API layer must POST to
+`/billing/checkout`, so five such strings sit in the one entry chunk that every platform
+installs — `src-tauri/tauri.conf.json` points every platform at the same `../app/dist`
+and declares no per-platform `frontendDist`.
+
+The mechanism A322 named does not close the gap. A322 says the checkout component is
+tree-shaken out of the mobile chunk "because the route element is chosen at the router",
+but `billingElementFor` reads `platform.kind()` at **runtime** — which is what makes the
+choice testable and correct at runtime, and also what keeps both route elements in one
+chunk. Runtime routing and build-time exclusion are different mechanisms, and only the
+second one removes bytes.
+
+**The rule.** A store-absence check must be pointed at a build that can satisfy it, and it
+must **print which artifact it inspected and whether that is the one a store receives**. A
+red check that names its gap is worth more than a green one that inspected the wrong
+bytes. The remedy is a build-time exclusion for the mobile bundle (or a genuinely separate
+mobile artifact), and until that exists the check stays red on the web `dist` on purpose.
+Narrowing a marker because the code trips it would make the check agree with the code
+while the property stayed false — a control that looks enforced, which is the failure this
+project's gates exist to catch.
+
+**What is established, and what is not.** The *runtime* property holds and is asserted:
+on `ios` and `android` `/billing` renders `MobilePlanScreen`, and `PricingScreen` states
+the fact with zero amounts, zero `button`/`a` elements and no checkout text, with the
+price fields **absent** rather than zeroed (`PricingScreen.test.tsx`). The *byte-level*
+absence does not hold yet, and it is a build gap rather than a component one. The owning
+phase is 14, which owns the mobile artifact and `scripts/check-no-purchase-ui.mjs`.
