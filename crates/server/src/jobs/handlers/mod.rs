@@ -2,6 +2,7 @@
 //! caller.
 
 pub mod cheatsheet;
+pub mod compact;
 pub mod counters;
 pub mod generate;
 pub mod generate_quiz;

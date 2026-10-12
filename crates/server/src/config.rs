@@ -64,6 +64,12 @@ pub struct AppConfig {
     /// before the rollover expires it (the spec's "3-day grace period
     /// (configurable)"). Read by `jobs::handlers::counters`.
     pub grace_period_days: i64,
+    /// How long an `upsert` change is kept before `compact_change_log` removes it (A184).
+    pub change_log_retention_days: i64,
+    /// How long a `delete` change is kept. At least the retention window, because a device
+    /// that has been offline for three months must still be told that a row was removed
+    /// rather than silently keep it (A184).
+    pub change_log_tombstone_retention_days: i64,
     /// LibreOffice's CLI, for the PPTX/DOCX PDF preview (A158).
     ///
     /// `None` follows the same policy as `pdfium_lib_path`: the source still
@@ -312,6 +318,12 @@ impl AppConfig {
             llm: llm_config(&get_or, &get),
             search: search_config(&get, &get_or)?,
             grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
+            change_log_retention_days: get_i64(&get, "CHANGE_LOG_RETENTION_DAYS", 90)?,
+            change_log_tombstone_retention_days: get_i64(
+                &get,
+                "CHANGE_LOG_TOMBSTONE_RETENTION_DAYS",
+                180,
+            )?,
             soffice_bin: get("SOFFICE_BIN")
                 .filter(|s| !s.is_empty())
                 .map(|s| root.join(s)),

@@ -92,7 +92,32 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
         enqueue_boundary_jobs(state, user_id, &timezone).await?;
         scheduled += 1;
     }
+
+    // The daily change-log compaction is a *global* singleton rather than a per-account
+    // boundary job, so it is enqueued once per pass and deduped by the UTC date (A184).
+    enqueue_compaction(state).await?;
+
     Ok(scheduled)
+}
+
+/// Enqueues the daily change-log compaction.
+///
+/// Idempotent by the UTC date: the unique index on `jobs.dedupe_key` means a second
+/// enqueue in one day is a no-op, which is what makes it safe to call from every scheduler
+/// pass, on every instance, across restarts. A `pass` that also enqueued the per-account
+/// boundaries runs the same way whether or not the compaction is already waiting.
+pub async fn enqueue_compaction(state: &AppState) -> AppResult<()> {
+    let key = format!("compact_change_log:{}", state.clock.now().date_naive());
+    jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        "compact_change_log",
+        serde_json::json!({}),
+        Some(&key),
+    )
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing the compaction: {error}")))?;
+    Ok(())
 }
 
 /// Enqueues every boundary kind for one account.

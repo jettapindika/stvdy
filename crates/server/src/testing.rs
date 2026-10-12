@@ -69,6 +69,10 @@ pub fn config() -> AppConfig {
             ("EXA_API_KEY", ""),
             ("SEARCH_API_KEY", ""),
             ("SEARCH_CACHE_TTL_HOURS", "24"),
+            // Pinned like the search keys: a developer whose `.env` sets a retention
+            // window would otherwise change what the sync suites compact.
+            ("CHANGE_LOG_RETENTION_DAYS", "90"),
+            ("CHANGE_LOG_TOMBSTONE_RETENTION_DAYS", "180"),
         ],
     )
     .expect("the test config must load")

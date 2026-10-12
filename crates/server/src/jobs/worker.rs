@@ -95,6 +95,9 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // while the rollover is idempotent and cheap to repeat.
         "monthly_grant" => crate::jobs::handlers::grants::run(state, job).await,
         "reset_counters" => crate::jobs::handlers::counters::run(state, job).await,
+        // The daily change-log compaction: a global singleton, unlike the per-account
+        // boundary jobs above (A184).
+        "compact_change_log" => crate::jobs::handlers::compact::run(state, job).await,
         // Separate from `generate_cheatsheet` so a failed print cannot discard a
         // successfully generated document: the blocks are the document, and a print is
         // retryable and free.
