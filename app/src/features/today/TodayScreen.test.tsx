@@ -1,10 +1,11 @@
 import { screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
 import { fakeCache } from '@/test/syncStore'
+import { setAccessToken } from '@/lib/tokens'
 import { TodayScreen } from './TodayScreen'
 
 /**
@@ -110,6 +111,9 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   vi.setSystemTime(NOW)
   window.localStorage.clear()
+  // The access token lives in module memory, so it survives a test: without this
+  // reset a test that signs in would leave every later test signed in too.
+  setAccessToken(null)
 })
 
 afterEach(() => {
@@ -217,8 +221,14 @@ describe('the Today view offline', () => {
 })
 
 describe('quick capture', () => {
-  /** The cache and the two served reads every capture test needs. */
-  function setup(granted: boolean) {
+  /**
+   * The cache and the two served reads every capture test needs.
+   *
+   * `overrides` exists for the cases where the answer is the point rather than the
+   * scaffolding: the student's zone decides which day the due line names, and the
+   * draft's instant decides it too, so a test that pins the pair has to say both.
+   */
+  function setup(granted: boolean, overrides: { timezone?: string; dueAt?: string } = {}) {
     const cache = fakeCache({
       task: [],
       event: [],
@@ -233,7 +243,9 @@ describe('quick capture', () => {
     const fake = installFakePlatform('macos', { sync: { read: cache.read } })
     const calls = mockFetch((url) => {
       const path = new URL(url).pathname
-      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/auth/me') {
+        return jsonResponse(200, { ...USER, timezone: overrides.timezone ?? USER.timezone })
+      }
       if (path === '/usage') {
         return jsonResponse(200, {
           ...USAGE,
@@ -245,7 +257,7 @@ describe('quick capture', () => {
           draft: {
             title: 'Selesaikan tugas kripto',
             notes: null,
-            due_at: '2026-10-16T16:59:00Z',
+            due_at: overrides.dueAt ?? '2026-10-16T16:59:00Z',
             priority: 2,
             estimate_min: 60,
             warnings: ['due_at: could not read "friday-ish"'],
@@ -258,6 +270,15 @@ describe('quick capture', () => {
       return jsonResponse(404, { code: 'not_found', message: 'no' })
     })
     return { fake, calls }
+  }
+
+  /** Types a line, runs the capture, and waits for the draft card. */
+  async function openDraft(user: UserEvent) {
+    const field = await screen.findByLabelText('What do you have to do?')
+    await user.type(field, 'selesaikan tugas kripto hari Jumat')
+    await user.click(screen.getByRole('button', { name: /Draft a task/ }))
+    await screen.findByText('Suggested task')
+    return field
   }
 
   it('shows the credit cost before the capture runs and saves nothing until confirmed', async () => {
@@ -314,6 +335,101 @@ describe('quick capture', () => {
 
     expect(fake.sync.writes).toEqual([])
     expect(screen.queryByText('Suggested task')).toBeNull()
+  })
+
+  /**
+   * The draft card's `Due` line names a day, not an instant.
+   *
+   * `2026-10-15T23:00Z` is **06:00 on the 16th in Jakarta** and 23:00 on the 15th
+   * in UTC, so the pair below is what a formatter that ignores the zone cannot
+   * pass: the raw instant renders the 15th, and every other date on this screen
+   * renders the student's own day. Gate 6 exists for exactly this deadline — the
+   * one a UTC implementation puts a day early.
+   */
+  describe('the due line is the student\u2019s day', () => {
+    const DUE_AT = '2026-10-15T23:00:00Z'
+
+    it('renders the 16th for a student in Jakarta', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      setup(true, { timezone: 'Asia/Jakarta', dueAt: DUE_AT })
+      // Signed in, because the zone this asserts comes from the session's own
+      // `timezone` and not from the default: an anonymous render would pass this
+      // test whatever the student's zone said.
+      setAccessToken('access-1')
+      renderWithProviders(<TodayScreen />, { route: '/' })
+
+      await openDraft(user)
+
+      expect(screen.getByText('Due 16 Oct 2026')).toBeInTheDocument()
+      // Not the instant, which is the same string a reader would have had to
+      // parse before: the UTC day is the 15th.
+      expect(screen.queryByText(/2026-10-15T23:00/)).toBeNull()
+    })
+
+    it('renders the 15th for the same instant in UTC', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      setup(true, { timezone: 'UTC', dueAt: DUE_AT })
+      setAccessToken('access-1')
+      renderWithProviders(<TodayScreen />, { route: '/' })
+
+      await openDraft(user)
+
+      // The zone decides, not the instant: this is the other half of the pair.
+      expect(screen.getByText('Due 15 Oct 2026')).toBeInTheDocument()
+    })
+  })
+
+  describe('dismissing the draft from the keyboard', () => {
+    it('closes the card on Escape while the caret is in the composer', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { fake } = setup(true)
+      renderWithProviders(<TodayScreen />, { route: '/' })
+
+      const field = await openDraft(user)
+      // The caret is in the composer, which is *outside* the card: a keydown
+      // handler on the card's container would never see this one, which is why
+      // the listener is on the window.
+      await user.click(field)
+
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByText('Suggested task')).toBeNull()
+      expect(document.activeElement).toBe(field)
+      expect(fake.sync.writes).toEqual([])
+    })
+
+    it('returns the caret to the composer when Escape arrives from a card control', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      setup(true)
+      renderWithProviders(<TodayScreen />, { route: '/' })
+
+      const field = await openDraft(user)
+      // Focus on the card's own button: this is the measurement the gate took.
+      // Losing focus is half the defect — without the focus move the caret ends
+      // at `document.body` and the next Tab starts at the top of the document.
+      screen.getByRole('button', { name: 'Dismiss' }).focus()
+      expect(document.activeElement).not.toBe(field)
+
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByText('Suggested task')).toBeNull()
+      expect(document.activeElement).toBe(field)
+    })
+
+    it('leaves the composer alone on Escape when there is no draft', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      setup(true)
+      renderWithProviders(<TodayScreen />, { route: '/' })
+
+      const field = await screen.findByLabelText('What do you have to do?')
+      await user.click(field)
+      await user.keyboard('{Escape}')
+
+      // The listener only exists while there is a draft, so a composer with
+      // nothing to refuse keeps its caret.
+      expect(document.activeElement).toBe(field)
+      expect(screen.queryByText('Suggested task')).toBeNull()
+    })
   })
 
   it('locks quick capture on a plan that does not grant it', async () => {

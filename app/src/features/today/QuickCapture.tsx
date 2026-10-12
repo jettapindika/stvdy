@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { asApiError, type ApiError } from '@/api/errors'
@@ -6,7 +6,9 @@ import { quickCapture, saveTask, type QuickCaptureDraft, type TaskInput } from '
 import { useUsage } from '@/api/queries/usage'
 import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice } from '@/components/ui/States'
+import { useSession } from '@/features/auth/useSession'
 import { TASK_CREDITS, planForFeature } from '@/features/billing/plans'
+import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
 
 /**
  * Quick capture: one line in, a draft the student confirms.
@@ -35,15 +37,52 @@ import { TASK_CREDITS, planForFeature } from '@/features/billing/plans'
  * **A plan that does not grant it shows the locked state**, not a button that will
  * 403: the feature's answer comes from the matrix, and the plan named as having it
  * is derived from the same file rather than written into this component.
+ *
+ * **The due line is a date in the student's zone, not an instant.** The draft
+ * carries a UTC instant, and printing it raw would name the wrong day: a task due
+ * 06:00 on the 16th in Jakarta is `23:00Z` on the 15th. The zone comes from the
+ * session, the same source `TodayScreen` uses for every other date on this screen
+ * — a second source would be a second answer to "which day is it".
+ *
+ * **A draft can be dismissed from the keyboard.** Escape closes it and puts the
+ * caret back in the composer: a draft is a proposal, and a keyboard user has to be
+ * able to refuse one without a mouse. The listener is on `window` (the shape
+ * `QuizScreen` and `StudyScreen` use for their global keys) because the card is a
+ * transient overlay of the composer and focus can be anywhere when Escape arrives.
  */
 export function QuickCapture() {
   const { t } = useTranslation()
   const usage = useUsage()
+  const session = useSession()
+  const timeZone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
+  const inputRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [draft, setDraft] = useState<QuickCaptureDraft | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiError | null>(null)
+
+  // Escape refuses the draft and hands the caret back to the composer. The
+  // listener lives on `window` rather than on the card, because focus can be
+  // anywhere when Escape is pressed — on the field, on one of the card's buttons,
+  // or on nothing after a click on the page — and a handler on the card would miss
+  // all but the first. It exists only while there is a draft to close, which is
+  // the same shape the app's other global keys use (`QuizScreen`, `StudyScreen`).
+  // Without the focus move, the caret lands on `document.body` and the next Tab
+  // starts from the top of the document.
+  useEffect(() => {
+    if (draft === null) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setDraft(null)
+      setEditing(false)
+      inputRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [draft])
 
   const granted = usage.data?.features.quick_capture
   const cost = TASK_CREDITS.breakdown
@@ -119,6 +158,7 @@ export function QuickCapture() {
       </label>
       <input
         id="quick-capture-text"
+        ref={inputRef}
         className="field"
         type="text"
         value={text}
@@ -180,27 +220,42 @@ export function QuickCapture() {
             </div>
           ) : (
             <ul className="flex flex-col gap-1">
-              <li className="text-body">{draft.title}</li>
+              {/* `wrap-anywhere` on every string in this card, because each one is
+                  text this component did not author — the model's title, a warning
+                  it wrote, and a number it chose. Measured in Chromium at 390px with
+                  the root font at 32px: a 55-character unbreakable title took
+                  `document.scrollingElement.scrollWidth` to **1051** against a 390
+                  client width, and `min-w-0 break-words` — the pair this app uses
+                  where a *row* flex item has to shrink — left it at 1051, because
+                  `overflow-wrap: break-word` does not lower a box's min-content
+                  size. `overflow-wrap: anywhere` does, and brings it to 390. */}
+              <li className="wrap-anywhere text-body">{draft.title}</li>
               {draft.due_at !== null ? (
-                <li className="meta">
+                <li className="wrap-anywhere meta">
+                  {/* The student's date, through the same helper and the same zone
+                      the rest of this screen uses. The raw instant is UTC, which
+                      names the wrong day for a deadline before 07:00 in Jakarta. */}
                   {t('today.capture.due', {
-                    when: new Date(draft.due_at).toISOString(),
+                    when: formatInZone(new Date(draft.due_at), timeZone, { dateStyle: 'medium' }),
                   })}
                 </li>
               ) : null}
               {draft.estimate_min !== null ? (
-                <li className="meta">
+                <li className="wrap-anywhere meta">
                   {t('today.capture.estimate', { count: draft.estimate_min })}
                 </li>
               ) : null}
             </ul>
           )}
 
-          {/* The model's warnings, as text beside the field they concern (A194). */}
+          {/* The model's warnings, as text beside the field they concern (A194).
+              `wrap-anywhere` for the same reason as the list above: the detail is
+              the model's own string, and a long one measured 1160px of page
+              overflow at 390px with the root font at 32px. */}
           {draft.warnings.length > 0 ? (
             <ul className="flex flex-col gap-1">
               {draft.warnings.map((warning) => (
-                <li key={warning} className="note note-warning">
+                <li key={warning} className="wrap-anywhere note note-warning">
                   {t('today.capture.warning', { detail: warning })}
                 </li>
               ))}
