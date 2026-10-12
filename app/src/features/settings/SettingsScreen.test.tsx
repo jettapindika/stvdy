@@ -192,6 +192,22 @@ describe('the settings form', () => {
     expect(screen.getByText('Bring your own model key')).toBeInTheDocument()
   })
 
+  it('links to the plan screen, which is a phone build\'s only route to it', async () => {
+    // The credit meter lives in the sidebar, which a phone does not render, and
+    // both `LockedFeature` and the plan-limit notice carry no link on iOS and
+    // Android (A143). So this link is what makes Phase 14's read-only plan screen
+    // reachable on a phone at all — without it the screen exists and no one can
+    // open it. The link is on every platform, because the destination is the plan
+    // and not a purchase.
+    setup()
+    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+
+    expect(await screen.findByRole('link', { name: 'Open plan and usage' })).toHaveAttribute(
+      'href',
+      '/billing',
+    )
+  })
+
   it('saves a language choice to the synced row, so the other device uses it', async () => {
     const user = userEvent.setup()
     const { fake } = setup()

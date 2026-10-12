@@ -1029,6 +1029,11 @@
       "light": "Light",
       "dark": "Dark"
     },
+    "plan": {
+      "title": "Plan and usage",
+      "hint": "What your plan includes, what you have used this month, and what each action costs.",
+      "open": "Open plan and usage"
+    },
     "devices": {
       "title": "Devices and sync",
       "hint": "See every device signed in to this account, and revoke one.",

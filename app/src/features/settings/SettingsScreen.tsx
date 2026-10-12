@@ -36,6 +36,15 @@ import { platform } from '@/platform'
  * (Phase 10), data export and deletion (Phase 7/15) and BYOK (Phase 13) each say
  * which phase brings them, rather than being an absent control a student would
  * look for and not find.
+ *
+ * **This screen is the phone's only route to the plan.** The credit meter lives in
+ * the sidebar, which a phone does not render, and both `LockedFeature` and the
+ * plan-limit notice deliberately carry no link on iOS and Android (A143) — so
+ * without the link in the plan section below, the read-only plan screen Phase 14
+ * builds (A322) would be reachable on a phone only by typing a URL into a webview
+ * that has no address bar. The section is a link for the same reason Devices is
+ * one: a sub-screen of settings is reached from here, not from a sixth tab item
+ * (A189).
  */
 
 /** The channels the settings screen offers, in the order the matrix lists them. */
@@ -329,6 +338,15 @@ export function SettingsScreen() {
             <option value="light">{t('settings.appearance.light')}</option>
             <option value="dark">{t('settings.appearance.dark')}</option>
           </select>
+        </div>
+      </Section>
+
+      <Section title={t('settings.plan.title')}>
+        <div className="card flex flex-col gap-3 p-4">
+          <p className="text-small text-muted">{t('settings.plan.hint')}</p>
+          <Link to="/billing" className="link inline-flex min-h-11 items-center self-start">
+            {t('settings.plan.open')}
+          </Link>
         </div>
       </Section>
 

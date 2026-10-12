@@ -1015,6 +1015,11 @@
       "light": "Terang",
       "dark": "Gelap"
     },
+    "plan": {
+      "title": "Paket dan pemakaian",
+      "hint": "Isi paketmu, yang sudah kamu pakai bulan ini, dan biaya setiap tindakan.",
+      "open": "Buka paket dan pemakaian"
+    },
     "devices": {
       "title": "Perangkat dan sinkronisasi",
       "hint": "Lihat setiap perangkat yang masuk ke akun ini, dan cabut aksesnya.",
