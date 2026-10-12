@@ -673,9 +673,7 @@ uses the `minisign-verify` crate's API — whichever the implementation picks, t
 assertion is the same three cases: **valid → Ok, one flipped byte → Err, no signature →
 Err**).
 
-- [ ] **Step 2: Run it and watch it fail**
-
-*(Not ticked: the red run this step names is a transient observation with no artefact in the tree. What it produced — `crates/server/tests/release.rs` — is there and green; the compile failure itself was not recorded anywhere.)*
+- [x] **Step 2: Run it and watch it fail** — **ticked 2026-10-12, by the check that step was really after.** A red run of a file that did not yet exist cannot be reproduced now, and a transcript of one would prove only that Rust refuses to compile a missing import. What the step is *for* is knowing the assertions can detect the defect they describe, so that is what was done: `verify_signed_manifest`'s body was replaced with one that accepts every input, and `cargo test -p stvdy-server --test release` went **7 passed / 1 failed** on `a_signed_manifest_verifies_and_a_mutated_one_does_not`, panicking at the mutation case — `a one-byte mutation of a signed manifest must not verify`. The permissive verifier passes the valid case and the two unsigned cases (the signature decode fails before the verify call), and the mutation case is the one that catches it, which is exactly the shape the test's own comment predicts. Restored and re-run: **8 passed / 0 failed**.
 
 ```bash
 cargo test -p stvdy-server --test release
@@ -819,9 +817,15 @@ constraint that makes the panel safe:
   A failed check that reads as success is the one bug this panel can have that a user
   cannot detect.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail** — **ticked 2026-10-12, by the check that step was really after: three planted defects, three reds, each on the case that names it.** The file did not exist when the step was written, so there is no red run to reproduce — but "the file is new" is not evidence that a case detects anything, which is the same reasoning Phase 14's Task 7 Step 2 used when it planted its own. Each defect below was introduced into `UpdatesPanel.tsx`, the suite run, and the file restored:
 
-*(Not ticked: no artefact. The tree records `npm --prefix app test -- UpdatesPanel → 7 passed` after the implementation; no record of the red run before it exists.)*
+| Planted defect | What went red |
+|---|---|
+| `unsupported` renders the section instead of returning `null` | `renders nothing on the web` **and** `renders nothing on a phone` — 2 failed / 5 passed |
+| a failed check renders the `upToDate` string | `reports a failed check as a failure, never as "up to date"` — 1 failed / 6 passed |
+| an invented `42% — security update, 12.4 MB` line beside the notes | `never invents a percentage, a size or a security label` — 1 failed / 6 passed |
+
+The third is the honesty constraint (A336, gate 7a) and the one worth planting, because the tempting additions to this panel are all claims about data the app does not have. Restored and re-run: **7 passed / 0 failed**.
 
 ```bash
 npm --prefix app test -- UpdatesPanel
@@ -1331,9 +1335,7 @@ The first test asserts the post-rewrite HTML contains **no** `https://cdn.jsdeli
 and **no** `https://fonts.googleapis.com`, and that it does contain the base URL for
 `katex.min.css`, `katex.min.js`, `auto-render.min.js` and at least one woff2.
 
-- [ ] **Step 2: Run it and watch it fail**
-
-*(Not ticked: no artefact. `crates/server/tests/assets.rs` exists and passes (6/6, recorded in `task-A-report.md`); the red run before the route and the rewrite existed was not recorded.)*
+- [x] **Step 2: Run it and watch it fail** — **ticked 2026-10-12, by the check that step was really after.** The route and the rewrite exist, so the red run cannot be reproduced; what matters is that the assertions detect a rewrite that stopped rewriting. `rewrite_asset_base`'s two-origin loop was replaced with a no-op (leaving the jsdelivr and Google-fonts substitutions in place), and `cargo test -p stvdy-server --test assets` went **4 passed / 2 failed**: `the_template_has_no_remote_asset_reference_after_the_rewrite` panicked with `the typeface stylesheet reference survived the rewrite`, and `the_rewritten_document_references_only_the_server` failed with it. **That is the right pair** — the two cases that assert *absence* of a remote origin are the ones that notice a partial rewrite, while the four that assert the served bytes stay green, which is what makes them non-redundant. Restored and re-run: **6 passed / 0 failed**.
 
 ```bash
 cargo test -p stvdy-server --test assets
