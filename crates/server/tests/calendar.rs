@@ -381,16 +381,35 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
                 END:VEVENT\r\n\
                 END:VCALENDAR\r\n";
 
+    // The re-poll's body: the same feed with one title changed, so a re-poll that does nothing
+    // is distinguishable from one that updated the row.
+    let edited = feed.replace("UAS Jaringan Komputer", "UAS Jaringan Komputer (revisi)");
+
+    // Three answers, in the order the three passes ask for them: the route's first import, the
+    // scheduler's re-poll, and the manual sync's conditional GET.
+    //
+    // **One fetcher for all three, and that is load-bearing.** The job worker `drain_jobs`
+    // spawns reads the fetcher off the *harness's* state, so a test that installs a second
+    // fetcher for the re-poll leaves `fake.calls()` blind to that fetch — which is how this
+    // case failed: the re-poll ran and wrote the row, while the assertion on `fake` still saw
+    // one call.
     let fake = Arc::new(ScriptedIcsFetch::new(vec![
         Scripted::Body {
             body: feed.to_string(),
             etag: Some("\"v1\"".to_string()),
             last_modified: None,
         },
-        // The second poll: the server answers 304 because the validators match.
+        // The re-poll: a changed body under the *same* validator, so the one stored etag is
+        // still current when the manual sync asks again.
+        Scripted::Body {
+            body: edited.clone(),
+            etag: Some("\"v1\"".to_string()),
+            last_modified: None,
+        },
+        // The manual sync: the server answers 304 because the validators match.
         Scripted::NotModified,
     ]));
-    let harness = harness.with_ics_fetch(fake.clone());
+    let mut harness = harness.with_ics_fetch(fake.clone());
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
     let token = signed_up(&app, &harness, "ics@example.test").await;
     // The ICS import itself is available on free; `POST /calendar/sync` is not, because it is
@@ -509,16 +528,48 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
     // can silently break: a later refactor that "tidies" the check into a trigger or a shared
     // validator would refuse this too, and the failure would be a connection that imports once
     // and then holds a stale timetable forever.
-    let edited = feed.replace("UAS Jaringan Komputer", "UAS Jaringan Komputer (revisi)");
-    let harness = harness.with_ics_fetch(Arc::new(ScriptedIcsFetch::always(&edited, None)));
-    // The re-poll's watermark has to be stale, or the pass correctly declines to examine it.
-    sqlx::query("update calendar_connections set last_synced_at = now() - interval '2 hours'")
+    //
+    // Two things have to be true before the re-poll can run, and both are properties of the
+    // poll rather than of this test:
+    //
+    //  * the watermark must be stale, or `calendar_pass` correctly declines to examine the
+    //    connection. It is written against the **injected** clock, not the database's, because
+    //    the pass reads both its cutoff and its dedupe window from that one clock;
+    //  * the clock must be in a **later** window. `jobs::enqueue_at`'s conflict clause is
+    //    `do update set payload = excluded.payload` with no status reset, so enqueuing against
+    //    this connection's already-completed job with the same `dedupe_key` updates that row
+    //    and leaves it `done` — no new work. That is the same property the poll test proves
+    //    from the other side, and here it would silently turn the re-poll into a no-op.
+    harness.state.clock = Arc::new(FixedClock::at(at("2026-06-01T02:00:00Z")));
+    sqlx::query("update calendar_connections set last_synced_at = $1")
+        .bind(harness.state.clock.now() - chrono::Duration::hours(2))
         .execute(&harness.state.pool)
         .await
         .unwrap();
-    stvdy_server::jobs::schedule::calendar_pass(&harness.state)
+    let rescheduled = stvdy_server::jobs::schedule::calendar_pass(&harness.state)
         .await
         .unwrap();
+    assert_eq!(
+        rescheduled, 1,
+        "a stale watermark must put the connection back in the poll"
+    );
+
+    // The row the pass produced, named by the *second* window's key. Without this, a future
+    // change to the key could make the re-poll fetch happen for a different reason — a manual
+    // sync, a second connection — and the assertions below would still pass.
+    let window = harness.state.clock.now().timestamp()
+        / harness.state.config.calendar_poll_interval.as_secs().max(1) as i64;
+    let second: Option<String> =
+        sqlx::query_scalar("select status from jobs where dedupe_key = $1")
+            .bind(format!("sync_calendar:{connection_id}:{window}"))
+            .fetch_optional(&harness.state.pool)
+            .await
+            .unwrap();
+    assert!(
+        matches!(second.as_deref(), Some("queued") | Some("done")),
+        "the second window must have its own job, queued or done: {second:?}"
+    );
+
     common::drain_jobs(&harness).await;
     let (_, events) = json(
         &app,
@@ -544,8 +595,9 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
     );
     assert_eq!(renamed["source"], "ics");
 
-    // The second poll carries the validator and a 304 changes nothing. `last_synced_at` is
-    // advanced even so, because the watermark is what keeps the poll from re-enqueueing.
+    // The re-poll above and this manual sync both carry the stored validator, and a 304
+    // changes nothing. `last_synced_at` is advanced even so, because the watermark is what
+    // keeps the poll from re-enqueueing.
     let changes_before: i64 = sqlx::query_scalar(
         "select count(*) from change_log where user_id = (select id from users where email = $1)",
     )
@@ -568,12 +620,17 @@ async fn an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validat
     common::drain_jobs(&harness).await;
 
     let calls = fake.calls();
-    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(calls.len(), 3, "import, re-poll and manual sync: {calls:?}");
     assert_eq!(calls[0].etag, None, "the first fetch is unconditional");
     assert_eq!(
         calls[1].etag.as_deref(),
         Some("\"v1\""),
-        "the second fetch must send the stored validator: {calls:?}"
+        "the re-poll must send the stored validator: {calls:?}"
+    );
+    assert_eq!(
+        calls[2].etag.as_deref(),
+        Some("\"v1\""),
+        "the manual sync must send the stored validator: {calls:?}"
     );
 
     let changes_after: i64 = sqlx::query_scalar(
@@ -796,7 +853,7 @@ async fn the_poll_job_is_dedupe_guarded_and_a_manual_sync_is_rate_limited(pool: 
     let harness = harness.with_clock(Arc::new(FixedClock::at(
         "2026-06-01T00:00:00Z".parse().unwrap(),
     )));
-    let harness = harness.with_ics_fetch(Arc::new(ScriptedIcsFetch::always(
+    let mut harness = harness.with_ics_fetch(Arc::new(ScriptedIcsFetch::always(
         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@f\r\nSUMMARY:Kelas\r\n\
          DTSTART;TZID=Asia/Jakarta:20260602T080000\r\nDTEND;TZID=Asia/Jakarta:20260602T090000\r\n\
          END:VEVENT\r\nEND:VCALENDAR\r\n",
@@ -814,13 +871,15 @@ async fn the_poll_job_is_dedupe_guarded_and_a_manual_sync_is_rate_limited(pool: 
     // the point of this test: the route's own first import already consumes the poll's dedupe
     // key for this window, so a poll after it is a no-op for a reason that has nothing to do
     // with the guard under test. `last_synced_at` is back-dated to the state a poll actually
-    // meets — a connection nobody has synced for two hours.
+    // meets — a connection nobody has synced for two hours — and against the **injected**
+    // clock, because the pass reads both its cutoff and its dedupe window from that clock.
     sqlx::query(
         "insert into calendar_connections (user_id, provider, ics_url, last_synced_at)
-         select id, 'ics', 'https://faculty.example/academic.ics', now() - interval '2 hours'
+         select id, 'ics', 'https://faculty.example/academic.ics', $2
            from users where email = $1",
     )
     .bind("poll@example.test")
+    .bind(harness.state.clock.now() - chrono::Duration::hours(2))
     .execute(&harness.state.pool)
     .await
     .unwrap();
@@ -843,21 +902,27 @@ async fn the_poll_job_is_dedupe_guarded_and_a_manual_sync_is_rate_limited(pool: 
         "two passes in one window must enqueue one job"
     );
 
-    // The handler runs it, moves the watermark, and re-enqueues nothing itself.
+    // The handler runs it, moves the watermark, and re-enqueues nothing itself. The watermark
+    // is the injected clock's instant, so it is read back against the same clock.
     common::drain_jobs(&harness).await;
-    let synced: bool = sqlx::query_scalar(
-        "select last_synced_at > now() - interval '1 minute' from calendar_connections",
-    )
-    .fetch_one(&harness.state.pool)
-    .await
-    .unwrap();
+    let synced: bool = sqlx::query_scalar("select last_synced_at > $1 from calendar_connections")
+        .bind(harness.state.clock.now() - chrono::Duration::minutes(1))
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
     assert!(synced, "the handler must advance the watermark");
 
-    // A connection synced inside the interval is not even **examined**. The clock is moved a
-    // window on so a fresh key would exist if the connection were selected, and the row count
-    // is what proves it was not: a selected connection inserts a new row, while the guard
-    // against an existing key would only have updated one.
-    harness.state.clock = Arc::new(FixedClock::at(at("2026-06-01T02:00:00Z")));
+    // A connection synced inside the interval is not even **examined**. The clock is moved one
+    // poll interval on — which is also exactly the staleness boundary, because the poll's
+    // interval and its dedupe window are the same length, and the strict `<` is what keeps a
+    // connection synced at the boundary unexamined. A fresh key exists at that instant, so the
+    // row count is what proves the connection was not selected: a selected connection inserts
+    // a new row (the `not exists` guard only matches a *queued* key, and this one is `done`),
+    // while a connection that was never examined leaves the count at one.
+    let interval = harness.state.config.calendar_poll_interval.as_secs().max(1) as i64;
+    harness.state.clock = Arc::new(FixedClock::at(
+        harness.state.clock.now() + chrono::Duration::seconds(interval),
+    ));
     let third = stvdy_server::jobs::schedule::calendar_pass(&harness.state)
         .await
         .unwrap();

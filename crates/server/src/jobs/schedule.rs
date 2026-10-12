@@ -258,8 +258,9 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
 ///
 ///  * the `not exists` guard plus the windowed `dedupe_key` mean a restart, a second instance
 ///    or a double tick enqueues **one** job rather than two;
-///  * `last_synced_at < now() - INTERVAL` means a connection synced inside the window is not
-///    even examined, so a pass costs one query rather than one row per connection.
+///  * `last_synced_at < now() - INTERVAL` (both sides read from `state.clock`) means a
+///    connection synced inside the window is not even examined, so a pass costs one query
+///    rather than one row per connection.
 ///
 /// A connection in `status = 'revoked'` is skipped: its grant is gone, and a pass would only
 /// mark it revoked again. `error` is deliberately **not** skipped — a faculty calendar that
@@ -268,12 +269,19 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
 pub async fn calendar_pass(state: &AppState) -> AppResult<u64> {
     let interval_secs = state.config.calendar_poll_interval.as_secs().max(1) as i64;
     let window = calendar_window(state);
+    // The cutoff is the **injected** clock's instant, not the database's `now()`. The dedupe
+    // key below is built from the same clock, so a pass that compared the database's clock
+    // against a key built from the injected one had two sources of truth for "what time is
+    // it": a test that moved the clock could make the key fresh while the selection still
+    // measured the wall clock, and no time-dependent assertion about this pass could be
+    // written. One instant, read once.
+    let cutoff = state.clock.now() - chrono::Duration::seconds(interval_secs);
     let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
         "select c.id, c.user_id
            from calendar_connections c
           where c.status <> 'revoked'
             and (c.last_synced_at is null
-                 or c.last_synced_at < now() - make_interval(secs => $1))
+                 or c.last_synced_at < $1)
             and not exists (
                   select 1 from jobs j
                    where j.status in ('queued', 'running')
@@ -281,7 +289,7 @@ pub async fn calendar_pass(state: &AppState) -> AppResult<u64> {
           order by c.last_synced_at asc nulls first, c.id
           limit $3",
     )
-    .bind(interval_secs as f64)
+    .bind(cutoff)
     .bind(window.to_string())
     .bind(SCHEDULE_BATCH)
     .fetch_all(&state.pool)

@@ -171,10 +171,11 @@ pub async fn sync_ics(state: &AppState, connection: &ConnectionRow) -> AppResult
     if fetched.not_modified {
         sqlx::query(
             "update calendar_connections
-                set last_synced_at = now(), updated_at = now()
+                set last_synced_at = $2, updated_at = $2
               where id = $1",
         )
         .bind(connection.id)
+        .bind(state.clock.now())
         .execute(&state.pool)
         .await
         .map_err(|error| {
@@ -239,8 +240,8 @@ pub async fn sync_ics(state: &AppState, connection: &ConnectionRow) -> AppResult
                 error = $3,
                 ics_etag = $4,
                 ics_last_modified = $5,
-                last_synced_at = now(),
-                updated_at = now()
+                last_synced_at = $6,
+                updated_at = $6
           where id = $1",
     )
     .bind(connection.id)
@@ -248,6 +249,7 @@ pub async fn sync_ics(state: &AppState, connection: &ConnectionRow) -> AppResult
     .bind(error.as_deref())
     .bind(fetched.etag.as_deref())
     .bind(fetched.last_modified.as_deref())
+    .bind(state.clock.now())
     .execute(&mut *tx)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("recording an ICS import: {error}")))?;
@@ -428,12 +430,13 @@ async fn record_failure(
                 error = $2,
                 ics_etag = null,
                 ics_last_modified = null,
-                last_synced_at = now(),
-                updated_at = now()
+                last_synced_at = $3,
+                updated_at = $3
           where id = $1",
     )
     .bind(connection.id)
     .bind(reason)
+    .bind(state.clock.now())
     .execute(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("recording a sync failure: {error}")))?;
