@@ -346,6 +346,21 @@ async fn free_tier_utilization_and_conversion_are_derived_from_the_split(pool: P
             .execute(&harness.state.pool)
             .await
             .unwrap();
+        // A live subscription, because that is what "paying" means to the report (A146): a
+        // stored `plan_id` with no live subscription grants no paid limits, so counting it as
+        // a paying account would overstate conversion by exactly the accounts that never paid.
+        sqlx::query(
+            "insert into subscriptions
+                (user_id, plan_id, status, billing_period, current_period_start,
+                 current_period_end)
+             values ($1, 'pro', 'active', 'monthly', $2, $3)",
+        )
+        .bind(user_id)
+        .bind(instant("2026-06-01T00:00:00Z"))
+        .bind(instant("2026-07-01T00:00:00Z"))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
         paid(
             &harness,
             user_id,
@@ -357,7 +372,11 @@ async fn free_tier_utilization_and_conversion_are_derived_from_the_split(pool: P
         .await;
     }
 
-    // Free tier: 60 credits granted, 18 spent — A46's "28% ≈ 17 of 60 credits".
+    // Free tier: 60 credits granted to each of the four, 18 spent in total. The figure the
+    // report carries is the tier's own ratio — total spent over total granted — so this is 18
+    // of 240, and it equals A46's "≈17 of 60" only because every free account is granted the
+    // same allowance. Reading it as one account's share would report 30% where the tier used
+    // 7.5%, which is the mistake this assertion exists to pin down.
     let at = instant("2026-06-12T03:00:00Z");
     for user_id in &free_accounts {
         sqlx::query(
@@ -392,8 +411,8 @@ async fn free_tier_utilization_and_conversion_are_derived_from_the_split(pool: P
         .as_f64()
         .expect("a utilization figure");
     assert!(
-        (utilization - 0.30).abs() < 1e-9,
-        "18 of 60 credits spent is 30%: {body}"
+        (utilization - 0.075).abs() < 1e-9,
+        "18 of 240 credits across the four free accounts is 7.5%: {body}"
     );
     let of_free = june_row["conversion_of_free"]
         .as_f64()

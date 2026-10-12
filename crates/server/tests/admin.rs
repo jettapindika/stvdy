@@ -325,16 +325,28 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
     // arithmetic against the rate it used (A304).
     assert_eq!(report.idr_per_usd, 17889);
 
-    // What cannot be computed yet is `null`, never `0`: no grants this month means no
-    // utilization, and no accounts to convert means no conversion ratio.
-    assert!(
-        month.free_utilization.is_none(),
-        "no free grants means no utilization, not 0%: {month:?}"
+    // What the report *can* compute is a real number, not a `null`: the free account was
+    // granted its monthly allowance this month and spent none of it, so 0% is a measurement
+    // rather than an invention, and one paying account of one free account is a ratio the
+    // report can state. The `null` property this test was named for is pinned in
+    // `admin_margin.rs::an_empty_month_is_null_and_the_fx_rate_used_is_printed`, whose range
+    // has no grants and no accounts at all — the only fixture where the answer is unknowable.
+    assert_eq!(
+        month.free_utilization,
+        Some(0.0),
+        "60 credits granted and none spent is 0%, not null: {month:?}"
     );
-    assert!(
-        month.conversion_of_free.is_none(),
-        "a conversion of 0 would be an invented number (gate 7(a)): {month:?}"
+    assert_eq!(
+        month.paying, 1,
+        "the paid account has a live subscription: {month:?}"
     );
+    assert_eq!(month.free_accounts, 1, "{month:?}");
+    assert_eq!(
+        month.conversion_of_free,
+        Some(1.0),
+        "one paying account of one free account: {month:?}"
+    );
+    assert_eq!(month.conversion_of_total, Some(0.5), "{month:?}");
 
     // The bound beside the spend: without it an admin cannot tell whether an account is at
     // 40% or 95% of its ceiling, which is the number the report exists for. It comes from the
@@ -367,9 +379,9 @@ async fn the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_comput
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["idr_per_usd"], 17889, "{body}");
-    assert!(
-        body["tripwires"]["free_utilization_over_30"].is_null(),
-        "{body}"
+    assert_eq!(
+        body["tripwires"]["free_utilization_over_30"], false,
+        "0% of the allowance is measured, and it is not over the 30% line: {body}"
     );
     let rows = body["months"]
         .as_array()

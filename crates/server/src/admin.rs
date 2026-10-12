@@ -498,7 +498,6 @@ pub async fn margin_report(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("counting the accounts: {error}")))?;
 
     let months = assemble_months(from, to, idr_per_usd, usage, revenue, free_credits);
-    let tripwires = tripwires(&months, idr_per_usd);
     let as_of = to;
 
     let mut months = months;
@@ -509,6 +508,12 @@ pub async fn margin_report(
         month.conversion_of_free = ratio(paying, free_accounts);
         month.conversion_of_total = ratio(paying, paying + free_accounts);
     }
+
+    // **After** the loop, not before it: `conversion_under_3` reads `conversion_of_free`, and
+    // a tripwire computed on months whose conversion had not been attached yet was `None`
+    // forever — a tripwire that can never fire is worse than no tripwire, because A46's table
+    // reads it as "measured, and fine".
+    let tripwires = tripwires(&months, idr_per_usd);
 
     Ok(MarginReport {
         from,
@@ -802,12 +807,15 @@ pub async fn mark_paid(
     _admin: AdminUser,
     Path(payment_id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    let row: Option<(String, i64, String)> =
-        sqlx::query_as("select status, amount_idr, order_id from payments where id = $1")
-            .bind(payment_id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the payment: {error}")))?;
+    // `amount_idr` is `int` (INT4) and the field is `i64`; sqlx decodes by SQL type, so the
+    // cast is required — without it this read is a `ColumnDecode` error, not a widening.
+    let row: Option<(String, i64, String)> = sqlx::query_as(
+        "select status, amount_idr::bigint as amount_idr, order_id from payments where id = $1",
+    )
+    .bind(payment_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the payment: {error}")))?;
 
     let Some((_, amount_idr, order_id)) = row else {
         return Err(AppError::NotFound);
