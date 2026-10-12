@@ -605,6 +605,15 @@ how to run it. Phase 6 recorded the requirement before the image existed, and it
   compares the version the running image reports (`chromium --version`) to that `ARG`, so a
   base-image change that silently moves Chromium **fails the build** rather than changing
   every PDF.
+- **The base is `trixie`, not `bookworm`, and the floor is `ort-sys`.** The prebuilt ONNX
+  Runtime that `ort-sys` links is built against glibc ≥ 2.38 (`__isoc23_strtoll`,
+  `__isoc23_strtoull`, `_M_replace_cold`) while bookworm carries 2.36, and `ort-sys`
+  `2.0.0-rc.13`'s `build/download/dist.tsv` carries exactly one distribution per target —
+  so there is no lower-glibc build to switch to and the base image is what had to move. Both
+  stages move together: a binary linked against trixie's glibc does not load on bookworm.
+  The pin follows the base into `trixie-security`, which is where a browser's current
+  version lives — trixie's main archive carries an older one (`150.0.7871.181-1~deb13u1`
+  against the security archive's `154.0.8037.92-1~deb13u1`, read 2026-10-12).
 - **CI runs the acceptance test, and runs it in the image too.** `.github/workflows/ci.yml`
   has two jobs: `pdf` runs
   `CHROME_PATH=/usr/bin/google-chrome cargo test -p stvdy-server --test pdf -- --ignored`
