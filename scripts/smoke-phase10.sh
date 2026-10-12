@@ -290,10 +290,18 @@ printf 'POST /calendar/sync on free: 403 %s (min_plan=%s)\n' \
 # The consent flow's first leg landed with Task 6, so this is now a real assertion rather
 # than a note: free has `google_calendar = false` **and** `google_accounts_max = 0`, and the
 # route checks the boolean first, so the refusal names the plan that has the feature rather
-# than reporting "0 of 0 accounts". A 404 here would mean the route is unregistered — which
-# is the state this scenario used to record, and the reason it asserts a code now.
+# than reporting "0 of 0 accounts".
+#
+# It needs a server with the calendar OAuth client configured (`just smoke-server-phase10`
+# sets dummy values; nothing here reaches Google). Without it the route answers 404 — the
+# documented behaviour for a half-configured client — and a 404 is also what an unregistered
+# route answers, so this scenario cannot tell those apart from outside. That is why the
+# configuration is the run's precondition rather than something the script guesses at.
 STATUS="$(ajson "$TMP/connect.json" GET /calendar/google/connect)"
-[ "$STATUS" = "403" ] || fail "GET /calendar/google/connect on free answered $STATUS, expected 403 (404 = the route is unregistered)"
+if [ "$STATUS" = "404" ]; then
+  fail "GET /calendar/google/connect answered 404. Either GOOGLE_CALENDAR_CLIENT_ID is unset on this server (start it with 'just smoke-server-phase10') or the route is unregistered; this scenario cannot distinguish them, which is why it requires the client."
+fi
+[ "$STATUS" = "403" ] || fail "GET /calendar/google/connect on free answered $STATUS, expected 403"
 [ "$(field '["code"]' < "$TMP/connect.json")" = "plan_required" ] \
   || fail "the connect refusal is not plan_required: $(cat "$TMP/connect.json")"
 printf 'GET /calendar/google/connect on free: 403 %s (min_plan=%s)\n' \
