@@ -1972,7 +1972,7 @@ and assert the next pass was full. Follows `scripts/smoke-phase5.sh`'s shape: it
 one key it needs from `.env` (not `source .env`, which Phase 5's notes record as a hazard),
 and ends with `=== PASS`.
 
-- [ ] **Step 10: Run the full gate**
+- [x] **Step 10: Run the full gate**
 
 | Gate | Command |
 |---|---|
@@ -2018,7 +2018,7 @@ docs(phase 10): the calendar contract, and the three gates
 | 19 | Roadmap gate 6 (Indonesian) measured and recorded | Task 11 Step 7 | **PARTIAL** — the server data half is measured: `an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day` (Jakarta 06:00 on the 16th imports to `2026-10-15T23:00:00Z`; the title round-trips; the local-day deadline renders `DTSTART;VALUE=DATE:20261016`) with `--test indonesian` **4 passed / 0 failed**. The UI half at 200% text was not driven in a browser |
 | 20 | Roadmap gate 7 (honesty) stated and recorded | Task 11 Step 8 | **PASS** — (a)–(e) stated in the phase's own gate-7 notes: no number invented, each traceable to a row, nothing on the screen generative, no cost badge, nothing an AI proposal |
 | 21 | `docs/{API,SYNC,ARCHITECTURE,ASSUMPTIONS,THREAT_MODEL}.md` updated in the same commits | — | **PASS** — all five carry a Phase 10 section: `docs/API.md` `## Calendar (Phase 10)`, `docs/SYNC.md` `## Calendar-sourced events (Phase 10)`, `docs/ARCHITECTURE.md` `## Calendar (Phase 10)`, `docs/ASSUMPTIONS.md` A230–A249, `docs/THREAT_MODEL.md` the § 2 asset rows and residual risk R7 |
-| 22 | The full quality gate is green | Task 11 Step 10 | **NOT GREEN** — `cargo fmt --all -- --check` clean exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean exit 0 (after `31900fb`); `npm --prefix app test` 63 files / 585 tests / 0 failed; `npm --prefix app run build` exit 0; `node scripts/check-no-cdn.mjs` exit 0. `cargo test --workspace` is **NOT** green: it stops at `crates/server/tests/syllabus.rs` (14 passed / 5 failed, Phase 11's exit gate), so it says nothing about the suites after it |
+| 22 | The full quality gate is green | Task 11 Step 10 | **GREEN, measured 2026-10-12.** `cargo fmt --all -- --check` clean exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean exit 0; **`cargo test --workspace --no-fail-fast` exit 0** — every target ok, the four suites this phase owns among them (`calendar` 24 passed / 0 failed, `route_sweep` 4/0, `schema` 27/0, core `calendar` 12/0); `npm --prefix app test` 66 files / 604 tests / 0 failed; `npm --prefix app run build` exit 0; `node scripts/check-no-cdn.mjs` exit 0. The earlier **NOT GREEN** on this row was true when written — the run stopped at `crates/server/tests/syllabus.rs`, which was red on committed code at 14/5 — and `9f1d6ae` fixed that suite. This is the first time the workspace gate has been green in the project's history |
 
 ---
 
@@ -2318,7 +2318,7 @@ named as moved rather than overwritten silently.
   - Task 9 Step 1, "Write the failing test" -- the test it names, `a_calendar_sourced_event_is_read_only_to_a_client_and_writable_by_the_sync`, does not exist at HEAD; the assertions it describes were folded into `crates/server/tests/calendar.rs::an_ics_url_is_imported_with_its_recurrence_and_a_poll_sends_the_validator` (`PATCH` 403, `DELETE` 403, `/sync/push` answering `read_only_entity`, and the re-poll renaming the row with `source` still `ics`), which is the test this phase's exit checklist rows 10 and 11 cite, so the named artefact cannot be confirmed.
   - Task 9 Step 2, "Run it and watch it fail" -- the test this step runs is the one Step 1 names, which is absent, so the failure this step is written to observe was not observed for that test.
   - Task 11 Step 7, "Roadmap gate 6 — Indonesian end to end" -- the UI half the step requires (a `2026-06-10T01:00Z` class driven onto the 10th in `Asia/Jakarta` in the browser at 200% text) was not done: the server data half is measured (`an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day`, `--test indonesian` 4 passed / 0 failed) and the phase's own gate-6 notes record the step as PARTIAL, so the step is not met.
-  - Task 11 Step 10, "Run the full gate" -- `cargo test --workspace`, one of the eight rows in the step's own table, is not green: it stops at `crates/server/tests/syllabus.rs` (14 passed / 5 failed, Phase 11's exit gate), so the step's table is not satisfied even though its other seven rows are.
+  - Task 11 Step 10, "Run the full gate" -- **superseded 2026-10-12: this step is now met.** Its eight rows are all satisfied, including `cargo test --workspace --no-fail-fast`, which exits 0 with every target ok. The reason it was left unticked was true when written: the run stopped at `crates/server/tests/syllabus.rs`, red on committed code at 14/5, and `9f1d6ae` fixed that suite. The step is ticked above.
 
 ---
 
