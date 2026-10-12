@@ -388,8 +388,14 @@ flag inside the screen, so the checkout component is never in the mobile chunk.
     The first real desktop run found three things, none of them the rem class and
     none of them fixed here: the sidebar's nav items measure **215×40** — under 44px
     in height at 100% text, both themes, on every surface; `button.cite` is 36.4×15.2
-    because its 44px rule sits inside `@media (max-width: 767px)` (deliberate,
-    recorded so nobody "fixes" it); and two `p.text-xs` paragraphs in the workspace
+    at 100% — the line-height of the prose it sits in (15.2 against 15.225), so it is a
+    mark *inside* a sentence rather than a control beside it, which WCAG 2.2 SC 2.5.8's
+    exception list covers (the 8px-gap clause cannot be met by something set between two
+    words). Its 44px box therefore lives inside `@media (max-width: 767px)`, and
+    `scripts/measure-mobile.mjs` exempts it **at the 32px desktop floor only** — the
+    phone leg still measures it as a target and still passes. Recorded in
+    `app/src/styles.css` beside `.cite` too, so the reason survives a search from either
+    end; and two `p.text-xs` paragraphs in the workspace
     panels overflow their box at 200% text, inside an `overflow-y-auto` panel whose
     `overflow-x` computes to `auto`, in a grid track declared `minmax(200px, 1fr)` —
     a **px** floor that does not grow with the text, so the panel scrolls sideways.
@@ -707,6 +713,9 @@ CLI out of `app/node_modules`.
 - [x] **Step 6: Commit**
 
 ```
+# DO NOT RUN THIS LINE. It is kept only because the note below explains what was done
+# instead and why; a bare `git add -A` in this repository stages every other slice's
+# work as well.
 git add -A && git commit -m "Phase 14 Task 1: mobile bundle config + both generated projects"
 ```
 
@@ -938,6 +947,20 @@ before the launch sequence ends) and resubmits each request from inside its own 
 `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` exits 0
 (the plugin is a workspace member, so one command covers both crates).
 
+**A correction to that sentence, and it is the reason the counts below matter: the
+command as written does *not* cover both crates.** `--manifest-path` without
+`--workspace` selects the `stvdy-shell` package only, so the plugin's seven scheduler
+tests — including A315's mechanical defence that the background seam never touches the
+webview — **never executed anywhere**, and its Rust shipped unlinted. `cargo fmt --all`
+did reach it, which is how the hole stayed invisible: one of the three commands was
+already right. The trio must pass `--workspace`
+(`cargo test --manifest-path src-tauri/Cargo.toml --workspace`), and it now does in
+`justfile`'s `check-shell` and in `.github/workflows/ci.yml` (`a5f9463`). With it,
+clippy immediately found a real violation in the plugin —
+`plugins/mobile/build.rs`'s `expect()` on the ACL generator, the project's own
+no-expect rule firing on the one crate that had never been linted — fixed in `7c93da5`,
+along with four files the same `--all` fmt check had been failing to reach.
+
 **Four things the plan's file list could not have known, each found by building it.**
 
 1. **The plan's dependency direction is a cycle, and cargo refuses it.**
@@ -1026,7 +1049,7 @@ reaches the app without the extension launching it.
 - Produces: `share::pending_imports() -> Vec<SharedFile>` and
   `share::clear_import(id)`.
 
-- [ ] **Step 1: Write the failing test — the group id is one string**
+- [x] **Step 1: Write the failing test — the group id is one string**
 
 `src-tauri/tests/share_group.rs`:
 
@@ -1047,12 +1070,12 @@ fn the_app_group_identifier_is_declared_in_exactly_one_place() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_group` →
 `cannot find file src/share.rs`.
 
-- [ ] **Step 3: The Share Extension target**
+- [x] **Step 3: The Share Extension target**
 
 `project.yml.template` is the generated `project.yml` plus a `ShareExtension` target of
 `type: app-extension`, `NSExtensionPointIdentifier = com.apple.share-services`, the App
@@ -1062,13 +1085,13 @@ Group entitlement on both targets, and `NSExtensionActivationRule` for
 and returns (it cannot open the host app). `Info.ios.plist` declares the App Group under
 the app's entitlements.
 
-- [ ] **Step 4: The app side**
+- [x] **Step 4: The app side**
 
 `src-tauri/src/share.rs` reads the group container's inbox on foreground, returns the
 pending files through a `share_pending` command, and deletes them once the SPA confirms
 the import. `lib.rs` calls it in `setup` and on resume.
 
-- [ ] **Step 5: Run it**
+- [x] **Step 5: Run it**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_group` → pass. Then a
 **device** build confirms the app appears in the share sheet (the simulator cannot show
@@ -1078,6 +1101,48 @@ a share sheet for a real file); that is a prerequisite, not a CI step (A327).
 
 ```
 git commit -am "Phase 14 Task 4: iOS Share Extension target + App Group import"
+```
+
+**Done, and measured: `cfdeebf`.** The `git add -A` above was **not** used (Task 1's
+reason). `tests/share_group.rs` is **4 passed**; the whole shell workspace is
+**25 unit + 12 cache + 1 config + 7 push + 4 share_android + 4 share_group + 9
+plugin = 62 passed, 0 failed**, `cargo clippy --manifest-path
+src-tauri/Cargo.toml --workspace --all-targets -- -D warnings` exits 0,
+`cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` is clean, and
+`cargo check --manifest-path src-tauri/Cargo.toml --target aarch64-apple-ios-sim
+--lib` exits 0.
+
+**Three things the plan's file list could not have known.**
+
+1. **The App Group is an entitlement, not a plist key, and `xcodegen generate`
+   overwrites the file at `entitlements.path`.** Measured: writing
+   `com.apple.security.application-groups` into
+   `stvdy-shell_iOS/stvdy-shell_iOS.entitlements` by hand and running
+   `xcodegen generate` replaces it with `<dict/>`. Both targets therefore declare it
+   under `entitlements.properties` in `project.yml.template` and XcodeGen writes the
+   two files. The plan's Step 3 ("`Info.ios.plist` declares the App Group under the
+   app's entitlements") would have shipped an empty dict.
+2. **The plan's Step 1 assertion is not implementable as written.**
+   `assert_eq!(app.matches("group.").count(), 1)` counts a *substring* of ordinary
+   prose — "…the App Group. The extension…" — so a correct file with a second
+   paragraph fails it. The shipped test counts the token (`group.` followed by a
+   letter or digit, with a reverse-DNS shape) and compares a `BTreeSet`, and it walks
+   the whole shell rather than two files, so a third spelling in the template, the
+   Kotlin or the entitlements is caught.
+3. **The extension's version is not the app's by default.** The CLI's
+   `bundle.iOS.bundleVersion` merge reaches the *app's* plist only, and XcodeGen
+   defaults an extension to `1.0`/`1` — which the App Store validator rejects. Both
+   are pinned in `project.yml.template` and compared against `tauri.conf.json` by
+   `tests/share_group.rs`.
+
+**The extension target itself was not built.** `xcodegen generate` renders it and
+`xcodebuild -list` reports it (`ShareExtension`, plus the app), the generated plist
+and both entitlements `plutil -lint` clean, and the embed phase is in the pbxproj —
+but no `xcodebuild` ran for it. **Prerequisite: a signing identity and an installed
+simulator runtime** (A327). The share-sheet row, the container being readable by both
+processes, and the extension launching all need a **physical device**.
+
+```
 ```
 
 ---
@@ -1096,7 +1161,7 @@ read from its `content://` URI and copied into app storage before the grant expi
 - Consumes: the fs plugin's URL-based read (`readFile`), `bundle.fileAssociations`.
 - Produces: `share::copy_into_storage(uri) -> Result<PathBuf, ShareError>`.
 
-- [ ] **Step 1: Write the failing test — a concrete MIME type, never `*/*`**
+- [x] **Step 1: Write the failing test — a concrete MIME type, never `*/*`**
 
 ```rust
 //! The matrix verified `mimeType: "*/*"` never matches a concrete intent, so the
@@ -1116,12 +1181,12 @@ fn every_file_association_declares_a_concrete_mime_type() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_android` → if Task 1 left
 `fileAssociations` empty, the `assert!(!assoc.is_empty())` fails.
 
-- [ ] **Step 3: Implement the intake**
+- [x] **Step 3: Implement the intake**
 
 The Kotlin `onNewIntent`/`onCreate` path reads the `content://` URI from `ACTION_SEND` /
 `ACTION_VIEW`, and `share::copy_into_storage` reads it with the **URL-based** fs API
@@ -1129,7 +1194,7 @@ The Kotlin `onNewIntent`/`onCreate` path reads the `content://` URI from `ACTION
 data dir. The copied path is what the upload queue holds; the original grant is allowed
 to die.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 `cargo test --manifest-path src-tauri/Cargo.toml --test share_android` → pass. A device
 build confirms a real share delivers a readable URI (prerequisite).
@@ -1138,6 +1203,36 @@ build confirms a real share delivers a readable URI (prerequisite).
 
 ```
 git commit -am "Phase 14 Task 5: Android share intake with an immediate durable copy"
+```
+
+**Done, and measured: `83dc02d`.** `tests/share_android.rs` is **4 passed**.
+
+**The Task 3 shape this replaced could not work, and the plan's Step 3 as written is
+what exposed it.** `ShareIntakeActivity.kt` resolved a copied path into a JSObject for
+a caller — and on a *cold start* there is no caller: the share arrives before any
+plugin command is in flight, and the only Kotlin→Rust direction the generated bridge
+provides answers a command Rust started. So the plugin's `src/intake.rs` (a Rust inbox
+writer no Android caller could reach) and the `mobile_share_intake` command are gone
+with it, and `ShareIntake.kt` writes the inbox itself in the layout the shell's reader
+owns. Two lifecycle hooks, because Android delivers a share to two: the launch intent
+from the plugin's `load(webView:)` (Tauri's plugin lifecycle has `onNewIntent` and no
+`onCreate(intent)`) and `onNewIntent` for the warm case.
+
+**The intent filters are hand-written in the plugin's manifest, and that is a CLI gap
+rather than a preference.** `bundle.fileAssociations` documents that `mimeType`
+becomes `android:mimeType` in an `<intent-filter>`, but CLI 2.12.2's Android manifest
+template emits only MAIN/LAUNCHER — read out of the shipped binary, which contains no
+`android:autoVerify` and no `android:mimeType` template. A library's manifest is merged
+into the app's, so the plugin's declares them against `${applicationId}.MainActivity`.
+
+**The Kotlin is unbuilt and no test in this commit executes it.**
+`~/Library/Android/sdk` does not exist and `ANDROID_HOME` is unset, so there is no
+`gradle`, no `kotlinc` and no SDK. What the tests check is the contract between files:
+the three MIME types in both `tauri.conf.json` and the manifest, the inbox name, and
+the sidecar keys the two languages must agree on. **Prerequisite for the rest: an
+Android SDK and a device** (A327).
+
+```
 ```
 
 ---
@@ -1161,7 +1256,8 @@ start.
   `push_token` command; `platform.deepLinks`.
 - Produces: `registerPush(deviceId)`, `onNotificationTap(intent)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — **the Rust half's, in `tests/deep_link.rs`
+  and `tests/push.rs`; the `tsx` below is the SPA half's and is not this slice's.**
 
 ```tsx
 // app/src/features/notifications/registerPush.test.tsx
@@ -1179,11 +1275,13 @@ it('registers the token against the current device and re-registers on refresh',
 
 and an adapter case that `platform.push.onToken` forwards the shell's token event.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail** — **the Rust half's: `cargo test
+  --manifest-path src-tauri/Cargo.toml --test deep_link` failed to compile against the
+  pre-change tree (`no variant or associated item named `NotOurHost``), and the line
+  reverted to watch it fail was the two-scheme `strip_scheme` in
+  `src-tauri/src/deeplink.rs`, restored to the `stvdy://`-only `strip_stvdy_scheme`.**
 
-`npm --prefix app test -- registerPush` → `Cannot find module`.
-
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement** — **the Rust half; the SPA half is not this slice's.**
 
 `platform.push` wraps the shell's token event and `onNotification`. `registerPush` calls
 it once after login and on every token-refresh event, PUTting `provider`/`token` (A329).
@@ -1191,20 +1289,87 @@ it once after login and on every token-refresh event, PUTting `provider`/`token`
 `task`, `reminder`) and navigates, buffering the tap when the app is cold-started
 (A316's "tap-to-open is the only guaranteed surface").
 
-- [ ] **Step 4: Deep links**
+- [x] **Step 4: Deep links** — **done in the Rust half (`866a0d2`); the SPA half is
+  `app/**` and is not this slice's.**
 
-Add `applinks:app.stvdy` to `bundle.iOS.associatedDomains` and rely on tauri-build's
-`autoVerify` Android filters (A320). A test asserts a `stvdy://` URL and an
-`https://app.stvdy/...` universal link both classify to the same `DeepLinkIntent`.
+**`bundle.iOS.associatedDomains` does not exist and was not invented.** The CLI's
+`IosConfig` is `deny_unknown_fields` with no such key (`tauri-utils-2.10.1`; the CLI's
+own `config.schema.json` agrees), so writing one is a config the CLI refuses to load.
+The mechanism is the deep-link plugin's build script: it writes
+`com.apple.developer.associated-domains: ["applinks:app.stvdy"]` into the app's
+entitlements and an `<intent-filter android:autoVerify="true">` into the Android
+manifest, from `plugins.deep-link.mobile[]` — which was added, with
+`{ "host": "app.stvdy", "scheme": ["https"], "appLink": true }`. `tests/deep_link.rs`
+(9 passed) asserts the absence of the invented key, that the declared host is the one
+`deeplink::APP_LINK_HOST` accepts, and that a `stvdy://` URL and an
+`https://app.stvdy/...` universal link classify to the same `DeepLinkIntent` — for all
+three routes, through a cold start, with the credential precedence preserved. A
+foreign host, a `userinfo` URL and an `http://` link are all refused;
+`IgnoreReason::NotOurHost` is new so the two refusals are distinguishable in a log.
 
-- [ ] **Step 5: Run it**
+- [ ] **Step 5: Run it** — **not run: `app/**` is fenced.**
 
-`npm --prefix app test -- notifications` → pass; `npm --prefix app run build` clean.
+`npm --prefix app test -- notifications` and `npm --prefix app run build` are the SPA
+half's, and the file list this step belongs to (`platform/types.ts`, `platform/mobile.ts`,
+`features/notifications/**`, `router.tsx`) is not this slice's. What the SPA half needs
+is written out in Step 6 below so the slice that holds `app/**` can implement it
+without re-deriving it.
 
 - [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 6: push token registration + deep-link/notification routing"
+```
+
+**The Rust half is done, and measured: `866a0d2`. The SPA half is not, and `app/**`
+is fenced — what it needs is written out below.**
+
+**Two schemes, one vocabulary.** `deeplink::classify` accepts
+`https://app.stvdy/<route>` as well as `stvdy://<route>` and reduces both to the same
+route-and-query pair before the route match, so there is one handler table and one set
+of tests. `tests/deep_link.rs` is **9 passed**: the two schemes classify alike, the
+credential precedence survives, a cold start still classifies, a foreign host and a
+`userinfo` URL and an `http://` link are all refused, and the host the classifier
+accepts is compared against `plugins.deep-link.mobile[]`.
+
+**Step 4's `bundle.iOS.associatedDomains` cannot be implemented as written, and the
+reason is a schema rather than a preference.** The CLI's `IosConfig` is
+`deny_unknown_fields` and has no such key (`tauri-utils-2.10.1`'s `IosConfig`; the
+CLI's own `config.schema.json` agrees), so a key there is a config the CLI refuses to
+load. The real mechanism is the deep-link plugin's build script, which writes
+`com.apple.developer.associated-domains: ["applinks:app.stvdy"]` into the app's
+entitlements and an `<intent-filter android:autoVerify="true">` into the Android
+manifest from `plugins.deep-link.mobile[]` — which is what was added. A test pins the
+*absence* of the invented key so a later reader does not "fix" this step by adding one.
+
+**The push half calls the route that already exists.** `push::register_with_device`
+PUTs `{provider, token}` to `crates/server/src/devices.rs:35`'s route, which was not
+touched; `push::token_path` is the one place the path is spelled and `tests/push.rs`
+reads the server's own router and compares them. `validate_token` runs client-side as
+well, so a token that could only be refused never becomes a round trip; a refusal
+carries the status and the server's body. `tests/push.rs` is **7 passed**, including a
+real PUT against a scratch HTTP server.
+
+**What the SPA half needs, precisely** (for whoever holds `app/**`):
+- `app/src/platform/types.ts` — a `PushApi` with `token(): Promise<{provider, token}>`
+  wrapping the shell's `push_token` command, `onToken(cb)` over the plugin's token
+  event, and `onNotification(cb)`.
+- `app/src/features/notifications/registerPush.ts` — `registerPush(deviceId)`: call
+  `platform.push.token()`, then `api.put('/devices/{deviceId}/push-token', body)`;
+  re-register on every token-refresh event (A329).
+- `app/src/features/notifications/NotificationRouter.tsx` — map a notification's
+  payload to a route (`workspace`/`task`/`reminder`) and navigate, buffering the tap
+  when the app was cold-started (the shell's `deep_link_current` is the cold-start
+  read for links; a notification tap needs the equivalent buffering).
+- The test the plan names: `registerPush.test.tsx` asserting the `PUT` body is
+  `{provider: 'apns', token: 'tok-1'}` and an adapter case that `platform.push.onToken`
+  forwards the shell's event.
+
+**Unverified:** no APNs/FCM registration (no Apple Developer account, no Firebase
+project), no tap-to-open cold or warm, no device. The PUT is exercised against a
+scratch server with a fabricated token.
+
+```
 ```
 
 ---
@@ -1224,6 +1389,39 @@ documented.
 - Consumes: `platform.secureStore` (Phase 1), `platform.notifications.schedule`.
 - Produces: no new code beyond a device verification and one SPA test.
 
+**Status: not done in this slice. Nothing in this task is committed, and no device row
+is claimed as a pass.** The honest state, item by item:
+
+- **The secure-storage half already exists and is confirmed rather than added.** Phase
+  1's `src-tauri/src/keychain.rs` installs a per-platform store
+  (`apple-native-keyring-store` with `keychain` on macOS and `protected` on iOS,
+  `windows-native-keyring-store`, `android-native-keyring-store`), `init()` is called
+  in `lib.rs::run` before the builder, and `secret_set`/`secret_get`/`secret_delete`
+  are registered commands. Its round-trip test
+  (`keychain::tests::keychain_round_trips_a_refresh_token`) **runs and passes on this
+  machine** — it is part of the 25 shell unit tests in every run quoted above. What is
+  *not* verified is the same round trip on a phone: that needs a device.
+- **The local-notification half is already wired at the shell level and needs nothing
+  added there.** The official `tauri-plugin-notification` is registered in `lib.rs`,
+  `notification:default` is in `capabilities/default.json`, the mobile manifest
+  declares `POST_NOTIFICATIONS` and the plugin's Kotlin asks for it at runtime
+  (`mobileRequestNotificationPermission`), and the pinned
+  `tauri-plugin-notifications` crate carries the push-receive path. The scheduling
+  *call* the plan asks for is `platform.notifications.schedule`, which is the SPA's
+  (`app/**`) — so this step's code is the SPA's, not the shell's.
+- **The two tests this task names are SPA tests** (`localReminder.test.ts` and the
+  reminder UI's copy assertion) and `app/**` is fenced. They are not written here.
+- **The device verification was not attempted and is not claimed.** Storing a token,
+  killing the app, reading it back from the Keychain/Keystore, and observing a
+  scheduled notification fire while the app is closed all require a **physical device**
+  and, for iOS, a **signing identity** — none of which exists here. Recorded as
+  unverified, not as a pass.
+- **The two doc edits are not made**, and deliberately: `docs/ARCHITECTURE.md` § Native
+  prototypes is where a *device result* is recorded, and there is no device result to
+  record; writing "not verified" into it now would be a placeholder rather than a
+  finding. `docs/RELEASE.md`'s Auto Backup caveat is a real gap and belongs to whoever
+  owns that file in this phase's remaining work.
+
 - [ ] **Step 1: Write the failing test — scheduling is best-effort, and the UI says so**
 
 ```ts
@@ -1236,11 +1434,11 @@ it('schedules a local reminder and never claims exact delivery', async () => {
 })
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 2: Run it and watch it fail** — **not run; `app/**` is fenced.**
 
 `npm --prefix app test -- localReminder` → the module does not exist.
 
-- [ ] **Step 3: Implement and verify**
+- [ ] **Step 3: Implement and verify** — **not done; needs `app/**` and a device.**
 
 Wire `platform.notifications.schedule` into the reminder UI; on a **device**, store a
 token, kill the app, and confirm the keychain read on relaunch and a scheduled
@@ -1598,20 +1796,20 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
 
 ## Phase 14 exit checklist
 
-| # | Check | Command / evidence | Pass condition |
+| # | Check | Command / evidence | Result |
 |---|---|---|---|
-| 1 | Workspace quality gate | `cargo fmt --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace` | clean |
-| 2 | Shell + plugin | `cargo test --manifest-path src-tauri/Cargo.toml` · `…/plugins/mobile/Cargo.toml` | pass |
-| 3 | Web | `npm --prefix app test` · `npm --prefix app run build` | pass |
-| 4 | iOS build | `tauri ios build --debug --target aarch64-sim` | exit 0, bundle produced |
-| 5 | Android build | `tauri android build --debug` | exit 0, APK produced |
-| 6 | **No purchase UI** | `node scripts/check-no-purchase-ui.mjs` | exit 0, prints the file count |
-| 7 | Push token registers | device: log + `push_tokens` row | token present, provider correct |
-| 8 | Deep links round-trip | cold start + warm, `stvdy://` and universal link | both classify to the same intent |
-| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | 44px, contrast both themes, 200% scale all pass. **13 surfaces** — the list, and the surfaces it does *not* reach with the reason for each, is in A323 above; the two it cannot reach from the tab bar (`/planner`, `/syllabus`) are Phase 11's own gate-5 leg |
-| 10 | Gate 6 | Indonesian phone-shell test | pass, output quoted |
-| 11 | Gate 7 | mobile plan screen + composer hint | no price, computed usage, hint present |
-| 12 | Docs | RELEASE/ARCHITECTURE/ASSUMPTIONS updated | present |
+| 1 | Workspace quality gate | `cargo fmt --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace` | **PASS** (the phase's own slices; `--workspace` on the shell side is `a5f9463`) |
+| 2 | Shell + plugin | `cargo test --manifest-path src-tauri/Cargo.toml --workspace` | **PASS** — 25 unit + 12 cache + 1 config + 7 push + 4 share_android + 4 share_group + 9 plugin = **62 passed, 0 failed**; clippy clean; `cargo fmt --all -- --check` clean |
+| 3 | Web | `npm --prefix app test` · `npm --prefix app run build` | **PASS** — `npm --prefix app test` → 65 files, 600 passed, 0 failed (Task 11's run) |
+| 4 | iOS build | `tauri ios build --debug --target aarch64-sim` | **PASS only with the runtime precondition supplied** — exit 0, `Stvdy.app` (110 MB) at Task 2; **the simulator runtime is absent on this machine** (`xcodebuild -downloadPlatform iOS` not run, multi-GB) and a *device* build needs a signing identity |
+| 5 | Android build | `tauri android build --debug` | **NOT MET** — no Android SDK at `~/Library/Android/sdk`, `ANDROID_HOME` unset, so `gen/android/` does not exist and `tauri android init` was never run |
+| 6 | **No purchase UI** | `node scripts/check-no-purchase-ui.mjs` | **PASS** — exit 0, `no purchase UI in 3 shipped file(s)`, stamp `store` |
+| 7 | Push token registers | device: log + `push_tokens` row | **NOT VERIFIED** — no Apple Developer account, no Firebase project, no device. The Rust half that mints and `PUT`s the token is tested (`tests/push.rs`, 7 passed, against a scratch HTTP server); the token in that test is fabricated |
+| 8 | Deep links round-trip | `tests/deep_link.rs` + a device for the OS hand-off | **PASS for classification** — 9 passed: `stvdy://` and `https://app.stvdy/…` classify to the same intent, cold start included. **NOT VERIFIED** for the OS handing the URL over: that needs a device and, for universal links, an AASA file served from `app.stvdy` |
+| 9 | Gate 5 | `node scripts/measure-mobile.mjs` | **PASS at both legs** after `2267d26` (the desktop leg's `button.cite` exemption at the 32px floor). The 22 clipped elements at 200% text on Phase 13's checkout surfaces are Phase 13's, recorded there |
+| 10 | Gate 6 | Indonesian phone-shell test | **PASS** — 12 passed, output quoted in Task 11 Step 4 |
+| 11 | Gate 7 | mobile plan screen + composer hint | **PASS** — `MobilePlanScreen.test.tsx` asserts `Free`, `2 of 2`, the usage line and `controls(container) === []` with no `Rp` |
+| 12 | Docs | RELEASE/ARCHITECTURE/ASSUMPTIONS updated | **PRESENT**, with one gap: Task 7's two doc edits are **not made** because there is no device result to record (see Task 7's status note) |
 
 ---
 
