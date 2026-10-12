@@ -12,6 +12,7 @@ pub mod config;
 pub mod entitlements;
 pub mod error;
 pub mod generation;
+pub mod planner;
 pub mod prompts;
 pub mod quiz;
 pub mod render;
