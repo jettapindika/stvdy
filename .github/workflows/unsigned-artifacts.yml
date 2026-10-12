@@ -199,21 +199,40 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
+          # AGP 9.3.1's module metadata declares `org.gradle.jvm.version: 17`, so 17 is the
+          # minimum and is what the generated project's `JvmTarget.JVM_1_8` compiles under.
           java-version: 17
-      - uses: android-actions/setup-android@v3
 
       - name: The SDK packages the generated project asks for
-        # The CLI discovers the NDK at `$ANDROID_HOME/ndk/<version>` (measured: it prints
-        # "Info Using installed NDK: …" and then reads that directory's `source.properties`),
-        # so installing one is enough and `NDK_HOME` is set here for the Gradle side.
+        # `android-actions/setup-android@v3` is deliberately **not** used: its default
+        # `packages` input is `tools platform-tools`, and `tools` is no longer a package
+        # `sdkmanager` can resolve — the action fails with `Failed to find package 'tools'`
+        # and exit 1 before any of this runs (observed on run 38237309810). The ubuntu-24.04
+        # runner image already carries an SDK, so this installs only what is missing and
+        # asserts what it found rather than trusting the image's inventory.
         #
-        # `compileSdk`/`targetSdk` are read from the CLI's own Gradle template rather than
-        # guessed: both are 37 in `@tauri-apps/cli` 2.12.2.
+        # The versions are read from the project `tauri android init` generates, not guessed:
+        # `compileSdk`/`targetSdk` are 37 and the Gradle wrapper is 9.6.1 (Gradle downloads
+        # its own distribution), with AGP 9.3.1 and Kotlin 2.2.10.
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-37" "build-tools;37.0.0" "ndk;27.2.12479018"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          sdkmanager="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)"
+          echo "sdkmanager: $sdkmanager"
+
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+
+          # The NDK is cargo's linker, not Gradle's: the generated project has no
+          # `ndkVersion` and no `externalNativeBuild`, so AGP never asks for one. The CLI
+          # discovers the NDK by listing `$ANDROID_HOME/ndk/*` and reading each candidate's
+          # `source.properties`, and takes the **highest** version present (measured: with
+          # 27.3.13750724 and 29.0.14206865 installed it prints the latter). `NDK_HOME` is
+          # exported because cargo-mobile2 warns that it is required.
+          ndk="$(ls -d "$ANDROID_HOME"/ndk/*/ | sort -V | tail -1)"
+          echo "NDK: $ndk"
+          test -f "$ndk/source.properties" || { echo "::error::no NDK under $ANDROID_HOME/ndk"; exit 1; }
+          echo "NDK_HOME=${ndk%/}" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -228,10 +247,20 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci --prefix app
 
-      - name: Generate the Android project
-        # Not committed in this tree (Phase 14 was blocked without an SDK), so the release
-        # cannot assume it exists. `--ci` skips the CLI's prompts, which a runner cannot answer.
-        run: ./app/node_modules/.bin/tauri android init --ci
+      - name: Generate the Android project, if the tree does not carry one
+        # `src-tauri/gen/android` is not in the tree today (Phase 14's Android half was
+        # blocked without an SDK, so `tauri android init` had never run for this repository),
+        # so the release cannot assume it exists. Conditional rather than unconditional
+        # because `init` on an existing project rewrites it — and once Phase 14 commits the
+        # project, the committed one is the one that must build.
+        # `--ci` skips the CLI's prompts, which a runner cannot answer.
+        run: |
+          set -euo pipefail
+          if [ -d src-tauri/gen/android ]; then
+            echo "the tree carries src-tauri/gen/android: using it as it is"
+          else
+            ./app/node_modules/.bin/tauri android init --ci --skip-targets-install
+          fi
 
       - name: The direct-APK keystore, from secrets, for this run only
         if: inputs.apk_signing == 'operator-keystore'
