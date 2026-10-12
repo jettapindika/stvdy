@@ -1455,7 +1455,7 @@ The phase summary quotes the job's output, per roadmap verification gate 3.
   (`--macos` / `--windows` / `--manifest` / `--all`), verifies what is verifiable, prints
   what it checked, and exits non-zero on any failure.
 
-- [ ] **Step 1: The refusals, first**
+- [x] **Step 1: The refusals, first**
 
 ```bash
 # The private key is used by exactly one workflow (A332). This script must never
@@ -1467,7 +1467,7 @@ if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
 fi
 ```
 
-- [ ] **Step 2: The checks**
+- [x] **Step 2: The checks**
 
 - **macOS:** `codesign --verify --deep --strict`, `spctl -a -vvv -t install`,
   `xcrun stapler validate`, `lipo -archs` contains both architectures.
@@ -1498,7 +1498,7 @@ and specific on failure, because the person reading it is mid-release.
 - Produces: the normative release document; the image section; A330-A354; the update
   channel in the threat model; the `/assets` route row.
 
-- [ ] **Step 1: `docs/RELEASE.md`, restructured but not rewritten**
+- [x] **Step 1: `docs/RELEASE.md`, restructured but not rewritten**
 
 It keeps every section it has (Desktop distribution, Mobile distribution, Store policy
 risk, Privacy labels, Account deletion, the pinned-Chromium prerequisite, Tax and PPN,
@@ -1508,21 +1508,21 @@ checklist** (Task 13), **Server deployment** (the image, `--migrate-only`, the e
 the reverse proxy, R2), and a pointer to `docs/OPERATIONS.md` for day-two procedures
 (A354). The versioning section gains A353's two-binary table.
 
-- [ ] **Step 2: `docs/ARCHITECTURE.md`**
+- [x] **Step 2: `docs/ARCHITECTURE.md`**
 
 The image's contents (Task 6 Step 8) and a short `### The print assets are served, not
 fetched` subsection recording A339's reason — `document.write` gives the page no base URL
 — because that is the kind of fact a future reader would otherwise "simplify" back into a
 CDN reference.
 
-- [ ] **Step 3: `docs/ASSUMPTIONS.md`**
+- [x] **Step 3: `docs/ASSUMPTIONS.md`**
 
 A330-A354 as rows, in the house format (area | decision | rationale), appended after A131.
 B1/B2/B3's status cells are updated with the workaround that is live (the dev mail sink,
 the internal payment contract, the draft legal text) — **their "Blocks public launch?"
 values stay `Yes`**, because none of them has been resolved by this phase.
 
-- [ ] **Step 4: `docs/THREAT_MODEL.md`**
+- [x] **Step 4: `docs/THREAT_MODEL.md`**
 
 The update channel is an asset that did not exist before this phase, so § 2 (Assets) gains
 it, § 5 gains its row (*"Forge an update manifest" → **Fails**, enforced by the minisign
@@ -1533,14 +1533,14 @@ defence because the client is the thing being replaced*). § 9's verification ta
 the row: *update manifest signature verified and a mutation rejected* | 15 |
 `crates/server/tests/release.rs`.
 
-- [ ] **Step 5: The route sweep**
+- [x] **Step 5: The route sweep**
 
 `/assets/{*path}` gets its `Exempt` row in `crates/server/tests/route_sweep.rs`'s table
 with its one-line reason ("a public file with no user data; the requester is Chromium with
 no credentials"). The sweep fails on an unclassified route and on a stale row, so this is
 not optional.
 
-- [ ] **Step 6: Run the sweeps**
+- [x] **Step 6: Run the sweeps**
 
 ```bash
 cargo test -p stvdy-server --test route_sweep
@@ -1562,7 +1562,7 @@ cargo test -p stvdy-server --test release
 - Produces: a terms/privacy draft, a notices file that names the fonts it actually ships,
   and the image's components listed.
 
-- [ ] **Step 1: The EULA draft**
+- [x] **Step 1: The EULA draft**
 
 `docs/EULA.md` carries the clauses A44 names, and **opens with a draft banner** stating it
 requires legal review before publication, because this plan is not legal advice and a
@@ -1574,7 +1574,7 @@ privacy notice's data inventory (account email, uploaded material, chat content,
 events, device identifiers for push, payment records) and the retention terms. The
 privacy half is where B2's legal input lands.
 
-- [ ] **Step 2: The notices file, corrected**
+- [x] **Step 2: The notices file, corrected**
 
 `THIRD_PARTY_NOTICES.md`'s bundled-assets table says IBM Plex Sans / IBM Plex Mono, and
 `app/public/fonts/` ships Plus Jakarta Sans, Inter and JetBrains Mono (A105 changed the
@@ -1584,7 +1584,7 @@ listing, and it gains the image's components: Chromium (BSD-3-Clause plus its ow
 third-party notices), pdfium (BSD-3-Clause), LibreOffice (MPL-2.0), the ONNX Runtime (MIT)
 and the `intfloat/multilingual-e5-base` model (MIT).
 
-- [ ] **Step 3: One sentence in `LICENSE` and one in `docs/RELEASE.md`**
+- [x] **Step 3: One sentence in `LICENSE` and one in `docs/RELEASE.md`**
 
 `LICENSE` gains a pointer: the hosted service is offered under `docs/EULA.md`. `docs/RELEASE.md`
 gains a row in the launch checklist naming B2 as the blocker for both the tax line items
@@ -1604,7 +1604,7 @@ and the privacy text.
 - Consumes: A330, A331, A344, A347-A349; B1/B2/B3.
 - Produces: the day-two runbook and the one place the launch decision is made.
 
-- [ ] **Step 1: The production host checklist (A330)**
+- [x] **Step 1: The production host checklist (A330)**
 
 A section an operator reads before buying anything: region (Indonesia, for UU PDP
 residency and the latency the Batam trial demonstrated), managed Postgres 16 + pgvector
@@ -1613,7 +1613,7 @@ trial host is named here as disqualified**), egress, a static IP or DNS, the abi
 run one container with `--shm-size` and a writable `/tmp` (A338), and TLS termination.
 Each row has a pass condition, so "is this host suitable" has an answer.
 
-- [ ] **Step 2: Deployment, step by step**
+- [x] **Step 2: Deployment, step by step**
 
 The exact sequence: pull the image, run `--migrate-only` once, start the container with
 the environment from `.env.example`'s production subset, point `WEB_ORIGIN` at the web
@@ -1623,7 +1623,7 @@ host. Then the reverse proxy's rules: TLS, the SSE route needs buffering off (th
 heartbeat exists precisely because proxies close idle streams), and the `GET /assets/`
 route is public.
 
-- [ ] **Step 3: Backups and the restore drill (A347)**
+- [x] **Step 3: Backups and the restore drill (A347)**
 
 RPO 15 minutes, RTO 4 hours. Postgres: managed PITR if the host offers it, otherwise a
 `pg_dump` on a timer to R2 with a 30-day retention and a daily verification that the dump
@@ -1633,7 +1633,7 @@ dump into a scratch database, runs `sqlx migrate info`, compares row counts for 
 `+sync` tables, and prints `=== PASS`. Its output goes in this section, dated, because a
 backup that has never been restored is a hope.
 
-- [ ] **Step 4: Monitoring and alerting (A348)**
+- [x] **Step 4: Monitoring and alerting (A348)**
 
 Four signals with thresholds and an owner: `/health` from an external uptime check
 (60 s interval, alert after two failures); the oldest `queued` job's age (alert above 15
@@ -1642,7 +1642,7 @@ minutes — a stuck worker is invisible otherwise); provider spend against
 nobody is told when it trips); and the 5xx rate over five minutes. Alert routing is a
 placeholder the user fills in, and the section says so.
 
-- [ ] **Step 5: The breach runbook (A349)**
+- [x] **Step 5: The breach runbook (A349)**
 
 Numbered, in the order to do them: contain (rotate `JWT_SECRET` and
 `ENCRYPTION_KEY_HEX`, revoke all sessions, disable signups), preserve (snapshot the
@@ -1651,14 +1651,14 @@ from the data inventory), notify (UU PDP's window; the template is here), and re
 two facts a runbook needs — who decides, and how long we have — are stated as blanks the
 user fills, because inventing them would be worse than leaving them visible.
 
-- [ ] **Step 6: Retention (A349)**
+- [x] **Step 6: Retention (A349)**
 
 `change_log` 90 days (A19), deleted accounts purged by `purge_deleted_accounts`, R2
 lifecycle rules, `var/mail` never used in production, and the log retention the operator
 chooses. One table, one row per data class, with the mechanism that enforces it — a
 retention policy with no mechanism is a sentence.
 
-- [ ] **Step 7: The launch checklist**
+- [x] **Step 7: The launch checklist**
 
 In `docs/RELEASE.md`, a table whose every row is **code**, **user** or **blocked**:
 
@@ -1701,7 +1701,7 @@ launch (Risk 3).
   `POST /billing/checkout`.
 - Produces: two per-store checklists and the command that proves the mobile claim.
 
-- [ ] **Step 1: The evidence script**
+- [x] **Step 1: The evidence script**
 
 `scripts/check-mobile-no-purchase.sh` greps the built mobile bundle
 (`app/dist` as packaged into the iOS/Android artifact) for purchase UI: the price
@@ -1710,7 +1710,7 @@ the checkout route path, the upgrade CTA keys, and `billing.checkout`. It fails 
 and it **also fails when it finds zero files to check**, because a scan of an empty
 directory passes every grep and proves nothing.
 
-- [ ] **Step 2: The Apple checklist**
+- [x] **Step 2: The Apple checklist**
 
 Privacy labels (each data class from the EULA's inventory, with its purpose and whether it
 is linked to identity), in-app account deletion (a row pointing at the screen and at
@@ -1720,13 +1720,13 @@ explaining QRIS-only billing, that the app sells nothing, and where a reviewer c
 an account and see the read-only plan screen. Plus the build-number rule (mobile build
 numbers bump per submission, `macOS.bundleVersion`'s iOS sibling).
 
-- [ ] **Step 3: The Google checklist**
+- [x] **Step 3: The Google checklist**
 
 Data Safety form (the same inventory, mapped to Google's categories), the account-deletion
 URL, review notes, the internal-testing track before production, and the Play signing key
 vs the direct-APK key (A352).
 
-- [ ] **Step 4: The policy-risk note, kept current**
+- [x] **Step 4: The policy-risk note, kept current**
 
 `docs/RELEASE.md`'s existing "Store policy risk" section already names the risk (both
 stores may require their own IAP for digital subscriptions, and a QRIS-only app that

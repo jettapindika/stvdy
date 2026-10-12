@@ -713,6 +713,25 @@ if [ "$dry_run" = "1" ]; then
   exit 0
 fi
 
+# An artifact directory that is not there is the most likely operator mistake (a wrong path, or a
+# build that never ran), and it must say so rather than exiting on a `find` that printed nothing.
+# Checked for the modes that read a directory, so `--version` and a remote `--manifest-url` still
+# work without one.
+case "$mode" in
+  macos | windows | all)
+    if [ ! -d "$dir" ]; then
+      echo "FAIL $dir is not a directory — nothing to verify (did the build run, and is --dir right?)" >&2
+      echo "1 of 1 checks failed — do not publish this artifact" >&2
+      exit 1
+    fi
+    ;;
+esac
+if [ "$mode" = "manifest" ] && [ -n "$manifest_dir" ] && [ ! -d "$manifest_dir" ]; then
+  echo "FAIL $manifest_dir is not a directory — nothing to verify" >&2
+  echo "1 of 1 checks failed — do not publish this artifact" >&2
+  exit 1
+fi
+
 for m in "${modes[@]}"; do
   case "$m" in
     version) check_version ;;
