@@ -641,3 +641,43 @@ fn exdates_are_removed_rdate_added_and_a_date_only_event_is_a_whole_day() {
         "an Indonesian title survives the import (gate 6)"
     );
 }
+
+/// The conflict policy as a function, so it has a test rather than a comment (A234).
+///
+/// The four cases are the roadmap's table, and the one worth reading twice is the last pair:
+/// a remote tombstone is honoured for an event Google owns and **ignored** for one we created,
+/// because `calendar.app.created` cannot delete what it cannot write. Acting on it would
+/// delete the student's own study block — the exact outcome the scope pair exists to prevent.
+#[test]
+fn google_wins_for_an_event_we_did_not_create_and_we_win_for_a_study_block() {
+    use stvdy_core::calendar::policy::{
+        LocalState, Origin, RemoteState, Winner, origin_of, resolve,
+    };
+
+    // source = 'google': the remote is authoritative for every field.
+    assert_eq!(
+        resolve(Origin::Google, LocalState::dirty(), RemoteState::changed()),
+        Winner::Remote
+    );
+    // source = 'app' mirrored to Google: the local edit is the user's, and it is pushed.
+    assert_eq!(
+        resolve(Origin::App, LocalState::dirty(), RemoteState::changed()),
+        Winner::Local
+    );
+    // A remote tombstone for a Google event is honoured; for an app event it is ignored and
+    // the local row is re-pushed, because Google cannot delete what it cannot write.
+    assert_eq!(
+        resolve(Origin::Google, LocalState::clean(), RemoteState::deleted()),
+        Winner::Remote
+    );
+    assert_eq!(
+        resolve(Origin::App, LocalState::clean(), RemoteState::deleted()),
+        Winner::Local
+    );
+
+    // The origin comes from the stored `source`, and an unknown value is the calendar's: a
+    // stale row is recoverable, a silently overwritten edit is not.
+    assert_eq!(origin_of("app"), Origin::App);
+    assert_eq!(origin_of("google"), Origin::Google);
+    assert_eq!(origin_of("ics"), Origin::Google);
+}

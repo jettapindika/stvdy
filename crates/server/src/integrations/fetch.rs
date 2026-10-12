@@ -16,7 +16,11 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use chrono::Utc;
-use stvdy_core::traits::search::{FetchError, FetchedPage, PageFetcher};
+// `FetchError` is re-exported rather than privately imported: `fetch_guarded_text` returns it,
+// so a caller of that function — a test included — has to be able to name it, and a private
+// import would make the new public function unusable from outside this module.
+pub use stvdy_core::traits::search::FetchError;
+use stvdy_core::traits::search::{FetchedPage, PageFetcher};
 
 /// How many redirects are followed before giving up. Bounded because an endless
 /// redirect chain is a denial-of-service on our own worker.

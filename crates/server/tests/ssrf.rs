@@ -259,7 +259,11 @@ fn only_a_url_that_could_be_opened_is_citable() {
 /// and no stub: `parse_target` and `resolve_public` refuse these without a socket.
 #[tokio::test]
 async fn the_guarded_text_fetch_refuses_a_private_host_and_a_non_http_scheme() {
-    use stvdy_server::integrations::fetch::{FetchError, fetch_guarded_text};
+    use stvdy_server::integrations::fetch::fetch_guarded_text;
+    // `FetchError` is `stvdy_core`'s, re-exported through the trait module rather than through
+    // `integrations::fetch`: it is the trait's error type, so importing it from where it is
+    // defined is what keeps the two crates' error contract visible.
+    use stvdy_core::traits::search::FetchError;
 
     for url in [
         "http://127.0.0.1/feed.ics",
