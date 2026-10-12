@@ -180,8 +180,13 @@ pub async fn grant_in(
     // (`where period_key is not null`), and Postgres will not infer a partial index as
     // a conflict target without the same predicate.
     let inserted: Option<Uuid> = sqlx::query_scalar(
-        "insert into credit_ledger (user_id, delta, bucket, reason, period_key)
-         values ($1, $2, $3, $4, $5)
+        // `plan_id` is the plan this grant happened under, written at write time (A303).
+        // It cannot be recovered later: `users.plan_id` holds only the *current* plan, so
+        // a grant read back after a conversion would be attributed to the plan the
+        // student later moved to, and the margin report's free-tier figure would shrink
+        // by exactly the cost of converting.
+        "insert into credit_ledger (user_id, delta, bucket, reason, period_key, plan_id)
+         values ($1, $2, $3, $4, $5, $6)
          on conflict (user_id, period_key) where period_key is not null do nothing
          returning id",
     )
@@ -190,6 +195,7 @@ pub async fn grant_in(
     .bind(grant.bucket.as_str())
     .bind(grant.reason)
     .bind(grant.period_key)
+    .bind(plan.as_str())
     .fetch_optional(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("granting credits: {error}")))?;
@@ -203,6 +209,60 @@ pub async fn grant_in(
         tracing::info!(%user_id, %plan, bucket, reason, period_key, credits, "credit grant");
     } else {
         tracing::debug!(%user_id, %plan, bucket, reason, period_key, "credit grant skipped: this period already granted");
+    }
+    Ok(granted)
+}
+
+/// Grants a purchased credit pack into the `purchased` bucket (A297).
+///
+/// **Takes a connection, not a pool**, and that is the whole point: the pack and the
+/// `payments` row that bought it commit together, so a credit pack cannot exist without
+/// the payment that paid for it — and a payment cannot be marked paid without the
+/// credits it bought. A pool-taking version would be a second transaction, which is
+/// exactly the partial application the money path forbids.
+///
+/// The `period_key` is `"pack:<payment id>"`, so the existing partial unique index on
+/// `(user_id, period_key)` makes a double grant a no-op **by construction** rather than
+/// by the caller remembering not to call twice — the same defence `monthly_grant` uses
+/// (A152). Two different packs are two payments and therefore two keys.
+///
+/// `ref_id` is the payment id, and it is what makes a double-credit-pack bug visible in
+/// the ledger instead of looking like an ordinary top-up.
+pub async fn grant_purchased(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    credits: i64,
+    ref_id: Uuid,
+) -> AppResult<bool> {
+    if credits <= 0 {
+        // A pack that grants nothing is a config error, and a zero row would confuse a
+        // later sum. The config's `validate()` refuses it at boot too.
+        return Ok(false);
+    }
+
+    let period_key = format!("pack:{ref_id}");
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        // The `where` clause is required: the unique index is partial
+        // (`where period_key is not null`), and Postgres will not infer a partial index
+        // as a conflict target without the same predicate.
+        "insert into credit_ledger (user_id, delta, bucket, reason, ref_id, period_key)
+         values ($1, $2, 'purchased', 'credit_pack', $3, $4)
+         on conflict (user_id, period_key) where period_key is not null do nothing
+         returning id",
+    )
+    .bind(user_id)
+    .bind(credits)
+    .bind(ref_id)
+    .bind(&period_key)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("granting a credit pack: {error}")))?;
+
+    let granted = inserted.is_some();
+    if granted {
+        tracing::info!(%user_id, %ref_id, credits, bucket = "purchased", "credit pack granted");
+    } else {
+        tracing::debug!(%user_id, %ref_id, "credit pack already granted for this payment");
     }
     Ok(granted)
 }
@@ -264,6 +324,14 @@ pub struct Spent {
 /// which is a double spend. It is transaction-scoped, so it is released at
 /// commit or rollback with no cleanup path to get wrong. The daily cap is checked
 /// inside the same lock, for the same reason.
+///
+/// `byok` marks the usage row as a call made on the account's own model key. It does **not**
+/// skip the charge — the only thing that reaches here on a BYOK turn is a cost we bear
+/// ourselves, such as a web search on our provider — but it does keep that row's
+/// `provider_cost_usd` out of our provider cost, because the model call was the student's
+/// (A156). The flag is a parameter rather than a follow-up `update` so the row is written
+/// right the first time: two statements can fail between them, and a row that says
+/// `byok = false` about a BYOK call overstates our cost in the report the flag exists for.
 pub async fn spend(
     state: &AppState,
     user_id: Uuid,
@@ -271,13 +339,17 @@ pub async fn spend(
     action: &str,
     credits: i64,
     daily_caps: [Option<DailyCap>; 2],
+    byok: bool,
 ) -> AppResult<Spent> {
     let mut tx = state
         .pool
         .begin()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning a spend: {error}")))?;
-    let spent = spend_in(&mut tx, state, user_id, plan, action, credits, daily_caps).await?;
+    let spent = spend_in(
+        &mut tx, state, user_id, plan, action, credits, daily_caps, byok,
+    )
+    .await?;
     tx.commit()
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("committing a spend: {error}")))?;
@@ -304,6 +376,7 @@ pub async fn spend_in(
     action: &str,
     credits: i64,
     daily_caps: [Option<DailyCap>; 2],
+    byok: bool,
 ) -> AppResult<Spent> {
     if credits < 0 {
         return Err(AppError::Internal(anyhow::anyhow!(
@@ -442,14 +515,20 @@ pub async fn spend_in(
             continue;
         }
 
+        // `plan_id` on both the ledger row and the usage event, written at write time
+        // (A303). This is the whole point of the column: a spend made on the free plan in
+        // June is attributed to the free tier in the margin report even after the account
+        // converts in July, because the row carries the plan it was spent under rather
+        // than being joined to the plan the account is on when the report runs.
         sqlx::query(
-            "insert into credit_ledger (user_id, delta, bucket, reason)
-             values ($1, $2, $3, $4)",
+            "insert into credit_ledger (user_id, delta, bucket, reason, plan_id)
+             values ($1, $2, $3, $4, $5)",
         )
         .bind(user_id)
         .bind(-take)
         .bind(bucket)
         .bind(format!("usage:{action}"))
+        .bind(plan.as_str())
         .execute(&mut *conn)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("writing the ledger: {error}")))?;
@@ -458,12 +537,15 @@ pub async fn spend_in(
     }
 
     let usage_event_id: Uuid = sqlx::query_scalar(
-        "insert into usage_events (user_id, action, credits) values ($1, $2, $3)
+        "insert into usage_events (user_id, action, credits, plan_id, byok)
+         values ($1, $2, $3, $4, $5)
       returning id",
     )
     .bind(user_id)
     .bind(action)
     .bind(i32::try_from(credits).unwrap_or(i32::MAX))
+    .bind(plan.as_str())
+    .bind(byok)
     .fetch_one(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("writing a usage event: {error}")))?;
@@ -471,6 +553,54 @@ pub async fn spend_in(
     Ok(Spent {
         usage_event_id,
         remaining: available - credits,
+    })
+}
+
+/// Opens a `usage_events` row for a model call made on the **user's own key** (A156/A302).
+///
+/// It returns the same [`Spent`] a real spend does, and that shape is the point: the caller's
+/// tail — recording the provider's tokens and cost on the row — is identical for a BYOK turn
+/// and a paid one, so the BYOK branch is one `if` at the spend site rather than a second copy
+/// of the whole request path. What differs is what *did not* happen: no ledger row, no
+/// allowance consumed, no daily cap counted, and no ceiling compared, because the money is the
+/// student's and not ours.
+///
+/// `credits` is `0` on the row because no allowance moved: the row exists to attribute a cost
+/// to a plan for the margin report, which is why it carries `plan_id` and `byok = true` and
+/// why the report puts BYOK in its own column (A156).
+pub async fn begin_byok_usage(
+    pool: &PgPool,
+    user_id: Uuid,
+    plan: stvdy_core::config::PlanId,
+    action: &str,
+) -> AppResult<Spent> {
+    let usage_event_id: Uuid = sqlx::query_scalar(
+        "insert into usage_events (user_id, action, credits, plan_id, byok)
+         values ($1, $2, 0, $3, true)
+         returning id",
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(plan.as_str())
+    .fetch_one(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("opening a BYOK usage row: {error}")))?;
+
+    // The balance as the client will report it. Read here rather than skipped because the
+    // SSE `usage` event carries it, and a BYOK turn that reported a balance of zero would
+    // tell a student with 400 credits that they are out.
+    let remaining: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger where user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("reading the balance: {error}")))?;
+
+    tracing::debug!(%user_id, action, byok = true, "BYOK turn: no credits spent");
+    Ok(Spent {
+        usage_event_id,
+        remaining,
     })
 }
 
@@ -615,6 +745,12 @@ pub enum RefundTarget {
     Quiz,
     Report,
     Cheatsheet,
+    /// The planner's proposal (A253). Charged two credits at `POST /goals/:id/plan`, so a
+    /// plan generation that fails permanently is a charge with nothing delivered.
+    PlanProposal,
+    /// The syllabus extraction. Charged eight credits at the upload, so an extraction that
+    /// fails permanently is the same shape.
+    SyllabusDraft,
 }
 
 impl RefundTarget {
@@ -625,6 +761,8 @@ impl RefundTarget {
             RefundTarget::Quiz => "quiz",
             RefundTarget::Report => "report",
             RefundTarget::Cheatsheet => "cheatsheet",
+            RefundTarget::PlanProposal => "plan proposal",
+            RefundTarget::SyllabusDraft => "syllabus draft",
         }
     }
 
@@ -659,6 +797,18 @@ impl RefundTarget {
                   order by updated_at
                   limit $1"
             }
+            RefundTarget::PlanProposal => {
+                "select id from plan_proposals
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
+            RefundTarget::SyllabusDraft => {
+                "select id from syllabus_drafts
+                  where status = 'failed' and credits_spent > 0
+                  order by updated_at
+                  limit $1"
+            }
         }
     }
 
@@ -688,6 +838,18 @@ impl RefundTarget {
                   where id = $1 and status = 'failed' and credits_spent > 0
                     for update skip locked"
             }
+            RefundTarget::PlanProposal => {
+                "select user_id, credits_spent
+                   from plan_proposals
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
+            RefundTarget::SyllabusDraft => {
+                "select user_id, credits_spent
+                   from syllabus_drafts
+                  where id = $1 and status = 'failed' and credits_spent > 0
+                    for update skip locked"
+            }
         }
     }
 
@@ -704,6 +866,12 @@ impl RefundTarget {
             }
             RefundTarget::Cheatsheet => {
                 "update cheatsheets set credits_spent = 0, updated_at = now() where id = $1"
+            }
+            RefundTarget::PlanProposal => {
+                "update plan_proposals set credits_spent = 0, updated_at = now() where id = $1"
+            }
+            RefundTarget::SyllabusDraft => {
+                "update syllabus_drafts set credits_spent = 0, updated_at = now() where id = $1"
             }
         }
     }
