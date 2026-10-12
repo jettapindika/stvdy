@@ -12,6 +12,26 @@ async fn main() -> anyhow::Result<()> {
     // deployment's environment (and CI) always wins over a stray file.
     let _ = dotenvy::dotenv();
 
+    // Two modes that exist for the deployment, not for a developer, and they are parsed
+    // before the pool is opened so a typo in a flag is not discovered after a migration has
+    // already run (A346).
+    //
+    // `--migrate-only` is the deploy procedure's first step, and it is a deployment contract
+    // rather than a convenience: two replicas starting together both run `sqlx::migrate!`
+    // against one database, and the advisory lock makes that survivable but leaves the second
+    // replica serving traffic against a schema it has not verified. Running this to
+    // completion *before* any replica starts is what removes the race, so an orchestrator must
+    // sequence it rather than run it beside the app.
+    //
+    // `--fetch-embedder-model` is what the image's build stage calls, and it needs no
+    // database: the download is the side effect.
+    match std::env::args().nth(1).as_deref() {
+        Some("--migrate-only") => return migrate_only().await,
+        Some("--fetch-embedder-model") => return fetch_embedder_model().await,
+        Some(other) => anyhow::bail!("unknown argument {other}"),
+        None => {}
+    }
+
     // Load and validate configuration before binding anything: a broken
     // plans.toml must be a startup failure, not a 500 on the first request.
     let config = AppConfig::from_env()?;
@@ -46,7 +66,12 @@ async fn main() -> anyhow::Result<()> {
     let refunded = credits::refund_pending(&pool, credits::RefundTarget::Deck).await?
         + credits::refund_pending(&pool, credits::RefundTarget::Quiz).await?
         + credits::refund_pending(&pool, credits::RefundTarget::Report).await?
-        + credits::refund_pending(&pool, credits::RefundTarget::Cheatsheet).await?;
+        + credits::refund_pending(&pool, credits::RefundTarget::Cheatsheet).await?
+        // Phase 11's two chargeable generations: the planner's proposal and the syllabus
+        // extraction. Both charge before the model is called, so both can be left with a
+        // pending refund by the same infrastructure failure.
+        + credits::refund_pending(&pool, credits::RefundTarget::PlanProposal).await?
+        + credits::refund_pending(&pool, credits::RefundTarget::SyllabusDraft).await?;
     if refunded > 0 {
         tracing::warn!(
             refunded,
@@ -68,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         fetcher: providers.fetcher,
         ics_fetch: providers.ics_fetch,
         payment: providers.payment,
+        push: providers.push,
         jobs: jobs::Queue::new(),
     };
 
@@ -97,7 +123,66 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+/// The deployment's migration step: connect, migrate, seed, exit.
+///
+/// It **does not bind a port**, and that is the point rather than an implementation detail.
+/// The race it removes is two replicas starting together: both would run `sqlx::migrate!`,
+/// and while the advisory lock makes that safe, the replica that loses the race then serves
+/// traffic against a schema it has not verified. An orchestrator that runs this to completion
+/// before starting any replica removes the race; a flag that also served traffic would not.
+///
+/// `seed_plans` runs here too, because it reconciles the `plans` table with `config/plans.toml`
+/// and the replicas would otherwise race on the same reconciliation.
+async fn migrate_only() -> anyhow::Result<()> {
+    let config = AppConfig::from_env()?;
+    telemetry::init(
+        if config.env.is_dev() { "dev" } else { "prod" },
+        "info,stvdy_server=debug",
+    );
+
+    let pool = db::connect(&config).await?;
+    db::migrate(&pool).await?;
+    db::seed_plans(&pool, &config.plans).await?;
+
+    tracing::info!("migrations applied; exiting without binding a port");
+    Ok(())
+}
+
+/// Populates `FASTEMBED_CACHE_DIR` and exits.
+///
+/// `fastembed` downloads the model on first construction, and the image's build stage calls
+/// this so the running container never does: a first ingest on a fresh host would otherwise
+/// either stall on a 1.06 GB download or fail when the host has no egress (A342).
+///
+/// It goes through `FastembedEmbedder::new` — the server's own constructor — rather than
+/// calling `fastembed` here, so the cache layout, the model name and the dimension assertion
+/// cannot differ between the image and the running process. A hand-copied directory or a
+/// second model map would be invalidated by a version bump with no error until the first
+/// ingest.
+///
+/// **It needs no database.** That is what lets the image's build stage run it before Postgres
+/// exists: the config is loaded (which is file-only), the embedder is constructed, and the
+/// download is the side effect.
+async fn fetch_embedder_model() -> anyhow::Result<()> {
+    let config = AppConfig::from_env()?;
+    let embedder = stvdy_server::integrations::embedder::FastembedEmbedder::new(&config.embedder)?;
+    let dim = stvdy_core::traits::embedder::Embedder::dim(&embedder);
+    drop(embedder);
+
+    anyhow::ensure!(
+        config.embedder.cache_dir.is_dir(),
+        "the model did not populate {}; the image would re-download it at first ingest",
+        config.embedder.cache_dir.display()
+    );
+    tracing::info!(
+        model = %config.embedder.model,
+        dim,
+        dir = %config.embedder.cache_dir.display(),
+        "embedding model cached"
+    );
+    Ok(())
+}
+
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutdown signal received");
 }
