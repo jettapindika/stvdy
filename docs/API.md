@@ -36,7 +36,13 @@ event: action     data: {"pending_action_id":"...","tool":"create_task","args":{
 event: usage      data: {"credits_spent":1,"credits_remaining":412}
 event: done       data: {"message_id":"...","used_web":false}
 event: error      data: {"code":"insufficient_credits","message":"...","min_plan":null}
+event: seq        data: {"seq":42}
 ```
+
+`seq` is the sync stream's event and belongs to `GET /sync/stream` alone (A181):
+it is the caller's own `max(seq)`, sent on connect and on every advance, and its
+only job is to tell an online device to pull now. The chat stream never emits it.
+A comment heartbeat (`: keep-alive`) goes out every 15 seconds on both.
 
 Consume with `fetch` + a stream reader, not `EventSource`: chat needs POST and an
 `Authorization` header, neither of which `EventSource` supports.
@@ -206,7 +212,103 @@ device" without guessing from a name it may have renamed.
 
 ## Sync (Phase 8)
 
-`GET /sync/pull?cursor=&limit=`, `POST /sync/push`, `GET /sync/stream`.
+Auth, and rate-limited per account at **600 requests/minute** (A185). The three
+routes are the client engine's whole wire surface; the normative description of
+the protocol is `docs/SYNC.md`, and this section is its request/response
+contract.
+
+### `GET /sync/pull`
+
+Query parameters, all optional:
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `cursor` | `0` | `0` starts the **initial pass**; any other value is a position on the `seq` clock. A negative value is a 400 `validation`. |
+| `offset` | `0` | Marks a page of the initial pass. Legal with any cursor: the first page sends `cursor=0&offset=0`, later pages send `cursor=<anchor>&offset=<n>`. |
+| `limit` | `200` | Clamped to a maximum of `1000`. Below `1` is a 400 `validation` — a caller bug rather than a request for a smaller page. |
+
+```json
+{
+  "changes": [
+    { "seq": 42, "entity": "task", "id": "uuid", "op": "upsert", "data": { "…": "…" } }
+  ],
+  "next_cursor": 42,
+  "has_more": false
+}
+```
+
+- `changes` is ordered by `seq` ascending on the incremental walk and by
+  `(dependency_rank, seq)` on the initial pass, so a parent lands before its child.
+- `next_cursor` is the anchor of the pass while the initial pass is unfinished, and
+  the last `seq` sent once it is. On an empty incremental page it is the cursor the
+  request carried, so polling a quiet account does not jump the cursor.
+- `has_more` is decided from one extra row read, so a full page is not a last page.
+- `data` is the row restricted to the per-entity column allowlist (A168). It never
+  contains `user_id`, `sources.file_key`, `sources.preview_key` or the cheatsheet
+  object keys.
+- A tombstone is `{"op": "delete", "data": null}`. An `upsert` whose row this
+  account no longer has is also `data: null`, which the client applies as a delete
+  (A188) — so every change of a live row in a page carries the row, not only the
+  first.
+- **410 `resync_required`** when `cursor > 0 && cursor < min_retained_seq` (the
+  per-user compaction watermark, A165). The remedy is a full resync: pull with
+  `cursor=0`. A cursor of `0` is never stale.
+
+### `POST /sync/push`
+
+```json
+{ "device_id": "uuid",
+  "mutations": [
+    { "mutation_id": "uuid", "entity": "task", "op": "upsert", "id": "uuid",
+      "payload": { "patch": { "…": "…" }, "base": { "…": "…" } },
+      "client_ts": "2026-10-11T00:00:00Z" }
+  ] }
+```
+
+One transaction for the whole batch, one SAVEPOINT per mutation, so a rejected
+mutation does not abort the batch. `mutation_id` is the idempotency key: a replay
+returns the stored result byte-identical and applies nothing.
+
+`payload`'s shape depends on the entity (A176): `task` and `event` carry
+`{"patch": {…}, "base": {…}|null}` with `base: null` meaning create, and every
+other pushable entity carries the full row.
+
+The response is always 200 with one result per mutation, in request order:
+
+```json
+{ "results": [ { "status": "applied", "seq": 42 } ] }
+```
+
+| Result | Body | Means |
+|---|---|---|
+| Applied | `{"status":"applied","seq":N}` | Written; `N` is the change's `seq`. |
+| Rejected | `{"status":"rejected","code":"…","message":"…"}` | Not written. `code` is the machine-readable one from `docs/SYNC.md`'s table. |
+| Conflict | `{"status":"conflict","winner":{…}}` | A tombstone won over this edit (A178). `winner` is the stored row **including its `deleted_at`**. |
+
+Refusals and their codes:
+
+| Code | When |
+|---|---|
+| `read_only_entity` | The entity is outside the six-entity offline scope, the op is not accepted for it (a delete of an append-only row, any delete of `user_settings`), or the payload carries a server-derived field (`ease`, `interval_days`, `due_at` on a `flashcard`). |
+| `not_found` | The id is another account's, or the row is already gone. Deliberately one answer for both: a client that could tell them apart could probe for another account's ids (A173). |
+| `conflict` | The `mutation_id` is recorded for a **different** account (A172). Never that account's stored result. |
+| `validation` | The entity's own field rules refused the payload — the same functions the REST routes call. |
+| `limit_reached` / `plan_required` / `feature_locked` | The entitlement engine's refusal for this entity's features. |
+| `internal` | The apply failed for a server-side reason. That mutation alone was rolled back to its savepoint. |
+
+Whole-request failures: **403 `forbidden`** when the body's `device_id` is not the
+authenticated device (A171); **400 `validation`** for a malformed body; **429
+`rate_limited`** above 600/minute; **401** for a revoked device, whose sessions are
+killed with the device.
+
+### `GET /sync/stream`
+
+`text/event-stream`. Emits `event: seq` with `data: {"seq": N}` whenever the
+caller's own `max(seq)` advances, and sends the current value **immediately on
+connect**, so a device that reconnects after a gap pulls at once. A per-connection
+poll every **2 seconds** with a **15-second** comment heartbeat (A181): a poll
+stays correct behind more than one server instance and needs no cross-instance bus.
+`event: seq` is additive to the chat event list above.
 
 ## Workspaces (Phase 1)
 
