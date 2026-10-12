@@ -97,6 +97,36 @@ could only hide them. The check prints `no purchase UI in 3 shipped file(s)` and
 instead of `app/dist`; on this machine it has no `.ipa` or `.apk` to read, which is row
 M9's caveat.
 
+### Building the APK: two things the generated project does not do for you
+
+Both were found by building one, not by reading about it, and both apply to the signed
+(`release.yml`) and unsigned (`.github/workflows/unsigned-artifacts.yml`) paths alike.
+
+- **`src-tauri/tauri.js` has to exist before Gradle runs.** The generated
+  `buildSrc/src/main/java/<id>/kotlin/BuildTask.kt` invokes
+  `node tauri android android-studio-script --release --target <abi>` with its working
+  directory set to `src-tauri/`. Node resolves that first argument as a **path**, not as a
+  module — `node tauri` needs a file called `tauri(.js)` in the working directory, and
+  `node_modules` is never consulted — so in this repository, whose npm project is `app/`,
+  every `rustBuild*Release` task fails with `Cannot find module '<repo>/src-tauri/tauri'`
+  after ~20 minutes of Gradle. Both workflows write a one-line forwarder to the real CLI.
+  Measured: `node tauri --version` fails in an empty directory and prints
+  `tauri-cli 2.12.2` with the file present.
+- **The release build type has no signing configuration.** The generated
+  `app/build.gradle.kts` has no `signingConfigs` block and its `release` build type sets no
+  `signingConfig`, so a release APK comes out unsigned and Gradle refuses the build.
+  `keystore.properties` alone does nothing — in `@tauri-apps/cli` 2.12.2's own template the
+  file's only mention is a `.gitignore` entry. The unsigned workflow appends the Gradle block
+  (idempotently, so a committed project carrying its own is left alone); a committed project
+  must carry one, or `release.yml` builds an unsigned release APK and fails.
+
+**The API origin is a build input, not a setting.** `VITE_API_BASE_URL` is inlined by Vite
+and falls back to `http://localhost:8080`, so an artifact built without it installs and then
+fails every request. `.github/workflows/unsigned-artifacts.yml` takes it as a required input
+and refuses the fallback; the same value must be in the server's CORS policy only if a
+**browser** serves the SPA — the three Tauri webview origins are always allowed
+(`crates/server/src/routes/mod.rs`).
+
 ### The channel, and the update path (A325)
 
 - **iOS — TestFlight, then App Store review.** The channel is App Store Connect; the

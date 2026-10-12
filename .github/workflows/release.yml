@@ -447,6 +447,26 @@ jobs:
             exit 1
           fi
 
+      - name: The Gradle plugin's `node tauri` needs a file called `tauri`
+        # The generated `buildSrc/.../BuildTask.kt` runs `node tauri android
+        # android-studio-script …` with its working directory set to `src-tauri/`, and Node
+        # resolves that first argument as a **path** rather than as a module — so a file named
+        # `tauri` has to exist there, and node_modules is never consulted. This repository's
+        # npm project is `app/`, so without this the task dies with
+        # `Cannot find module '<repo>/src-tauri/tauri'` on every `rustBuild*Release` task.
+        #
+        # Measured on run 38239252653 and reproduced locally; the same step is in
+        # `.github/workflows/unsigned-artifacts.yml`, which is where the APK was first built.
+        run: |
+          set -euo pipefail
+          # `printf` and not a heredoc: a heredoc's terminator has to start at column 0, which
+          # a YAML block scalar forbids.
+          printf '%s\n' \
+            '// Forward to the real CLI; see the workflow step that writes this file.' \
+            'module.exports = require("../app/node_modules/@tauri-apps/cli/tauri.js")' \
+            > src-tauri/tauri.js
+          (cd src-tauri && node tauri --version)
+
       - name: The direct-APK keystore, from secrets, for this run only
         # A352: the direct APK is signed by the operator's key, and it is **not** Play's key —
         # Play App Signing holds its own and re-signs the Play build. Confusing the two is how

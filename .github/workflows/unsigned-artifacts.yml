@@ -349,6 +349,37 @@ jobs:
             ./app/node_modules/.bin/tauri android init --ci --skip-targets-install
           fi
 
+      - name: The Gradle plugin's `node tauri` needs a file called `tauri`
+        # The generated `buildSrc/.../BuildTask.kt` runs
+        #   `node tauri android android-studio-script --release --target <abi>`
+        # with its working directory set to `src-tauri/` (`executable = """node"""`,
+        # `args = listOf("tauri", ...)`, `workingDir(File(projectDir, rootDirRel))` — read out
+        # of the generated Kotlin, which is committed source rather than a black box).
+        #
+        # Node resolves that first argument as a **path**, not as a module: `node tauri` needs
+        # a file named `tauri` (or `tauri.js`) in the working directory, and node_modules is
+        # never consulted. In this repository the npm project is `app/`, so there is nothing
+        # for it to find and the task dies with
+        # `Cannot find module '<repo>/src-tauri/tauri'` — which is what every
+        # `rustBuild*Release` task reported on run 38239252653, after 21 minutes of Gradle.
+        #
+        # Measured rather than assumed: `node tauri --version` fails in an empty directory and
+        # prints `tauri-cli 2.12.2` with this file in place. Written here rather than committed
+        # because it is a workaround for another project's template, and a committed `tauri.js`
+        # in a Rust workspace root would outlive the bug.
+        run: |
+          set -euo pipefail
+          # `printf` and not a heredoc: a heredoc's terminator has to start at column 0, which a
+          # YAML block scalar forbids — the same trap this workflow already hit twice.
+          printf '%s\n' \
+            '// Forward to the real CLI. The Gradle `rust` plugin invokes `node tauri …` with' \
+            '// its working directory set to `src-tauri/`, and Node resolves that argument as a' \
+            '// path rather than as a module, so a file with this name has to exist here.' \
+            'module.exports = require("../app/node_modules/@tauri-apps/cli/tauri.js")' \
+            > src-tauri/tauri.js
+          echo "--- written; the CLI resolves through it:"
+          (cd src-tauri && node tauri --version)
+
       - name: The direct-APK keystore, from secrets, for this run only
         if: inputs.apk_signing == 'operator-keystore'
         env:
