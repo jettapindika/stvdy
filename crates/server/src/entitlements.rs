@@ -257,6 +257,11 @@ where
         action,
         cost,
         [None, None],
+        // Never BYOK. Every caller of this sequence — a deck, a quiz, a report, a cheatsheet,
+        // a syllabus import, a task breakdown — spends our provider's money, and none of them
+        // has a user-key seam. A `true` here would be a claim about a call that never went to
+        // the student's endpoint, and the margin report would believe it.
+        false,
     )
     .await?;
 
