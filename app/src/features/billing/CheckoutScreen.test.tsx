@@ -35,11 +35,30 @@ import type { PaymentView } from '@/api/queries/billing'
 const PAYMENT_ID = PAYMENT.id
 
 beforeEach(() => {
+  // The screen decides whether the fixture's invoice is still live by reading the
+  // **wall clock**, and `PAYMENT.expires_at` is a fixed timestamp, so the three
+  // cases below that render the live state pass until that instant and fail from
+  // it onwards. That is not a hypothesis: this suite was green in CI at 09:04Z on
+  // 2026-10-12 and red from 09:15Z, the fixture's own expiry, with "Unable to find
+  // an element with the text: Waiting for confirmation".
+  //
+  // So the clock is pinned instead — ten minutes inside the fixture's window,
+  // *derived from the fixture* rather than written down twice, because two
+  // constants that have to stay ordered are the same defect one step out.
+  //
+  // Only `Date` is faked. The screen polls on an interval, and faking
+  // `setTimeout`/`setInterval` too would put testing-library's own async utilities
+  // on a clock nothing advances.
+  vi.useFakeTimers({
+    toFake: ['Date'],
+    now: Date.parse(PAYMENT.expires_at) - 10 * 60_000,
+  })
   installFakePlatform('macos')
   setAccessToken('access-1')
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   await i18n.changeLanguage('en')
 })
