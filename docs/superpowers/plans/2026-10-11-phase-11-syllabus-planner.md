@@ -537,7 +537,7 @@ rename and nothing else, and the rule is "next free", not "this file's guess".
 
 **The failing test first.**
 
-- [ ] **Step 1: Register the two modules with the data blocks missing, and watch the sweep
+- [x] **Step 1: Register the two modules with the data blocks missing, and watch the sweep
       catch it.** Add the `include_str!` constants, the two `ModuleId` variants, their
       `version()`/`text()`/`variables()`/`base_sections()` arms and the `ALL` length, and
       add `"semester_context"` to `UNTRUSTED_VARIABLES`. Change nothing in the two `.md`
@@ -549,7 +549,7 @@ rename and nothing else, and the rule is "next free", not "this file's guess".
 (`semester_context`). That failure is the sweep doing its job, and it is the reason this
 task exists.
 
-- [ ] **Step 2: `crates/core/src/prompts/registry.rs`.**
+- [x] **Step 2: `crates/core/src/prompts/registry.rs`.**
 
 ```rust
 pub const SYLLABUS_V1: &str = include_str!("../../../../prompts/syllabus.v1.md");
@@ -613,7 +613,7 @@ impl ModuleId {
 }
 ```
 
-- [ ] **Step 3: `crates/core/src/prompts/mod.rs`.** Append to `UNTRUSTED_VARIABLES`, with
+- [x] **Step 3: `crates/core/src/prompts/mod.rs`.** Append to `UNTRUSTED_VARIABLES`, with
       the comment the list's style uses:
 
 ```rust
@@ -623,7 +623,7 @@ impl ModuleId {
     "semester_context",
 ```
 
-- [ ] **Step 4: `prompts/syllabus.v1.md`.** Wrap the semester context in the block the base
+- [x] **Step 4: `prompts/syllabus.v1.md`.** Wrap the semester context in the block the base
       prompt uses, so the value is labelled as data:
 
 ```markdown
@@ -632,7 +632,7 @@ semester_context: "{{semester_context}}"
 </user_context_data>
 ```
 
-- [ ] **Step 5: `prompts/planner_effort.v1.md`.** Same, for the goal title:
+- [x] **Step 5: `prompts/planner_effort.v1.md`.** Same, for the goal title:
 
 ```markdown
 <user_context_data>
@@ -640,11 +640,11 @@ goal_title: "{{goal_title}}"
 </user_context_data>
 ```
 
-- [ ] **Step 6: Run the contract sweep.**
+- [x] **Step 6: Run the contract sweep.**
       `cargo test -p stvdy-core --test prompts` — green. Then
       `cargo test -p stvdy-core` to confirm nothing else read `ModuleId::ALL`'s length.
 
-- [ ] **Step 7: Commit.** `feat(core): register the syllabus and effort prompt modules`
+- [x] **Step 7: Commit.** `feat(core): register the syllabus and effort prompt modules`
 
 ---
 
@@ -657,7 +657,7 @@ goal_title: "{{goal_title}}"
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the two test files.** The assertions that matter:
+- [x] **Step 1: Write the two test files.** The assertions that matter:
 
 ```rust
 // crates/core/tests/generation_syllabus.rs
@@ -698,7 +698,7 @@ fn a_reply_that_drops_a_topic_is_refused() {
 `cargo test -p stvdy-core --test generation_syllabus --test generation_effort` — fails to
 compile (`parse_syllabus` does not exist).
 
-- [ ] **Step 2: `crates/core/src/generation/syllabus.rs`.** The structs mirror the module's
+- [x] **Step 2: `crates/core/src/generation/syllabus.rs`.** The structs mirror the module's
       schema exactly, with `deny_unknown_fields` (a drifted prompt must fail loudly) and
       bounds that a model ignoring the module cannot exceed:
 
@@ -770,7 +770,7 @@ than `MAX_EVIDENCE_WORDS`; any `confidence` is outside `0.0..=1.0`; a count exce
 as RFC 3339 **in `tz`**; or a `rrule` does not parse with `rrule`'s bounded iterator. It
 never drops an item silently — a dropped item is a deadline the student never sees.
 
-- [ ] **Step 3: `crates/core/src/generation/effort.rs`.**
+- [x] **Step 3: `crates/core/src/generation/effort.rs`.**
 
 ```rust
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -789,9 +789,9 @@ pub fn parse_effort(raw: &str) -> Result<EffortFile, GenerationError>;
 pub fn reconcile(estimate: &EffortFile, requested: &[String]) -> Result<Vec<(String, i64)>, GenerationError>;
 ```
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-core --test generation_syllabus --test generation_effort`
+- [x] **Step 4: Run.** `cargo test -p stvdy-core --test generation_syllabus --test generation_effort`
 
-- [ ] **Step 5: Commit.** `feat(core): the syllabus and effort JSON contracts`
+- [x] **Step 5: Commit.** `feat(core): the syllabus and effort JSON contracts`
 
 ---
 
@@ -804,12 +804,12 @@ pub fn reconcile(estimate: &EffortFile, requested: &[String]) -> Result<Vec<(Str
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the migration, run the schema test, watch it fail.**
+- [x] **Step 1: Write the migration, run the schema test, watch it fail.**
       `cargo test -p stvdy-server --test schema` — fails with
       `tables exist that are neither in the spec nor a documented deviation:
       ["syllabus_drafts"]`.
 
-- [ ] **Step 2: The migration.**
+- [x] **Step 2: The migration.**
 
 ```sql
 -- Syllabus extraction drafts.
@@ -840,18 +840,18 @@ create unique index on syllabus_drafts (source_id);
 create index on syllabus_drafts (user_id, status);
 ```
 
-- [ ] **Step 3: `crates/server/tests/schema.rs`.** Append `"syllabus_drafts"` to
+- [x] **Step 3: `crates/server/tests/schema.rs`.** Append `"syllabus_drafts"` to
       `documented`, with the one-line comment the list's style uses, naming A251.
 
-- [ ] **Step 4: `docs/ASSUMPTIONS.md` § Schema deviations.** One row: new table
+- [x] **Step 4: `docs/ASSUMPTIONS.md` § Schema deviations.** One row: new table
       `syllabus_drafts`, why it is not `+sync`, and why it is keyed uniquely on
       `source_id`.
 
-- [ ] **Step 5: Run.** `cargo test -p stvdy-server --test schema` — green. Then
+- [x] **Step 5: Run.** `cargo test -p stvdy-server --test schema` — green. Then
       `cargo sqlx prepare --workspace` (the queries land in Task 4, so this is a no-op
       here; run it again after Task 4).
 
-- [ ] **Step 6: Commit.** `feat(server): the syllabus draft table, and the deviation row it needs`
+- [x] **Step 6: Commit.** `feat(server): the syllabus draft table, and the deviation row it needs`
 
 ---
 
@@ -866,7 +866,7 @@ create index on syllabus_drafts (user_id, status);
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the first three tests in `crates/server/tests/syllabus.rs`.**
+- [x] **Step 1: Write the first three tests in `crates/server/tests/syllabus.rs`.**
 
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
@@ -892,7 +892,7 @@ async fn another_accounts_draft_is_not_found(pool: PgPool) {
 
 `cargo test -p stvdy-server --test syllabus` — fails to compile (no `syllabus::routes`).
 
-- [ ] **Step 2: `crates/server/src/syllabus.rs`.**
+- [x] **Step 2: `crates/server/src/syllabus.rs`.**
 
 ```rust
 pub fn routes(body_limit_bytes: usize) -> Router<AppState>;
@@ -924,7 +924,7 @@ pub async fn create(
 `draft` returns the stored extraction plus the review list, or 409 `conflict` while the
 status is `extracting`, and 422 `conflict`-free failure detail when it is `failed`.
 
-- [ ] **Step 3: The `ingest_source` arm.** In
+- [x] **Step 3: The `ingest_source` arm.** In
       `crates/server/src/jobs/handlers/ingest.rs`, add a `"syllabus"` arm to the `kind`
       match that parses exactly like `"pdf"` (or `"text"`, by `mime`), and after the
       chunks are written, one extra step:
@@ -951,7 +951,7 @@ through `prompts::compose_task` with `timezone`, `semester_context: None` and
 `status = 'ready'`. On failure it writes `status = 'failed'` and `error`, sets the source
 to `failed` **only** for a permanent failure, and returns the `Failure`.
 
-- [ ] **Step 4: `crates/server/tests/route_sweep.rs`.** Three rows and one driver arm:
+- [x] **Step 4: `crates/server/tests/route_sweep.rs`.** Three rows and one driver arm:
 
 | Method | Path | Class | Why / feature | Refusal |
 |---|---|---|---|---|
@@ -959,10 +959,10 @@ to `failed` **only** for a permanent failure, and returns the `Failure`.
 | GET | `/syllabus/{id}/draft` | ReadOnly | reads the caller's own draft | — |
 | POST | `/syllabus/{id}/confirm` | ReadOnly | the import was already counted and charged; confirming writes rows and spends nothing | — |
 
-- [ ] **Step 5: Run.** `cargo test -p stvdy-server --test syllabus --test route_sweep` and
+- [x] **Step 5: Run.** `cargo test -p stvdy-server --test syllabus --test route_sweep` and
       `cargo sqlx prepare --workspace`.
 
-- [ ] **Step 6: Commit.** `feat(server): syllabus upload, the draft, and the extraction step`
+- [x] **Step 6: Commit.** `feat(server): syllabus upload, the draft, and the extraction step`
 
 ---
 
@@ -974,7 +974,7 @@ to `failed` **only** for a permanent failure, and returns the `Failure`.
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the two tests that are the review screen's whole contract.**
+- [x] **Step 1: Write the two tests that are the review screen's whole contract.**
 
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
@@ -994,7 +994,7 @@ async fn confirming_writes_only_the_kept_items(pool: PgPool) {
 
 `cargo test -p stvdy-server --test syllabus` — fails (no `confirm`).
 
-- [ ] **Step 2: The handler.**
+- [x] **Step 2: The handler.**
 
 ```rust
 #[derive(Debug, serde::Deserialize)]
@@ -1031,9 +1031,9 @@ meeting becomes one `events` row per occurrence and there is still exactly one r
 engine in the product. A draft that is already `confirmed` answers 409 `conflict` rather
 than writing twice.
 
-- [ ] **Step 3: Run.** `cargo test -p stvdy-server --test syllabus`
+- [x] **Step 3: Run.** `cargo test -p stvdy-server --test syllabus`
 
-- [ ] **Step 4: Commit.** `feat(server): the syllabus review's confirm, and only confirmed items`
+- [x] **Step 4: Commit.** `feat(server): the syllabus review's confirm, and only confirmed items`
 
 ---
 
@@ -1046,7 +1046,7 @@ than writing twice.
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the purity sweep and the first five contract tests.**
+- [x] **Step 1: Write the purity sweep and the first five contract tests.**
 
 ```rust
 // crates/core/tests/planner_purity.rs
@@ -1109,7 +1109,7 @@ fn block_and_break_lengths_are_exact() {
 
 `cargo test -p stvdy-core --test planner --test planner_purity` — fails to compile.
 
-- [ ] **Step 2: `crates/core/src/planner/model.rs`.** The contract § 6 types, verbatim in
+- [x] **Step 2: `crates/core/src/planner/model.rs`.** The contract § 6 types, verbatim in
       field order and name, plus the four it names without writing out:
 
 ```rust
@@ -1200,7 +1200,7 @@ pub enum PlanWarning {
 server and read by a client, and the accept path validates the **blocks the client sends**
 against the invariants rather than trusting a round-tripped `PlanProposal` (A264).
 
-- [ ] **Step 3: `crates/core/src/planner/slots.rs`.** Steps 1 and 2 of the algorithm.
+- [x] **Step 3: `crates/core/src/planner/slots.rs`.** Steps 1 and 2 of the algorithm.
 
 ```rust
 /// Step 1. `None` when there is no goal to plan for, or every goal is in the past.
@@ -1229,7 +1229,7 @@ pub(crate) fn ceil_to_block(input: &PlannerInput) -> DateTime<Utc>;
 at 14:07 would emit a block starting at 14:07, which is not a block length and not a
 boundary a student can reason about.
 
-- [ ] **Step 4: `crates/core/src/planner/mod.rs`.** The public surface and the step order,
+- [x] **Step 4: `crates/core/src/planner/mod.rs`.** The public surface and the step order,
       with `propose` wired to `slots` only for now:
 
 ```rust
@@ -1253,9 +1253,9 @@ pub fn propose(input: &PlannerInput) -> PlanProposal {
 }
 ```
 
-- [ ] **Step 5: Run.** `cargo test -p stvdy-core --test planner --test planner_purity`
+- [x] **Step 5: Run.** `cargo test -p stvdy-core --test planner --test planner_purity`
 
-- [ ] **Step 6: Commit.** `feat(core): the planner's horizon, study windows and block chunking`
+- [x] **Step 6: Commit.** `feat(core): the planner's horizon, study windows and block chunking`
 
 ---
 
@@ -1268,7 +1268,7 @@ pub fn propose(input: &PlannerInput) -> PlanProposal {
 
 **The failing test first.**
 
-- [ ] **Step 1: Add the seven tests.**
+- [x] **Step 1: Add the seven tests.**
 
 ```rust
 #[test]
@@ -1319,7 +1319,7 @@ fn a_deadline_before_now_is_a_warning_not_a_panic() {
 
 `cargo test -p stvdy-core --test planner` — fails on the new assertions.
 
-- [ ] **Step 2: The module.**
+- [x] **Step 2: The module.**
 
 ```rust
 /// Step 3. `D = Σ_topic remaining_min × weight(topic) + due_review_min`.
@@ -1345,7 +1345,7 @@ pub(crate) fn allocate(
 pub(crate) struct Slot { pub interval: Interval, pub remaining_min: i64 }
 ```
 
-- [ ] **Step 3: Add the determinism test, which is the one this task's ordering makes
+- [x] **Step 3: Add the determinism test, which is the one this task's ordering makes
       non-obvious.** It builds the same logical input twice — once with the accuracy map
       assembled in a `HashMap` and read out in insertion order, once from a `BTreeMap` — and
       asserts `serde_json::to_vec(&propose(&a)) == serde_json::to_vec(&propose(&b))`,
@@ -1356,9 +1356,9 @@ pub(crate) struct Slot { pub interval: Interval, pub remaining_min: i64 }
 fn the_same_input_produces_byte_identical_output() { /* … */ }
 ```
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-core --test planner`
+- [x] **Step 4: Run.** `cargo test -p stvdy-core --test planner`
 
-- [ ] **Step 5: Commit.** `feat(core): the planner's demand, review pass and spread-capped allocation`
+- [x] **Step 5: Commit.** `feat(core): the planner's demand, review pass and spread-capped allocation`
 
 ---
 
@@ -1371,7 +1371,7 @@ fn the_same_input_produces_byte_identical_output() { /* … */ }
 
 **The failing test first.**
 
-- [ ] **Step 1: Add the two tests.**
+- [x] **Step 1: Add the two tests.**
 
 ```rust
 #[test]
@@ -1388,7 +1388,7 @@ fn the_balancer_never_moves_a_pinned_block() {
 }
 ```
 
-- [ ] **Step 2: The module.**
+- [x] **Step 2: The module.**
 
 ```rust
 /// The share of `max_study_min_per_day` above which a day counts as overloaded.
@@ -1414,12 +1414,12 @@ A block is movable iff `!block.pinned && block.kind == BlockKind::NewMaterial` (
 After a move, `day_load` is recomputed from `blocks` rather than patched, so the two can
 never disagree.
 
-- [ ] **Step 3: Wire step 7 in `propose`,** gated on `input.config.balancer_enabled`, which
+- [x] **Step 3: Wire step 7 in `propose`,** gated on `input.config.balancer_enabled`, which
       the server sets from `PlannerMode` (A257).
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_purity`
+- [x] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_purity`
 
-- [ ] **Step 5: Commit.** `feat(core): the Power balancer, bounded to a hundred iterations`
+- [x] **Step 5: Commit.** `feat(core): the Power balancer, bounded to a hundred iterations`
 
 ---
 
@@ -1433,7 +1433,7 @@ never disagree.
 
 **The failing test first.**
 
-- [ ] **Step 1: Add the tests.**
+- [x] **Step 1: Add the tests.**
 
 ```rust
 // crates/core/tests/planner.rs
@@ -1461,7 +1461,7 @@ fn prep_progress_has_no_composite_score() {
 }
 ```
 
-- [ ] **Step 2: `replan.rs`.**
+- [x] **Step 2: `replan.rs`.**
 
 ```rust
 /// `propose`, with `PlannerInput::pinned` emitted first as blocks with `pinned: true` and
@@ -1470,7 +1470,7 @@ fn prep_progress_has_no_composite_score() {
 pub fn replan(input: &PlannerInput) -> PlanProposal;
 ```
 
-- [ ] **Step 3: `progress.rs`.**
+- [x] **Step 3: `progress.rs`.**
 
 ```rust
 /// The goal's true components, and nothing else (spec § Honesty rules: no composite
@@ -1495,9 +1495,9 @@ pub struct TopicAttempts { pub topic: String, pub attempts: i64, pub correct: i6
 `weak_topics` is the topics whose accuracy is below `WEAK_TOPIC_ACCURACY = 0.6`, ordered
 by accuracy ascending then by name — the same ordering rule A266 uses, for the same reason.
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_progress`
+- [x] **Step 4: Run.** `cargo test -p stvdy-core --test planner --test planner_progress`
 
-- [ ] **Step 5: Commit.** `feat(core): replan with pinned blocks, and the prep-progress calculation`
+- [x] **Step 5: Commit.** `feat(core): replan with pinned blocks, and the prep-progress calculation`
 
 ---
 
@@ -1510,11 +1510,11 @@ by accuracy ascending then by name — the same ordering rule A266 uses, for the
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the migration and run the schema test.**
+- [x] **Step 1: Write the migration and run the schema test.**
       `cargo test -p stvdy-server --test schema` — fails on `plan_proposals`, then on
       nothing once the `documented` row is added.
 
-- [ ] **Step 2: The migration.**
+- [x] **Step 2: The migration.**
 
 ```sql
 -- The planner's proposal.
@@ -1553,16 +1553,16 @@ alter table events add column goal_id uuid references goals(id) on delete set nu
 create index on events (goal_id);
 ```
 
-- [ ] **Step 3: The three consequences, in the same commit.** (a) `documented` +=
+- [x] **Step 3: The three consequences, in the same commit.** (a) `documented` +=
       `"plan_proposals"`; (b) an ASSUMPTIONS § Schema deviations row covering both the new
       table and the new column; (c) `src-tauri/src/cache/schema.rs` gains `goal_id text`
       on the `events` table, and `docs/SYNC.md` notes that the `Event` payload now carries
       it — the client cache must have the column or an applied event loses it.
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-server --test schema` and
+- [x] **Step 4: Run.** `cargo test -p stvdy-server --test schema` and
       `cargo test -p stvdy-sync` (the payload round-trip).
 
-- [ ] **Step 5: Commit.** `feat(server): the plan proposal table, and the goal link a block needs`
+- [x] **Step 5: Commit.** `feat(server): the plan proposal table, and the goal link a block needs`
 
 ---
 
@@ -1577,7 +1577,7 @@ create index on events (goal_id);
 
 **The failing test first.**
 
-- [ ] **Step 1: Write the first three tests.**
+- [x] **Step 1: Write the first three tests.**
 
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
@@ -1596,19 +1596,19 @@ async fn a_proposal_that_cannot_fit_reports_its_deficit(pool: PgPool) {
 async fn another_accounts_proposal_is_not_found(pool: PgPool) { /* 404 */ }
 ```
 
-- [ ] **Step 2: `config/plans.toml` and `crates/core/src/config/plans.rs`.** Add the
+- [x] **Step 2: `config/plans.toml` and `crates/core/src/config/plans.rs`.** Add the
       `[planner]` table (A255) and a `PlannerTunables` struct on `PlansFile` with
       `validate()` requiring it, beside `provider_cost_ceiling_usd`. A missing table is a
       config error, not a silent default.
 
-- [ ] **Step 3: `crates/server/src/goals.rs`.** `GET /goals`, `POST /goals`,
+- [x] **Step 3: `crates/server/src/goals.rs`.** `GET /goals`, `POST /goals`,
       `GET /goals/{id}`, `PATCH /goals/{id}`, `DELETE /goals/{id}`,
       `GET /goals/{id}/progress`. Goals are **not** plan-gated: a free account has goals and
       a manual planner. `progress` builds `PrepProgress` from the goal's `source_ids`, the
       quiz attempts over the last 14 days and the due cards, and returns it — with
       `quiz_accuracy_pct: null` when there are none.
 
-- [ ] **Step 4: `crates/server/src/planner/mod.rs`.** The only place a `PlannerInput` is
+- [x] **Step 4: `crates/server/src/planner/mod.rs`.** The only place a `PlannerInput` is
       built and the only place `PlannerMode` becomes a `PlannerConfig` (A257):
 
 ```rust
@@ -1621,7 +1621,7 @@ pub fn busy_from(events: &[EventRow], tasks: &[TaskRow]) -> Vec<Interval>;
 goal's already-started `study_block` events (A265). `due_review_min` is `due_cards ×
 DUE_CARD_MIN` (A260), read from the same due computation the study screen uses.
 
-- [ ] **Step 5: `crates/server/src/planner/routes.rs`.** Four routes, exact paths from the
+- [x] **Step 5: `crates/server/src/planner/routes.rs`.** Four routes, exact paths from the
       spec's API list:
 
 ```rust
@@ -1636,7 +1636,7 @@ pub fn routes() -> Router<AppState>;
 plan list); the paths are the spec's, they differ in method and depth, and the route sweep
 carries both rows.
 
-- [ ] **Step 6: `crates/server/src/planner/apply.rs`.**
+- [x] **Step 6: `crates/server/src/planner/apply.rs`.**
 
 ```rust
 /// Validates the client's blocks and writes them, or writes none of them (A264).
@@ -1653,7 +1653,7 @@ pub async fn accept(
 ) -> AppResult<Vec<Uuid>>;
 ```
 
-- [ ] **Step 7: `crates/server/tests/route_sweep.rs`.** Ten rows and two driver arms
+- [x] **Step 7: `crates/server/tests/route_sweep.rs`.** Ten rows and two driver arms
       (`POST /goals/{id}/plan`, `POST /plan/replan`):
 
 | Method | Path | Class | Why / feature | Refusal |
@@ -1669,10 +1669,10 @@ pub async fn accept(
 | POST | `/plans/accept` | ReadOnly | the 2 credits were charged at plan time | — |
 | POST | `/plan/replan` | Swept | `PlanGeneration` | 403 `plan_required` |
 
-- [ ] **Step 8: Run.** `cargo test -p stvdy-server --test planner --test route_sweep` and
+- [x] **Step 8: Run.** `cargo test -p stvdy-server --test planner --test route_sweep` and
       `cargo sqlx prepare --workspace`.
 
-- [ ] **Step 9: Commit.** `feat(server): goals CRUD, the proposal preview, accept and replan`
+- [x] **Step 9: Commit.** `feat(server): goals CRUD, the proposal preview, accept and replan`
 
 ---
 
@@ -1686,7 +1686,7 @@ pub async fn accept(
 
 **The failing test first.**
 
-- [ ] **Step 1: Add the two refund tests.**
+- [x] **Step 1: Add the two refund tests.**
 
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
@@ -1702,7 +1702,7 @@ async fn a_failed_extraction_refunds_the_eight_credits(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: `crates/server/src/jobs/handlers/plan.rs`.**
+- [x] **Step 2: `crates/server/src/jobs/handlers/plan.rs`.**
 
 ```rust
 /// The `plan_goal` job: the one model call, then the pure planner, then the row.
@@ -1718,16 +1718,16 @@ It reads `now` **once** from `state.clock.now()` at the top and puts it in the
 effort reply that `reconcile` refuses twice) marks the proposal `failed`; a transient one
 leaves it `planning` for the retry.
 
-- [ ] **Step 3: The three wiring edits.** `handlers/mod.rs` gains `pub mod plan;`;
+- [x] **Step 3: The three wiring edits.** `handlers/mod.rs` gains `pub mod plan;`;
       `worker.rs::dispatch` gains `"plan_goal" => crate::jobs::handlers::plan::run(state,
       job).await,`; `credits.rs::RefundTarget` gains `PlanProposal` and `SyllabusDraft`
       with their `label()`, `list_failed_sql()` and `clear_sql()` arms; `main.rs`'s boot
       sweep grows by two.
 
-- [ ] **Step 4: Run.** `cargo test -p stvdy-server --test planner --test syllabus` and
+- [x] **Step 4: Run.** `cargo test -p stvdy-server --test planner --test syllabus` and
       `cargo sqlx prepare --workspace`.
 
-- [ ] **Step 5: Commit.** `feat(server): the plan_goal job, and the refund arm a failed plan needs`
+- [x] **Step 5: Commit.** `feat(server): the plan_goal job, and the refund arm a failed plan needs`
 
 ---
 
@@ -1738,7 +1738,7 @@ leaves it `planning` for the retry.
 
 **The failing test first.**
 
-- [ ] **Step 1: The gate test.**
+- [x] **Step 1: The gate test.**
 
 ```rust
 #[sqlx::test(migrations = "../../migrations")]
@@ -1769,10 +1769,10 @@ async fn an_accepted_proposal_cannot_be_accepted_twice(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run the gate and quote its output in the phase summary.**
+- [x] **Step 2: Run the gate and quote its output in the phase summary.**
       `cargo test -p stvdy-server --test planner -- --nocapture`
 
-- [ ] **Step 3: Commit.** `test(server): the planner exit gate, and the sweep's new rows`
+- [x] **Step 3: Commit.** `test(server): the planner exit gate, and the sweep's new rows`
 
 ---
 
@@ -1901,7 +1901,7 @@ exist, which is why it is written here rather than with the server tests.
   use: migrate, boot, seed a user, upload a fixture syllabus, run the job, confirm, plan,
   accept, and print the written blocks.
 
-- [x] **Step 7: Gate 5 (accessibility), measured, on the two new screens.**
+- [ ] **Step 7: Gate 5 (accessibility), measured, on the two new screens.**
   (a) keyboard only: tab from the goals list to the preview, move a block with the arrow
   keys, reach Accept and the review screen's every control, each with a visible
   `outline-ring`; (b) contrast on both themes with the existing token test extended to the
@@ -2139,6 +2139,8 @@ en.planner.deficit -> 480 minutes of work did not fit before your deadline.
   not part of `npm test` or the Rust suites; and scenarios 6–8 (plan, accept, replan) are the
   ones with no Rust equivalent *as a wired process*, which is why they are the ones worth running
   by hand after any change to the accept path.
+
+  Left unticked — **Task 15 Step 7** ("Gate 5 (accessibility), measured"): its leg (e) asks for 200% text at phone width with no clipping, and that leg is **not measured** — `scripts/measure-mobile.mjs`'s `ROUTES` table has no entry for `/planner`, `/goals`, `/goals/:id/progress`, `/syllabus` or `/syllabus/:draftId`, so pointing the harness at these screens measures the 404 notice. The exit checklist's row 16 records the same split (contrast measured, (e) NOT MEASURED), and a tick here would assert a measurement the phase's own notes say is absent.
 
 ## Self-Review
 
