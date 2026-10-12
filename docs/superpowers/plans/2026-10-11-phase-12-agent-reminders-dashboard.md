@@ -2609,6 +2609,16 @@ agree with the harness's own arithmetic (both report the same lowest phone contr
 they are the only desktop-width gate-5 evidence in the project until the fixed harness is run at that
 width for a phase that needs it.
 
+**One limitation of the instrument, which bears on how the numbers above should be read.** The
+harness's only empty-measurement guard is **aggregate** — it fails if the whole walk found zero
+targets and zero text pairs, not if one surface's fixture 404'd. So a `SURFACES` entry whose fixture
+is missing measures an error notice and still counts as a pass. A green run therefore means "no
+measured defect on the screens the fixtures rendered", not "every surface rendered the screen it
+names". For this phase's two surfaces that gap is closed independently rather than assumed: the
+`/dashboard` walk was confirmed to land on `location.pathname === '/dashboard'` with the course
+names and totals cells present, and the proposal card was read out of the rendered DOM in Indonesian
+with its real labels and buttons. The per-surface guard belongs to the harness's owner.
+
 **Three findings at desktop width, none of them on this phase's screens, each named rather than
 silently fixed:**
 
