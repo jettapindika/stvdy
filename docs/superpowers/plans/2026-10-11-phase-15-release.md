@@ -1900,13 +1900,35 @@ node scripts/check-no-cdn.mjs
 - [ ] `tauri build --target universal-apple-darwin` produces a binary whose `lipo -archs`
       lists both architectures; `codesign --verify --deep --strict`, `spctl -a -vvv` and
       `xcrun stapler validate` all pass; the notarization is `Accepted`.
-      **NOT MEASURED** — no universal build was produced and no notarization was submitted:
-      the tree carries one valid identity, `Apple Development: jettapindika@gmail.com
-      (3A2BQR598M)` (`security find-identity -v -p codesigning`), which is not a Developer ID
-      Application certificate, and there is no `~/.appstoreconnect` notarytool profile.
-      `scripts/notarize-macos.sh` now exists (Phase 15 Task 3 step 2) and its argument and
-      refusal paths are measured, but its submit-and-staple path is unverified against
-      Apple, so no notarization was submitted here.
+      **THE BUILD AND THE ARCHITECTURES ARE NOW MEASURED; the four signing checks are
+      NOT, and they are not "not measured" for want of effort — each one was run and each
+      one refuses for a named reason.** `x86_64-apple-darwin` was added to the toolchain
+      (`rustup target add`) and `tauri build --target universal-apple-darwin --no-bundle`
+      then produced **`src-tauri/target/universal-apple-darwin/release/stvdy-shell`**,
+      18,360,432 bytes, `lipo -archs` → **`x86_64 arm64`** (slices 9,708,412 and 8,644,720),
+      `file` → `Mach-O universal binary with 2 architectures`. So the item's first half
+      passes. **The signing half does not, and here is what each command actually said:**
+
+      | Command | Exit | Output |
+      |---|---|---|
+      | `codesign --verify --deep --strict` | **1** | `code object is not signed at all` |
+      | `spctl -a -vvv -t install` | **3** | `rejected` / `source=no usable signature` |
+      | `xcrun stapler validate` | **65** | `stvdy-shell does not have a ticket stapled to it` |
+
+      `codesign -dv` says why: `flags=0x20002(adhoc,linker-signed)`, `Signature=adhoc`,
+      `TeamIdentifier=not set` — the linker's own ad-hoc signature, which
+      `codesign --verify` does not accept. The tree carries one identity, `Apple
+      Development: jettapindika@gmail.com (3A2BQR598M)`, and that is **not** a Developer ID
+      Application certificate, which is what `spctl` requires for distribution. So the
+      remaining blocker is the operator's certificate and a notarytool credential, exactly
+      as the earlier note said — but the earlier note also said **no universal build was
+      produced**, and that half is now false: the build works, the architectures are right,
+      and the three commands above are the first real outputs this item has ever had.
+      `scripts/notarize-macos.sh`'s refusal paths were measured too: no argument → **exit
+      2**; a missing file → **exit 2** naming the credential shapes it accepts; `--dry-run`
+      on a missing file → **exit 0** with `credentials: none -- the real run would refuse
+      (exit 2)`, so the dry run prints the plan and the real run refuses before it submits
+      anything.
 - [ ] The NSIS installer is signed, SHA-256, and timestamped, and `osslsigncode verify`
       says so.
       **NOT MEASURED** — no NSIS installer was built or signed here: `tauri build` for
