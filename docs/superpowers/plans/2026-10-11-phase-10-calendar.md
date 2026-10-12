@@ -2089,15 +2089,72 @@ requirement**, lowest contrast 5.01:1. The week grid does **not** reflow to one 
 it stays a two-column table whose cells wrap — which is the finding to record either way: a
 two-column grid fits where a seven-column one does not, and the table is what A244 requires.
 
+**(f) The desktop leg, 1365×900, both themes, both scales.** The pass the verification table
+below recorded as not run, measured with `VIEWPORT_WIDTH=1365 VIEWPORT_HEIGHT=900
+VIEWPORT_DPR=2 OUTPUT=gate5-desktop.json node scripts/measure-mobile.mjs` (the env-var form
+`P14UncoveredSurfaces` added in `19f2fbb`, so the two legs share one harness rather than
+being two scripts that would disagree about what a defect is). The calendar surface,
+four combinations:
+
+| key | scrollWidth/clientWidth | overflows | clipped | overlapped | past edge | targets | under 44px | contrast pairs | below requirement | lowest |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `calendar/dark/x100` | 1365/1365 | false | 0 | 0 | 0 | 16 | 5 | 61 | 0 | 5.69:1 |
+| `calendar/dark/x200` | 1365/1365 | false | 0 | 0 | 0 | 16 | 0 | 61 | 0 | 5.69:1 |
+| `calendar/light/x100` | 1365/1365 | false | 0 | 0 | 0 | 16 | 5 | 61 | 0 | 5.01:1 |
+| `calendar/light/x200` | 1365/1365 | false | 0 | 0 | 0 | 16 | 0 | 61 | 0 | 5.01:1 |
+
+Contrast improves at desktop width (5.69:1 dark, 5.01:1 light against the phone leg's
+5.01:1): the sidebar's darker `--surface` is behind more of the screen, and the measurement
+composites the stack, so this is the ratio a reader sees rather than a different rule.
+
+**The one finding, and it is the shell's rather than the calendar's.** At **100% text only**,
+five targets measure **215×40** against the 44px requirement: the sidebar's five
+`a.nav-item` links (`Today`, `Workspaces`, `Calendar`, `Tasks`, `Settings`), identical in
+both themes, **absent at 200%** (the links grow past 44px there). They are the desktop
+`lg:` sidebar, which is why the phone leg never saw them — at 390px the same destinations
+render as the bottom tab bar. **Not fixed here**: the sidebar is not the calendar surface,
+the defect is in the shell's layout rather than in anything Phase 10 added, and a fix in
+another slice's file would be a second writer on it. Recorded, with the numbers, as an
+inherited defect for whichever slice owns the shell's navigation. This is the desktop leg
+earning its keep: a 40px row that is 44px tall at every other scale is exactly the finding
+the phone-only pass could not produce.
+
+**Also inherited, and not this surface:** the desktop run fails on other slices' screens —
+`checkout-*/light` (five states whose status is not in words, plus the same 215×40 sidebar
+links) and `workspace-*/light/x200` and `pricing/light/x200` (clipped text). Those are Phase
+12's, Phase 13's and Phase 14's surfaces, measured by the same harness on the same run, and
+none of them is the calendar. The calendar's own four combinations are green apart from the
+sidebar row above.
+
 ### Roadmap gate 6 — Indonesian end to end. PARTIAL, and recorded as partial
 
-- **Server data half: not measured here.** The feed's escaping, the folding at a multi-byte
-  boundary, and a `TZID`-bearing `DTSTART` importing to the right wall clock are
-  `crates/server/tests/calendar.rs`'s and `crates/core/tests/calendar.rs`'s, which are the
-  server and core slices'. `scripts/smoke-phase10.sh` asserts the half that can be asserted
-  over HTTP: an Indonesian title containing **both** a comma and a semicolon
-  (`UAS Jaringan Komputer; bab 3,4 dan 5`) comes back from `/cal/<token>.ics` with `\,` and
-  `\;` escaped, one `VEVENT`, a `UID` and a `SEQUENCE`, and two renders **byte-identical** —
+- **Server data half: measured, and it composes the three cases the plan names.** New with
+  Task E: `an_indonesian_feed_imports_to_the_right_wall_clock_and_renders_the_local_day` in
+  `crates/server/tests/calendar.rs`. It imports a feed whose `SUMMARY` carries **both** a
+  semicolon and a comma (`UTS Jaringan Komputer; bab 3,4 dan 5`) and whose
+  `DTSTART;TZID=Asia/Jakarta:20261016T060000` must land on **`2026-10-15T23:00:00Z`** — 06:00
+  Jakarta on the 16th is 23:00Z on the **15th**, which is the pair that catches a UTC
+  implementation, because a build that read the value as UTC would store `06:00Z` and every
+  other assertion would stay self-consistent. It then asserts the title round-trips whole,
+  that a deadline at `2026-10-15T17:00Z` renders `DTSTART;VALUE=DATE:20261016` with
+  `DTEND;VALUE=DATE:20261017` (the local day, exclusive end), and that the feed's escaping
+  puts `\,` and `\;` on the wire. The unit halves are
+  `crates/core/tests/calendar.rs`'s (`a_deadline_is_an_all_day_event_in_the_users_zone`,
+  `a_long_indonesian_title_folds_and_comes_back_whole`,
+  `a_tzid_event_keeps_its_wall_clock_across_a_dst_boundary`), which is where the placement
+  rule and the multi-byte fold are proven.
+- **What the server half still cannot be:** the composed case is a **route-level** test with
+  an injected fetcher, not a live fetch of a real faculty calendar. The guard is precisely
+  what refuses a local stub, so a test that reached one through the real fetcher would be
+  proving the guard absent (A233). The importer, the expansion and the escaping are the real
+  code; the network is the seam.
+- **Server data half, as previously recorded, kept for the record:** the feed's escaping, the
+  folding at a multi-byte boundary, and a `TZID`-bearing `DTSTART` importing to the right wall
+  clock are `crates/server/tests/calendar.rs`'s and `crates/core/tests/calendar.rs`'s.
+  `scripts/smoke-phase10.sh` asserts the half that can be asserted over HTTP: an Indonesian
+  title containing **both** a comma and a semicolon (`UAS Jaringan Komputer; bab 3,4 dan 5`)
+  comes back from `/cal/<token>.ics` with `\,` and `\;` escaped, one `VEVENT`, a `UID` and a
+  `SEQUENCE`, and two renders **byte-identical** —
   a broken `SUMMARY` line is a shifted field, not a cosmetic difference.
 - **UI half: not driven in a browser at 200% scale.** The clock is covered by unit tests
   against a fixed instant and an explicit zone — `calendar.test.ts` places a
@@ -2136,24 +2193,34 @@ two-column grid fits where a seven-column one does not, and the table is what A2
 
 ### Verification table
 
+**Task E re-ran the whole table.** The rows below are the state after Task E's commit; the
+original "not run" verdicts are kept where they still hold, and the ones Task E moved are
+named as moved rather than overwritten silently.
+
 | Gate | Command | Result |
 |---|---|---|
-| format | `cargo fmt --all -- --check` | **not run by this slice** — the Rust workspace was mid-write by four live slices throughout, and `crates/core` was reported red twice |
-| lints | `cargo clippy --workspace --all-targets -- -D warnings` | not run, same reason |
-| tests | `cargo test --workspace` | not run, same reason |
+| format | `cargo fmt --all -- --check` | **clean, exit 0** (Task E; the tree was quiet enough) |
+| lints | `cargo clippy --workspace --all-targets -- -D warnings` | **RED, exit 101, 12 errors, 0 in this slice's files.** One was mine — `crates/server/src/calendar/oauth.rs`'s `expect` on a constant `url::Url`, which the workspace's `expect_used = "deny"` refuses; fixed in `23ab8b3`, and the 11 that remain are peer files: `billing/apply.rs`, `billing/webhook.rs`, `chat/agent.rs`, `credits.rs`, `integrations/push.rs`, `jobs/handlers/{ingest,reminders}.rs`, `jobs/schedule.rs` (the reminders pass's `.bind(&window)`, not the calendar poll), `planner/routes.rs`, `syllabus.rs` |
+| tests | `cargo test --workspace` | run with the same tree; see the row's note below — the calendar suites are green, the workspace is red on peer suites |
+| tests, calendar (server) | `cargo test -p stvdy-server --test calendar` | **10 passed, 0 failed** — was 6 before Task E (Task 6's three cases + gate 6's data case) |
+| tests, calendar (core) | `cargo test -p stvdy-core --test calendar` | **12 passed, 0 failed** |
+| tests, route sweep | `cargo test -p stvdy-server --test route_sweep` | **4 passed, 0 failed** — including `every_registered_route_is_classified`, which fails on an unclassified route, so the two new rows are load-bearing |
 | SPA tests | `npm --prefix app test` | **559 passed, 1 failed** at `0312568`; the one failure is `src/features/billing/CheckoutScreen.tsx: undefined` in the raw-colour scan — another slice's uncommitted file, not this one's |
 | SPA tests, this slice | `npm --prefix app test -- calendar` | **21 passed** (`calendar.test.ts` 11, `CalendarScreen.test.tsx` 6, `layout.test.ts` 4) |
 | axe | `src/features/a11y.test.tsx` | the calendar screen added; no violations |
 | web build | `npm --prefix app run build` | `tsc --noEmit` clean for every path this slice owns |
 | no CDN | `node scripts/check-no-cdn.mjs` | not re-run by this slice |
 | phone measurement | `node scripts/measure-mobile.mjs` | calendar surface: `390/390` at 100% and 200%, both themes, 0 clipped, 0 overlapped, 0 targets under 44px, 0 text pairs below requirement, lowest 5.01:1 |
-| smoke | `bash scripts/smoke-phase10.sh` | **written, not run** — it needs a live server and a database, and the ICS half's successful fetch is the server suite's by design |
+| desktop measurement | `VIEWPORT_WIDTH=1365 VIEWPORT_HEIGHT=900 VIEWPORT_DPR=2 OUTPUT=gate5-desktop.json node scripts/measure-mobile.mjs` | **exit 1** on peer surfaces; the calendar's four combinations are `1365/1365`, 0 clipped, 0 overlapped, 0 past-edge, 0 pairs below requirement, lowest 5.69:1 dark / 5.01:1 light, **5 targets under 44px at 100% text only** — the shell's sidebar `a.nav-item` rows at 215×40, both themes, absent at 200%. Numbers in gate 5 (f) above; the sidebar is not this slice's file |
+| smoke | `bash scripts/smoke-phase10.sh` | **PASS, exit 0**, against a live server and Postgres. New with Task E: `GET /calendar/google/connect` on free is **403 plan_required (min_plan=pro)**, and `GET /calendar/google/callback` with an unknown state is **302 to `stvdy://oauth/calendar?status=error&reason=the+consent+request+is+not+valid`** with no credential in the URL. The run needs `just smoke-server-phase10` (which sets dummy `GOOGLE_CALENDAR_*` values): without the client the connect route is a 404, and 404 is also what an unregistered route answers, so the script fails rather than reporting an unmeasured pass |
 
 ### `NOT VERIFIED HERE`
 
-- **The live Google Calendar API**, and **the real `410`**: the consent routes are unlanded
-  and the OAuth client does not exist in this repo. The tests drive a fake; the real `410`
-  arrives after a long idle period.
+- **The live Google Calendar API**, and **the real `410`**: the OAuth client does not exist in
+  this repo. The consent routes and their refusals are tested; the code exchange, the refresh
+  token's issuance and the "Study Plan" calendar's find-or-create (A237) are not, and the plan's
+  Task 6 names all four items. The tests drive a fake; the real `410` arrives after a long idle
+  period.
 - **A successful ICS fetch over HTTP from this smoke run.** The guard is precisely what
   refuses `127.0.0.1`, so a run that pointed the real fetcher at a local stub and passed would
   be proving the guard *absent*. The import, the conditional GET and the 404/410 paths are the
