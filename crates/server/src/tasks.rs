@@ -34,7 +34,7 @@ use stvdy_core::generation::{GenerationError, capture, is_retryable};
 use stvdy_core::prompts::{ChatVars, ModuleId, compose_task};
 use stvdy_core::tasks as rules;
 use stvdy_core::traits::llm::{ChatMsg, ChatRequest, Role, Usage};
-use stvdy_sync::proto::ErrorCode;
+use stvdy_sync::proto::{Entity, ErrorCode};
 
 use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::credits::Spent;
@@ -221,20 +221,7 @@ impl NewTask {
 /// answer to how long a title may be.
 pub fn validate_task(id: Uuid, payload: &Value, is_create: bool) -> Result<NewTask, Reject> {
     let object = payload_object(payload)?;
-    let known: &[&str] = &[
-        "id",
-        "workspace_id",
-        "parent_id",
-        "title",
-        "notes",
-        "due_at",
-        "estimate_min",
-        "priority",
-        "status",
-        "position",
-        "deleted_at",
-    ];
-    reject_unknown(object, known)?;
+    reject_unknown(object, Entity::Task.payload_columns())?;
 
     let title: Option<String> = field(object, "title")?;
     if is_create && title.is_none() {
@@ -311,10 +298,15 @@ fn payload_object(payload: &Value) -> Result<&Map<String, Value>, Reject> {
 
 /// Refuses a field the entity's writer does not accept.
 ///
-/// The list is the same one the sync protocol ships and accepts (`payload_columns`), so a
-/// field this file allows but the protocol drops cannot exist. `user_id` is deliberately
-/// absent from every list: the row already belongs to the caller, and a payload free to
-/// state it is a payload that looks accepted while being ignored.
+/// `known` is the entity's own `payload_columns` — the allowlist the pull ships and the
+/// push writes — so the two directions cannot disagree: a field this validator allows and
+/// the writer drops cannot exist, and neither can a field the writer accepts that this
+/// refuses. A hand-written list here would be a second answer to "what is a task's column",
+/// and it would drift the first time a column was added to one of them.
+///
+/// `user_id` is deliberately absent from every allowlist: the row already belongs to the
+/// caller, and a payload free to state it is a payload that looks accepted while being
+/// ignored.
 fn reject_unknown(object: &Map<String, Value>, known: &[&str]) -> Result<(), Reject> {
     for key in object.keys() {
         if !known.contains(&key.as_str()) {

@@ -21,6 +21,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
+use stvdy_sync::proto::Entity;
+
 use crate::auth::extract::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -39,23 +41,11 @@ const APP_SOURCE: &str = "app";
 /// How far ahead the window reaches when the caller gives no `to`.
 const DEFAULT_WINDOW_DAYS: i64 = 7;
 
-/// The columns a client may write.
-///
-/// The four calendar-owned columns are deliberately **absent**: a payload naming one is
-/// refused rather than ignored, because a field that looks accepted while being dropped is
-/// how a forged value reaches a client's cache.
-const CLIENT_COLUMNS: &[&str] = &[
-    "id",
-    "workspace_id",
-    "kind",
-    "title",
-    "starts_at",
-    "ends_at",
-    "source",
-    "task_id",
-];
-
 /// The columns the calendar sync owns (A198), named so the refusal can list them.
+///
+/// `source` is the fourth and is handled separately, because `source = "app"` is the one
+/// value a client may state: it is the column's own default, and refusing it would refuse
+/// the payload a client that echoes the row it pulled would send.
 const CALENDAR_COLUMNS: &[&str] = &["external_id", "etag", "connection_id"];
 
 pub fn routes() -> Router<AppState> {
@@ -121,18 +111,26 @@ impl NewEvent {
 pub fn validate_event(payload: &Value, is_create: bool) -> Result<NewEvent, Reject> {
     let object = payload_object(payload)?;
 
-    // The calendar's columns are refused **first**, before the unknown-key check: the
-    // refusal that names the calendar is the one a client can act on, and "not a field a
-    // client may write" would hide why.
+    // The calendar's columns are refused **first**, before the unknown-key check, and their
+    // presence alone is the offence — a null included, because clearing `external_id` breaks
+    // the `(connection_id, external_id)` match the next incremental sync makes just as
+    // surely as forging one. A198's wire code for this through a push is `read_only_entity`
+    // (the client's remedy is to stop writing, never to upgrade), which is the code the REST
+    // route maps to its own 400 `validation`.
     for column in CALENDAR_COLUMNS {
-        if object.get(*column).is_some_and(|value| !value.is_null()) {
+        if object.contains_key(*column) {
             return Err(Reject::read_only_field(format!(
                 "{column} is written by the calendar sync, not by a client"
             )));
         }
     }
+    // Everything the protocol writes for an event, minus the calendar's own columns: the
+    // allowlist is `Entity::Event.payload_columns()`, so the two directions cannot disagree
+    // about what an event payload is.
     for key in object.keys() {
-        if !CLIENT_COLUMNS.contains(&key.as_str()) && !CALENDAR_COLUMNS.contains(&key.as_str()) {
+        let known = Entity::Event.payload_columns().contains(&key.as_str())
+            && !CALENDAR_COLUMNS.contains(&key.as_str());
+        if !known {
             return Err(Reject::validation(format!(
                 "{key} is not a field a client may write"
             )));
