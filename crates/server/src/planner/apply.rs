@@ -66,10 +66,6 @@ impl AcceptBlock {
     fn is_pinned(&self) -> bool {
         self.goal_id.is_nil() && self.topic == PINNED_TOPIC
     }
-
-    fn minutes(&self) -> i64 {
-        (self.ends_at - self.starts_at).num_minutes()
-    }
 }
 
 /// The body of `POST /plans/accept`.

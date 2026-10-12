@@ -83,18 +83,16 @@ fn a_confidence_outside_zero_to_one_is_refused() {
 
 #[test]
 fn an_item_carries_the_line_it_was_read_from() {
-    let raw = format!(
-        r#"{{"course":{{"name":"Jaringan Komputer","code":"IF2230","instructor":null}},
-            "meetings":[{{"title":"Lecture","rrule":"FREQ=WEEKLY;BYDAY=MO;COUNT=3",
+    let raw = r#"{"course":{"name":"Jaringan Komputer","code":"IF2230","instructor":null},
+            "meetings":[{"title":"Lecture","rrule":"FREQ=WEEKLY;BYDAY=MO;COUNT=3",
                           "start_time":"08:00","end_time":"09:40","location":"Room 3",
-                          "evidence":"Kuliah Senin 08:00 ruang 3","confidence":0.95}}],
-            "deadlines":[{{"title":"Tugas 1","due":"2026-11-12T23:59:00+07:00",
+                          "evidence":"Kuliah Senin 08:00 ruang 3","confidence":0.95}],
+            "deadlines":[{"title":"Tugas 1","due":"2026-11-12T23:59:00+07:00",
                            "weight_percent":15.0,"evidence":"Tugas 1 dikumpulkan 12 Nov",
-                           "confidence":0.4}}],
-            "exams":[],"notes":["UAS material is cumulative"]}}"#
-    );
+                           "confidence":0.4}],
+            "exams":[],"notes":["UAS material is cumulative"]}"#;
 
-    let file = parse_syllabus(&raw).unwrap();
+    let file = parse_syllabus(raw).unwrap();
     let items = review_items(&file, jakarta()).unwrap();
     assert_eq!(items.len(), 2);
 
