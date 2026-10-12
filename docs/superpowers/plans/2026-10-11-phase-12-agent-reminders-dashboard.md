@@ -2202,7 +2202,7 @@ export function planLocalNotifications(input: {
 }): LocalReminder[]
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // ActionCard.test.tsx
@@ -2231,26 +2231,54 @@ it('locks the topic breakdown on a plan that does not grant it', () => {
 })
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `npm --prefix app test -- ActionCard localSchedule DashboardScreen`
 
-- [ ] **Step 3: Write the components and the queries**
+- [x] **Step 3: Write the components and the queries**
 
 `ActionCard` reads its state from `GET /actions/pending` on the web and from the synced
 `pending_actions` rows on native, so a card confirmed on another device updates in place.
 `useLocalNotifications` writes the ids it scheduled into `Platform.localState` and skips a
 push whose `reminder_id` is already there (A285's fallback half).
 
-- [ ] **Step 4: Run the tests and the build**
+- [x] **Step 4: Run the tests and the build**
 
 `npm --prefix app test && npm --prefix app run build && node scripts/check-no-cdn.mjs`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(app): the confirmation card, the local schedule, and the dashboard
 ```
+
+---
+
+**Execution notes, Task 15.** Three things the plan did not anticipate.
+
+1. **The card had no mount, so the plan's file list would have shipped dead code.** `ActionCard`
+   reads `GET /actions/pending`, and nothing in the brief's files mounts it — `onAction` in
+   `sse.ts` would have been a handler nobody sets, and a proposal streamed mid-answer would never
+   have appeared. Main granted `ChatScreen.tsx`, `useChatStream.ts` and `App.tsx`: the card list
+   is mounted under the chat thread, `onAction` invalidates the pending-actions query, and
+   `useLocalNotifications` is called once in `App`'s signed-in branch. Without the third, the
+   local schedule had no caller at all.
+2. **`localSchedule.ts`'s lead times are asserted against `crates/core/src/reminders.rs`, not
+   against literals.** The test reads the server file and evaluates its constants, because a
+   client that led by a different margin would notify at a time the server does not consider the
+   reminder's time — a second schedule for one subject, which is exactly the divergence the
+   module exists to prevent, and nothing else in either suite would see it.
+3. **A defect in `plans.ts` blocked the card's cost.** The parser's key pattern was `[a-z_]+`, so
+   `flashcard_batch_10` and `quiz_10` — the two prices a confirmed agent write charges — were
+   skipped **silently**, in the parser's documented "the file does not say" direction. Nothing
+   quoted them before this phase, which is why it survived; honesty gate 7(d) was being satisfied
+   by a blank. Fixed by widening to `[a-z0-9_]+`, with two regression cases.
+
+Also: `sse.test.ts` asserted that an `action` frame is **ignored** — true before this phase and
+false now that `action` is one of the roadmap § 4's six names. Rewritten to assert the new
+contract plus two malformed-frame cases, with a genuinely unknown event name carrying the
+forward-compatibility assertion the old case was really about.
+
 
 ---
 
@@ -2317,8 +2345,8 @@ Phase 2's stub exists. It asserts: a proposal arrives as an `action` event, no t
 until the confirm, the confirm creates one, the second confirm is a 409, and a repeated
 `POST /reminders` answers `applied: false`.
 
-- [ ] **Step 1: Write the docs and the script**
-- [ ] **Step 2: Run the full gate**
+- [x] **Step 1: Write the docs and the script**
+- [ ] **Step 2: Run the full gate** — **NOT RUN**: see the execution notes below.
 
 ```bash
 cargo fmt --all -- --check
@@ -2330,7 +2358,7 @@ cargo sqlx prepare --workspace --check
 bash scripts/smoke-phase12.sh
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```
 docs(phase 12): the agent, the reminders, and the dashboard as built
@@ -2451,3 +2479,44 @@ the hub composes the per-workspace `GET /workspaces/:id/decks` and
 `GET /workspaces/:id/quizzes` routes that already exist, so a later screen needs no server
 work. Recorded here so the paragraph is accounted for item by item rather than quietly
 dropped.
+
+### Execution notes, Task 16 — what is done and what is not
+
+**Done.** The five docs are committed (`a06d648` and the two peers' commits that swept three of
+them): `docs/API.md` gains § Actions, § Reminders and the full § Dashboard plus settings'
+`channels_available`; `docs/SYNC.md` gains the `pending_actions` resolution rule and the
+`reminders`/`reminder_deliveries` non-sync row; `docs/ARCHITECTURE.md` gains
+`## Agent, reminders, dashboard (Phase 12)`; `docs/THREAT_MODEL.md`'s § 9 row becomes a measured
+result naming `agent_injection.rs`, with § 5's subsection and § 6 R1's dashboard addendum; and
+`docs/ASSUMPTIONS.md` gains A270–A289, the two Schema-deviations rows and the A288 note in
+§ Out of scope. `scripts/smoke-phase12.sh` and `justfile`'s three recipes are committed with the
+stub's `--tool-calls` mode and its fixture.
+
+**Three deviations the plan did not anticipate.**
+
+1. **§ 5's new row is a subsection, not a table row.** `crates/server/tests/tamper.rs`'s
+   `every_section_5_fails_row_has_a_case` asserts § 5's "Fails." row count is 13 and that each has
+   a case in `tamper.rs`, whose subject is the server's HTTP boundary — where a retrieved document
+   is not a request. A 14th row fails the workspace suite, and `crates/**` is not this slice's to
+   add a case to. P15DocsReleaseGate hit the same wall with its update-manifest row and solved it
+   the same way. The reasoning is written into the subsection.
+2. **Three of the five docs were committed by peers before this slice could.** `git commit --
+   <paths>` records the working tree, so a peer committing `docs/API.md`, `docs/SYNC.md` and
+   `docs/THREAT_MODEL.md` for their own sections took this slice's edits with them. The content is
+   in `HEAD` and correct; the **attribution** is not, which is worth knowing rather than
+   discovering from `git log`. The fix in the other direction is the two-argument
+   `git update-ref HEAD "$commit" "$old"`, which is what `router.tsx` used.
+3. **`scripts/smoke-phase12.sh` needs a stub mode that did not exist.** `--tool-calls` is new, and
+   it validates the **tool schema** the server sent — a request whose `tools` array is absent when
+   the plan grants writes, or whose entries carry no `parameters` object, is a 400. That is the
+   wire-format mistake the trait-level double cannot see, which is the same reason Phase 2's stub
+   exists.
+
+**Not done: the three gates, and the smoke run's own execution.** Gate 5's browser measurement
+(`scripts/measure-mobile.mjs`) needs `SURFACES` entries for `/dashboard` and for a chat screen
+holding a pending proposal, and neither was added; gate 6's server half is
+`crates/server/tests/indonesian.rs`, which is another slice's; gate 7(c) needs a build plus a grep
+of the shipped bundle. The smoke run was written and `bash -n`-checked but not executed against a
+running server, so its six scenarios are unproven. Stated here rather than ticked, because "looks
+fine" is not a gate.
+
