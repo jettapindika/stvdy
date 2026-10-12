@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  AGENT_CREDITS,
   PLANS,
   REPORT_CREDITS,
   TASK_CREDITS,
@@ -109,6 +110,27 @@ describe('the plan matrix reader', () => {
     const parsed = parsePlans('[credits]\ntask_breakdown = 5\nreport_outline = 3\n')
     expect(parsed.taskCredits.breakdown).toBe(5)
     expect(parsed.credits.outline).toBe(3)
+  })
+
+  it('reads a key whose name contains a digit, which the matrix has two of', () => {
+    // `flashcard_batch_10` and `quiz_10` are the matrix's own names for the two
+    // prices a confirmed agent write charges, and the parser's key pattern used to
+    // be `[a-z_]+` — so both lines were skipped in silence. Nothing quoted them
+    // before this phase, which is exactly why the gap survived: a skipped line is
+    // not an error here, it is "the file does not say".
+    expect(AGENT_CREDITS.flashcards).toBe(4)
+    expect(AGENT_CREDITS.quiz).toBe(6)
+
+    const parsed = parsePlans('[credits]\nflashcard_batch_10 = 7\nquiz_10 = 9\n')
+    expect(parsed.agentCredits).toEqual({ flashcards: 7, quiz: 9 })
+  })
+
+  it('reads the agent prices from the credits table and nowhere else', () => {
+    // `flashcard_batch_10` is also a plausible plan-block key, and a value read
+    // there would put a *grant* on a button as a price. The parser only accepts the
+    // key inside `[credits]`.
+    const parsed = parsePlans('[plans.pro]\nflashcard_batch_10 = true\n')
+    expect(parsed.agentCredits).toEqual({ flashcards: null, quiz: null })
   })
 
   it('returns null rather than a guess when the key is absent', () => {

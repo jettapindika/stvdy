@@ -4,6 +4,7 @@ import { Navigate, Outlet } from 'react-router'
 import { Shell } from './components/layout/Shell'
 import { LoadingState } from './components/ui/States'
 import { useSession } from './features/auth/useSession'
+import { useLocalNotifications } from './features/reminders/useLocalNotifications'
 
 /**
  * The signed-in shell, and the gate in front of it.
@@ -21,6 +22,16 @@ import { useSession } from './features/auth/useSession'
 export function App() {
   const { t } = useTranslation()
   const session = useSession()
+  const signedIn = session.status === 'signed-in'
+  // The local schedule is mounted here rather than on a screen, because it is a
+  // property of *this device* and not of any one route: a reminder has to be
+  // scheduled whether or not the student opens Today. The hook gates itself to
+  // ios/android (see its own doc comment — on web and desktop `schedule` delivers
+  // immediately, so an ungated mount notifies on every page load), and `signedIn`
+  // is the caller's half of the gate: with no session there is no account timezone
+  // and no rows, and firing the reads anyway would be four 401s on the sign-in
+  // screen.
+  useLocalNotifications(signedIn)
 
   if (session.status === 'loading') {
     return (

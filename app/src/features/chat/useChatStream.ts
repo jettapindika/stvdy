@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import { actionKeys } from '@/api/queries/actions'
 import { chatKeys } from '@/api/queries/chat'
 import { streamChat, type ChatCitation, type ChatUsage } from '@/api/sse'
 import { ApiError } from '@/api/errors'
@@ -107,6 +108,18 @@ export function useChatStream(workspaceId: string): ChatStreamState {
             onCitations(citations) {
               if (!isCurrent()) return
               setTurn((current) => (current === null ? current : { ...current, citations }))
+            },
+            onAction() {
+              if (!isCurrent()) return
+              // A proposal arrived mid-answer, and the card renders it from
+              // `GET /actions/pending` rather than from this event: the event
+              // carries no cost and no status, and a card built from it could not
+              // show that the proposal had already been resolved on another device.
+              // So the list is refetched, which is also what makes a *second*
+              // device's tap land here.
+              void queryClient
+                .invalidateQueries({ queryKey: actionKeys.pending })
+                .catch(() => undefined)
             },
             onUsage(usage) {
               if (!isCurrent()) return

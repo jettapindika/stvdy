@@ -17,16 +17,18 @@ function collect() {
   const tokens: string[] = []
   const citations: ChatCitation[][] = []
   const done: { message_id: string; used_web: boolean }[] = []
+  const actions: { pending_action_id: string; tool: string; args: Record<string, unknown> }[] = []
   const errors: ApiError[] = []
 
   const parser = createChatEventParser({
     onToken: (text) => tokens.push(text),
     onCitations: (list) => citations.push(list),
     onDone: (value) => done.push(value),
+    onAction: (action) => actions.push(action),
     onError: (error) => errors.push(error),
   })
 
-  return { parser, tokens, citations, done, errors }
+  return { parser, tokens, citations, done, actions, errors }
 }
 
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -197,10 +199,62 @@ describe('the chat stream parser', () => {
     expect(errors).toHaveLength(1)
   })
 
-  it('ignores an event name the contract does not define', () => {
-    const { parser, tokens, errors, done } = collect()
+  it('parses an action frame into onAction, mid-answer', () => {
+    // `action` is one of the six names the roadmap § 4 fixes, and it is a new event
+    // on *this* stream rather than a second stream: a proposal belongs to the turn
+    // that produced it. It carries no cost (A277) — the card reads the price from
+    // `plans.ts` — so this is the whole payload.
+    const { parser, tokens, actions, errors } = collect()
+
+    parser.feed(frame('token', { t: 'Menyiapkan ' }))
+    parser.feed(
+      frame('action', {
+        pending_action_id: 'a1',
+        tool: 'create_task',
+        args: { title: 'Selesaikan tugas kriptografi' },
+      }),
+    )
+    parser.feed(frame('token', { t: 'kartunya.' }))
+
+    expect(actions).toEqual([
+      {
+        pending_action_id: 'a1',
+        tool: 'create_task',
+        args: { title: 'Selesaikan tugas kriptografi' },
+      },
+    ])
+    // The answer keeps streaming around it: the card does not interrupt the text.
+    expect(tokens).toEqual(['Menyiapkan ', 'kartunya.'])
+    expect(errors).toEqual([])
+  })
+
+  it('reports an action frame that names no tool, rather than rendering an empty card', () => {
+    const { parser, actions, errors } = collect()
 
     parser.feed(frame('action', { pending_action_id: 'a1' }))
+
+    expect(actions).toEqual([])
+    expect(errors).toHaveLength(1)
+  })
+
+  it('reports an action frame whose arguments are not an object', () => {
+    // The card renders exactly what was proposed, so an arguments payload that is
+    // not an object must not reach it as `{}` — that would show an action with no
+    // fields and no way to tell it from a real one.
+    const { parser, actions, errors } = collect()
+
+    parser.feed(frame('action', { pending_action_id: 'a1', tool: 'create_task', args: 'nope' }))
+
+    expect(actions).toEqual([])
+    expect(errors).toHaveLength(1)
+  })
+
+  it('ignores an event name the contract does not define', () => {
+    // Forward compatibility, and it is the reason the frame table has a `default`:
+    // a server that grows a seventh event kind must not break an older client.
+    const { parser, tokens, errors, done } = collect()
+
+    parser.feed(frame('future_thing', { anything: true }))
     parser.feed(frame('token', { t: 'ok' }))
 
     expect(errors).toEqual([])

@@ -49,6 +49,20 @@ export interface SettingsView {
   settings: SettingsRow
   /** `users.timezone`, which is why it is not a field of the row above (A203). */
   timezone: string
+  /**
+   * The reminder channels this deployment can actually deliver on (A288).
+   *
+   * Not a field of the row, and not in the cache, because it is not the student's
+   * preference: it is a fact about which transports exist — `push` is present only
+   * when the server has APNs/FCM credentials — and the settings screen offers only
+   * what will fire. The server derives it; the client never guesses it.
+   *
+   * Empty means "this build could not ask", which is the safe direction: a channel
+   * offered because the answer was unknown is exactly the channel that is granted,
+   * selectable and silently never fires, which is the defect the field exists to
+   * remove.
+   */
+  channels_available: string[]
 }
 
 export const settingsKeys = {
@@ -57,6 +71,24 @@ export const settingsKeys = {
 
 /** The fields a save may name. Every one is optional: this is a partial write. */
 export type SettingsPatch = Partial<Omit<SettingsRow, 'updated_at'> & { timezone: string }>
+
+/**
+ * The deployment's available channels, from the route, or none.
+ *
+ * A failure is `[]` rather than an error, and that is the whole point: the cached
+ * path below reads the *row* from the device, and a settings screen that refused
+ * to render because one metadata field could not be fetched would be a settings
+ * screen that does not work offline — which is the thing the cache exists for. An
+ * empty answer disables every channel row instead, which is honest and visible.
+ */
+async function readAvailableChannels(): Promise<string[]> {
+  try {
+    const body = await api.get<{ channels_available: string[] }>('/settings')
+    return Array.isArray(body.channels_available) ? body.channels_available : []
+  } catch {
+    return []
+  }
+}
 
 export function useSettings() {
   return useQuery({
@@ -70,7 +102,7 @@ export function useSettings() {
         const rows = await platform.sync.read<SettingsRow>('user_settings')
         const settings = rows[0]
         if (settings === undefined) throw new Error('the settings row is not cached yet')
-        return { settings, timezone: '' }
+        return { settings, timezone: '', channels_available: await readAvailableChannels() }
       }
       return await api.get<SettingsView>('/settings')
     },

@@ -77,11 +77,38 @@ export interface ChatDone {
   used_web: boolean
 }
 
+/**
+ * A proposal the assistant wants the student to confirm.
+ *
+ * `pending_action_id` is the row in `pending_actions`; `tool` and `args` are what
+ * the model proposed, carried so a client can render the card without a second
+ * request. There is deliberately **no cost field** (A277): the roadmap § 4 fixes
+ * this body, and adding one would be a contract change made by a phase. The card
+ * reads the price from `plans.ts`, which is the same source every other cost on
+ * screen comes from and the same file the server charges from.
+ */
+export interface ChatAction {
+  pending_action_id: string
+  tool: string
+  args: Record<string, unknown>
+}
+
 export interface ChatStreamHandlers {
   /** A text fragment. Not a word and not a line: concatenate in arrival order. */
   onToken?(text: string): void
   /** The citations for the answer that just streamed. May be empty. */
   onCitations?(citations: ChatCitation[]): void
+  /**
+   * A WRITE tool proposed an action, mid-answer.
+   *
+   * A new event on **this** stream rather than a second one (roadmap § 4 fixes the
+   * six names: `token`, `citations`, `action`, `usage`, `done`, `error`), because a
+   * proposal belongs to the turn that produced it: it arrives while the answer is
+   * still streaming, and a second connection would have to be told which turn it
+   * was for. It can arrive zero times (a turn with no write tool) or several (up to
+   * `MAX_PROPOSALS_PER_TURN`).
+   */
+  onAction?(action: ChatAction): void
   onUsage?(usage: ChatUsage): void
   /** The answer is complete and persisted. `message_id` is its row. */
   onDone?(done: ChatDone): void
@@ -197,6 +224,46 @@ export function createChatEventParser(handlers: ChatStreamHandlers): {
             return
           }
           handlers.onCitations?.(citations)
+          return
+        }
+        case 'action': {
+          let body: unknown
+          try {
+            body = JSON.parse(data) as unknown
+          } catch {
+            handlers.onError?.(malformed('An action event was not readable JSON.'))
+            return
+          }
+          if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+            handlers.onError?.(malformed('An action event was not a proposal.'))
+            return
+          }
+          // Every field is checked with `typeof` before use; the record shape is the
+          // one assertion, and it is the same one `citationsFrom` makes on each
+          // item of a citation list, because a parsed JSON object is a string-keyed
+          // record and this repo ships no runtime schema validator.
+          const event = body as Record<string, unknown>
+          if (typeof event.pending_action_id !== 'string' || typeof event.tool !== 'string') {
+            handlers.onError?.(malformed('An action event carried no id or tool.'))
+            return
+          }
+          // The arguments are the model's own JSON, so a non-object is a malformed
+          // frame rather than an empty proposal: the card renders exactly what was
+          // proposed, and rendering `{}` for a payload that was not one would show
+          // an action with no fields and no way to tell that from a real one.
+          if (
+            typeof event.args !== 'object' ||
+            event.args === null ||
+            Array.isArray(event.args)
+          ) {
+            handlers.onError?.(malformed('An action event carried no arguments.'))
+            return
+          }
+          handlers.onAction?.({
+            pending_action_id: event.pending_action_id,
+            tool: event.tool,
+            args: event.args as Record<string, unknown>,
+          })
           return
         }
         case 'usage': {

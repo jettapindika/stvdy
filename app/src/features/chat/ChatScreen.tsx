@@ -6,7 +6,10 @@ import { useSources } from '@/api/queries/sources'
 import { asApiError } from '@/api/errors'
 import type { ChunkCitation } from '@/api/sse'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
+import { useSession } from '@/features/auth/useSession'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
+import { DEFAULT_TIMEZONE } from '@/lib/time'
+import { ActionCardList } from './ActionCard'
 import { MessageList } from './MessageList'
 import { useChatStream } from './useChatStream'
 
@@ -36,6 +39,14 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
   const messages = useMessages(workspaceId)
   const sources = useSources(workspaceId)
   const stream = useChatStream(workspaceId)
+  const session = useSession()
+  // The account's zone (A203), never the device's: a proposal the model resolved
+  // to a Jakarta evening must read as that evening on a phone set to UTC, and the
+  // fallback is the product's own default rather than the machine's zone.
+  const timeZone =
+    session.status === 'signed-in' && session.user.timezone.length > 0
+      ? session.user.timezone
+      : DEFAULT_TIMEZONE
 
   const [draft, setDraft] = useState('')
   const [selected, setSelected] = useState<string[]>([])
@@ -109,6 +120,12 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             emptyReason={readySources.length === 0 ? noSourcesReason : readyReason}
           />
         )}
+
+        {/* The proposals this turn — or an earlier one — left for the student to
+            decide. It renders nothing when there is nothing pending, and it reads
+            `GET /actions/pending` rather than the stream's `action` event, so a
+            card confirmed on another device shows as confirmed here. */}
+        <ActionCardList timeZone={timeZone} />
       </div>
 
       {openCitation !== null && (
