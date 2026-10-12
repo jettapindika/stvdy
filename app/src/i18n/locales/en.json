@@ -941,6 +941,7 @@
         "reason": "A goal is an exam or a deadline with a date. Import a syllabus and its exams become goals, or add one yourself.",
         "action": "Import a syllabus"
       },
+      "importAnother": "Import another syllabus",
       "past": "Date has passed",
       "daysLeft_one": "{{count}} day left",
       "daysLeft_other": "{{count}} days left"

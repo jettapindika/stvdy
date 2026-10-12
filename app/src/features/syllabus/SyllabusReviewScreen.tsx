@@ -119,7 +119,7 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
 
   if (written !== null) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
         <PageHeader title={t('syllabus.review.title')} />
         <p className="note note-success wrap-anywhere">
           {t('syllabus.review.written', {
@@ -141,7 +141,7 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader title={t('syllabus.review.title')} subtitle={t('syllabus.review.subtitle')} />
 
       {/* The header line the honesty rule asks for: nothing exists yet. */}
@@ -208,7 +208,22 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
                         ) : null}
                       </div>
 
-                      <div className="flex min-h-11 items-center gap-2">
+                      {/* **The input goes *inside* the label, and that is the app's
+                          convention rather than a style choice** — `SourcePicker` and
+                          `WorkspaceScreen`'s upload-kind radios are built the same way.
+                          Two reasons, and the gate is the second: the `<label>` is the hit
+                          area a finger reaches (a native checkbox box is ~13px, so
+                          measuring the input alone reports a false failure on every
+                          checkbox in the app), and the harness's `hitArea` resolves a
+                          checkbox's target as `el.closest('label')` **or**
+                          `label[for=…]` — as siblings with `htmlFor` it found the label,
+                          but the wrapper carried only `min-h-11` while the *input* stayed
+                          61.3x22, which is what the walk reported. `has-[:focus-visible]`
+                          is what puts the focus ring on the row rather than on the box. */}
+                      <label
+                        htmlFor={`keep-${String(row.index)}`}
+                        className="flex min-h-11 cursor-pointer items-center gap-2 text-body"
+                      >
                         <input
                           id={`keep-${String(row.index)}`}
                           type="checkbox"
@@ -217,10 +232,8 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
                             setDraftAt(row.index, { keep: event.target.checked })
                           }}
                         />
-                        <label htmlFor={`keep-${String(row.index)}`} className="text-body">
-                          {t('syllabus.review.keep')}
-                        </label>
-                      </div>
+                        {t('syllabus.review.keep')}
+                      </label>
 
                       <div className="flex flex-col gap-1">
                         <label className="label" htmlFor={`title-${String(row.index)}`}>

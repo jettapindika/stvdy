@@ -926,6 +926,7 @@
         "reason": "Tujuan adalah ujian atau tenggat dengan tanggal. Impor silabus dan ujiannya menjadi tujuan, atau tambahkan sendiri.",
         "action": "Impor silabus"
       },
+      "importAnother": "Impor silabus lain",
       "past": "Tanggalnya sudah lewat",
       "daysLeft_other": "Tersisa {{count}} hari"
     },

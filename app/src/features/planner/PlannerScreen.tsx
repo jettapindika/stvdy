@@ -180,6 +180,22 @@ export function PlannerScreen() {
               ))}
             </ul>
           )}
+
+          {/* **The import link lives here, not only in the empty state, and that was a
+              real defect.** It used to exist *only* inside the `rows.length === 0`
+              branch above, and it is the app's **only** link to `/syllabus` — so a
+              student with any goal at all could not reach the syllabus import, and
+              every student who had used the planner had one. The same class as the
+              planner itself having no nav entry: a screen reachable only by typing a
+              URL, which no phase's file list owned. Rendering it whenever the list
+              renders is what makes the import reachable in both states. */}
+          {rows.length > 0 ? (
+            <div className="mt-3">
+              <Link to="/syllabus" className="link inline-flex min-h-11 items-center">
+                {t('planner.goals.importAnother')}
+              </Link>
+            </div>
+          ) : null}
         </div>
       </Section>
 

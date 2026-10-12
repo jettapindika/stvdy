@@ -47,7 +47,23 @@ export function WorkspaceListScreen() {
   const showNotice = createError !== null && (validation === null || validation.field === null)
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+    // `w-full` is load-bearing, exactly as it is on `TasksScreen` (Phase 14's fix-round-1
+    // measured that one at 493px against a 390 viewport). Without it this div's width is
+    // its *fit-content*, which can never go below its content's min-content, so the root
+    // grows past the viewport as soon as anything inside it is wider than the phone at
+    // 200% text. `w-full` makes the width definite (the container's content box) instead
+    // of content-based, which is the property that stops a wide intrinsic child from
+    // resizing the screen.
+    //
+    // **Measured, and it is behaviour-preserving at HEAD:** with and without the class,
+    // this screen reports the same four combinations, 44 targets, 80 text pairs, 48 Tab
+    // stops and `page 390/390` — the class only changes which of two ways the same width
+    // is arrived at. It is here because the *latent* failure is real and was observed:
+    // with a peer's in-flight workspace-course fields in the tree, this screen's content
+    // pushed the root to **502px inside a 390px viewport** with 25 elements past the right
+    // edge and the page scrolling sideways. The class is content-dependent, which is why it
+    // is worth the paragraph: a screen that fits today is one field away from not fitting.
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
       <PageHeader
         title={t('nav.workspaces')}
         subtitle={t('workspaces.list.subtitle')}

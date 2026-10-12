@@ -584,6 +584,107 @@ const PENDING_ACTIONS = [
 ]
 
 /**
+ * The planner's and syllabus screens' fixtures (Phase 11).
+ *
+ * **These exist to close Phase 11's gate-5 leg (e)**, which had never been measured
+ * because the walk could not *reach* the screens: neither nav has a planner item, and
+ * the only two inbound links formed a closed cycle (`PlannerScreen` → `/syllabus` from
+ * its empty-goals state, `SyllabusReviewScreen` → `/planner` after a confirm). The
+ * `tasks` screen now renders the reciprocal half of the spec's `Plan | Tasks` control,
+ * so `/planner` is reachable by tapping and the walk has a path.
+ *
+ * **One goal is enough to bring in the densest state**, because `PlannerScreen` does
+ * `rows.find(g => g.id === selected) ?? rows[0] ?? null` — with one goal and nothing
+ * selected, it becomes `active` and `PrepProgress` renders without a click. That is
+ * what makes `/goals/:id/progress` a required fixture rather than an optional one.
+ */
+const GOAL = {
+  id: 'g1',
+  workspace_id: 'w1',
+  title: 'UTS Kriptografi',
+  target_date: daysFromAnchor(30),
+  source_ids: ['s1'],
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+}
+
+/**
+ * `GET /goals/:id/progress`, as the PrepProgress card renders it.
+ *
+ * Every number here is the spec's own honesty rule in fixture form (A252): four honest
+ * figures and **no composite**. `quiz_accuracy_pct` is a real percentage rather than
+ * null, so the card renders its number branch — a null would render "no quizzes yet",
+ * which is the *other* state and not the one leg (e) needs to measure for clipping.
+ */
+const GOAL_PROGRESS = {
+  goal_id: 'g1',
+  window_days: 14,
+  topic_coverage_pct: 62,
+  quiz_accuracy_pct: 74,
+  cards_due: 27,
+  weak_topics: ['Algoritma Kunci Publik'],
+  topics: [
+    { name: 'Fungsi Hash', accuracy: 0.79 },
+    { name: 'Algoritma Kunci Publik', accuracy: 0.375 },
+  ],
+}
+
+
+/**
+ * A confirmed-ready syllabus draft, for the review screen.
+ *
+ * `status: 'ready'` because that is the state that renders the items to review; a
+ * `processing` draft renders the waiting panel, which has no items and would measure a
+ * fraction of the screen. The item indices are the contract's own — the position in the
+ * **reply**, not in a sorted list (`crates/core/src/generation/syllabus.rs:109-113`),
+ * which is the premise Phase 11's own suite got wrong five times.
+ */
+const SYLLABUS_DRAFT = {
+  // `draft_id` and `source_id` are required by `DraftBody`; `course` renders the header.
+  draft_id: 'd1',
+  source_id: 's1',
+  status: 'ready',
+  error: null,
+  course: { name: 'Kriptografi', code: 'IF4020', instructor: 'Dr. Sari' },
+  // **The item shape is the contract, and getting it wrong is silent.** `reviewRows`
+  // (`features/syllabus/review.ts:87-91`) drops any row whose `kind` is not one of
+  // `['class','deadline','exam']` *before* it reads anything else, and requires a numeric
+  // `index` and a non-empty `evidence`. The date field is **`when`**, not `starts_at` or
+  // `due_at`. An earlier version of this fixture used `kind: 'event'`/`'task'` with
+  // `starts_at`/`due_at`, which renders an **empty list** — and the surface would have
+  // reported PASS while measuring a screen with no items in it, which is the exact failure
+  // the `expect` on the review surface exists to catch.
+  items: [
+    {
+      index: 0,
+      kind: 'exam',
+      title: 'UTS Kriptografi',
+      evidence: 'Ujian Tengah Semester: 2 November 2026, 90 menit',
+      needs_check: false,
+      when: daysFromAnchor(21),
+      rrule: null,
+      start_time: null,
+      end_time: null,
+      topics: ['Fungsi Hash', 'Algoritma Kunci Publik'],
+      weight_percent: 30,
+    },
+    {
+      index: 1,
+      kind: 'deadline',
+      title: 'Tugas 4 dikumpulkan minggu depan',
+      evidence: 'Tugas 4 dikumpulkan minggu depan',
+      needs_check: true,
+      when: daysFromAnchor(7),
+      rrule: null,
+      start_time: null,
+      end_time: null,
+      topics: [],
+      weight_percent: null,
+    },
+  ],
+}
+
+/**
  * Phase 13's four screens, and the one thing about them a fixture has to get right.
  *
  * The pricing page, the billing page, the checkout screen and the plan screen are the
@@ -807,6 +908,50 @@ const SURFACES = [
   },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
+  // --- Phase 11: the planner and the syllabus import, which had never been walked -----
+  //
+  // Reached by **tapping** — Tasks' `Plan` link, then the planner's own import link —
+  // because that is the only way a student reaches these screens and therefore the only
+  // honest way to walk them. Before those links existed there was no path at all (the two
+  // inbound links formed a closed cycle), which is why leg (e) went unmeasured; a surface
+  // keyed by URL would have passed while the screens were unreachable.
+  //
+  // **No `set` and no fixture switch**, deliberately: the import link renders whether or
+  // not the account has goals, so one fixture serves all three surfaces. An earlier version
+  // emptied `/goals` for the syllabus pair, which does not work here — the loop is
+  // theme → scale → surface, `staleTime` is 30 s, and `/goals` is one query key, so the
+  // emptied answer was still cached when `planner` ran again. The durable fix was the
+  // product one: make the import reachable with goals present.
+  {
+    name: 'planner',
+    expect: 'UTS Kriptografi',
+    steps: [{ nav: 'Tasks' }, { link: 'Plan' }],
+  },
+  {
+    name: 'syllabus',
+    expect: 'Import a syllabus',
+    steps: [{ nav: 'Tasks' }, { link: 'Plan' }, { link: 'Import another syllabus' }],
+  },
+  // The review screen a draft opens. **It needs the upload to have happened**, because a
+  // draft is listed nowhere — `SyllabusPanel` holds the id in local state from the POST's
+  // response — so the steps fill the textarea, read the syllabus, and follow the link that
+  // appears. That is the student's own path, and it is why the harness needed a `fill` step.
+  {
+    name: 'syllabus-review',
+    expect: 'Ujian Tengah Semester',
+    steps: [
+      { nav: 'Tasks' },
+      { link: 'Plan' },
+      { link: 'Import another syllabus' },
+      { fill: '#syllabus-text', value: 'UAS Kriptografi 15 Desember. Tugas 4 minggu depan.' },
+      // The upload's button label carries the plan's credit cost, so it is clicked by
+      // selector rather than by a label that would have to encode `config/plans.toml`.
+      { selector: 'button.btn-primary' },
+      // **`syllabus.upload.review`, not the draft's title** — the title is never a link;
+      // the link is this label, and it exists only once `draftId !== null`.
+      { link: 'Read what was found' },
+    ],
+  },
   {
     name: 'workspace-sources',
     steps: [{ nav: 'Work' }, { link: WORKSPACE.name }],
@@ -1090,6 +1235,15 @@ const ROUTES = {
   // `/billing` renders `BillingScreen`, and without this entry the walk measured that
   // panel's 404 notice instead of its content.
   '/plans': () => PLANS_VIEW,
+  // Phase 11's three screens. `/goals` and `/goals/g1/progress` are both required for
+  // `/planner`: the screen auto-selects its first goal (`rows[0]`), so the progress card
+  // renders without a click and a missing progress fixture would measure its error notice.
+  '/goals': () => ({ goals: [GOAL] }),
+  '/goals/g1/progress': () => GOAL_PROGRESS,
+  '/syllabus/d1/draft': () => SYLLABUS_DRAFT,
+  // The upload itself, so the review link can appear. `SyllabusPanel` holds the returned
+  // id in local state, so this is what makes `draftId !== null` true.
+  '/workspaces/w1/syllabus': () => ({ draft_id: 'd1', source_id: 's1' }),
   '/billing/invoices': () => INVOICES_VIEW,
   // The checkout screen's two calls. The poll is keyed by the id the checkout returns, and
   // `CHECKOUT` is what the six state surfaces switch between walks — so every
@@ -1784,6 +1938,51 @@ async function openSurface(page, surface) {
   // it runs before the first step touches the page.
   if (typeof surface.set === 'function') surface.set()
   for (const step of surface.steps) {
+    // A `fill` step writes a value into a field, which the four tap kinds cannot express.
+    // The syllabus review screen is why it exists: a draft is only reachable after an
+    // upload, and the upload needs text in `#syllabus-text` — so without this the screen
+    // is reachable only by URL, which is the thing the walk refuses to do.
+    //
+    // The value is set through the native setter and an `input` event, because React
+    // tracks the last value it wrote and ignores a plain `element.value = …`.
+    if (step.fill !== undefined) {
+      const written = await page.evaluate(
+        (selector, value) => {
+          const field = document.querySelector(selector)
+          if (field === null) return false
+          const setter = Object.getOwnPropertyDescriptor(
+            field instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype
+              : HTMLInputElement.prototype,
+            'value',
+          )?.set
+          setter?.call(field, value)
+          field.dispatchEvent(new Event('input', { bubbles: true }))
+          return true
+        },
+        step.fill,
+        step.value ?? '',
+      )
+      if (!written) fail(`no field ${step.fill} on the way to ${surface.name}`)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      continue
+    }
+    // A `selector` step clicks by CSS, for a control whose label is computed rather than
+    // fixed — the syllabus upload's button reads `Read the syllabus ({{count}} credits)`,
+    // so a label-keyed step would have to encode the plan's credit cost and would break
+    // the day `config/plans.toml` changes it. The four tap kinds stay the default, because
+    // a label is what a *student* sees and matching it is the stronger check.
+    if (step.selector !== undefined) {
+      const clicked = await page.evaluate((selector) => {
+        const target = document.querySelector(selector)
+        if (target === null) return false
+        target.click()
+        return true
+      }, step.selector)
+      if (!clicked) fail(`no element ${step.selector} on the way to ${surface.name}`)
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      continue
+    }
     const wanted = step.nav ?? step.link ?? step.tab ?? step.button
     const scope =
       step.nav !== undefined
