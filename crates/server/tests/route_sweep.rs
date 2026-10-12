@@ -216,6 +216,11 @@ fn read_only_rows() -> Vec<Row> {
             "/sync/pull",
             "reads the caller's own change log; a pull that needed a plan would break account sync on free",
         ),
+        ro(
+            "GET",
+            "/sync/stream",
+            "an SSE hint; it reads the caller's own clock and spends nothing",
+        ),
     ]
 }
 

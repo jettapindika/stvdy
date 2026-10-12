@@ -8,6 +8,7 @@ pub mod apply;
 pub mod log;
 pub mod pull;
 pub mod push;
+pub mod stream;
 
 use axum::Router;
 use axum::routing::{get, post};
@@ -17,11 +18,10 @@ use uuid::Uuid;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    // One `.route(...)` per task that lands it: `get("/sync/stream", …)` in Task 6 joins
-    // this call, so the module never declares a handler that does not exist yet.
     Router::new()
         .route("/sync/pull", get(pull::pull))
         .route("/sync/push", post(push::push))
+        .route("/sync/stream", get(stream::stream))
 }
 
 /// Records that this device just talked to the server.
