@@ -390,7 +390,7 @@ for stopping the loss.
    them is cheap and they are the ones that spend money.
 6. **Rotate the updater's minisign key only through a release** (A332): installed apps verify
    against the key compiled into them, so a new key reaches an install only via an update signed
-   by the old one. If the old key is what leaked, there is no in-band path — see R7 in
+   by the old one. If the old key is what leaked, there is no in-band path — see R8 in
    `docs/THREAT_MODEL.md`.
 
 ### 2. Preserve — before rotating anything else

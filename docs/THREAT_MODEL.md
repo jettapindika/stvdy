@@ -275,7 +275,11 @@ asked the same question — not who.
 *Revisit if:* the cached key ever incorporates user-scoped data (a workspace filter, a private
 document), which would turn a shared cache into a cross-tenant channel.
 
-**R7 — The update key is a single point of trust.** A compromised minisign private key forges an
+<!-- R7 is Phase 10's feed-token row and R8 is this phase's. The numbering follows the
+     phase sequence (R1-R6 are phases 7-9), not landing order: both rows were written
+     concurrently and each phase had already cross-referenced its own number, so the
+     later-landing slice renumbered. Do not renumber one of these back. -->
+**R8 — The update key is a single point of trust.** A compromised minisign private key forges an
 update that **every installed copy accepts and runs**, with the user's privileges, and the app has
 no way to tell it from a genuine one. This is the largest single-point failure in the product: it is
 strictly worse than having no updater, because it *looks* like a control, and there is no partial
