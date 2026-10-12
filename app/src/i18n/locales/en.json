@@ -759,6 +759,10 @@
     "composer": {
       "title": "Composer honesty",
       "description": "The line under every chat composer, and the grounding toggle above it. Both are part of the composer rather than a tooltip: a warning nobody has to open is one most people never read."
+    },
+    "sync": {
+      "title": "Sync status",
+      "description": "The control the shell shows in both form factors: a row at the foot of the sidebar, and a chip in the tab bar's band on a phone. The state is a word plus a tone, so it reads correctly in monochrome, and the tones are the chips above. It is a link to the Devices screen, which is why Devices needs no sixth nav item."
     }
   },
   "planner": {
@@ -854,5 +858,55 @@
       "free": "Re-rendering uses the stored content: no model call, and no credits."
     },
     "template": "Rendered with template {{version}}"
+  },
+  "sync": {
+    "state": {
+      "synced": "Synced",
+      "syncing": "Syncing",
+      "offline": "Offline",
+      "needsAttention": "Needs attention",
+      "revoked": "Signed out on this device"
+    },
+    "lastSynced": "Last synced {{when}}",
+    "neverSynced": "Not synced yet",
+    "onlineOnly": "This build keeps nothing on this device",
+    "pending_one": "{{count}} change waiting to sync",
+    "pending_other": "{{count}} changes waiting to sync",
+    "rejected": "Not saved — the server refused it ({{code}})",
+    "unavailable": "Sync status unavailable"
+  },
+  "devices": {
+    "title": "Devices and sync",
+    "subtitle": "Every device signed in to your account, and when each one last synced.",
+    "signedIn": "Signed in",
+    "loading": "Loading your devices",
+    "thisDevice": "This device",
+    "rename": "Rename",
+    "renameLabel": "Device name",
+    "signOut": "Sign out",
+    "keep": "Keep it signed in",
+    "revokeConfirm": "Sign out {{name}}? Its local copy is deleted the next time it connects.",
+    "revokeConfirmCurrent": "This is the device you are using, so you will be signed out here.",
+    "platform": {
+      "web": "Web",
+      "macos": "macOS",
+      "windows": "Windows",
+      "ios": "iPhone or iPad",
+      "android": "Android"
+    },
+    "empty": {
+      "title": "No devices",
+      "reason": "This account is signed in on no other devices."
+    },
+    "reset": {
+      "title": "Reset local data and resync",
+      "what": "Deletes this device's local copy of your data, including any changes it has not sent yet, and downloads everything again. Nothing on the server is deleted.",
+      "action": "Reset and resync",
+      "confirm": "This deletes the local copy and anything not yet sent. Your account is not affected.",
+      "confirmAction": "Delete and resync",
+      "done": "Local data was deleted and resynced.",
+      "failed": "The local data could not be reset.",
+      "noneLocal": "This build keeps no local copy of your data, so there is nothing to reset."
+    }
   }
 }

@@ -9,6 +9,7 @@ import { SignInScreen } from './features/auth/SignInScreen'
 import { SignUpScreen } from './features/auth/SignUpScreen'
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
+import { DevicesScreen } from './features/devices/DevicesScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
 import { ReportScreen } from './features/reports/ReportScreen'
@@ -96,6 +97,14 @@ export const router = createBrowserRouter([
           {
             path: 'billing',
             element: <PlanUsageScreen />,
+          },
+          // Reached from the sync status control rather than from the nav (A189):
+          // the sidebar and the phone tab bar are both built from the same five
+          // labels, and Settings — which the spec nests Devices under — is still a
+          // `NotBuiltRoute` because Phase 9 owns it.
+          {
+            path: 'devices',
+            element: <DevicesScreen />,
           },
           {
             path: 'styleguide',

@@ -7,8 +7,8 @@ import {
 } from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 
-import { desktopPlatform } from './desktop'
-import type { Platform, PlatformKind } from './types'
+import { desktopPlatform, type NativePlatform } from './desktop'
+import type { PlatformKind } from './types'
 
 /**
  * Tauri adapter for iOS and Android.
@@ -16,8 +16,14 @@ import type { Platform, PlatformKind } from './types'
  * Differs from desktop in the two places that matter: local notifications can be
  * *scheduled* and fire while the app is closed, and haptics exist. Updates ship
  * through the stores, so there is no updater path here.
+ *
+ * Everything else — the keychain, the deep-link classification, and the whole
+ * sync surface including `configureSync` — is the desktop implementation, spread
+ * rather than restated. The phone and the laptop run the same engine over the same
+ * SQLite cache; a second copy here is how the two would drift, and the spec's
+ * "one account, every device" is exactly the property that a drift would break.
  */
-export function mobilePlatform(kind: PlatformKind): Platform {
+export function mobilePlatform(kind: PlatformKind): NativePlatform {
   const base = desktopPlatform(kind)
 
   return {

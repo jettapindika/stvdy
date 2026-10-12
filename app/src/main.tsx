@@ -28,7 +28,12 @@ const queryClient = new QueryClient({
 function installRuntimePlatform() {
   if (!isTauri()) return
   const kind = currentOsPlatform()
-  installPlatform(kind === 'ios' || kind === 'android' ? mobilePlatform(kind) : desktopPlatform(kind))
+  const adapter =
+    kind === 'ios' || kind === 'android' ? mobilePlatform(kind) : desktopPlatform(kind)
+  // The shell's sync commands need the session's credentials handed to them
+  // (A186); they are the one capability that rides beside the adapter rather than
+  // inside `Platform.sync`, whose seven members are fixed.
+  installPlatform(adapter, { configureSync: adapter.configureSync })
 }
 
 const container = document.getElementById('root')

@@ -311,6 +311,41 @@ function post(input: ChatStreamInput): Promise<Response> {
 }
 
 /**
+ * Feeds a response body to a parser, chunk by chunk.
+ *
+ * The one piece of *transport* the two streams share, and sharing it is not the
+ * same as merging them: the chat stream is a POST with four event kinds and a
+ * `[DONE]` sentinel, the sync stream is a GET with one, and each keeps its own
+ * parser and its own frame table. What is genuinely the same is this loop — a
+ * reader hands back arbitrary byte boundaries, so half a frame routinely arrives
+ * first — and the distinction between a stream that never started and one that
+ * died mid-answer, which is why the drop is the caller's sentence rather than
+ * this function's.
+ */
+async function pump(
+  body: ReadableStream<Uint8Array>,
+  feed: (chunk: string) => void,
+  dropped: () => void,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      feed(decoder.decode(value, { stream: true }))
+    }
+  } catch (error) {
+    // A cancellation is the caller's own action, not a failure to report.
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    dropped()
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+/**
  * Sends a message and drives the handlers as the answer arrives.
  *
  * A refusal that arrives *before* the stream (a 402 from the middleware, say) and
@@ -350,29 +385,150 @@ export async function streamChat(
   }
 
   const parser = createChatEventParser(handlers)
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
+  await pump(
+    response.body,
+    (chunk) => {
+      parser.feed(chunk)
+    },
+    () => {
+      handlers.onError?.(
+        new ApiError({
+          status: 0,
+          code: 'network',
+          message: '',
+          // The connection was established and the server had already answered: the
+          // body was cut off mid-stream. Saying "the server could not be reached"
+          // here would be untrue, so this drop names its own sentence.
+          reasonKey: 'error.network.dropped',
+        }),
+      )
+    },
+  )
+}
 
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      parser.feed(decoder.decode(value, { stream: true }))
-    }
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error
-    handlers.onError?.(
-      new ApiError({
-        status: 0,
-        code: 'network',
-        message: '',
-        // The connection was established and the server had already answered: the
-        // body was cut off mid-stream. Saying "the server could not be reached"
-        // here would be untrue, so this drop names its own sentence.
-        reasonKey: 'error.network.dropped',
-      }),
-    )
-  } finally {
-    reader.releaseLock()
+/**
+ * The sync stream's handlers.
+ *
+ * One event, and it carries no data beyond the number: `GET /sync/stream` is a
+ * per-connection poll of the caller's own `max(seq)` (A181), so a `seq` means
+ * "your change log moved" and nothing about *what* moved. The client answers by
+ * pulling, which is where the changes actually arrive.
+ */
+export interface SyncStreamHandlers {
+  /** The user's `change_log` reached this seq. */
+  onSeq?(seq: number): void
+  onError?(error: ApiError): void
+}
+
+/**
+ * A parser for the sync stream's frames.
+ *
+ * Deliberately its own parser rather than a mode of the chat one, because the two
+ * contracts have almost nothing in common: this is a GET with a single `seq`
+ * event and no `[DONE]` sentinel, and the chat stream is a POST with four events,
+ * citations and a terminal marker. Folding them together would mean one parser
+ * whose every branch asks which stream it is on. What they do share — the reader
+ * loop and the mid-stream drop — is `pump`, above.
+ *
+ * An event name this contract does not define is ignored rather than reported: a
+ * server that grows a second event kind must not break an older client, which is
+ * the same rule the chat parser follows.
+ */
+export function createSyncEventParser(handlers: SyncStreamHandlers): {
+  feed(chunk: string): void
+} {
+  const parser = createParser({
+    onEvent(message: EventSourceMessage) {
+      if (message.event !== 'seq') return
+
+      let body: unknown
+      try {
+        body = JSON.parse(message.data) as unknown
+      } catch {
+        handlers.onError?.(malformed('A seq event was not readable JSON.'))
+        return
+      }
+      const seq = (body as { seq?: unknown } | null)?.seq
+      if (typeof seq !== 'number') {
+        handlers.onError?.(malformed('A seq event carried no seq.'))
+        return
+      }
+      handlers.onSeq?.(seq)
+    },
+  })
+
+  return {
+    feed(chunk: string) {
+      parser.feed(chunk)
+    },
   }
+}
+
+/**
+ * Opens the sync hint and reports every seq the server sends.
+ *
+ * A GET with no body, which is the one place this differs from `streamChat` at
+ * the transport level — and it is why the reader is `fetch` rather than
+ * `EventSource` here too: the route needs an `Authorization` header, and
+ * `EventSource` cannot attach one. A refusal before the stream and a failure
+ * inside it both reach `onError` as the same typed error, so the caller has one
+ * branch.
+ */
+export async function streamSync(
+  handlers: SyncStreamHandlers,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  let response: Response | null = null
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = getAccessToken()
+    try {
+      response = await fetch(`${API_BASE_URL}/sync/stream`, {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+        },
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      handlers.onError?.(
+        new ApiError({ status: 0, code: 'network', message: '', origin: API_BASE_URL }),
+      )
+      return
+    }
+
+    if (response.ok) break
+
+    const error = apiErrorFromBody(response.status, await readJsonBody(response))
+    // The same single-flight refresh as everywhere else: an access token that
+    // expired between passes must not cost the device its hint.
+    if (attempt === 0 && error.isAuthFailure && (await ensureFreshSession())) continue
+    handlers.onError?.(error)
+    return
+  }
+
+  if (response === null || !response.ok || response.body === null) {
+    handlers.onError?.(malformed('The sync stream did not start.'))
+    return
+  }
+
+  const parser = createSyncEventParser(handlers)
+  await pump(
+    response.body,
+    (chunk) => {
+      parser.feed(chunk)
+    },
+    () => {
+      handlers.onError?.(
+        new ApiError({
+          status: 0,
+          code: 'network',
+          message: '',
+          reasonKey: 'error.network.dropped',
+        }),
+      )
+    },
+  )
 }

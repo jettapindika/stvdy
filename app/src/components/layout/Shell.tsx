@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useSyncEngine } from '@/features/sync/useSyncEngine'
 import { useFormFactor } from '@/lib/useFormFactor'
 import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
@@ -19,10 +20,16 @@ import { TabBar } from './TabBar'
  *
  * The skip link is not optional (R-32): a keyboard user should not have to tab
  * through the whole nav to reach content, and `<main>` is the landmark to skip to.
+ *
+ * The shell also mounts the sync engine's glue (`useSyncEngine`), and that is the
+ * right place for it: the shell only exists for a signed-in account, so the engine
+ * is configured when there is a session and torn down when there is not. It is a
+ * no-op on the web build, which has no local database and no outbox (A14).
  */
 export function Shell({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
   const isPhone = useFormFactor() === 'phone'
+  useSyncEngine()
 
   return (
     <div className="flex min-h-[100dvh] bg-bg text-text">

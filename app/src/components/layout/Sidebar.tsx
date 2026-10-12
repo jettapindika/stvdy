@@ -3,6 +3,7 @@ import { NavLink } from 'react-router'
 
 import { Wordmark } from '@/components/ui/BrandIllustration'
 import { CreditMeter } from '@/features/billing/CreditMeter'
+import { SyncStatus } from '@/features/sync/SyncStatus'
 
 /**
  * Primary navigation, shared by the sidebar and the phone tab bar.
@@ -47,8 +48,13 @@ export function Sidebar() {
         </NavLink>
       ))}
 
-      <div className="mt-auto pt-4">
+      <div className="mt-auto flex flex-col gap-1 pt-4">
         <CreditMeter />
+        {/* The status control sits at the foot of the rail, beside the meter, and
+            it is the only route to /devices (A189): Devices is not one of the five
+            labels this rail and the phone tab bar share, and a sixth would take
+            width from all of them. */}
+        <SyncStatus />
       </div>
     </nav>
   )

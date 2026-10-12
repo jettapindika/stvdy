@@ -7,6 +7,7 @@ import {
   type Runtime,
   type SecureStore,
   type SyncApi,
+  type SyncCredentials,
   type SyncReport,
 } from '@/platform'
 import { webPlatform } from '@/platform/web'
@@ -63,6 +64,8 @@ export interface FakeSync {
   tombstones: Array<{ entity: string; id: string }>
   resets: number
   syncNows: number
+  /** Every `configureSync` call, in order, for asserting the token handshake. */
+  configured: SyncCredentials[]
   /** How many subscribers are live, for asserting an unsubscribe actually ran. */
   readonly subscribers: number
 }
@@ -90,6 +93,7 @@ function fakeSync(overrides?: Partial<SyncApi>): { api: SyncApi; fake: FakeSync 
     tombstones: [],
     resets: 0,
     syncNows: 0,
+    configured: [],
     get subscribers() {
       return handlers.size
     },
@@ -174,34 +178,44 @@ export function installFakePlatform(
 
   const { api: syncApi, fake: sync } = fakeSync(options.sync)
 
-  installPlatform({
-    ...webPlatform(kind),
-    // A native kind has a runtime with a local database; `web` does not. The
-    // fake follows the kind rather than always claiming `web`, because the
-    // online-only sync path is chosen by `runtime()` and a fake that lied here
-    // would make every native test exercise the web branch (A14).
-    runtime: () => options.runtime ?? (kind === 'web' ? 'web' : 'tauri'),
-    secureStore,
-    sync: syncApi,
-    async openExternal(url) {
-      opened.push(url)
+  installPlatform(
+    {
+      ...webPlatform(kind),
+      // A native kind has a runtime with a local database; `web` does not. The
+      // fake follows the kind rather than always claiming `web`, because the
+      // online-only sync path is chosen by `runtime()` and a fake that lied here
+      // would make every native test exercise the web branch (A14).
+      runtime: () => options.runtime ?? (kind === 'web' ? 'web' : 'tauri'),
+      secureStore,
+      sync: syncApi,
+      async openExternal(url) {
+        opened.push(url)
+      },
+      ...(options.deepLinks
+        ? {
+            deepLinks: {
+              async current() {
+                return (options.current ?? null) as DeepLinkIntent | null
+              },
+              async onOpen(handler: (intent: DeepLinkIntent) => void) {
+                handlers.add(handler)
+                return () => {
+                  handlers.delete(handler)
+                }
+              },
+            },
+          }
+        : {}),
     },
-    ...(options.deepLinks
-      ? {
-          deepLinks: {
-            async current() {
-              return (options.current ?? null) as DeepLinkIntent | null
-            },
-            async onOpen(handler: (intent: DeepLinkIntent) => void) {
-              handlers.add(handler)
-              return () => {
-                handlers.delete(handler)
-              }
-            },
-          },
-        }
-      : {}),
-  })
+    {
+      // Recorded rather than spied, so a test asserts what the engine was handed:
+      // the token handshake is the one thing `Platform.sync`'s seven members cannot
+      // carry (A186).
+      async configureSync(credentials) {
+        sync.configured.push(credentials)
+      },
+    },
+  )
   return { values, deleted, deepLinks, opened, sync }
 }
 
@@ -211,8 +225,9 @@ export function installFakePlatform(
  * in the tab and simply be unable to restore the session later.
  */
 export function installFailingSecureStore(kind: PlatformKind = 'web'): void {
-  installPlatform({
-    ...webPlatform(kind),
+  installPlatform(
+    {
+      ...webPlatform(kind),
     secureStore: {
       async set() {
         throw new Error('secure storage is not available in the web build')

@@ -748,6 +748,10 @@
     "composer": {
       "title": "Kejujuran composer",
       "description": "Baris di bawah setiap composer chat, dan tombol dasar di atasnya. Keduanya bagian dari composer, bukan tooltip: peringatan yang tidak wajib dibuka adalah peringatan yang jarang dibaca."
+    },
+    "sync": {
+      "title": "Status sinkron",
+      "description": "Kontrol yang ditampilkan shell di kedua bentuk: satu baris di kaki bilah samping, dan chip di pita bilah tab pada ponsel. Statusnya berupa kata ditambah warna, jadi tetap terbaca tanpa warna, dan warnanya adalah chip di atas. Kontrol ini tautan ke layar Perangkat, karena itu Perangkat tidak perlu jadi item navigasi keenam."
     }
   },
   "planner": {
@@ -841,5 +845,54 @@
       "free": "Render ulang memakai isi yang tersimpan: tanpa panggilan model, dan tanpa kredit."
     },
     "template": "Dirender dengan template {{version}}"
+  },
+  "sync": {
+    "state": {
+      "synced": "Tersinkron",
+      "syncing": "Menyinkronkan",
+      "offline": "Offline",
+      "needsAttention": "Perlu diperiksa",
+      "revoked": "Sudah keluar di perangkat ini"
+    },
+    "lastSynced": "Terakhir sinkron {{when}}",
+    "neverSynced": "Belum pernah sinkron",
+    "onlineOnly": "Versi ini tidak menyimpan apa pun di perangkat ini",
+    "pending_other": "{{count}} perubahan menunggu sinkron",
+    "rejected": "Tidak tersimpan — server menolaknya ({{code}})",
+    "unavailable": "Status sinkron tidak tersedia"
+  },
+  "devices": {
+    "title": "Perangkat dan sinkronisasi",
+    "subtitle": "Setiap perangkat yang masuk ke akunmu, dan kapan masing-masing terakhir sinkron.",
+    "signedIn": "Sudah masuk",
+    "loading": "Memuat perangkatmu",
+    "thisDevice": "Perangkat ini",
+    "rename": "Ubah nama",
+    "renameLabel": "Nama perangkat",
+    "signOut": "Keluar",
+    "keep": "Biarkan tetap masuk",
+    "revokeConfirm": "Keluarkan {{name}}? Salinan lokalnya dihapus saat perangkat itu terhubung lagi.",
+    "revokeConfirmCurrent": "Ini perangkat yang sedang kamu pakai, jadi kamu akan keluar di sini.",
+    "platform": {
+      "web": "Web",
+      "macos": "macOS",
+      "windows": "Windows",
+      "ios": "iPhone atau iPad",
+      "android": "Android"
+    },
+    "empty": {
+      "title": "Belum ada perangkat",
+      "reason": "Akun ini tidak masuk di perangkat lain."
+    },
+    "reset": {
+      "title": "Hapus data lokal dan sinkron ulang",
+      "what": "Menghapus salinan lokal datamu di perangkat ini, termasuk perubahan yang belum terkirim, lalu mengunduh semuanya lagi. Tidak ada yang dihapus di server.",
+      "action": "Hapus dan sinkron ulang",
+      "confirm": "Ini menghapus salinan lokal dan semua yang belum terkirim. Akunmu tidak terpengaruh.",
+      "confirmAction": "Hapus dan sinkron ulang",
+      "done": "Data lokal sudah dihapus dan disinkronkan ulang.",
+      "failed": "Data lokal tidak bisa dihapus.",
+      "noneLocal": "Versi ini tidak menyimpan salinan lokal datamu, jadi tidak ada yang perlu dihapus."
+    }
   }
 }

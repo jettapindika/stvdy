@@ -5,6 +5,7 @@ import { EmptyState, ErrorState, LoadingState, SkeletonRows } from '@/components
 import { Icon } from '@/components/ui/Icon'
 import { LockedFeature } from '@/components/ui/LockedFeature'
 import { PageHeader, Section } from '@/components/layout/Section'
+import { SyncStatus } from '@/features/sync/SyncStatus'
 import { COURSE_NAMES, courseVars } from '@/tokens/tokens'
 
 /**
@@ -237,6 +238,21 @@ export function StyleguideScreen() {
             ),
           )}
         </ul>
+      </Section>
+
+      <Section title={t('styleguide.sync.title')}>
+        <p className="max-w-prose text-sm text-muted">{t('styleguide.sync.description')}</p>
+        {/* The live control in both layouts. Its *state* is the real one rather
+            than a staged sample: a gallery that showed "Needs attention" over an
+            empty outbox would be demonstrating a status the app cannot produce,
+            which is the one thing this control exists not to do. The four tones it
+            can carry are the chips directly above. */}
+        <div className="flex flex-col gap-3 border-y border-border py-3">
+          <SyncStatus />
+          <div className="self-end">
+            <SyncStatus variant="chip" />
+          </div>
+        </div>
       </Section>
 
       <Section title={t('styleguide.locked.title')}>

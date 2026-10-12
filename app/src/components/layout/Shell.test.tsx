@@ -169,6 +169,40 @@ describe('the shell always offers navigation', () => {
   })
 
   /**
+   * The sync status control, in both form factors (A189).
+   *
+   * Devices is reached from this control rather than from a sixth nav item,
+   * because the sidebar and the tab bar are both built from the same five labels.
+   * Two consequences are asserted here and both would be silent regressions:
+   * the control has to exist on *both* form factors, or one of them loses its only
+   * route to the device list; and it must not be one of the tab bar's links, or the
+   * five labels lose the widths they were measured at (5 x 78px on a 390px phone).
+   */
+  it('carries the sync status control in the sidebar, on desktop', () => {
+    mockViewport(1280)
+    renderShell()
+
+    expect(screen.getByRole('link', { name: /Devices and sync/ })).toHaveAttribute(
+      'href',
+      '/devices',
+    )
+  })
+
+  it('carries the sync status control on a phone without making it a sixth tab', () => {
+    mockViewport(390)
+    renderShell()
+
+    // Reachable, and outside the nav so the five labels keep their widths.
+    expect(screen.getByRole('link', { name: /Devices and sync/ })).toHaveAttribute(
+      'href',
+      '/devices',
+    )
+    const bar = screen.getByRole('navigation', { name: 'Main' })
+    expect(within(bar).getAllByRole('link')).toHaveLength(5)
+    expect(within(bar).queryByRole('link', { name: /Devices and sync/ })).not.toBeInTheDocument()
+  })
+
+  /**
    * The tab bar must be able to scroll sideways, and that is a 200%-text-scale
    * defect rather than a style choice.
    *

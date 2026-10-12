@@ -536,7 +536,11 @@
      the inset rather than a magic number, so the two cannot disagree when either
      changes. */
   .shell-main-phone {
-    padding-bottom: calc(2.75rem + 1px + env(safe-area-inset-bottom, 0px));
+    /* The tab bar, plus the sync status chip's row above it. The chip is in the
+       tab bar's band but not among its five labels (A189): the labels keep the
+       widths they were measured at, and this reservation is what keeps the last
+       row of content clear of the band. */
+    padding-bottom: calc(2.75rem + 1px + 3rem + env(safe-area-inset-bottom, 0px));
   }
 
   /* --- Identity: the citation mark ---------------------------------------- */

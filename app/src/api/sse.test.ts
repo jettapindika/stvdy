@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from './errors'
-import { createChatEventParser, type ChatCitation } from './sse'
+import { createChatEventParser, createSyncEventParser, type ChatCitation } from './sse'
 
 /**
  * The stream parser, fed by hand.
@@ -206,5 +206,58 @@ describe('the chat stream parser', () => {
     expect(errors).toEqual([])
     expect(tokens).toEqual(['ok'])
     expect(done).toEqual([])
+  })
+})
+
+/**
+ * The sync stream's parser, which is deliberately a separate one.
+ *
+ * `GET /sync/stream` shares the reader loop with the chat stream and nothing else:
+ * one `seq` event instead of four kinds plus citations and a `[DONE]` sentinel, and
+ * a `seq` that means "your change log moved" rather than "here is the change". The
+ * cases below are the two that a shared parser would get wrong: a chat event
+ * arriving on the sync stream, and a `seq` frame whose number is not a number.
+ */
+describe('the sync stream parser', () => {
+  function collectSeq() {
+    const seqs: number[] = []
+    const errors: ApiError[] = []
+    const parser = createSyncEventParser({
+      onSeq: (seq) => seqs.push(seq),
+      onError: (error) => errors.push(error),
+    })
+    return { parser, seqs, errors }
+  }
+
+  it('reports the seq of a frame, split across reads', () => {
+    const { parser, seqs } = collectSeq()
+
+    parser.feed('event: seq\ndata: {"s')
+    parser.feed('eq": 41}\n\n')
+
+    expect(seqs).toEqual([41])
+  })
+
+  it('ignores an event name the sync contract does not define', () => {
+    const { parser, seqs, errors } = collectSeq()
+
+    // A chat `token` frame must not be read as a seq, and must not be reported as
+    // an error either: a server that grows a second event kind must not break an
+    // older client.
+    parser.feed(frame('token', { t: 'hello' }))
+    parser.feed(frame('done', { message_id: 'm1' }))
+
+    expect(seqs).toEqual([])
+    expect(errors).toEqual([])
+  })
+
+  it('reports a seq frame it cannot read rather than throwing', () => {
+    const { parser, seqs, errors } = collectSeq()
+
+    parser.feed('event: seq\ndata: not json\n\n')
+    parser.feed(frame('seq', { seq: '41' }))
+
+    expect(seqs).toEqual([])
+    expect(errors.map((error) => error.code)).toEqual(['provider_error', 'provider_error'])
   })
 })

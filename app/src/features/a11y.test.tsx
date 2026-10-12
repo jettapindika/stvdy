@@ -6,6 +6,7 @@ import { ChatScreen } from '@/features/chat/ChatScreen'
 import { CheatsheetScreen } from '@/features/reports/CheatsheetScreen'
 import { ReportScreen } from '@/features/reports/ReportScreen'
 import { PlanUsageScreen } from '@/features/billing/PlanUsageScreen'
+import { DevicesScreen } from '@/features/devices/DevicesScreen'
 import { StudyScreen } from '@/features/study/StudyScreen'
 import { TodayScreen } from '@/features/today/TodayScreen'
 import { WorkspaceListScreen } from '@/features/workspaces/WorkspaceListScreen'
@@ -367,5 +368,49 @@ describe('screen accessibility', () => {
     const { container } = renderWithProviders(<PlanUsageScreen />, { route: '/billing' })
     await screen.findByRole('heading', { name: 'Plan and usage' })
     await expectAccessible(container, () => heading(container, 'the plan and usage screen'))
+  })
+
+  it('the devices screen has no axe violations', async () => {
+    // The composition here is a list of rows that each carry a status word, two
+    // buttons and a confirmation that replaces the row's own action. The rename
+    // field is the one that can lose its name — a label wrapping an input is fine,
+    // but the `<span>` beside it has to be the label rather than a sibling — and
+    // the reset block's confirmation is a second `role="alert"`-capable region.
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/devices') {
+        return jsonResponse(200, {
+          devices: [
+            {
+              id: 'd1',
+              name: "Jetta's MacBook",
+              platform: 'macos',
+              app_version: '0.1.0',
+              last_seen_at: '2026-10-11T09:00:00Z',
+              last_sync_at: '2026-10-11T08:00:00Z',
+              created_at: '2026-10-01T08:00:00Z',
+              revoked_at: null,
+              current: true,
+            },
+            {
+              id: 'd2',
+              name: 'Pixel 8',
+              platform: 'android',
+              app_version: null,
+              last_seen_at: '2026-10-11T09:30:00Z',
+              last_sync_at: null,
+              created_at: '2026-10-02T08:00:00Z',
+              revoked_at: null,
+              current: false,
+            },
+          ],
+        })
+      }
+      return notFound()
+    })
+    const { container } = renderWithProviders(<DevicesScreen />, { route: '/devices' })
+    await screen.findByRole('heading', { name: 'Devices and sync' })
+    await expectAccessible(container, () => heading(container, 'the devices screen'))
   })
 })
