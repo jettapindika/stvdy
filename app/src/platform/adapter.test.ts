@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { listenMock, invokeMock, pluginListenerMock } = vi.hoisted(() => ({
+const { listenMock, invokeMock, pluginListenerMock, notificationMock } = vi.hoisted(() => ({
   listenMock: vi.fn(),
   invokeMock: vi.fn(),
   pluginListenerMock: vi.fn(),
+  notificationMock: {
+    isPermissionGranted: vi.fn(),
+    requestPermission: vi.fn(),
+    sendNotification: vi.fn(),
+  },
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -12,6 +17,13 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => listenMock(...args),
+}))
+// The desktop half of A310's split uses the official plugin's JS API, so its behaviour is
+// asserted through this mock rather than through `invoke`.
+vi.mock('@tauri-apps/plugin-notification', () => ({
+  isPermissionGranted: (...args: unknown[]) => notificationMock.isPermissionGranted(...args),
+  requestPermission: (...args: unknown[]) => notificationMock.requestPermission(...args),
+  sendNotification: (...args: unknown[]) => notificationMock.sendNotification(...args),
 }))
 
 import { desktopPlatform } from './desktop'
@@ -220,14 +232,16 @@ describe('the push adapter', () => {
 /**
  * The local-notification path, and the one field that would fail silently.
  *
- * One plugin serves every platform now (A310 as revised), so the payload shape is the
- * SPA's half of a contract with `tauri-plugin-notifications`' Rust deserializer. The
- * plugin is a fork of the official one, and the official one's JS wrapper named the
- * instant `at` while the fork's `Schedule::At` names it `date` — a mix-up that produces
- * no error, just a notification that never fires. So the assertion is on the key.
+ * Two crates, one per platform family (A310): the official `tauri-plugin-notification` on
+ * desktop and the community `tauri-plugin-notifications` on mobile, which cannot be linked
+ * into one Android build because both declare the namespace `app.tauri.notification`. They
+ * are forks, so the mobile payload's field names are close enough to the official one's to be
+ * a **silent no-op** if they are mixed up: the official JS wrapper named the instant `at`,
+ * and the fork's `Schedule::At` names it `date`. A mix-up produces no error — just a reminder
+ * that never fires — so the assertion is on the key.
  */
 describe('the local-notification adapter', () => {
-  it('schedules a phone reminder with the field the plugin deserializes', async () => {
+  it('schedules a phone reminder with the field the mobile plugin deserializes', async () => {
     invokeMock.mockResolvedValue(true)
     const at = new Date('2026-10-16T06:00:00.000Z')
 
@@ -242,23 +256,26 @@ describe('the local-notification adapter', () => {
     })
   })
 
-  it('delivers a desktop reminder now, because notify-rust cannot schedule one', async () => {
-    invokeMock.mockResolvedValue(true)
+  it('delivers a desktop reminder now, because the desktop plugin cannot schedule one', async () => {
+    notificationMock.isPermissionGranted.mockResolvedValue(true)
 
     await desktopPlatform('macos').notifications.schedule('Due', 'Hand in the essay', new Date())
 
-    expect(invokeMock).toHaveBeenCalledWith('plugin:notifications|notify', {
-      options: { title: 'Due', body: 'Hand in the essay' },
+    expect(notificationMock.sendNotification).toHaveBeenCalledWith({
+      title: 'Due',
+      body: 'Hand in the essay',
     })
   })
 
   it('sends nothing when permission was refused', async () => {
     invokeMock.mockResolvedValue(false)
     invokeMock.mockClear()
+    notificationMock.isPermissionGranted.mockResolvedValue(false)
 
     await mobilePlatform('android').notifications.schedule('Due', 'body', new Date())
     await desktopPlatform('macos').notifications.notify('Due', 'body')
 
     expect(invokeMock).not.toHaveBeenCalledWith('plugin:notifications|notify', expect.anything())
+    expect(notificationMock.sendNotification).not.toHaveBeenCalled()
   })
 })

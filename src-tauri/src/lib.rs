@@ -52,16 +52,6 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        // Notifications, on every platform, from one plugin (A310 as revised): the
-        // community `tauri-plugin-notifications` is a superset of the official
-        // `tauri-plugin-notification`, and the official one cannot receive remote push —
-        // its iOS delegate skips `UNPushNotificationTrigger` and its Android manifest
-        // registers no FCM service. The two cannot coexist at all: both declare the
-        // Android namespace `app.tauri.notification` and AGP 9 refuses to merge a
-        // manifest two libraries claim, so linking both means **no APK can be
-        // assembled**. Registered unconditionally now, because the local-notification
-        // surface it also serves exists on the desktop too.
-        .plugin(tauri_plugin_notifications::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +77,17 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        // The desktop half of A310's notification split: the official plugin raises local
+        // notifications, and the community one in the mobile block below is the one that can
+        // receive remote push. **Only one of the two is linked into a given build, and that
+        // is a hard requirement rather than tidiness** — both crates declare the Android
+        // namespace `app.tauri.notification`, and AGP 9 refuses to merge a manifest two
+        // libraries claim, so an Android build carrying both cannot produce an APK at all.
+        //
+        // The permission is desktop-only for the same reason the registration is
+        // (`capabilities/desktop.json`), and a plugin registered without it is a runtime
+        // failure `cargo test` cannot see.
+        builder = builder.plugin(tauri_plugin_notification::init());
         // The updater, registered here rather than in the common block because the
         // plugin's own platform matrix is `ios: none, android: none` (A335): mobile
         // updates ship through TestFlight and Play, and a mobile build that linked
@@ -104,6 +105,15 @@ pub fn run() {
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         builder = builder.plugin(tauri_plugin_haptics::init());
+        // The mobile half of A310's notification split. This is the pinned community plugin
+        // `tauri-plugin-notifications` (Choochmeque), **not** the official
+        // `tauri-plugin-notification` registered in the desktop block above. The official one
+        // cannot receive remote push — its iOS delegate skips `UNPushNotificationTrigger` and
+        // its Android manifest registers no FCM service — and the two cannot be linked into
+        // one Android build at all, because both declare the namespace
+        // `app.tauri.notification` and AGP 9 refuses the manifest merge. So each platform
+        // gets the one it needs and neither build sees both.
+        builder = builder.plugin(tauri_plugin_notifications::init());
     }
 
     // The shell's pass, handed to the mobile plugin below (A311/A315).

@@ -3,6 +3,11 @@ import { listen } from '@tauri-apps/api/event'
 import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
 import { check, type Update } from '@tauri-apps/plugin-updater'
@@ -212,34 +217,22 @@ export function desktopPlatform(kind: PlatformKind): NativePlatform {
     },
 
     notifications: {
-      // One plugin on every platform (A310 as revised): the community
-      // `tauri-plugin-notifications` replaced the official `tauri-plugin-notification`,
-      // which cannot receive remote push and which declares the same Android namespace —
-      // linking both means no APK can be assembled at all.
-      //
-      // These are `invoke` calls rather than the plugin's JS package because the fork's
-      // npm wrapper is not published for this version; the click listener in
-      // `mobile.ts` was already invoked this way.
+      // The desktop half of A310's platform split: the official `tauri-plugin-notification`,
+      // whose mobile counterpart is the community `tauri-plugin-notifications` in
+      // `mobile.ts`. The two cannot be linked into one Android build — both declare the
+      // namespace `app.tauri.notification` and AGP 9 refuses the manifest merge — so each
+      // platform gets exactly one, and this is the desktop one.
       async requestPermission() {
-        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) === true) {
-          return true
-        }
-        return (await invoke<string>('plugin:notifications|request_permission')) === 'granted'
+        if (await isPermissionGranted()) return true
+        return (await requestPermission()) === 'granted'
       },
       async notify(title, body) {
-        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
-          return
-        }
-        await invoke('plugin:notifications|notify', { options: { title, body } })
+        if (await isPermissionGranted()) sendNotification({ title, body })
       },
-      // Desktop cannot schedule (notify-rust raises the toast when it is asked to), so
-      // deliver now. Server push and in-app delivery are the real desktop reminder
-      // channels.
+      // Desktop cannot schedule (the plugin ignores it), so deliver now. Server
+      // push and in-app delivery are the real desktop reminder channels.
       async schedule(title, body) {
-        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
-          return
-        }
-        await invoke('plugin:notifications|notify', { options: { title, body } })
+        if (await isPermissionGranted()) sendNotification({ title, body })
       },
     },
 

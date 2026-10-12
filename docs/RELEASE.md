@@ -97,10 +97,11 @@ could only hide them. The check prints `no purchase UI in 3 shipped file(s)` and
 instead of `app/dist`; on this machine it has no `.ipa` or `.apk` to read, which is row
 M9's caveat.
 
-### Building the APK: two things the generated project does not do for you
+### Building the APK: what the generated project does not do for you
 
-Both were found by building one, not by reading about it, and both apply to the signed
-(`release.yml`) and unsigned (`.github/workflows/unsigned-artifacts.yml`) paths alike.
+Each of these was found by building one rather than by reading about it, and all three apply
+to the signed (`release.yml`) and unsigned (`.github/workflows/unsigned-artifacts.yml`) paths
+alike.
 
 - **`src-tauri/tauri.js` has to exist before Gradle runs.** The generated
   `buildSrc/src/main/java/<id>/kotlin/BuildTask.kt` invokes
@@ -119,6 +120,14 @@ Both were found by building one, not by reading about it, and both apply to the 
   file's only mention is a `.gitignore` entry. The unsigned workflow appends the Gradle block
   (idempotently, so a committed project carrying its own is left alone); a committed project
   must carry one, or `release.yml` builds an unsigned release APK and fails.
+- **Only one notification plugin may be linked into an Android build.** The official
+  `tauri-plugin-notification` and the community `tauri-plugin-notifications` both declare the
+  Android namespace `app.tauri.notification`, and AGP 9 refuses to merge a manifest two
+  libraries claim — `Namespace 'app.tauri.notification' is used in multiple modules and/or
+  libraries` — so an Android build carrying both **cannot produce an APK at all**. Each is
+  therefore behind its own `cfg(target_os)` block (A310): the official one desktop-only, the
+  community one mobile-only. A build that reaches for both fails at the manifest merge, which
+  is late and loud rather than subtle, but it costs twenty minutes of Gradle to find.
 
 **The API origin is a build input, not a setting.** `VITE_API_BASE_URL` is inlined by Vite
 and falls back to `http://localhost:8080`, so an artifact built without it installs and then

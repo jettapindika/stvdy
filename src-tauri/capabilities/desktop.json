@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop-only",
-  "description": "Global shortcut and the updater are desktop only. `tauri-plugin-updater` declares `ios: none, android: none`, and mobile updates ship through TestFlight and Play, so a mobile build must not see this permission — which is why it is here rather than in `default.json`.",
+  "description": "Global shortcut, the updater and the desktop notification plugin are desktop only. `tauri-plugin-updater` declares `ios: none, android: none`, and mobile updates ship through TestFlight and Play, so a mobile build must not see this permission — which is why it is here rather than in `default.json`. The notification permission is here for the same shape of reason: the desktop plugin is the official `tauri-plugin-notification`, and its mobile counterpart is the community crate whose permission is `notifications:default` in `mobile.json` (A310).",
   "windows": ["main"],
   "platforms": ["macOS", "windows", "linux"],
-  "permissions": ["global-shortcut:default", "updater:default"]
+  "permissions": ["global-shortcut:default", "updater:default", "notification:default"]
 }

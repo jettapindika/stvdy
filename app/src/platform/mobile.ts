@@ -25,9 +25,24 @@ export function mobilePlatform(kind: PlatformKind): NativePlatform {
     ...base,
 
     notifications: {
-      // `requestPermission` and `notify` are the desktop implementation, spread above: one
-      // plugin serves every platform now (A310 as revised), so only the difference is here.
-      ...base.notifications,
+      // The mobile half of A310's platform split, and the shape differs from the desktop's
+      // because the plugin does: these are `invoke` calls to
+      // `tauri-plugin-notifications` (Choochmeque), whose `Schedule::At` names the instant
+      // `date` where the official plugin's JS wrapper took `at`. The fork's npm wrapper is
+      // not published for this version, which is why the calls are raw — the click listener
+      // below was already written this way.
+      async requestPermission() {
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) === true) {
+          return true
+        }
+        return (await invoke<string>('plugin:notifications|request_permission')) === 'granted'
+      },
+      async notify(title, body) {
+        if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
+          return
+        }
+        await invoke('plugin:notifications|notify', { options: { title, body } })
+      },
       async schedule(title, body, at) {
         if ((await invoke<boolean | null>('plugin:notifications|is_permission_granted')) !== true) {
           return
@@ -36,10 +51,8 @@ export function mobilePlatform(kind: PlatformKind): NativePlatform {
         // the client schedules reminders from synced data rather than waiting
         // for the server.
         //
-        // `date`, not `at`: this plugin's `Schedule::At` names the instant `date`
-        // (`src/models.rs`), where the official plugin's JS wrapper took `at`. The two
-        // are forks of one another, which is exactly why the field names are close
-        // enough to be a silent no-op if they are mixed up.
+        // `date`, not `at` — the two crates are forks, so the field names are close enough
+        // to be a silent no-op if they are mixed up. `adapter.test.ts` asserts the key.
         await invoke('plugin:notifications|notify', {
           options: {
             title,

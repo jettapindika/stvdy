@@ -6,6 +6,7 @@
   "platforms": ["iOS", "android"],
   "permissions": [
     "haptics:default",
+    "notifications:default",
     "stvdy-mobile:default"
   ]
 }

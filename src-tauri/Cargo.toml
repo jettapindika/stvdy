@@ -26,28 +26,6 @@ tauri-build = { version = "2.7.2", features = [] }
 [dependencies]
 tauri = { version = "2.12.3", features = ["protocol-asset"] }
 tauri-plugin-deep-link = "2.6.1"
-# Notifications, on every platform, from one plugin (A310 as revised).
-#
-# `tauri-plugin-notifications` (Choochmeque) is a fork of the official
-# `tauri-plugin-notification` that adds remote push, and it is a **superset**: it
-# carries the same `notify`/`schedule`/`cancel`/`create_channel` surface the local
-# reminder path needs, on desktop as well as mobile.
-#
-# **The official plugin had to go, and not for tidiness.** Both crates declare the
-# Android namespace `app.tauri.notification`, and AGP 9 refuses to merge a manifest
-# that two libraries claim: `Namespace 'app.tauri.notification' is used in multiple
-# modules and/or libraries: :tauri-plugin-notifications, :tauri-plugin-notification`.
-# With both linked, **no APK can be assembled at all** — found by building one, on
-# run 38239252653's Android leg and reproduced locally. Since the push half is the
-# one the official plugin provably cannot do (its iOS delegate skips
-# `UNPushNotificationTrigger` and its Android manifest registers no FCM service),
-# the fork is the one that stays.
-#
-# `push-notifications` is **not** a default feature. Without it the plugin's
-# registration code is not compiled at all and `registerForPushNotifications`
-# returns an error, so the Android build would ship no FCM dependency and the iOS
-# build no APNs registration — a receive path that compiles and never receives.
-tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
 tauri-plugin-dialog = "2.8.2"
 tauri-plugin-fs = "2.7.0"
 tauri-plugin-opener = "2.7.1"
@@ -95,6 +73,11 @@ keyring-core = "1.0.0"
 # land in the same commit: an updater registered without a key is not a degraded
 # updater, it is an app that does not start.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+# The desktop half of A310's platform split. The official plugin raises local notifications
+# and cannot receive remote push; its mobile equivalent is the community crate in the target
+# block below. Only one of the two is ever linked into a given build — see that block for why
+# that is a hard requirement rather than tidiness.
+tauri-plugin-notification = "2.6.0"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-updater = "2.13.3"
 # The `deep-link` feature forwards a second process's CLI arguments (i.e. a
@@ -129,6 +112,23 @@ tauri-plugin-haptics = "2.4.2"
 # native halves, and a desktop build that linked them would compile Swift and Kotlin
 # for platforms it cannot run on.
 tauri-plugin-stvdy-mobile = { path = "plugins/mobile" }
+# Push receive (A310). Mobile-only, and **the platform split is what makes two notification
+# plugins legal**: this one and the official `tauri-plugin-notification` both declare the
+# Android namespace `app.tauri.notification`, and AGP 9 refuses to merge a manifest two
+# libraries claim — with both linked into one Android build, **no APK can be assembled at
+# all**. The official one is therefore desktop-only (see the target block above) and this one
+# is mobile-only, so no build ever contains both. The collision appeared when the official
+# plugin sat in the *common* dependencies, which is what this arrangement corrects.
+#
+# The split is also what keeps macOS 11 supported: this crate's macOS half runs `swift build`,
+# which requires a deployment target of 12.0 or later, and `bundle.macOS.minimumSystemVersion`
+# is 11.0.
+#
+# `push-notifications` is **not** a default feature. Without it the plugin's registration code
+# is not compiled at all and `registerForPushNotifications` returns an error, so the Android
+# build would ship no FCM dependency and the iOS build no APNs registration — a receive path
+# that compiles and never receives.
+tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
 
 [features]
 default = ["custom-protocol"]
