@@ -344,8 +344,13 @@ Everything below was decided because the spec left it open. Disagree with any ro
 | A329 | Mobile | **The push token is registered against the device row created at login.** `PUT /devices/{id}/push-token` already exists and upserts on `device_id`; the client calls it after login and on every token refresh, sending `provider = "apns" \| "fcm"`. | No new server route is added, and `push_tokens` is not a `+sync` table (a token is per-device and server-owned), so `0017_sync_triggers.sql` stays the last trigger-attaching migration. Registering against the login's device row is what makes the token's lifetime the device's lifetime rather than the session's. |
 
 <!-- A230-A249 (Phase 10), A290-A309 (Phase 13) and A310-A329 (Phase 14) have all landed.
-     Phase 15 takes A330 upward; A330-A354 landed in `66466ea`. The numbering is claimed by the
-     block, not by the next free slot (the same rule the migration numbers follow). -->
+     Phase 15 takes A330 upward; A330-A354 landed in `66466ea`. **A355-A355c are outside every
+     block above and that is deliberate:** they were claimed after A354 by the account-deletion
+     work, which arrived late and had no phase left to belong to -- the same situation A160
+     describes from the other side, where the work was deferred to "the release prerequisites"
+     and nothing then picked it up. The numbering rule is unchanged: a block is claimed before
+     its rows are written, and this is the one case where the claim came after. The next block
+     starts at A356. -->
 
 | A330 | Release | **The production host is a Linux VPS in an Indonesian region, with managed Postgres 16 + pgvector, and the container is deployed as one process.** The vendor is the user's purchase; the *shape* is pinned here. | A45 forbids production on the `168.110.202.106` trial host and A47 forbids Supabase's free tier as the production database. One region for the API, the database, the bucket and SearXNG is UU PDP's residency expectation and the latency the Batam trial demonstrated, and `crates/server/src/main.rs` runs the API, the worker and the scheduler as three tasks in one process — so one container *is* the whole server, and scaling the API separately is a later concern documented rather than built. `docs/OPERATIONS.md` carries the checklist a candidate must satisfy before it is accepted, each row with a pass condition so "is this host suitable" has an answer. |
 | A331 | Object storage | **Cloudflare R2 is the production object store, and the client does not change.** `STORAGE_BACKEND=s3`, `S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com`, `S3_REGION=auto`, `S3_FORCE_PATH_STYLE=false`, an R2 API token scoped to one bucket, and **no public bucket** — reads are presigned only. | A15 already decided the backend; what is pinned here is the configuration. The client is unchanged because `aws-sdk-s3` talks to any S3-compatible endpoint, and the bucket must not be public because `GET /sources/:id/file` already hands out short-lived scoped URLs (`PRESIGN_TTL_SECS`) — a public bucket would make the presigning decorative. |
