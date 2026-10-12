@@ -536,12 +536,12 @@ fn the_task_modules_document_the_schemas_their_contracts_parse() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test prompts task_modules` →
 `error[E0599]: no variant named QuickCaptureV1`.
 
-- [ ] **Step 3: Edit the two prompt files (A191)**
+- [x] **Step 3: Edit the two prompt files (A191)**
 
 Wrap every user-typed value in the block the composer's rule requires. In
 `prompts/quick_capture.v1.md`:
@@ -562,7 +562,7 @@ and `{{notes}}` — one block, with `{{due_at}}` inside it too, because a date t
 typed ("besok") arrives as free text through the capture path. **Nothing else in either file
 changes**: the rules, the schema line and the wording are the file's contract.
 
-- [ ] **Step 4: Add the two variants**
+- [x] **Step 4: Add the two variants**
 
 In `crates/core/src/prompts/registry.rs`, following the existing shape exactly:
 
@@ -619,12 +619,12 @@ impl ModuleId {
 values (a task with no due date has the string the caller chooses — Task 6 passes `"none"`,
 which is a statement the prompt can read, not an absence).
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 `cargo test -p stvdy-core --test prompts` — the whole file, because the two sweeps are the
 assertion that matters and a targeted run would not run them.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(core): the quick-capture and task-breakdown prompt modules
@@ -672,7 +672,7 @@ pub struct CaptureDraft {
 pub fn parse_draft(raw: &str, tz: Tz) -> Result<CaptureDraft, GenerationError>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The reply's offset is kept, not re-derived. A model told the timezone resolves
@@ -746,12 +746,12 @@ fn an_empty_title_is_a_schema_failure() {
 fn a_fenced_reply_still_parses() { /* ```json … ``` around the first case's body */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test capture` → `error[E0433]: failed to resolve: use of
 undeclared crate or module 'capture'`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Parse with `strip_code_fence` → `serde_json::from_str::<DraftFile>` (a `Json` error, which
 `is_retryable` already retries) → normalise:
@@ -766,11 +766,11 @@ Parse with `strip_code_fence` → `serde_json::from_str::<DraftFile>` (a `Json` 
   `None` + a warning (an estimate of zero minutes is not an estimate).
 - `notes`: trim; an empty string becomes `None`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test capture`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the quick-capture draft contract, and what a bad date does
@@ -818,7 +818,7 @@ pub const MAX_SUBTASKS: usize = 8;
 pub fn parse_proposal(raw: &str) -> Result<Proposal, GenerationError>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The prompt asks for 3-8 subtasks in the 15-90 minute range, and the contract is what
@@ -882,11 +882,11 @@ fn the_proposal_order_is_the_models_order() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-core --test breakdown`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `parse_proposal(raw)` = `strip_code_fence` → `serde_json` → validate: non-empty title after
 trim (else `Schema`); count in `3..=8` **after** dropping restatements of the parent — which
@@ -902,11 +902,11 @@ Total equality is compared after the drops, against the sum of what remains; a m
 with a normalised form (trim, case-fold, collapse internal whitespace) — the same
 normalisation Phase 5's MCQ grading uses.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test breakdown`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the task-breakdown proposal contract
@@ -1090,22 +1090,22 @@ fn a_duration_longer_than_the_client_reported_elapsed_time_is_refused() {
 fn the_bounds_are_exact() { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-core --test tasks` and `cargo test -p stvdy-core --test study`
 
-- [ ] **Step 3: Write both modules**
+- [x] **Step 3: Write both modules**
 
 `tasks.rs` is pure data in, pure data out — no `serde_json`, no sqlx, no clock. The
 `order_tasks` comparator is written once and both the server query's `ORDER BY` and the
 client's sort must match it; the plan's Task 6 repeats it in SQL with a comment naming this
 function, because the server sorts in the database and this sorts a vector.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-core --test tasks --test study`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(core): the task order, the due window, and the session bound
@@ -1124,13 +1124,13 @@ feat(core): the task order, the due window, and the session bound
 - Does **not** produce: any `+sync` table, any trigger, any change to
   `0017_sync_triggers.sql` or `crates/server/tests/schema.rs`.
 
-- [ ] **Step 1: Read `migrations/` and confirm the number**
+- [x] **Step 1: Read `migrations/` and confirm the number**
 
 `ls migrations/` — the highest on disk today is `0023`. Phase 7's plan claims `0025`–`0026`
 and Phase 8 claims `0027`+. If `0028` is taken, take the next free number and update this
 file's references to it.
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 ```sql
 -- Phase 9's three settings the table never had, and the column that stops a batch of
@@ -1181,13 +1181,13 @@ alter table user_settings
            and break_min between 0 and 60);
 ```
 
-- [ ] **Step 3: Apply it and check the two assertions**
+- [x] **Step 3: Apply it and check the two assertions**
 
 `sqlx migrate run` then `cargo test -p stvdy-server --test schema` — that suite asserts
 exactly the `0017` table list carries both triggers, which is the assertion that would fail
 if this migration had added one.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 feat(db): subtask order, quiet hours, and the settings the spec's DDL had
@@ -1230,7 +1230,7 @@ Routes (paths exactly as `docs/API.md:778` reserves them):
 | `POST /tasks/quick-capture` | Body `{text}`. `require(Feature::QuickCapture)` then one `reserve_in` transaction. 200 `{draft, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A193). |
 | `POST /tasks/:id/breakdown` | Body `{}`. `require(Feature::TaskBreakdown)` then `reserve_in`. 200 `{proposal, credits_spent, credits_remaining, prompt_version}`. Writes **no task** (A195). |
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// A free account has `quick_capture = false` in the matrix, so the refusal is the engine's
@@ -1299,11 +1299,11 @@ async fn the_breakdown_language_comes_from_the_settings_row(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test tasks` → the module does not exist.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 The two generative routes follow the shape `crates/server/src/cheatsheets/routes.rs` already
 uses: `require` first (a counted refusal must be the one the caller sees), then
@@ -1320,11 +1320,11 @@ provider failure is not a charge for nothing.
 `{"capture_text": text, "output_language": settings.language}`. `now` and `timezone` are
 declared `Caller` but filled from `values_of(ChatVars)`, so they are not passed twice.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test tasks`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): tasks, quick capture, and a breakdown that saves nothing
@@ -1356,7 +1356,7 @@ Routes:
 | `PATCH /events/:id` | Partial. A `source != 'app'` row is **not editable at all**: 403 `forbidden` with a message naming the calendar, because Phase 10's Google/ICS rows are read-only in the UI and a 404 would read as "deleted". |
 | `DELETE /events/:id` | 204 tombstone; same rule for a non-`app` row. |
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The columns Phase 10 fills are not the client's to write (A198). Each one is its own
@@ -1406,22 +1406,22 @@ async fn an_unknown_kind_is_refused(pool: PgPool) { /* … */ }
 async fn deleting_a_linked_task_keeps_the_event(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test events`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `validate_event` is the single place the field rules live; the REST handler and Task 10's
 push decision both call it. The `PATCH`/`DELETE` guard for a non-`app` row is a read of the
 row's `source` inside the same transaction as the update, not a separate check-then-write,
 so a Phase 10 sync landing between them cannot be overwritten.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test events`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): events, and the four columns a client may not write
@@ -1453,7 +1453,7 @@ Routes:
 | `GET /sessions?from=&to=` | The Today timeline and "time studied today". `ORDER BY started_at desc, id desc`. |
 | `GET /activity?from=&to=` | `{reviews: [ts], attempts: [ts], sessions: [ts]}` — the three instants a streak is made of, so the *client* owns the streak rule and there is one implementation of it (A205). The web build has no local cache, which is why this read exists as a route at all. |
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// The normal path: a session is recorded once and reports `applied`.
@@ -1487,21 +1487,21 @@ async fn activity_reports_reviews_attempts_and_sessions(pool: PgPool) {
 async fn sessions_are_scoped_and_a_foreign_task_is_not_found(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test study`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 `validate_session` parses the payload into `NewSession` and runs `check_session` with
 `server_now = state.clock.now()`. The insert is
 `insert … on conflict (id) do nothing returning id` and `applied = row.is_some()`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test study`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): study sessions, the bound on their length, and the activity read
@@ -1539,7 +1539,7 @@ Routes:
 Phase 13 (BYOK is Power's, and the key store is `user_api_keys`, which this phase does not
 touch).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// A free plan's channels are `[web, push]`, so `telegram` is 403 `plan_required` with
@@ -1592,21 +1592,21 @@ async fn out_of_range_study_hours_are_a_validation_error(pool: PgPool) {
 async fn a_first_read_returns_the_defaults(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test settings`
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Validate before writing, so the migration's `check` constraints are a backstop rather than
 the error path. `language` and `theme` are validated against their `in (…)` sets in Rust
 for the same reason.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test settings`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): settings, quiet hours, and a channel the plan grants
@@ -1628,7 +1628,7 @@ feat(server): settings, quiet hours, and a channel the plan grants
 - Produces: `decide` rejects a payload the entity's validator rejects, with the validator's
   code.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `crates/server/tests/route_sweep.rs`, add the rows. `read_only_rows()` gains twelve:
 
@@ -1696,12 +1696,12 @@ async fn a_pushed_session_beyond_its_elapsed_time_is_rejected(/* … */) {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `cargo test -p stvdy-server --test route_sweep` → "classify these routes in ROUTES …".
 `cargo test -p stvdy-server --test tamper` → the three new cases fail on the rejection code.
 
-- [ ] **Step 3: Add the calls to `decide`**
+- [x] **Step 3: Add the calls to `decide`**
 
 In `crates/server/src/sync/push.rs`, the per-entity arm calls the entity's validator before
 applying, and maps a `Reject` to `MutationResult::Rejected { code, message }`:
@@ -1719,11 +1719,11 @@ Entity::UserSettings => crate::settings::validate_settings_push(user_id, id, pay
 The `study_sessions` validator needs the mutation's `client_ts`, which `decide` already has
 in hand — pass it rather than reading a clock (A204).
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `cargo test -p stvdy-server --test route_sweep --test tamper`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(server): the push path validates what the REST path validates
@@ -1846,22 +1846,22 @@ async fn the_rest_path_and_the_push_path_agree_on_the_log(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test -p stvdy-server --test offline_tasks` — the engine API from Phase 8 is present
 and the routes are not, so the first failure is the REST route the test's second half uses.
 
-- [ ] **Step 3: Make it pass**
+- [x] **Step 3: Make it pass**
 
 No production code is expected from this task: it is the assertion that Tasks 5–10 and Phase
 8 together do what the roadmap's gate says. Anything it finds is a defect in one of those,
 fixed there, with the fix named in the execution notes.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 `cargo test -p stvdy-server --test offline_tasks`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 test(server): the offline task, event and session sync after reconnect
@@ -1964,11 +1964,11 @@ it('reads task_breakdown from the credits table', () => {
 it('returns null rather than a guess when the key is absent', () => { /* … */ })
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `npm --prefix app test -- useFocusTimer plans` → `useFocusTimer` does not exist.
 
-- [ ] **Step 3: Write the platform capability and the hook**
+- [x] **Step 3: Write the platform capability and the hook**
 
 - `web.ts`: `localState` over `localStorage` with a `stvdy.` prefix; `get` returns `null` on
   a missing key and on unparseable JSON (and logs the parse failure), `delete` removes it.
@@ -1990,11 +1990,11 @@ it('returns null rather than a guess when the key is absent', () => { /* … */ 
   accumulated, so a throttled background tab does not drift.
 - `plans.ts`: extend the parser with `task_breakdown` and export `TASK_CREDITS`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 `npm --prefix app test`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(app): the local-state capability, the focus timer, and the cost of a breakdown
@@ -2049,7 +2049,7 @@ export interface TodayBuckets {
 export function todayBuckets(input: TodayInput): TodayBuckets
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 /// The one that fails silently for an Indonesian user: a task due at 07:00+07:00 is on
@@ -2131,11 +2131,11 @@ it('offers the local reset', async () => { /* … */ })
 it('names the sections other phases own', async () => { /* … */ })
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 `npm --prefix app test -- today tasks settings`
 
-- [ ] **Step 3: Write the screens**
+- [x] **Step 3: Write the screens**
 
 - `TodayScreen`: replaces the four empty states with the real ones — "Due now" (the due-card
   count and a one-tap review), today's timeline (events and tasks, `formatInZone`), overdue,
@@ -2163,11 +2163,11 @@ it('names the sections other phases own', async () => { /* … */ })
   key sets and `{{placeholder}}` sets, so a missing Indonesian key or a dropped `{{count}}`
   fails it.
 
-- [ ] **Step 4: Run the tests and the build**
+- [x] **Step 4: Run the tests and the build**
 
 `npm --prefix app test && npm --prefix app run build && node scripts/check-no-cdn.mjs`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(app): Today, quick capture, break-down, tasks and settings
@@ -2510,6 +2510,11 @@ the sync line reads "Synced", the overdue task carries the word "Overdue" and th
 - **`cargo sqlx prepare --workspace --check` is not a gate this phase can run**: the tree
   uses the runtime `query*` API throughout, so the command reports "no queries found" rather
   than checking a cache, which is what Phase 7's slice recorded as well.
+
+  Left unticked — **Task 1 Step 1**: it names `the_task_modules_document_the_schemas_their_contracts_parse`, which is not in `crates/core/tests/prompts.rs`; the property shipped as two cases, `the_quick_capture_documented_schema_parses_into_the_generation_contract` and `the_task_breakdown_documented_schema_parses_into_the_generation_contract`. The step's other named test (`the_task_modules_require_a_language_rather_than_defaulting_to_the_source_language`) exists verbatim.
+  Left unticked — **Task 4 Step 1**: it names `overdue_tasks_are_included_and_marked` and `a_deleted_row_is_absent_from_the_order_and_the_tree`, neither of which is in `crates/core/tests/tasks.rs`; they shipped as `overdue_tasks_are_included_and_tomorrows_are_not` and `a_deleted_child_is_absent_from_the_tree`. The step's other nine named tests exist verbatim.
+  Left unticked — **Task 11 Step 1**: it names `deleting_a_parent_offline_tombstones_its_children_locally`, which is not in `crates/server/tests/offline_tasks.rs`; it shipped as `deleting_a_parent_offline_tombstones_its_children`, which carries the property (it asserts the device's cache lost the children as well as the server's rows). The step's other three named tests exist verbatim.
+  Left unticked — **Task 12 Step 1**: it names `the duration is the elapsed time and not the block length`, which is not in `app/src/features/today/useFocusTimer.test.ts`; it shipped as `records the elapsed time, never the configured block length`. The step's other five named timer cases and both `plans.test.ts` cases exist verbatim.
 
 ---
 
