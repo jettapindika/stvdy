@@ -1452,8 +1452,8 @@ documented.
 - Consumes: `platform.secureStore` (Phase 1), `platform.notifications.schedule`.
 - Produces: no new code beyond a device verification and one SPA test.
 
-**Status: not done in this slice. Nothing in this task is committed, and no device row
-is claimed as a pass.** The honest state, item by item:
+**Status: the SPA half is done; the device half is not, and is not claimed.** The honest
+state, item by item:
 
 - **The secure-storage half already exists and is confirmed rather than added.** Phase
   1's `src-tauri/src/keychain.rs` installs a per-platform store
@@ -1472,48 +1472,90 @@ is claimed as a pass.** The honest state, item by item:
   `tauri-plugin-notifications` crate carries the push-receive path. The scheduling
   *call* the plan asks for is `platform.notifications.schedule`, which is the SPA's
   (`app/**`) — so this step's code is the SPA's, not the shell's.
-- **The two tests this task names are SPA tests** (`localReminder.test.ts` and the
-  reminder UI's copy assertion) and `app/**` is fenced. They are not written here.
+- **The scheduling path needed no new code, and that was checked rather than assumed.**
+  `useLocalNotifications` (Phase 9's) is mounted from `App`, plans from the device's own
+  synced rows, calls `platform.notifications.schedule` per reminder, and is gated to
+  iOS/Android because web and desktop deliver immediately rather than scheduling. What
+  Task 7 asked for that was **not** there is the test — the plan named
+  `localReminder.test.ts` and a copy assertion, and neither existed. They do now, and
+  they are the three assertions in Step 1 below.
 - **The device verification was not attempted and is not claimed.** Storing a token,
   killing the app, reading it back from the Keychain/Keystore, and observing a
   scheduled notification fire while the app is closed all require a **physical device**
   and, for iOS, a **signing identity** — none of which exists here. Recorded as
-  unverified, not as a pass.
+  unverified, not as a pass. The prerequisite is named per property in Step 3.
 - **The two doc edits are not made**, and deliberately: `docs/ARCHITECTURE.md` § Native
   prototypes is where a *device result* is recorded, and there is no device result to
   record; writing "not verified" into it now would be a placeholder rather than a
   finding. `docs/RELEASE.md`'s Auto Backup caveat is a real gap and belongs to whoever
   owns that file in this phase's remaining work.
 
-- [ ] **Step 1: Write the failing test — scheduling is best-effort, and the UI says so**
+- [x] **Step 1: Write the test — scheduling is best-effort, and the copy says so**
 
-```ts
-it('schedules a local reminder and never claims exact delivery', async () => {
-  const { calls } = installFakePlatform()
-  await scheduleReminder('Drink water', new Date('2026-10-12T09:00:00Z'))
-  expect(calls.some((c) => c.path === 'notifications.schedule')).toBe(true)
-  // The copy under the reminder must not promise minute accuracy (A318).
-  expect(screen.queryByText(/exactly|on the minute/i)).toBeNull()
-})
+`app/src/features/notifications/localReminder.test.ts` — **3 passed**. The plan's sketch
+called a `scheduleReminder` helper that does not exist and asserted on a rendered screen
+that does not exist either (a reminder's copy is what the *notification* shows; there is
+no screen). The three cases assert the same properties through the real path, which is
+`useLocalNotifications` on a phone:
+
+1. the instant reaches the platform as a **`Date`** at the value the plan computed
+   (`2026-10-16T15:59:00.000Z`, one `LEAD_TASK_MIN` before the due time), and the
+   reminder is recorded under the server's own dedupe key;
+2. a schedule the platform **refused** is not recorded as shown, so the next mount tries
+   again — the direction of that failure is the whole of "best-effort";
+3. **no string promises exact delivery**, asserted over the shipped
+   `reminders.local.*` resources in *both* languages and over what was actually
+   scheduled in each (A318). `menit`/`minutes` is deliberately not a forbidden word: "in
+   60 minutes" is a lead time, not a claim about when the OS delivers.
+
+- [x] **Step 2: Run it and watch it fail**
+
+`npm --prefix app test -- localReminder` → the module does not exist, which is the state
+the plan predicts. **Each of the three cases was then shown to fail against a planted
+defect**, because "the file is new" is not evidence that a case detects anything:
+
+- case 1: `useLocalNotifications.ts`'s
+  `platform.notifications.schedule(reminder.title, reminder.body, reminder.at)` reverted
+  to pass `reminder.at.toISOString()` → `expected '2026-10-16T15:59:00.000Z' to be an
+  instance of Date`.
+- case 2: the `continue` that skips `markRemindersSeen` after a refusal removed (the
+  failure swallowed and the key recorded anyway) → `expected [ 'task_due:t1:2026-10-16'
+  ] to deeply equal []`.
+- case 3: `en.json`'s `reminders.local.taskBody` given `, exactly` → `expected '…' not
+  to match /exact|precisely|on the minute|…/i`.
+
+- [ ] **Step 3: The device verification** — **not done, and every property below names
+  its prerequisite.**
+
+Nothing here has been attempted on hardware, and nothing in this task is recorded as a
+pass. What each property needs:
+
+| Property (A319/A318) | Prerequisite that does not exist here |
+|---|---|
+| The refresh token survives a restart: written to the Keychain (iOS) / Keystore (Android) and read back after the process is killed | A physical iPhone with a **signing identity** and a provisioning profile (`apple-native-keyring-store`'s `protected` store requires one), or an Android device with the Keystore; no simulator runtime and no Android SDK is installed |
+| A scheduled local reminder fires while the app is closed | The same device, plus `POST_NOTIFICATIONS` granted and, on Android, `SCHEDULE_EXACT_ALARM` (user-grantable and revocable — the design assumes it is *not* granted, A318) |
+| The token is re-acquired after an Android Auto Backup restore (Keystore keys are not restorable) | An Android device and a restore cycle through a Google account |
+
+The code half is what this slice could reach: `secret_*` is consumed by
+`app/src/lib/tokens.ts` (the refresh token and device id, never the access token) through
+`platform.secureStore`, and `platform.notifications.schedule` is consumed by
+`useLocalNotifications`. Both are asserted in `app/**`'s suite; neither assertion is a
+device.
+
+**`docs/ARCHITECTURE.md`'s Phase 14 device rows are unchanged, deliberately.** There is
+no device result to record, and a "not verified" row would be a placeholder rather than a
+finding. `docs/RELEASE.md`'s Auto Backup caveat is a real gap and belongs to whoever owns
+that file in this phase's remaining work — this slice is fenced out of it.
+
+- [x] **Step 4: Commit**
+
+```
+git commit -- app/src/features/notifications/localReminder.test.ts \
+  docs/superpowers/plans/2026-10-11-phase-14-mobile.md
 ```
 
-- [ ] **Step 2: Run it and watch it fail** — **not run; `app/**` is fenced.**
-
-`npm --prefix app test -- localReminder` → the module does not exist.
-
-- [ ] **Step 3: Implement and verify** — **not done; needs `app/**` and a device.**
-
-Wire `platform.notifications.schedule` into the reminder UI; on a **device**, store a
-token, kill the app, and confirm the keychain read on relaunch and a scheduled
-notification firing while closed. Record pass/fail in `docs/ARCHITECTURE.md`. Add the
-Android Auto Backup caveat (a restored install loses Keystore keys → re-login) to
-`docs/RELEASE.md`.
-
-- [ ] **Step 4: Commit**
-
-```
-git commit -am "Phase 14 Task 7: secure storage + local notifications verified on device"
-```
+**Not `git commit -am`**, and not the message the plan wrote: "verified on device" is not
+true, and a commit message is the one place a claim like that outlives its author.
 
 ---
 
