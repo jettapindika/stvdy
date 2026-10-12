@@ -2262,27 +2262,193 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 
 | Gate | Command | Result |
 |---|---|---|
-| Format | `cargo fmt --all -- --check` | pending |
-| Lints | `cargo clippy --workspace --all-targets -- -D warnings` | pending |
-| Rust tests | `cargo test --workspace` | pending |
-| Plan matrix | `cargo test -p stvdy-core --test entitlements_matrix` | pending |
-| The sweep | `cargo test -p stvdy-server --test route_sweep` | pending |
-| The tamper suite | `cargo test -p stvdy-server --test tamper` | pending |
-| The concurrency proof | `cargo test -p stvdy-server --test credits concurrent_spends_never_double_spend` | pending |
-| The downgrade | `cargo test -p stvdy-server --test limits_periods a_downgrade_keeps_the_data` | pending |
-| Abuse controls | `cargo test -p stvdy-server --test abuse` | pending |
-| Offline queries | `cargo sqlx prepare --workspace --check` | pending |
-| Web tests | `npm --prefix app test` | pending |
-| Web build | `npm --prefix app run build` | pending |
-| No CDN | `node scripts/check-no-cdn.mjs` | pending |
-| Desktop + shell | `just check-shell` | pending |
-| Roadmap gate 3 (this phase's acceptance) | `bash scripts/smoke-phase7.sh` | pending |
-| Roadmap gate 5 (accessibility) | measured in Chromium at 390×844, both themes, 200% text | pending |
-| Roadmap gate 6 (Indonesian) | copy parity + the `Asia/Jakarta` month roll | pending |
-| Roadmap gate 7 (honesty) | clauses (a)–(f), each with the check named | pending |
-| Everything | `just check` | pending |
+| Format | `cargo fmt --all -- --check` | clean |
+| Lints | `cargo clippy --workspace --all-targets -- -D warnings` | clean (`-p stvdy-server` re-run clean after this slice's test edit) |
+| Rust tests | `cargo test --workspace` | **NOT RE-RUN by this slice** — see the Execution notes |
+| Plan matrix | `cargo test -p stvdy-core --test entitlements_matrix` | green in Task 1's slice |
+| The sweep | `cargo test -p stvdy-server --test route_sweep` | green in Task A2's slice |
+| The tamper suite | `cargo test -p stvdy-server --test tamper` | **14 passed; 0 failed** (12 cases + 2 this slice added) |
+| The concurrency proof | `cargo test -p stvdy-server --test credits concurrent_spends_never_double_spend` | green in Task B's slice; re-asserted end to end by the smoke run |
+| The downgrade | `cargo test -p stvdy-server --test limits_periods a_downgrade_keeps_the_data` | green in Task B's slice; re-asserted end to end by the smoke run |
+| Abuse controls | `cargo test -p stvdy-server --test abuse` | green in Task C's slice |
+| Offline queries | `cargo sqlx prepare --workspace --check` | unchanged ("no queries found") |
+| Web tests | `npm --prefix app test` | **307 passed / 307** (36 files), Task E's slice |
+| Web build | `npm --prefix app run build` | clean |
+| No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)` |
+| Desktop + shell | `just check-shell` | **NOT RE-RUN by this slice** — see the Execution notes |
+| Roadmap gate 3 (this phase's acceptance) | `bash scripts/smoke-phase7.sh` | **PASS**, 8 scenarios, exit 0 (see the Execution notes) |
+| Roadmap gate 5 (accessibility) | measured in Chromium at 390×844, both themes, 200% text | **NOT PERFORMED** — see the Execution notes |
+| Roadmap gate 6 (Indonesian) | copy parity + the `Asia/Jakarta` month roll | partially: the copy half is asserted by Task E's suite, the data half by `limits_periods.rs` and the smoke run; **not quoted from a browser** |
+| Roadmap gate 7 (honesty) | clauses (a)–(f), each with the check named | **NOT PERFORMED** as a fresh pass — see the Execution notes |
+| Everything | `just check` | not run |
 
 ---
+
+## Execution notes (Phase 7, as built)
+
+The phase's build notes are in the commit history; this section is the **gate pass**, and it
+is written honestly: three of the four gates were performed and one was not.
+
+### The four documents: DONE
+
+`docs/API.md` gains `## Entitlements and usage (Phase 7)` (the full `GET /usage` body, the
+53-row route classification table copied verbatim from `route_sweep.rs`'s table so the
+document and the test cannot disagree, and the five-row refusal table naming each code's
+status and which fields it populates), `## Admin (Phase 7)` with the three routes, the four
+new source kinds and `GET /sources/{id}/preview` in `## Sources`, and `## Account` re-tagged
+to Phase 15 (A160). `docs/ARCHITECTURE.md` gains `## Entitlements, credits and limits
+(Phase 7)`: the two layers, the one snapshot statement, why counters are derived (A147), the
+ceiling's enforcement point and its overshoot bound (A155/A161), the period key (A152), the
+sweep's two tests, and the ingestion formats with the `SOFFICE_BIN` policy (A158).
+`docs/THREAT_MODEL.md` §5 corrects the "Unlock a paid feature" row to **403**
+`plan_required` / `feature_locked` and adds the two new "fails" rows; §6 gives R5 its
+measured numbers (25 per IP per 24 h, 100 per non-public domain, the exact log line, the
+public-domain exemption list, the 48 h prune); §9's Phase 7 rows name
+`crates/server/tests/{route_sweep,tamper,abuse,credits}.rs` and their cases.
+`docs/ASSUMPTIONS.md` gains **A140–A163** (all 24 rows), four "Schema deviations" rows
+(`signup_attempts`, `credit_ledger.period_key` + the two `read_only` columns,
+`sources.preview_key`, `[credits] monthly_rollover`) and two local-environment notes
+(`GRACE_PERIOD_DAYS=3`, `SOFFICE_BIN` unset). `docs/RELEASE.md` gains the LibreOffice image
+requirement beside Chromium's, because `GET /sources/:id/preview` needs it.
+
+**The doc-driven tamper case was the guard working, exactly as the brief predicted.** Adding
+two "fails" rows made `every_section_5_fails_row_has_a_case` fail; two cases were added
+(`an_account_at_its_provider_cost_ceiling_is_refused`, which drives the real chat route
+against an account whose month already cost the plan's ceiling and asserts the ledger and
+`usage_events` are untouched, and `signing_up_past_the_per_ip_limit_is_refused`, which drives
+real signups from one address with a forged `x-forwarded-for`), the expected count moved
+11 → 13, and the guard was **falsified** by renaming a covered case: it failed with
+`signing_up_past_the_per_ip_limit_is_refused_TYPO is named for "Farm signups past the per-IP
+limit" but is not a case in this file`.
+
+`cargo test -p stvdy-server --test tamper` → **14 passed; 0 failed**.
+
+### Roadmap gate 3, the smoke run: PASS
+
+`scripts/smoke-phase7.sh`, eight scenarios, exit 0, against a real server on a scratch
+database (`stvdy_smoke7`) with `scripts/stub-llm.py`. The numbers it printed:
+
+| Scenario | Printed result |
+|---|---|
+| The plan matrix, quoted from `config/plans.toml` | free `workspaces=2 max_file_mb=20 chat_msgs_per_day=20 credits_per_month=60 ceiling_usd=0.5`; pro `500/2.0`; power `2000/6.0`; `monthly_rollover=False` |
+| 1. A fresh account | `credits={'monthly': 60, 'purchased': 0, 'total': 60}` `workspaces_limit=2` `chat/day=20` `export_formats=['md']` `costs.chat_message=1` `costs.report_outline=3` `costs.report_section=6` `provider_cost.paused=False` `resets_at=2026-10-31T17:00:00Z`; no `spent_usd`/`ceiling_usd` on the wire |
+| 2. An exhausted account | `status=422 code=limit_reached limit=20 used=20 min_plan=pro` |
+| 3. A concurrent-spend run | `balance before=5 after=0 \| successes=5 refusals=3 \| negative buckets=0`; the refusal `code=insufficient_credits min_plan=pro message="this action costs 1 credits and you have 0"` |
+| 4. A downgrade | `before: plan=pro workspaces=3 read_only=0` → `after: plan=free workspaces=3 read_only=1 (free allows 2)`; every row still readable |
+| 5. A refused upload | `uploaded 22020096 bytes, refused 422 limit_reached limit=20971520 used=22020096`; `sources in the workspace after the refusal: 1` |
+| 6. The ceiling pause | `status=422 code=limit_reached min_plan=pro limit=null used=null \| ledger 60 -> 60 \| usage rows 1 -> 1`; `GET /usage provider_cost.paused=True`; `no dollar figure on the paused view` |
+| 7. The §5 rows | `§5 carries 13 "Fails." row(s)`; unlock a paid feature `403 plan_required`; a forged token signed with the server's own secret → `/usage plan=free` (same as the real token); a non-admin grant `404 not_found`; a cross-tenant read `404` and the owner `200`; `no provider key in a body: 0 of the 34 collected response file(s)` |
+| 8. The signup limiter | domain rule `429 rate_limited`; the same address can still log in `401` (so the credential bucket is not what refused it); the same volume for `gmail.com` → `201` (exempt); per-IP `attempts recorded=25 (limit 25)` then `429 rate_limited` |
+
+**A defect in the gate's own tooling, found by running it.** The first run reported
+`the reset_counters job did not finish`, which reads like a broken worker and is not one: the
+`jobs` table is shared through `DATABASE_URL`, so **another `stvdy-server` already running on
+`:8099` from a binary built at 05:02** (before this phase's `reset_counters` handler existed)
+claimed this run's job and answered `unknown job kind reset_counters`. The script now
+diagnoses exactly that, naming the shared queue and the fix, instead of leaving a
+handler hunt. The run above is the one made against an isolated database, where the queue has
+one consumer.
+
+**Two more things the run taught, both now in the script's comments.** The credential routes
+sit behind `ratelimit::auth_layer` — an in-process bucket of **30 requests, then one refill
+per minute** per IP (A12) — and this run makes ~15 credential requests, so a *second* run in
+the same server process spends its time waiting for cells (measured: 12.7 s for the first run,
+2 m 41 s for the second, which then failed on the bucket). The header now says to run it
+against a freshly started server, and `auth_post` waits across the refill and explains itself
+rather than hanging. And the loopback address has no aliases on macOS (`ifconfig lo0` carries
+only `127.0.0.1`, and `curl --interface 127.0.0.2` fails with `Can't assign requested
+address`), so the per-IP rule is driven by seeding the count for this run's own address and
+discriminating the 429 from the credential bucket's by a login from the same address.
+
+### Roadmap gate 5, accessibility: **NOT PERFORMED**
+
+The brief is explicit that this gate is measured in a real browser and that "looks fine" is
+not a gate, and this pass did not measure it. What exists:
+
+- The surfaces are known and small: `PlanUsageScreen` has **two** focusable elements (the
+  `ApiErrorNotice` plan link, present only on a non-mobile platform and absent for
+  `feature_locked`, and `LockedFeature`'s upgrade link, present only where
+  `config/billing_policy.toml` allows a CTA); `CreditMeter` is one `Link` to `/billing` with
+  `min-h-11` (44px) and `focus:outline-2 focus:outline-offset-2 focus:outline-ring`. The
+  add-source form's radios sit in a 44px `<label>` with `has-[:focus-visible]:outline-ring`.
+- The token-level contrast gate is already green in `npm test`
+  (`app/src/tokens/contrast.test.ts`, every documented pair, both themes, `MIN.text = 4.5`),
+  and `app/src/tokens/invariants.test.ts` fails any focus utility that is not `outline-ring`.
+  `app/src/features/a11y.test.tsx` runs axe over the plan screen.
+
+  That is a *stylesheet* gate and an *axe* gate, not the measurement the brief asks for: it
+  does not prove a visible ring on a real `Tab` walk, a computed ratio on the rendered
+  screen in both `prefers-color-scheme` values, a 44px target at 390px, or zero clipping at
+  200% text. **The instrument was written and not run**: `/tmp/gate7-a11y.js` installs a
+  `window.__gate` with `contrast()` (composites each element's real backdrop and applies
+  WCAG 2.1), `walk()` (real `Tab` presses, one entry per stop, wrapping detected), `ring()`,
+  `targets()` and `overflow()`; a Chromium tab was opened on the built bundle at 390×844,
+  `prefers-color-scheme: dark`, and the seeded gate account exists in `stvdy_smoke7`
+  (`gate7@example.test`, 20 of 20 chats used, 12 purchased credits, a paused ceiling, two
+  workspaces) so the screen has something to render. The walk was not completed before this
+  slice stopped.
+
+  **What this degrades to:** the phase's UI is two new components and one form change, all of
+  whose styling is shared with Phase 6's surfaces (the same `Section`/`Link`/`LockedFeature`
+  and the same `:focus-visible` rule), and Phase 6's gate measured those at 390×844 in both
+  themes. That is an argument, not a measurement, and it is recorded as one.
+
+### Roadmap gate 6, Indonesian: partially performed
+
+- **Copy.** Task E's slice asserts it and this pass read the assertions rather than re-running
+  them: `app/src/api/errors.test.ts`'s `describe('the refusals in Indonesian')` renders each
+  refusal through the real `t` and asserts the Indonesian sentences verbatim —
+  `limit_reached` → `"Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan
+  kamu sudah memakai 2. Pro menaikkan batas ini."`, `plan_required` → `"Ekspor PDF tidak
+  termasuk dalam paketmu saat ini. Fitur ini ada di Pro."`, `insufficient_credits` →
+  `"Kredit tidak cukup"` / `"Saldo kreditmu kurang dari biaya ini."` — with
+  `expect(sentence).not.toContain('plan has reached')` as the check that no English word
+  survives. `PlanUsageScreen.test.tsx` asserts the screen's rows in Indonesian
+  (`'Paket dan pemakaian'`, `'2 dari 2'`, `'Sudah di batas'`). **Not driven from the
+  Indonesian UI in a browser**, which is what the brief asks for.
+- **Data.** `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`
+  is the exact property: clock pinned at `2026-10-31T18:00:00Z`, 30 flashcards seeded on both
+  a `Asia/Jakarta` and a `UTC` account, and the Jakarta account reads
+  `flashcards_this_month == 0` and is admitted while UTC reads `== 30` and is refused
+  `limit_reached`. `crates/server/tests/indonesian.rs::an_indonesian_question_is_answered_with_a_resolved_citation`
+  is the retrieval half, and **no `entitlements::` call exists anywhere on the retrieval or
+  citation path** (`chat/retrieve.rs`, `web.rs`, `prompt.rs`, `sse.rs`: zero hits; the only
+  two are pre-retrieval in `routes.rs`). The smoke run is the wired half: an Indonesian text
+  source reaches `ready`, its chunks are cited, and a chat turn costs the matrix's
+  `chat_message = 1`. **The month-roll was not re-driven against the live server** — it needs
+  a pinned clock, which is the test's instrument.
+
+### Roadmap gate 7, honesty: evidence gathered, not a fresh pass
+
+Every clause has an asserting test, and this pass read them rather than re-running the gate:
+(a) `admin.rs::the_margin_report_splits_free_from_paid_and_nulls_what_it_cannot_compute`
+asserts `revenue`/`conversion` are `null` on the wire, never `0`; (b)
+`PlanUsageScreen.test.tsx`'s "renders only the numbers the usage endpoint returned" asserts
+every digit run traces to the fixture (`expect(shown.filter((run) => !allowed.has(run)))
+.toEqual([])`); (c) the composer hint is `honesty.composerHint` = `"AI can make mistakes.
+Check the citations."` / `"AI bisa salah. Periksa kutipannya."`, pinned by
+`i18n.test.ts` and rendered under the composer — **not re-asserted by grepping the shipped
+bundle in this pass**, which is the check the brief names; (d)
+`crates/server/tests/entitlements.rs::the_usage_costs_are_the_costs_the_routes_charge` asserts
+`body["costs"] == credits::costs(&plans)` and `costs.chat_message == chat_message_cost()`, and
+the smoke run printed `costs.chat_message=1 costs.report_outline=3 costs.report_section=6`
+from the same file the server charges from; (e) no proposal surface is added by this phase —
+the plan says so and the surfaces were checked; (f)
+`PlanUsageScreen.test.tsx`'s mobile case asserts no `Rp` price and no upgrade link on `ios`,
+backed by `config/billing_policy.toml`'s `allow_purchase_ui = false` and the server's
+`feature_locked`.
+
+### The gates not re-run, and why
+
+`cargo test --workspace` and `just check-shell` were **not** run in this pass. `cargo fmt
+--all -- --check` is clean and `cargo clippy -p stvdy-server --all-targets -- -D warnings` is
+clean on the tree as committed, and `cargo test -p stvdy-server --test tamper` is 14/14 — but
+the workspace-wide suite is the main agent's single post-fan-in run, and claiming a green
+`cargo test --workspace` from a scoped run would be exactly the kind of assertion this phase's
+own gate exists to prevent.
+
+---
+
 
 ## Self-Review
 
