@@ -829,13 +829,52 @@ fn the_push_decision_rejects_what_the_allowlist_rejects() {
 
     // The other direction: the six offline-write entities are accepted, so the refusals
     // above are the allowlist and not a decision that refuses everything.
-    for entity in [
-        Entity::Task,
-        Entity::Event,
-        Entity::FlashcardReview,
-        Entity::QuizAttempt,
-        Entity::StudySession,
-        Entity::UserSettings,
+    //
+    // Each one gets a payload **its own** rules accept, because since Phase 9 `decide` runs
+    // the entity's validator: a task needs a title, an event needs its four `not null`
+    // columns, and a session needs a start, a duration and the device's `client_ts` (A204).
+    // One shared payload would now assert that the validators refuse everything, which is the
+    // opposite of what this case is for.
+    for (entity, payload) in [
+        (
+            Entity::Task,
+            serde_json::json!({ "title": "Read chapter 4" }),
+        ),
+        (
+            Entity::Event,
+            serde_json::json!({
+                "kind": "study_block",
+                "title": "Read chapter 4",
+                "starts_at": "2026-11-02T09:00:00Z",
+                "ends_at": "2026-11-02T10:00:00Z",
+            }),
+        ),
+        (
+            Entity::FlashcardReview,
+            serde_json::json!({ "rating": 4, "reviewed_at": "2026-11-02T09:00:00Z" }),
+        ),
+        (
+            Entity::QuizAttempt,
+            serde_json::json!({
+                "user_answer": "A",
+                "correct": true,
+                "answered_at": "2026-11-02T09:00:00Z",
+            }),
+        ),
+        (
+            Entity::StudySession,
+            // Relative to now, because the bound reads the mutation's own `client_ts` — the
+            // `upsert` helper writes `Utc::now()` — and a fixed date would be refused for
+            // starting more than 24 h in the future (A204).
+            serde_json::json!({
+                "started_at": (Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
+                "duration_min": 30,
+            }),
+        ),
+        (
+            Entity::UserSettings,
+            serde_json::json!({ "study_start_hour": 7 }),
+        ),
     ] {
         assert!(entity.is_client_writable(), "{entity:?}");
         stvdy_server::sync::push::decide(
@@ -843,9 +882,11 @@ fn the_push_decision_rejects_what_the_allowlist_rejects() {
             &facts,
             &snapshot,
             false,
-            &upsert(entity, serde_json::json!({ "title": "Read chapter 4" })),
+            &upsert(entity, payload),
         )
-        .expect("a pushable entity must be accepted");
+        .unwrap_or_else(|result| {
+            panic!("a pushable entity must be accepted: {entity:?} {result:?}")
+        });
     }
 }
 
