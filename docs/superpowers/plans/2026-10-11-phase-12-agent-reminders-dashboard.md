@@ -2590,16 +2590,24 @@ combinations, 168 targets, 496 text pairs. `dashboard` at all four: `7 targets, 
 below requirement, 0 clipped, 0 overlapped, page 1365/1365`. `workspace-chat-proposal` at all
 four: `35 targets, 82 text pairs, 0 below requirement, 0 overlapped, page 1365/1365`.
 
-**The desktop leg cannot be taken with `scripts/measure-mobile.mjs`, and that is a finding of its
-own.** Its `SURFACES` steps name the phone tab bar's labels, but the two layouts do not share
-them: the tab bar is `md:hidden` and reads `nav.work` ("Work"), while the desktop sidebar is
-`hidden md:flex` and reads `nav.workspaces` ("Workspaces"). At `VIEWPORT_WIDTH=1365` the walk dies
-on `FAIL: no nav a labelled "Work"` after the first surface — so the desktop leg of gate 5 has
-never actually run through the shared harness, for any phase. The numbers above were taken with a
-throwaway probe using the same arithmetic (44px targets, WCAG AA on effective colours, page
-overflow, clipped content, paint past the edge) and the desktop labels; the harness's fix — a
-per-breakpoint label, or a `nav` selector that is not the tab bar's — belongs to that file's
-owner.
+**The desktop leg could not be taken with `scripts/measure-mobile.mjs` at the time of this run, and
+that was a defect in the instrument rather than in the phase.** Its `SURFACES` steps name the phone
+tab bar's labels, but the two layouts do not share them: the tab bar is `md:hidden` and reads
+`nav.work` ("Work"), while the desktop sidebar is `hidden md:flex` and reads `nav.workspaces`
+("Workspaces"). At `VIEWPORT_WIDTH=1365` the walk died on `FAIL: no nav a labelled "Work"` after the
+first surface — so the desktop leg of gate 5 had **never actually run through the shared harness,
+for any phase**, which is the same class of thing as a gate that never ran at all.
+
+**That is now fixed, and the fix is not this phase's.** `bc7eed8` (the commit after
+`19f2fbb`, which added the two Phase 12 surfaces to the table) added a one-step label alias in
+`openSurface` — `Work → Workspaces`, `More → Settings` — and its owner verified the whole walk
+completes at 1365×900. The history is recorded in `docs/ASSUMPTIONS.md`'s A323, because a leg that
+silently never ran is worth more than the numbers it would have produced. The numbers below were
+taken **before** that fix, with a throwaway probe using the same arithmetic (44px targets, WCAG AA on
+effective colours, page overflow, clipped content, paint past the edge) and the desktop labels; they
+agree with the harness's own arithmetic (both report the same lowest phone contrast, 4.97:1), and
+they are the only desktop-width gate-5 evidence in the project until the fixed harness is run at that
+width for a phase that needs it.
 
 **Three findings at desktop width, none of them on this phase's screens, each named rather than
 silently fixed:**
@@ -2616,14 +2624,23 @@ silently fixed:**
    phase did not touch it.
 3. **Two `p.text-xs.text-muted` paragraphs overflow their box at 200% text** — the Sources
    panel's `workspaces.sourcePicker.emptyHint` (client 106px, scroll 144px) and the Studio
-   panel's deck-cost hint (client 107px, scroll 123px). Both sit inside
-   `div.min-h-0.flex-1.overflow-y-auto`, whose **computed `overflow-x` is `auto`**, so the text is
-   reachable by horizontal scroll rather than lost — which is the same class as the tab bar's
-   fifth item, and the shared harness excludes that class from its `pastEdge` check via
-   `inScroller` but not from its `clipped` check. So this is a **harness gap** as much as a
-   product smell: a check that fires on a sanctioned pattern is the check that gets deleted. Both
-   paragraphs are in the workspace panels (Phase 6's screens, house-wide), not on the dashboard or
-   the card.
+   panel's deck-cost hint (client 107px, scroll 123px). The cause was probed rather than reasoned
+   about, and it is **a real product defect, not a harness artifact**: the paragraph sits inside
+   `div.min-h-0.flex-1.overflow-y-auto` whose `overflow-x` *computes to* `auto` (CSS Overflow 3:
+   one axis non-`visible` makes the other compute to `auto`), inside a grid track declared
+   **`minmax(200px, 1fr)`** — a **px** floor that does not grow with the text, so at 200% the column
+   is too narrow for its content and the panel scrolls sideways. Both paragraphs are in the
+   workspace panels (Phase 6's screens, house-wide), not on the dashboard or the card.
+
+   **An earlier draft of this note proposed exempting this class from the harness's `clipped`
+   check, by extending its `inScroller` exclusion. That proposal was measured and is wrong**, and
+   the counter-example is worth keeping: the same exclusion would have exempted `SourcePicker`'s
+   rows — inside `div.max-h-32.overflow-y-auto`, whose `overflow-x` also computes to `auto` — which
+   were clipping a source's title for real (`scrollHeight` 147 vs `clientHeight` 135 at 200% text).
+   The distinction that survives is between a **container** that scrolls, which is the fix working
+   and which the check already exempts, and a **descendant** whose own content overflows, which is
+   still a layout that needs sideways scrolling at all. The change belongs with the guard's own
+   author rather than with this slice, and the counter-example is written into the plan for them.
 
 ### Roadmap gate 6 — Indonesian end to end
 
