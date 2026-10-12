@@ -439,9 +439,17 @@ jobs:
         # A352: the direct APK is signed by the operator's key, and it is **not** Play's key —
         # Play App Signing holds its own and re-signs the Play build. Confusing the two is how
         # an upgrade fails to install, which is why docs/RELEASE.md records which key signs
-        # which artifact. `keystore.properties` is the hook the generated Android project
-        # reads (https://v2.tauri.app/distribute/sign/android/); it is written here from
-        # secrets, never committed, and gone with the runner.
+        # which artifact.
+        #
+        # `keystore.properties` is **not** read by the generated project on its own. Tauri's
+        # signing page has the operator add a `signingConfigs` block to
+        # `gen/android/app/build.gradle.kts` and point the release build type at it; the file's
+        # only mention in `@tauri-apps/cli` 2.12.2's own template is a `.gitignore` entry. So
+        # this step writes the properties file and the **committed project** is where the
+        # Gradle block has to be — which is why this job refuses to run when
+        # `src-tauri/gen/android` is absent rather than generating one.
+        # `.github/workflows/unsigned-artifacts.yml` is the path that generates the project,
+        # and it appends the block for exactly this reason.
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

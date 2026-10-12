@@ -404,11 +404,16 @@ bash scripts/check-mobile-no-purchase.sh
 `check-shell` depends on `check-web` on purpose: `generate_context!()` panics at compile time when
 `app/dist` is missing, and `dist/` is gitignored.
 
-### 2. Bump the version, in the two places that must agree
+### 2. Bump the version, in every place that must agree
 
-`Cargo.toml`'s `[workspace.package] version` and `src-tauri/tauri.conf.json`'s `version` (A353 —
-see § Versioning for which of the two a hotfix may ship alone). `crates/server/tests/release.rs`
-asserts the two are equal, so a bump that misses one fails the suite rather than the release.
+`Cargo.toml`'s `[workspace.package] version`, `src-tauri/Cargo.toml`,
+`src-tauri/tauri.conf.json`, both blocks of `src-tauri/gen/apple/project.yml.template` and the
+generated `project.yml` beside it, and the two lock files — the table in § Versioning is the
+list, with the test or the workflow step that binds each one. A bump that misses
+`tauri.conf.json` or the shell's manifest fails
+`crates/server/tests/release.rs::the_version_is_the_workspace_version`; one that misses the iOS
+template fails `src-tauri/tests/share_group.rs::the_extension_version_matches_the_apps` on CI,
+which is how v0.1.1's was caught after the tag.
 
 ### 3. Tag, and push the tag
 
@@ -472,6 +477,49 @@ document does not restate it.
 | Windows Authenticode certificate | the NSIS installer, unsigned | SmartScreen warns on every install. The warning is per-publisher reputation, so it does not decay |
 | a real minisign keypair | everything, with a placeholder `pubkey` | Every signature fails to verify — a safe-but-useless updater. The plugin requires `plugins.updater` to exist, so the honest alternative is no updater at all |
 | a production host | every artifact | Nothing can be *deployed*. A45 forbids the trial VPS, and putting the manifest endpoint or the QRIS webhook behind it is the specific mistake that row names |
+
+### The unsigned path, for a build that exists before the certificates do
+
+`.github/workflows/unsigned-artifacts.yml` is `workflow_dispatch`-only and produces the three
+installers **without** any certificate: a macOS universal `.dmg`, a Windows NSIS `.exe` and the
+direct-channel `.apk`. It exists because `release.yml` refuses to publish an unsigned macOS build
+on purpose (A333), and that refusal is a property of the signed channel rather than an
+inconvenience in it — so the two are separate files, and this one says on every artifact what is
+missing.
+
+```bash
+gh workflow run unsigned-artifacts.yml -f version=0.1.2 \
+  -f visibility=prerelease -f apk_signing=operator-keystore
+```
+
+Three properties it holds, each for a reason:
+
+- **It cannot reach the updater channel.** Every build overrides
+  `bundle.createUpdaterArtifacts` to `false`, so no `latest.json` is produced or published and no
+  installed app can be offered a build from here. The override is also load-bearing: at its
+  committed value the CLI refuses to build at all without `TAURI_SIGNING_PRIVATE_KEY`.
+- **The version is checked before anything is built**, against `Cargo.toml`,
+  `tauri.conf.json` and `src-tauri/gen/apple/project.yml.template` — the four places a bump has
+  to reach (see § Versioning).
+- **The APK is signed by a named key.** `apk_signing=operator-keystore` needs the four
+  `ANDROID_*` secrets and produces the direct-channel APK; `apk_signing=debug` needs no key
+  material and produces a debug-signed APK that installs but **cannot** be updated in place by a
+  later release build. The Release notes say which of the two a given file is.
+
+It also **generates** the Android project (`tauri android init --ci`), because
+`src-tauri/gen/android` is not committed in this tree — Phase 14's Android half was blocked
+without an SDK. Two consequences worth knowing before Phase 14 lands:
+
+- the generated project has **no signing configuration**, so this workflow appends one before
+  building; a committed project must carry its own, or `release.yml`'s Android job will build an
+  unsigned release APK and Gradle will refuse it;
+- the NDK is selected through `NDK_HOME`, which is what `cargo-mobile2` reads
+  (`src/android/ndk.rs::Env::new`) — it is not discovered from Gradle, and the generated project
+  sets no `ndkVersion`.
+
+**A build from this workflow is not a release.** It is not notarized, it is not signed on
+Windows, and it is published as a pre-release or a draft; the store and direct-download
+distribution paths remain the ones above.
 
 ## Server deployment
 
@@ -620,7 +668,25 @@ single user sees it. The service is not launched publicly until rows 8 and 9 are
 ## Versioning
 
 `CARGO_PKG_VERSION` for the server and shell, the same value in
-`tauri.conf.json`. Mobile build numbers are bumped per store submission.
+`tauri.conf.json`. Mobile build numbers are bumped per submission.
+
+**A bump touches more than those three, and the ones it misses are the ones nothing used to
+check.** As of v0.1.2 the places are:
+
+| Place | Bound by |
+|---|---|
+| `Cargo.toml` `[workspace.package] version` | `scripts/verify-release-artifacts.sh --version`, and the release workflow's `version` job |
+| `src-tauri/tauri.conf.json` `version` | `crates/server/tests/release.rs::the_version_is_the_workspace_version` |
+| `src-tauri/Cargo.toml` `version` | the same test |
+| `src-tauri/gen/apple/project.yml.template`, both blocks | `src-tauri/tests/share_group.rs::the_extension_version_matches_the_apps` |
+| `src-tauri/gen/apple/project.yml`, both blocks | nothing — it is XcodeGen's committed output, so it is byte-compared to the template by hand |
+| the two committed lock files (`Cargo.lock`, `src-tauri/Cargo.lock`) | `cargo metadata` rewrites them; the local packages' versions live there. `src-tauri/plugins/mobile/Cargo.lock` carries none, so it does not move |
+| `README.md`'s `/health` line, `docs/API.md`'s Phase 0 section | nothing — a documented response body that disagrees with the response is a false example |
+
+The iOS blocks' **`CFBundleVersion`** is deliberately not in that list: it is `"0.1.0"` and
+`"1"`, it was already stale at v0.1.1, and `a96a31d` recorded why moving it would be a guess —
+which of the two the CLI's `bundle.iOS.bundleVersion` merge reaches is a question two built
+artifacts did not settle.
 
 **The server and the shell are versioned independently, and the tag names which one ships**
 (A353). They are separate binaries with separate release cadences, and clients are not
