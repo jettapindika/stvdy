@@ -2252,8 +2252,10 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
       Phase 13's checkout inherits `billing::checkout_allowed`.
 - [ ] Admin can switch a plan and grant credits, and the margin scaffold splits free from
       paid while returning `null` for what it cannot compute.
-- [ ] Roadmap gate 5 (accessibility) performed and recorded.
-- [ ] Roadmap gate 6 (Indonesian) performed and recorded, both copy and data.
+- [x] Roadmap gate 5 (accessibility) performed and recorded, and the one defect it found
+      fixed with a regression test (the upgrade link's 93×19 phone target, below).
+- [x] Roadmap gate 6 (Indonesian) performed and recorded, both copy and data, with all
+      three refusals driven from the Indonesian UI (below).
 - [ ] Roadmap gate 7 (honesty) performed and recorded, all six clauses.
 - [ ] `docs/{API,ARCHITECTURE,THREAT_MODEL,ASSUMPTIONS}.md` updated in the same phase.
 - [ ] The full quality gate is green.
@@ -2272,13 +2274,13 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 | The downgrade | `cargo test -p stvdy-server --test limits_periods a_downgrade_keeps_the_data` | green in Task B's slice; re-asserted end to end by the smoke run |
 | Abuse controls | `cargo test -p stvdy-server --test abuse` | green in Task C's slice |
 | Offline queries | `cargo sqlx prepare --workspace --check` | unchanged ("no queries found") |
-| Web tests | `npm --prefix app test` | **307 passed / 307** (36 files), re-run in this pass |
+| Web tests | `npm --prefix app test` | **311 passed / 311** (36 files), re-run in the fix pass (+4 for the three regression tests and the target-size one) |
 | Web build | `npm --prefix app run build` | clean, re-run in this pass (and the shipped bundle is what gate 7(c) grepped) |
 | No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)`, re-run in this pass |
 | Desktop + shell | `just check-shell` | **green** (fmt, clippy, the shell's tests) |
 | Roadmap gate 3 (this phase's acceptance) | `bash scripts/smoke-phase7.sh` | **PASS**, 8 scenarios, exit 0 (see the Execution notes) |
-| Roadmap gate 5 (accessibility) | measured in Chromium, 390×844 + 1280×900, both themes, 200% text | **PASS**, one defect found and **not fixed** (`LockedFeature`'s upgrade link is 93×19 at phone width) — 79 + 46 contrast pairs, 0 below requirement, lowest 5.28:1; 8 stops at desktop, 6 at phone, all `solid 2px` at 2px offset; `scrollWidth == clientWidth == 390` at 200%. See the Execution notes |
-| Roadmap gate 6 (Indonesian) | copy driven from the Indonesian UI in the browser + the `Asia/Jakarta` month roll | **PASS** for `limit_reached`, quoted from the DOM ("Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan kamu sudah memakai 2. Pro menaikkan batas ini."); **`plan_required`/`insufficient_credits` not captured in the browser** (a hand-seeded report row crashed the report screen), so they remain unit-level assertions; the data half is `limits_periods.rs` + `indonesian.rs` + the smoke run. See the Execution notes |
+| Roadmap gate 5 (accessibility) | measured in Chromium, 390×844 + 1280×900, both themes, 200% text; re-measured after the fix | **PASS**. The one defect the first pass found — `LockedFeature`'s upgrade link at **93×19** at phone width — is **fixed and re-measured: 70×19 → 70×44** at 390px (and 70×44 at 1280px), `min-height: 44px`, and the gate's own `targets()` on the report screen at 390px now returns **0 targets under 44px** (the tab bar's five items are 78×44). The rest of the first pass stands: 79 + 46 contrast pairs, 0 below requirement, lowest 5.28:1; 8 stops at desktop, 6 at phone, all `solid 2px` at 2px offset; `scrollWidth == clientWidth == 390` at 200%. The regression test asserts the class contract (`min-h-11` + `inline-flex items-center`), because jsdom has no layout engine to measure. See the Execution notes |
+| Roadmap gate 6 (Indonesian) | all three refusals driven from the Indonesian UI in the browser (`navigator.languages` = `id-ID` before boot) + the `Asia/Jakarta` month roll | **PASS** for all three, each sentence quoted from the rendered DOM: `limit_reached` — "**Batas paket tercapai**" / "**Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan kamu sudah memakai 2. Pro menaikkan batas ini.**"; `plan_required` — "**Tidak ada di paketmu**" / "**Ekspor ini tidak termasuk dalam paketmu saat ini. Fitur ini ada di Pro.**"; `insufficient_credits` — "**Kredit tidak cukup**" / "**Saldo kreditmu kurang dari biaya ini.**". The screen the gate could not reach is reachable because the crash it hit was a **real defect** (the stored `outline` is passed through, and both readers of `outline.sections` threw) — fixed with tests. The data half is `limits_periods.rs` + `indonesian.rs` + the smoke run. See the Execution notes |
 | Roadmap gate 7 (honesty) | clauses (a)–(f), each with the check named | **PASS** — (c) re-asserted by grepping the shipped bundle (1 match each, English and Indonesian); (a), (d) and (f) measured; (b) and (e) inherited evidence. See the Execution notes |
 | Everything | `just check` | not run |
 
@@ -2287,7 +2289,10 @@ git commit -m "docs(phase 7): the entitlement contract, the threat model's new r
 ## Execution notes (Phase 7, as built)
 
 The phase's build notes are in the commit history; this section is the **gate pass**, and it
-is written honestly: three of the four gates were performed and one was not.
+is written honestly: three of the four gates were performed and one was not. A later fix pass
+then closed the two defects the gate pass measured — the upgrade link's 44px target and the
+outline shape that crashed two screens — and drove the two refusals the Indonesian gate could
+not reach; what that pass did and did not run is recorded under "The gates not re-run".
 
 ### The four documents: DONE
 
@@ -2360,7 +2365,7 @@ only `127.0.0.1`, and `curl --interface 127.0.0.2` fails with `Can't assign requ
 address`), so the per-IP rule is driven by seeding the count for this run's own address and
 discriminating the 429 from the credential bucket's by a login from the same address.
 
-### Roadmap gate 5, accessibility: PASS on the two new components, one defect found
+### Roadmap gate 5, accessibility: PASS on the two new components, one defect found and fixed
 
 Measured in a real Chromium (driven over CDP) on the built bundle against the real API on
 `:8097`, on the three surfaces this phase changed: `PlanUsageScreen` and `CreditMeter` at
@@ -2397,13 +2402,15 @@ three credit buckets (`60 / 12 / 72`).
   `--text-muted` over `--bg` and are above 7:1; the meter's balance is `--text-muted` over the
   rail at the same pair. The lowest anywhere measured is **5.28:1**, against a 4.5:1
   requirement.
-- **(c) 44px targets at phone width — one failure, reported not softened.** At 390px the tab
-  bar's five items are 44px tall. **`LockedFeature`'s upgrade link measures 93x19** at both
-  390px and 1280px — a real interactive target under 44px on this phase's surface (and on
-  Phase 6's report and cheatsheet screens, which share the component; Phase 6's gate listed
-  buttons and nav items but not this link, so it was missed there too). At 1280px the sidebar
-  items are **215x40**, also under 44, but the clause is about phone width, where the tab bar
-  carries navigation at 44px. The add-source form's radios measure **13x13 inside
+- **(c) 44px targets at phone width — one failure, since fixed and re-measured.** At 390px
+  the tab bar's five items are 44px tall. **`LockedFeature`'s upgrade link measured 93x19** at
+  both 390px and 1280px — a real interactive target under 44px on this phase's surface (and
+  on Phase 6's report and cheatsheet screens, which share the component; Phase 6's gate listed
+  buttons and nav items but not this link, so it was missed there too). It now measures
+  **70x44** at 390px and at 1280px, and the gate's `targets()` on the report screen returns
+  **0 under 44px**; see "The one defect gate 5 found" below. At 1280px the sidebar items are
+  **215x40**, also under 44, but the clause is about phone width, where the tab bar carries
+  navigation at 44px. The add-source form's radios measure **13x13 inside
   79x58 / 114x58 / 97x44 / 97x44 / 201x44 labels** — the label is what is clicked and what
   the finger hits, which is the wrapped-control case and not a failure; the two source-list
   checkboxes are the same shape.
@@ -2423,21 +2430,43 @@ three credit buckets (`60 / 12 / 72`).
   costs `<dl>`s report a content width of **327 against a 310 box**, absorbed by the
   surrounding padding with nothing clipped and no page overflow.
 
-#### The one defect gate 5 found
+#### The one defect gate 5 found — fixed, with the measurement it asked for
 
-**`LockedFeature`'s upgrade link is 93x19 at phone width**, against the 44px target the gate
-requires. It is a plain `Link` with `link mt-1 self-start text-small` and no height utility,
+**`LockedFeature`'s upgrade link was 93x19 at phone width**, against the 44px target the gate
+requires. It was a plain `Link` with `link mt-1 self-start text-small` and no height utility,
 where every other control on the surface has one (`min-h-11` on the meter, on the
 `ApiErrorNotice` plan link, and on the upload radios' labels). It sits on this phase's plan
 screen and on Phase 6's report and cheatsheet screens, and it is the control a user who has
 just been told a feature is locked is meant to reach.
 
-**Not fixed in this slice, and deliberately not fixed quietly.** The brief for this slice
-says `app/**` is settled and green and that a defect found there must be **reported, not
-fixed**, so a fix slice can be dispatched with the right ownership. The fix is one class
-(`min-h-11` + `inline-flex items-center`, the shape `States.tsx:196` already uses) plus a
-regression test asserting the link's rendered height at 390px, which is exactly the shape
-Phase 6's four fixes took.
+**The fix is the shape `States.tsx:196` already uses**: `min-h-11 inline-flex items-center`,
+keeping `self-start` so the box stays as wide as its label. Measured in the same Chromium
+session with the same instrument, on the built bundle against the real API, on the report
+screen with a free account (where the link renders):
+
+| | 390px | 1280px |
+|---|---|---|
+| before | **70x19**, `display: block`, `min-height: auto` | 70x19 |
+| after | **70x44**, `display: flex`, `min-height: 44px`, `align-items: center` | **70x44** |
+
+The gate's own instrument (`/tmp/gate7-a11y.js`) re-run on the report screen at 390px now
+returns **0 targets under 44px** — the tab bar's five items are 78x44 — with
+`scrollWidth == clientWidth == 390`, 0 elements clipped, and the only element whose
+`scrollWidth` exceeds its `clientWidth` being the `sr-only` skip link, which is inherent to
+that technique. The link's own box is unchanged in width because the label is Indonesian
+("Naik ke Pro"); the gate measured the English "Upgrade to Power" at 93px.
+
+**The regression test pins the class contract, and the reason is the harness.** jsdom has no
+layout engine, so `getBoundingClientRect()` in `app/src/test/` is zeros and a rendered height
+cannot be asserted from `npm --prefix app test`; there is also **no in-tree check that
+measures targets** to extend — the gate's instrument is a scratch file outside the repo. So
+`LockedFeature.test.tsx` asserts the three utilities that decide the height (`min-h-11` is
+2.75rem = 44px at the root size, `inline-flex items-center` is what makes the box that tall
+rather than the line box of an inline element), the shape `Shell.test.tsx`'s tab-bar case and
+`ReportScreen.test.tsx`'s row case already take, and the number itself is the measurement
+above. Removing any of the three classes puts the link back under the target: with the old
+`className` the test fails with
+`expected 'link mt-1 self-start text-small' to contain 'min-h-11'`.
 
 ### Roadmap gate 6, Indonesian end to end: PASS
 
@@ -2456,18 +2485,42 @@ Phase 6's four fixes took.
     "**Batas paket tercapai**" /
     "**Paket Pro sudah mencapai batasnya untuk ruang belajar. Batasnya 2 dan kamu sudah
     memakai 2. Pro menaikkan batas ini.**" / "**Lihat paket**".
-  - **`plan_required` and `insufficient_credits` — NOT captured from the browser.** The
-    report screen crashed with `Cannot read properties of undefined (reading 'length')` on the
-    row this gate seeded by hand into `reports` (a `status = 'ready'` row with a
-    `sections_md`/`outline` shape the API's own derivation may not accept), so the PDF export
-    button was never reachable, and the chat refusal was not driven. **This is stated as not
-    performed rather than upgraded**: whether that crash is my fixture or a real defect in the
-    screen's derivation could not be established without more work, so it is recorded as an
-    open question for whoever owns `app/**`, and it is **not** claimed as a defect.
-    The two sentences those codes produce are asserted through the real `t` in
-    `app/src/api/errors.test.ts` — `plan_required` → "**Ekspor PDF tidak termasuk dalam
-    paketmu saat ini. Fitur ini ada di Pro.**" and `insufficient_credits` → "**Kredit tidak
-    cukup**" / "**Saldo kreditmu kurang dari biaya ini.**" — which is one layer below the DOM.
+  - **`plan_required`** — a PDF export from a report screen, on the same account shape as
+    above: `users.plan_id = 'pro'` with no subscription row, so the client believed the
+    account was Pro and offered **"Unduh PDF"**, while the server refused the format. The
+    screen was reached by clicking through the UI (workspaces → the workspace → Studio →
+    Laporan → "Buka laporan"), not by a deep link. The notice the user reads:
+    "**Tidak ada di paketmu**" /
+    "**Ekspor ini tidak termasuk dalam paketmu saat ini. Fitur ini ada di Pro.**" /
+    "**Lihat paket**".
+  - **`insufficient_credits`** — a chat turn on a free account whose balance was spent to
+    zero (`credit_ledger` sums to 0; `GET /usage` reads `{"monthly": 0, "purchased": 0,
+    "total": 0}`), driven from the workspace's **Chat** panel. The notice the user reads:
+    "**Kredit tidak cukup**" / "**Saldo kreditmu kurang dari biaya ini.**" / "**Tanya
+    lagi**".
+
+  **The crash that stopped this gate is a real defect, and it is fixed.** The gate seeded a
+  report row by hand and could not tell whether the crash was its fixture or the screen. It
+  was the screen. Measured against the real API on `:8097`, `GET /reports/:id` **passes the
+  stored `outline` through verbatim** — `ReportJson.outline` is the raw `jsonb` column — and
+  derives the top-level `sections` from the stored outline's headings, answering `[]` when
+  there are none. A row whose outline is `{"title":"Laporan Uji"}` came back as exactly that
+  with `sections: []`; `{}`, `{"sections": null}` and `{"sections": {...}}` all come back the
+  same way, and `outline: null` is the one shape the screen already handled. Two readers of
+  `outline.sections` threw `Cannot read properties of undefined (reading 'length')` on such a
+  row: the report screen (`data.outline.sections.length`) and the **Studio's report row**
+  (`report.outline?.sections.length ?? 0`). The Studio's was the one the gate actually hit —
+  in the browser it replaced the whole panel with React Router's error boundary ("Unexpected
+  Application Error!"), which is why the PDF export was unreachable. Both now go through one
+  shared `readableOutline` in `app/src/api/queries/reports.ts`, which fills a missing
+  `sections` (and a section's missing `labels`) as empty; the report screen then says so in
+  the UI — "**Kerangka laporan ini tidak bisa dibaca**" / "**Kerangka yang tersimpan tidak
+  punya daftar bagian, jadi tidak ada yang bisa disunting atau dibuat di sini. Usulkan
+  kerangka lagi dari Studio.**" — rather than rendering an empty document as though the model
+  had produced nothing, and the Studio row renders with its title, status and link and no
+  section count. Three regression tests cover it (`ReportScreen.test.tsx` ×2,
+  `ReportPanel.test.tsx` ×1), each **confirmed to fail without the guard** with the identical
+  `TypeError`.
 
 - **Data.** `crates/server/tests/limits_periods.rs::the_monthly_counter_rolls_at_the_users_own_midnight`
   is the exact property, and it is the strongest evidence in this gate: the clock is pinned at
@@ -2530,9 +2583,17 @@ result is the main agent's to report. `cargo fmt --all -- --check` is clean,
 `cargo clippy -p stvdy-server --all-targets -- -D warnings` is clean, and
 `cargo test -p stvdy-server --test tamper` is **14 passed / 0 failed**, all on the committed
 tree. `just check-shell` was run and is **green** (fmt, clippy and the shell's tests).
-`npm --prefix app test` is **307 passed / 307** (36 files), `npm --prefix app run build` is
-clean, and `node scripts/check-no-cdn.mjs` reports **no third-party loads in 3 shipped
-file(s)**.
+
+**The fix pass (the upgrade link and the outline guard).** `npm --prefix app test` is
+**311 passed / 311** (36 files), `npm --prefix app run build` is clean, and
+`node scripts/check-no-cdn.mjs` reports **no third-party loads in 3 shipped file(s)**. The
+three Rust commands were run on the whole tree at the end of that pass: `cargo fmt --all --
+--check` and `cargo clippy --workspace --all-targets -- -D warnings` **both fail, and neither
+failure is in a file this slice touched** — they are in the uncommitted Phase 8 work another
+slice is mid-flight on (`crates/server/src/sync/pull.rs`'s two needless `Ok(..?)`,
+`crates/server/src/sync/push.rs`/`apply.rs`'s formatting). `crates/**` is outside this slice's
+ownership by the brief, so nothing there was edited; the app changes are green on their own
+(`npm --prefix app test`, the build, and no-CDN, all above).
 
 ---
 
