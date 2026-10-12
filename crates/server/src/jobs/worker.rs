@@ -105,6 +105,19 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // One connection, one pass (A238). The payload names the connection rather than the
         // account, because two Google accounts for one student are two rows.
         "sync_calendar" => crate::jobs::handlers::calendar::run(state, job).await,
+        // The planner's one model call (A253). Enqueued by `POST /goals/:id/plan` and
+        // `POST /plan/replan`, never scheduled: a plan is something the student asks for.
+        "plan_goal" => crate::jobs::handlers::plan::run(state, job).await,
+        // The two payment passes (A301). Both are singletons with a `dedupe_key`, so a
+        // restart or a second instance cannot double-run them, and both call the *same*
+        // `billing::apply::apply_paid` the webhook does — one code path, so a payment
+        // recovered by polling and one recovered by a webhook cannot differ.
+        "poll_payment" => crate::jobs::handlers::poll_payment::run(state, job).await,
+        "reconcile_payments" => crate::jobs::handlers::reconcile_payments::run(state, job).await,
+        // One boundary of a renewal's 7/3/1/0-day notice (A300). Not a singleton: there are
+        // four boundaries per period per account, and the `dedupe_key` — which names the
+        // account, the period end and the boundary — is what makes each of them once-only.
+        "renewal_reminder" => crate::jobs::handlers::renewal::run(state, job).await,
         // Permanent: no retry will invent a handler for a kind this binary does
         // not know, which is what an old row from a newer version looks like.
         other => Err(jobs::Failure::permanent(format!(

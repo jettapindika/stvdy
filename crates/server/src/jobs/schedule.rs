@@ -39,28 +39,86 @@ pub const SCHEDULE_BATCH: i64 = 500;
 /// grant that follows is the new period's allowance.
 const BOUNDARY_KINDS: [&str; 2] = ["reset_counters", "monthly_grant"];
 
+/// How often the payment passes are enqueued (A301).
+///
+/// Five minutes is the resolution of a lost webhook: the checkout screen polls the server,
+/// the server polls the gateway, and a student who paid should see their plan inside a
+/// coffee break rather than at the next quarter hour. It is deliberately its own ticker
+/// rather than the boundary pass's 900 seconds — a per-account boundary job is a monthly
+/// event and does not want to run three times as often, and a payment is a minute-scale
+/// event that must not wait fifteen.
+pub const PAYMENT_TICK: Duration = Duration::from_secs(300);
+
 /// Spawns the scheduler. The `JoinHandle` is returned so `main` can keep it alive and a
 /// test can abort it.
 pub fn spawn(state: AppState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(
             interval_secs = SCHEDULE_INTERVAL.as_secs(),
+            payment_secs = PAYMENT_TICK.as_secs(),
             "job scheduler started"
         );
-        let mut ticker = tokio::time::interval(SCHEDULE_INTERVAL);
+        let mut boundary = tokio::time::interval(SCHEDULE_INTERVAL);
+        let mut payments = tokio::time::interval(PAYMENT_TICK);
         loop {
-            // The first tick completes immediately, which is deliberate: a process that
-            // starts mid-month still schedules the accounts whose boundary it missed.
-            ticker.tick().await;
-            match pass(&state).await {
-                Ok(0) => {}
-                Ok(scheduled) => tracing::info!(scheduled, "scheduled period jobs"),
-                // A pass that fails is retried by the next tick; nothing is lost, because
-                // the pass is idempotent and reads the same accounts again.
-                Err(error) => tracing::warn!(%error, "the scheduler pass failed"),
+            // Both ticks complete immediately on the first pass, which is deliberate: a
+            // process that starts mid-month still schedules the accounts whose boundary it
+            // missed, and one that starts mid-outage starts asking the gateway at once.
+            tokio::select! {
+                _ = boundary.tick() => match pass(&state).await {
+                    Ok(0) => {}
+                    Ok(scheduled) => tracing::info!(scheduled, "scheduled period jobs"),
+                    // A pass that fails is retried by the next tick; nothing is lost, because
+                    // the pass is idempotent and reads the same accounts again.
+                    Err(error) => tracing::warn!(%error, "the scheduler pass failed"),
+                },
+                _ = payments.tick() => match payment_pass(&state).await {
+                    Ok(enqueued) => tracing::debug!(enqueued, "enqueued the payment passes"),
+                    Err(error) => tracing::warn!(%error, "enqueuing the payment passes failed"),
+                },
             }
         }
     })
+}
+
+/// One payment pass: enqueue the poller and the sweep, idempotent by their windows.
+///
+/// Public because it is the unit the tests drive — waiting five minutes for a tick would
+/// be a timing test. Both kinds are **singletons**: `dedupe_key = "poll_payment"` and
+/// `"reconcile_payments"` with no window, because there is one of each per deployment and
+/// a second enqueue must be a no-op rather than a second scan of the same table. The
+/// cadence comes from this ticker, not from the key.
+pub async fn payment_pass(state: &AppState) -> AppResult<u64> {
+    // Nothing to poll when no gateway is configured: a deployment with no gateway has no
+    // payments to reconcile, and enqueuing a job that would answer `provider_error` every
+    // five minutes is noise in the failure log rather than a signal.
+    if state.config.qris.is_none() {
+        return Ok(0);
+    }
+
+    jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        "poll_payment",
+        serde_json::json!({}),
+        Some("poll_payment"),
+    )
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing poll_payment: {error}")))?;
+
+    jobs::enqueue(
+        &state.pool,
+        &state.jobs,
+        "reconcile_payments",
+        serde_json::json!({}),
+        Some("reconcile_payments"),
+    )
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("enqueuing reconcile_payments: {error}"))
+    })?;
+
+    Ok(2)
 }
 
 /// One pass: enqueue the next boundary jobs for the accounts that do not have them.
@@ -99,6 +157,12 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
 
     // And the calendar poll, which is per *connection* rather than per account (A238).
     calendar_pass(state).await?;
+
+    // And the renewal reminders, which are per *subscription* rather than per account
+    // (A300): four boundaries at 7/3/1/0 days before the period end, each keyed by the
+    // period it belongs to. Deliberately here rather than in the payment pass — a renewal
+    // is a monthly event, and the account it belongs to may have no gateway traffic at all.
+    crate::jobs::handlers::renewal::renewal_pass(state).await?;
 
     Ok(scheduled)
 }
