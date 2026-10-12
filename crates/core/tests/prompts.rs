@@ -42,6 +42,15 @@ const REPORT_OUTLINE_FILE: &str = include_str!("../../../prompts/report_outline.
 /// worth checking against the struct that parses it.
 const CHEATSHEET_FILE: &str = include_str!("../../../prompts/cheatsheet.v1.md");
 
+/// The quick-capture module file, for the documented-schema check. Its example is the one a
+/// model is shown, so a prompt edit that renames a field has to fail the build rather than a
+/// student's capture call.
+const QUICK_CAPTURE_FILE: &str = include_str!("../../../prompts/quick_capture.v1.md");
+
+/// The task-breakdown module file, for the documented-schema check. Its example nests one
+/// subtask, so it pins the nested struct and the outer one in one place.
+const TASK_BREAKDOWN_FILE: &str = include_str!("../../../prompts/task_breakdown.v1.md");
+
 fn vars() -> ChatVars {
     ChatVars {
         assistant_name: "Stvdy".to_string(),
@@ -1343,4 +1352,55 @@ fn the_task_modules_require_a_language_rather_than_defaulting_to_the_source_lang
             "task_breakdown.v1 renders {{{{{name}}}}} as a line the model reads"
         );
     }
+}
+
+/// The schema `quick_capture.v1.md` shows the model must parse into the struct the server
+/// deserialises, or the prompt and the contract have drifted apart. `deny_unknown_fields` is
+/// in force on `DraftFile`, so an example that grows a field is a failure here too.
+///
+/// The example's `due_at` is `null`, which is the module's own statement that a capture with
+/// no date has no date: the draft must not invent one from the example.
+#[test]
+fn the_quick_capture_documented_schema_parses_into_the_generation_contract() {
+    let schema = QUICK_CAPTURE_FILE
+        .split_once("Schema:")
+        .expect("quick_capture.v1.md documents a Schema line")
+        .1
+        .trim()
+        .lines()
+        .next()
+        .expect("the Schema line is followed by the example");
+
+    let parsed: stvdy_core::generation::capture::DraftFile =
+        serde_json::from_str(schema).expect("the module's own example must parse");
+
+    assert_eq!(
+        parsed.priority,
+        stvdy_core::generation::capture::DEFAULT_PRIORITY,
+        "the example must show the documented default"
+    );
+    assert!(parsed.due_at.is_none(), "the example invents no deadline");
+}
+
+/// The schema `task_breakdown.v1.md` shows the model must parse into the struct the server
+/// deserialises. The example nests one subtask, so this also pins the nested struct and the
+/// outer one together: `deny_unknown_fields` is in force on both, and a field renamed in one
+/// place is a failure here rather than a student's breakdown call.
+#[test]
+fn the_task_breakdown_documented_schema_parses_into_the_generation_contract() {
+    let schema = TASK_BREAKDOWN_FILE
+        .split_once("Schema:")
+        .expect("task_breakdown.v1.md documents a Schema line")
+        .1
+        .trim()
+        .lines()
+        .next()
+        .expect("the Schema line is followed by the example");
+
+    let parsed: stvdy_core::generation::breakdown::BreakdownFile =
+        serde_json::from_str(schema).expect("the module's own example must parse");
+
+    assert_eq!(parsed.subtasks.len(), 1);
+    assert_eq!(parsed.subtasks[0].estimate_min, 45);
+    assert_eq!(parsed.total_estimate_min, 180);
 }
