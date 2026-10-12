@@ -2512,11 +2512,99 @@ stub's `--tool-calls` mode and its fixture.
    wire-format mistake the trait-level double cannot see, which is the same reason Phase 2's stub
    exists.
 
-**Not done: the three gates, and the smoke run's own execution.** Gate 5's browser measurement
-(`scripts/measure-mobile.mjs`) needs `SURFACES` entries for `/dashboard` and for a chat screen
-holding a pending proposal, and neither was added; gate 6's server half is
-`crates/server/tests/indonesian.rs`, which is another slice's; gate 7(c) needs a build plus a grep
-of the shipped bundle. The smoke run was written and `bash -n`-checked but not executed against a
-running server, so its six scenarios are unproven. Stated here rather than ticked, because "looks
-fine" is not a gate.
+**The smoke run executed and passes.** `BASE=http://localhost:8098 STUB_PORT=8102 bash
+scripts/smoke-phase12.sh`, against a freshly built server with the stub in tool-call mode, six
+scenarios green:
+
+```
+the stream carried an action event for pending_action_id=01a12e7f-fae0-74ff-a775-ef2969bfe683
+the wire carried 10 tools, all ten with a JSON schema
+no task was written (0 before and after) and the proposal is pending
+one task written; the proposal is confirmed by a device
+second confirm -> 409 conflict, and still one task
+rejected; still one task
+two devices, one row, and fire_at is the FIRST (2026-10-16T15:59:00Z)
+channels_available=['web', 'email']
+push is NOT configured (no APNs/FCM credentials): this run degrades to the in-app and
+email channels, and no push delivery was exercised. That is the documented degraded
+state (A288), not a pass.
+```
+
+The ten-tool wire schema is read out of the stub's request log, which is the check a
+trait-level double cannot make. The last scenario is the phase's cross-device dedupe claim
+**exercised** rather than asserted: two registrations an hour apart, one row, and the stored
+`fire_at` is the first — which a fire-time key fails.
+
+### Roadmap gate 5 — accessibility. Measured, and it found the largest defect in the project so far
+
+Measured in a real headless Chromium against the built bundle served by `vite preview` on :4173,
+at **390×844** (the harness's viewport), both themes, at 100% and 200% text, with `dashboard`
+and `workspace-chat-proposal` among the surfaces.
+
+**Before the fix — the dashboard scrolled sideways at *normal* text size.** `dashboard/light/x100`:
+**15 elements painted past the right edge** and `the page scrolls sideways: 423 > 390`.
+`dashboard/light/x200`: **40 elements past the edge**, two clipped course names, and
+`844 > 390`. No earlier phase's measurement caught a horizontal overflow at 100%, because the
+class was believed to be rem-based minimums; a `truncate`'s nowrap min-content propagates the
+same way at any text size.
+
+The mechanism is `6b54e04`'s, re-derived independently: a `truncate` on a flex child carries
+`white-space: nowrap`, so its min-content width is the whole string and it propagates up through
+the flex column; `min-width: 0` is inert in the **cross** axis and load-bearing only on the flex
+item holding the truncate; and `w-full` on the root is what makes the width definite, so
+`max-w-3xl` is a ceiling rather than a floor. One layer down, the totals grid was `grid-cols-2`
+with `min-width: auto` cells — at 200% "Minutes studied" and "Card reviews" forced the card
+12.9px past the edge before anything wrapped. Fixed in `f38305c`.
+
+**After, all four dashboard combinations:** `7 targets, 0 under 44px; 41 text pairs, 0 below
+requirement; 0 clipped; 0 overlapped; page 390/390`.
+
+**Whole run: 52 screen/theme/scale combinations, 852 targets, 2244 text pairs, lowest contrast
+4.97:1 — PASS.** The Phase 12 surfaces, each at both scales and both themes, all
+`0 under 44px, 0 below requirement, 0 clipped, 0 overlapped, page 390/390`: `dashboard` (7
+targets, 41 pairs), `workspace-chat` and `workspace-chat-proposal` (22 targets, 55 pairs),
+`settings` (25 targets, 53 pairs), `plan` (8 targets, 79 pairs). Every target carries `min-h-11`,
+and the card's Confirm/Edit/Dismiss are asserted as real tab stops in order with the state
+carried by an icon **and** a word. **Desktop width was not measured** — the harness is a phone
+viewport and no desktop leg was added.
+
+### Roadmap gate 6 — Indonesian end to end
+
+- **UI, in a real browser.** A render of the two new surfaces with `navigator.languages` set to
+  `id-ID`, reading the body text and failing on any dotted identifier: **PASS, no locale key
+  rendered**. The dashboard reads "Kemajuan", "Menit belajar", "510 menit belajar dan 95 ulangan
+  kartu di rentang ini.", "Waktu per mata kuliah", "Penguasaan kuis". The card reads "Saran Buat
+  kartu", "Judul / Jumlah / Sumber", **"Butuh 4 kredit saat kamu konfirmasi."** and **"Tidak ada
+  yang ditambahkan sampai kamu konfirmasi."** — the honesty copy in Indonesian, with the price
+  before the action.
+- **The defect this gate exists for, and it is real.** The card shipped resolving its field
+  labels as `` t(`agent.field.${arg}`) `` against the *argument* names, so five of its twelve
+  labels rendered **the key itself** (`agent.field.due_at` where a reader expects "Tenggat").
+  Neither existing check could see it: `i18n.test.ts`'s dynamic-prefix rule marks every key
+  beneath the prefix as used, so a reachable key and an unreachable one are the same thing to it,
+  and the component's own test asserted the *value* rendered without asserting the label did. It
+  took a browser reading the screen in Indonesian to catch it. Fixed in `f4bfecf`, with a case
+  that drives all four field-bearing tools and asserts no rendered label is the key it resolved
+  from.
+- **Server half** is `crates/server/tests/indonesian.rs`, which is not this slice's.
+
+### Roadmap gate 7 — honesty
+
+- **(a) no invented number.** `DashboardScreen.test.tsx` asserts the counts the route returned
+  (odd fixture values, so a screen that computed its own would have to reproduce them), that a
+  topic with no attempts is **absent** rather than `0%`, that an empty window says so rather than
+  showing a row of zeroes, and that a failed read surfaces as a failure and never as `0 minutes`.
+- **(b) the number traces to something the app computes.** Every figure is the route's own count
+  or sum; `dashboard.rs`'s suite asserts each equals a seeded count.
+- **(c) the composer hint, re-asserted by grepping the shipped bundle** rather than by reading the
+  component: `grep -ro "AI can make mistakes\. Check the citations\." app/dist/` →
+  `app/dist/assets/index-CBDbwWge.js`, one occurrence; and `AI bisa salah` (the Indonesian) is in
+  the same bundle, so the hint ships in both languages.
+- **(d) the cost before the action runs.** `ActionCard.test.tsx` asserts the card shows
+  `Costs {AGENT_CREDITS.flashcards} credits when you confirm.`, quoting the exported table read
+  from `config/plans.toml` rather than a literal — and the Indonesian browser run reads the same
+  sentence as "Butuh 4 kredit saat kamu konfirmasi.".
+- **(e) the "Suggested …" label.** Asserted rendered, with `honesty.nothingAddedYet` beside it,
+  and a case that a pending card never reads as done; on a confirmed card the controls are gone
+  and the created row is named instead.
 
