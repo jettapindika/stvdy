@@ -55,6 +55,38 @@ These need **you**, not code, and they block a public launch rather than a phase
 | B2 | Tax/PPN treatment and store privacy-label text | Legal, not technical. Invoices must be correct and the UU PDP privacy notice must be true |
 | B3 | SMTP host/user/password and a From address | Every AI action is gated on a verified email, so with the dev file sink no real account can be onboarded. The provider swap is config-only once the credentials exist |
 
+## GitHub Actions is billing-blocked, and it stops every workflow
+
+**Every job dispatched after 2026-10-12 18:10 WIB was refused before it started**, with the
+annotation GitHub puts on the check run:
+
+```
+The job was not started because recent account payments have failed or your
+spending limit needs to be increased. Please check the 'Billing & plans' section
+in your settings
+```
+
+This is an account setting, not a defect in any workflow, and **it is yours to clear** —
+`Settings → Billing and plans`. The symptom is worth recognising because it looks like a code
+failure from the outside: the run goes `completed/failure` in seconds, every job after the
+first is `skipped`, and `gh run view --log-failed` answers `log not found` because no runner
+ever produced a log. `gh api repos/<owner>/<repo>/check-runs/<job-id>/annotations` is where
+the real message is.
+
+What it cost here: `.github/workflows/unsigned-artifacts.yml`'s first green run — the Windows
+NSIS installer — had already landed, and the two jobs after it (macOS, Android) could not be
+re-run once the block began. **The last run that actually executed is
+`38239252653`** (`a28ed56f`), and its artifacts are still downloadable from the Actions tab.
+
+Two consequences worth acting on when the block clears:
+
+- The macOS and Android legs of `unsigned-artifacts.yml` have fixes committed that **have
+  never run on a runner** — see the two commits after `a28ed56f`. Both were reproduced and
+  fixed locally instead (the dmg builds and is universal; the Gradle block compiles), so what
+  is unverified is the runner, not the code.
+- `release.yml` is the signed path and it needs its certificates regardless, so it is blocked
+  on credentials as well as on billing.
+
 ## Staging on the Batam trial host, and the one thing that needs you
 
 The A45 host (`168.110.202.106`) now runs the real stack — Postgres + pgvector, the server image,
@@ -157,13 +189,8 @@ version:
   have marked a rule with exactly 500 occurrences as truncated — a connection that looks broken
   while it is fine. Corrected, with two cases that have the same occurrence count and opposite
   answers.
-- **Three defects in the app's `QuickCapture`**, all found by measuring rather than looking:
-  Escape does not close the draft or return focus, the Due line renders a raw UTC instant (so a
-  task due 06:00 in Jakarta names the wrong day), and the ISO token pushes the page 34px wide at
-  200% text on a phone.
-- **A WCAG Level A failure in the SPA:** `index.html` is a static `lang="en"` and nothing updates
-  it, so a screen reader pronounces the entire Indonesian UI with an English voice. Found by
-  Phase 8's gate; being fixed.
+- **Three defects in the app's `QuickCapture`, all found by measuring rather than looking — all three now fixed and regression-tested.** Escape did not close the draft or return focus, the Due line rendered a raw UTC instant (so a task due 06:00 in Jakarta named the wrong day), and the ISO token pushed the page 34px wide at 200% text on a phone. `QuickCapture.tsx:47-79` handles Escape and hands the caret back to the composer, the due line goes through `formatInZone` (the same helper the screen uses), and the token carries `min-w-0 break-words`; `QuickCapture.test.tsx` asserts all three, with the Chromium measurements in the plan's gate notes. Kept in this list rather than deleted because the *class* — a defect invisible until something measures at a second text scale — is the part worth carrying forward.
+- **A WCAG Level A failure in the SPA, fixed.** `index.html` is a static `lang="en"` and nothing updated it, so a screen reader pronounced the entire Indonesian UI with an English voice. Found by Phase 8's gate. **Fixed, and the fix is a runtime setter rather than the attribute:** `app/src/i18n/index.ts`'s `applyDocumentLanguage` runs once for the resolved language *before* the first render and again on every `languageChanged`, with four cases in `i18n.test.tsx`. `index.html`'s static `lang="en"` stays deliberately — it is what a screen reader gets for the fraction of a second before the module runs, and changing it to `id` would mislabel the English default.
 - **Every piece of copy the server generates for a student is English-only, in an Indonesian product — and one of them is a notification the student gets at 09:00.** The spec's line 93 requires "English and Bahasa Indonesia from day one … no hard-coded strings" for the SPA, and the SPA meets it. The server does not, and nothing checks it:
   - `crates/server/src/auth/email_verify.rs:83` — subject `"Verify your Stvdy email"`, body `"Confirm this address to finish setting up your account."` This is the email that gates every AI action (A43), sent to a student who may have chosen Indonesian.
   - `crates/server/src/jobs/handlers/renewal.rs:338-367` — `copy()` builds `"Your {plan} plan {when}"` and a two-sentence body, and this is the text that arrives **as a push notification and as the in-app feed row** (the comment says so: "the text the student sees in the app and the text that arrives as a push are the same sentence from the same row").
