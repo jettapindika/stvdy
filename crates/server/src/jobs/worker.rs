@@ -114,6 +114,11 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         // recovered by polling and one recovered by a webhook cannot differ.
         "poll_payment" => crate::jobs::handlers::poll_payment::run(state, job).await,
         "reconcile_payments" => crate::jobs::handlers::reconcile_payments::run(state, job).await,
+        // The hard delete behind `DELETE /account` (A355). Scheduled by the deletion request at
+        // `deleted_at + ACCOUNT_DELETION_GRACE_DAYS`, with the scheduler's pass as the backstop
+        // for a marked account whose job was lost — the window is the `run_at`, so the handler
+        // purges whatever it is handed.
+        "purge_deleted_accounts" => crate::jobs::handlers::purge_accounts::run(state, job).await,
         // One boundary of a renewal's 7/3/1/0-day notice (A300). Not a singleton: there are
         // four boundaries per period per account, and the `dedupe_key` — which names the
         // account, the period end and the boundary — is what makes each of them once-only.

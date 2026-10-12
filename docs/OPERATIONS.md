@@ -460,24 +460,33 @@ mechanism is a sentence, so every row names the thing that actually does the del
 | Data class | Window | Enforced by |
 |---|---|---|
 | `change_log` (the sync history) | **90 days** | the `compact_change_log` job, which trims below the watermark (A19, A165) |
-| Deleted accounts and their rows | on deletion, immediately | `purge_deleted_accounts` — the job kind named in `migrations/0015_jobs.sql`. **Not built yet**: see the note below |
+| Deleted accounts and their rows | **immediately for access; the rows are purged 7 days after the request** | `purge_deleted_accounts`, scheduled by `DELETE /account` at `deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (A355), with the scheduler's `pass` as the backstop for a marked account whose job was lost. Access ends at the request — sessions, devices, the ICS feed token and pending credentials are revoked then — so the window is the purge's scheduling rather than a recoverable state |
 | Generated documents (`reports/`, `cheatsheets/` in R2) | `<the operator's choice>` | an R2 **lifecycle rule** on those prefixes, which is the only thing that deletes an object nobody asked about again |
 | Uploaded sources and their previews | until the student deletes them, or the account is deleted | the deletion paths (`DELETE /sources/:id`, account deletion), plus the R2 lifecycle rule above as the backstop |
+| The object-storage bytes an account-deletion purge could not remove | the R2 lifecycle rule's window | the purge collects `sources.file_key` and the `cheatsheets` keys and calls `delete_objects`, which **logs and continues** rather than failing — a purge that refused to complete because R2 was briefly unavailable would leave the account half-deleted, which is worse than an orphaned object. So an object whose delete failed is the accepted residual, and the lifecycle rule on those prefixes is what eventually removes it |
 | Chat content, tasks, events, settings | until the student deletes them, or the account is deleted | the deletion paths; the `+sync` tables cascade |
 | `var/mail` (the dev sink) | **never in production** | `SMTP_URL` is set in production, so the sink is not written at all. A dev sink left on a host is unencrypted verification and receipt mail at rest, which is why this is a row rather than a note |
 | Service logs | `<the operator's window, e.g. 30 days>` | the log rotation on the host. Long enough to investigate a report, short enough not to be a shadow database |
 | Payment records | `<the statutory accounting period — B2>` | the `payments` table. **This row is deliberately not 90 days**: tax and accounting rules require these records, and they survive account deletion in anonymised form (see `docs/EULA.md` § 9) |
 | `usage_events` and `credit_ledger` | `<the operator's window>` | not yet enforced by a job. Named here so the gap is visible rather than implied — the tables grow monotonically today |
 
-**The one row with no mechanism, stated plainly.** Deleted accounts are *specified* to be purged
-by `purge_deleted_accounts` — the job kind is named in `migrations/0015_jobs.sql` — and no handler
-dispatches it. `DELETE /account` and `GET /account/export` do not exist either; `docs/API.md`
-§ Account tags both as Phase 15 work, and `app/src/features/settings/SettingsScreen.tsx` renders
-the control under "Not built yet". So the account-deletion promise in `docs/EULA.md` § 9 and the
-`docs/RELEASE.md` § Account deletion section describe **intended** behaviour, not shipped
-behaviour, and both stores' account-deletion rows are typed `blocked` for that reason (A351).
-This is recorded here rather than left in a plan because a retention table that claimed a mechanism
-it does not have is exactly the kind of sentence this section exists to prevent.
+**The row that had no mechanism, and now does.** Deleted accounts were *specified* to be purged
+by `purge_deleted_accounts` — the job kind named in `migrations/0015_jobs.sql` — and until A355 no
+handler dispatched it: `DELETE /account` and `GET /account/export` did not exist either. **That is
+now shipped.** `DELETE /account` marks the account, revokes every credential at once, cancels its
+jobs and schedules the purge at `deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (default 7 days); the
+scheduler's `pass` enqueues the same job for any marked account whose own job was lost, so the
+window is the `run_at` and the two producers cannot disagree about it. The job is idempotent —
+`purged_at` is written with `coalesce` and every delete matches nothing on a second pass — which
+is what makes a double run a no-op rather than an error.
+
+What the purge deletes and what it keeps is a per-table-group mapping, not a cascade: the
+student's content goes, and `payments`, `credit_ledger`, `subscriptions` (cancelled),
+`usage_events` and `change_log` survive attached to an **anonymized** `users` row. That row cannot
+be deleted at all — `payments.user_id` and `credit_ledger.user_id` are `not null references users
+on delete cascade`, so removing it would take the payment ledger with it — which is why the
+tombstone is what keeps the financial half of this table. A355a states the full mapping and the
+reason for each group.
 
 ## Where the launch decision is made
 

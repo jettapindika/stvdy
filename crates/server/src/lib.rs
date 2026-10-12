@@ -1,5 +1,6 @@
 //! The Stvdy server: Axum routes, auth, sync, job worker and integrations.
 
+pub mod account;
 pub mod actions;
 pub mod admin;
 pub mod assets;

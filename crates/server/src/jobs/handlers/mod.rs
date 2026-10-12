@@ -11,6 +11,7 @@ pub mod grants;
 pub mod ingest;
 pub mod plan;
 pub mod poll_payment;
+pub mod purge_accounts;
 pub mod reconcile_payments;
 pub mod reminders;
 pub mod render_pdf;

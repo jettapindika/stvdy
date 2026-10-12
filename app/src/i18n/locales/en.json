@@ -1354,10 +1354,26 @@
     },
     "later": {
       "title": "Not built yet",
-      "data": "Data export and deletion",
-      "dataPhase": "Exporting and deleting your account arrive in Phase 15.",
       "byok": "Bring your own model key",
       "byokPhase": "BYOK arrives in Phase 13."
+    },
+    "data": {
+      "title": "Your data",
+      "exportHint": "Download everything we hold about your account. JSON is for a machine, Markdown is for reading, and ICS imports into a calendar app.",
+      "export": {
+        "json": "Export JSON",
+        "md": "Export Markdown",
+        "ics": "Export calendar (ICS)"
+      },
+      "exportFailed": "The export did not finish: {{message}}",
+      "deleteConsequences": "Deleting your account signs you out on every device immediately, cancels anything still running, and removes your workspaces, sources, chats, flashcards, quizzes, reports, tasks, events and settings. Records we must keep for tax or accounting survive in anonymised form.",
+      "deleteForfeit": "Deleting is immediate and cannot be undone. Any remaining prepaid time is forfeited.",
+      "deleteStart": "Delete my account",
+      "deleteConfirmLabel": "Type {{email}} to confirm",
+      "deleteConfirm": "Delete my account permanently",
+      "deleting": "Deleting…",
+      "cancel": "Cancel",
+      "deleteFailed": "The deletion did not finish: {{message}}"
     }
   },
   "agent": {

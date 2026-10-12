@@ -3,6 +3,7 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 pub type AppResult<T> = Result<T, AppError>;
@@ -47,6 +48,20 @@ pub enum AppError {
     #[error("this link has expired")]
     LinkExpired,
 
+    /// The account was deleted at the student's own request (A355).
+    ///
+    /// A distinct variant rather than `Unauthorized` for the reason the spec's deletion rule
+    /// is a *promise*: a generic 401 tells a student their password is wrong, and the remedy
+    /// they reach for — reset it, try again — cannot work, because the account they are
+    /// typing at is going away. The message names the purge date, which is the only fact the
+    /// student needs and the one thing a 401 could not carry.
+    #[error("this account was deleted at your request; its data is removed on {purges_at}")]
+    AccountDeleted {
+        /// When `purge_deleted_accounts` will remove the data. Rendered RFC 3339 in the
+        /// message, because the client shows the server's sentence rather than composing one.
+        purges_at: DateTime<Utc>,
+    },
+
     #[error("rate limited")]
     RateLimited,
 
@@ -83,6 +98,10 @@ impl AppError {
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::ResyncRequired | AppError::LinkExpired => StatusCode::GONE,
+            // 403, not 410: the account is not a resource the client can re-fetch, and a
+            // client that branched on 410 for a sync cursor would misread this as one. What
+            // distinguishes it is the code, which is what the client branches on anyway.
+            AppError::AccountDeleted { .. } => StatusCode::FORBIDDEN,
             // A limit the user can raise by paying is 422; a feature the plan
             // does not include at all is 403. Both are documented in the roadmap
             // § HTTP error mapping.
@@ -109,6 +128,7 @@ impl AppError {
             AppError::Conflict(_) => "conflict",
             AppError::ResyncRequired => "resync_required",
             AppError::LinkExpired => "link_expired",
+            AppError::AccountDeleted { .. } => "account_deleted",
             AppError::RateLimited => "rate_limited",
             AppError::Entitlement { code, .. } => code,
             AppError::EmailNotVerified => "email_not_verified",

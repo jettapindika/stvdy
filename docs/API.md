@@ -955,7 +955,7 @@ reads the date it will actually reset on.
 ### Every route, and what it is
 
 The table below is the same table `crates/server/tests/route_sweep.rs` asserts,
-so the document and the test cannot disagree. **53 rows are registered** and every
+so the document and the test cannot disagree. **55 rows are registered** and every
 one is classified; a new route that is not in the table fails
 `every_registered_route_is_classified`.
 
@@ -1016,6 +1016,8 @@ exportable (A149).
 | GET | `/cheatsheets/{id}/html` | the HTML is the document the credits already bought; only the PDF is gated |
 | POST | `/cheatsheets/{id}/re-render` | re-rendering is a pure function of stored blocks and charges nothing |
 | GET | `/usage` | reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159) |
+| DELETE | `/account` | deleting one's own account is a right, not a plan feature: the app store rules require it for any app that can create an account, and an over-limit account must still be able to leave (A355c) |
+| GET | `/account/export` | the spec's `Export my data`, on every plan; `ExportFormat` gates the report and cheatsheet documents, not the right to take your own data out (A355c) |
 
 **Exempt** — no authenticated user at all.
 
@@ -1865,10 +1867,69 @@ dependency, not a dashboard one.
 
 ## Account (Phase 15)
 
-`DELETE /account`, `GET /account/export`. Re-tagged from Phase 7 (A160): neither
-is in the roadmap's Phase 7 paragraph, and both need the retention and purge
-machinery (`purge_deleted_accounts`, the `## Data retention` schedule) that ships
-with the release prerequisites.
+`DELETE /account`, `GET /account/export`. Re-tagged from Phase 7 (A160), which deferred them to
+"the release prerequisites" for the retention and purge machinery they need; A355 ships them.
+
+### `DELETE /account`
+
+Auth. **A request, not a hard delete**: it marks `users.deleted_at`, revokes every credential,
+cancels the account's jobs, and schedules `purge_deleted_accounts` at
+`deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (default **7 days**, A355). Idempotent — a second call
+on a marked account is not an error and answers the same two dates.
+
+```json
+{ "deleted_at": "2026-10-12T06:00:00Z",
+  "purges_at": "2026-10-19T06:00:00Z",
+  "forfeited_period_end": "2026-11-11T00:00:00Z",
+  "sessions_revoked": 2, "jobs_cancelled": 1, "already_deleted": false }
+```
+
+`forfeited_period_end` is the paid period the account was inside, or `null`. The confirmation
+copy states the forfeiture **before** the student confirms (A350), and this field is the fact
+behind that sentence rather than a product-wide claim.
+
+**Effective immediately, not at the purge**: every `auth_sessions` row is revoked, every device
+revoked, `ics_feed_token` cleared (it is a capability URL with no session behind it, A242),
+pending `email_verification_tokens` and `login_tickets` deleted, and every `queued`/`running`
+job for the account marked `failed` with `error = 'account deleted'`. A window in which a
+signed-in device still worked would make the confirmation a lie.
+
+**Login, signup and Google sign-in refuse a marked account** with `403 account_deleted` and the
+purge date, after the password check rather than before (A355c). Signing up again with the same
+address meets the same refusal until the purge anonymizes the row and releases the address.
+
+### `GET /account/export?format=json|md|ics`
+
+Auth, and **not plan-gated**: the matrix's `ExportFormat` governs the report and cheatsheet
+documents, not the right to take your own data out (A355c). Defaults to `json`.
+
+- `json` — `application/json`. The account (with `password_hash`, `google_sub` and
+  `ics_feed_token` **omitted** — a data export that hands back a credential is a leak with a
+  download button), one array per collection, and `truncated` naming any collection that hit the
+  cap. Bounded at **5,000 rows per collection** (A355b).
+- `md` — `text/markdown; charset=utf-8`. The same rows rendered for a person; a section with no
+  rows says "None" rather than being omitted, so the document cannot read as "we hold nothing"
+  when it means "we did not look".
+- `ics` — `text/calendar; charset=utf-8`. The account's own `class`/`exam`/`study_block`/`deadline`
+  events plus one deadline per task with a `due_at`, through the same pure renderer the feed uses
+  (A241/A248), so an exported calendar and a subscribed one cannot disagree about a `UID` or a
+  `SEQUENCE`. `external` events are excluded: they are a copy of a calendar the student already
+  has, and exporting them would duplicate it under a `UID` their client has never seen.
+
+An unknown `format` is `400 validation`, never a silent JSON answer.
+
+### What the purge deletes, and what it keeps
+
+Per table group, and the split is the whole of A355a. Deleted: workspaces, sources, chunks,
+messages, decks, flashcards, reviews, quizzes, questions, attempts, reports, revisions,
+cheatsheets, tasks, goals, sessions, events, plan proposals, syllabus drafts, pending actions,
+reminders, calendar connections, settings, API keys, devices, auth sessions, verification tokens,
+login tickets, the mutation log and the compaction watermark. **Retained** and attached to an
+**anonymized** `users` row: `payments`, `credit_ledger`, `subscriptions` (cancelled),
+`usage_events`, `discount_redemptions`, `change_log`, `webhook_events`. The row cannot be deleted
+at all — `payments.user_id` and `credit_ledger.user_id` are `not null references users on delete
+cascade` — which is why the tombstone is what keeps the ledger, and why the margin report and the
+tax position survive.
 
 ## Billing (Phase 13)
 

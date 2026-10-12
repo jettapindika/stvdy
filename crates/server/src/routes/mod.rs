@@ -163,6 +163,10 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         // Each feature module owns its own paths, so a new route in one file
         // cannot be lost by forgetting to register it here.
         .merge(devices::routes())
+        // Account deletion and the data export (A355). Its own module rather than a corner of
+        // `settings`: the deletion touches the account, the credentials, the job queue and the
+        // billing rows at once, and `settings.rs` is the row the student edits.
+        .merge(crate::account::routes())
         .merge(workspaces::routes())
         .merge(chunks::routes())
         .merge(chat::routes())

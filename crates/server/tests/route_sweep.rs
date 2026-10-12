@@ -211,6 +211,26 @@ fn read_only_rows() -> Vec<Row> {
             "/usage",
             "reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159)",
         ),
+        // Phase 15's account routes (A355). Both `ReadOnly`, and the reason is the same for
+        // both: **leaving is not a plan feature**. `GET /account/export` is the spec's
+        // `Export my data`, which every plan has — the entitlements matrix's `ExportFormat`
+        // governs the *report* and *cheatsheet* documents, not the right to take your own data
+        // out — and `DELETE /account` is required by app store rules for any app that can
+        // create an account, so refusing it to an exhausted or downgraded student would be
+        // refusing the one remedy the store rule exists to guarantee.
+        ro(
+            "DELETE",
+            "/account",
+            "deleting one's own account is a right, not a plan feature: the app store rules \
+             require it for any app that can create an account, and an over-limit account must \
+             still be able to leave",
+        ),
+        ro(
+            "GET",
+            "/account/export",
+            "the spec's `Export my data`, on every plan; `ExportFormat` gates the report and \
+             cheatsheet documents, not the right to take your own data out (A355)",
+        ),
         ro(
             "GET",
             "/sync/pull",

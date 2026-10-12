@@ -248,7 +248,78 @@ pub async fn pass(state: &AppState) -> AppResult<u64> {
     // is a monthly event, and the account it belongs to may have no gateway traffic at all.
     crate::jobs::handlers::renewal::renewal_pass(state).await?;
 
+    // And the account purges (A355). A `DELETE /account` schedules its own purge at the end of
+    // its window, so this pass exists for the account whose job was never written — a deletion
+    // that landed while the scheduler was down, or a row marked before this handler shipped.
+    purge_pass(state).await?;
+
     Ok(scheduled)
+}
+
+/// One purge pass: enqueue `purge_deleted_accounts` for every marked account whose window has
+/// closed and whose job is missing (A355).
+///
+/// The same shape as [`calendar_pass`], and the same two halves:
+///
+///  * `deleted_at <= now - grace` keeps an account inside its window out of the batch. The
+///    cutoff is the **injected** clock, not the database's `now()`, because the request that
+///    scheduled the job built its `run_at` from the same clock — two sources of truth for "has
+///    the window closed" is how a test that moves the clock and a pass that reads the wall
+///    clock come to disagree.
+///  * `purged_at is null` is the other half, and it is what stops the pass from re-enqueuing
+///    forever: an account that has been purged keeps its row (it is anonymized, not deleted),
+///    so without this clause every pass would touch its `jobs` row for the rest of the
+///    deployment's life.
+///  * `not exists (… status in ('queued','running'))` is the third, exactly as [`pass`] does
+///    it: an account whose purge the request already scheduled is not examined twice. A `done`
+///    row does not block a re-enqueue, and does not need to — the guard above has already
+///    excluded that account.
+///
+/// Public because it is the unit the tests drive: waiting fifteen minutes for a tick would be a
+/// timing test.
+pub async fn purge_pass(state: &AppState) -> AppResult<u64> {
+    let grace = chrono::Duration::days(state.config.account_deletion_grace_days);
+    let cutoff = state.clock.now() - grace;
+
+    let accounts: Vec<Uuid> = sqlx::query_scalar(
+        "select u.id
+           from users u
+          where u.deleted_at is not null
+            and u.purged_at is null
+            and u.deleted_at <= $1
+            and not exists (
+                  select 1 from jobs j
+                   where j.status in ('queued', 'running')
+                     and j.dedupe_key = 'purge_deleted_accounts:' || u.id::text)
+          order by u.deleted_at asc
+          limit $2",
+    )
+    .bind(cutoff)
+    .bind(SCHEDULE_BATCH)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing accounts to purge: {error}")))?;
+
+    let mut enqueued = 0u64;
+    for user_id in accounts {
+        jobs::enqueue(
+            &state.pool,
+            &state.jobs,
+            "purge_deleted_accounts",
+            serde_json::json!({ "user_id": user_id }),
+            // The same key the deletion request uses, so the two producers cannot produce two
+            // jobs for one account — and so a backstop enqueue against an account whose purge
+            // is already waiting is the no-op `enqueue`'s conflict clause makes it.
+            Some(&crate::account::purge_dedupe_key(user_id)),
+        )
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing a purge: {error}")))?;
+        enqueued += 1;
+    }
+    if enqueued > 0 {
+        tracing::info!(enqueued, "scheduled account purges");
+    }
+    Ok(enqueued)
 }
 
 /// One pass over the live calendar connections whose watermark is older than the interval.

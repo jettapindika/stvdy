@@ -189,10 +189,12 @@ buttons in the application: **Export my data** produces your material, tasks, ev
 as JSON, Markdown and an ICS calendar file, and **Delete account** removes it. For the rest,
 write to `<privacy contact>`. You may complain to the Indonesian data-protection authority.
 
-**Deleting your account.** Deletion is immediate and irreversible: it revokes every session,
-cancels pending jobs, removes or anonymises your personal data, and forfeits any remaining
-prepaid period (§ 5). Records we must keep for tax or accounting purposes survive deletion in
-anonymised or legally-required form; the retention periods are the ones in the table above.
+**Deleting your account.** Deletion is immediate and irreversible from the moment you confirm
+it: it revokes every session on every device, cancels anything still running, and forfeits any
+remaining prepaid period (§ 5). **Your data is then removed 7 days after that request** (a
+window we keep so that a mistake can be answered before the rows are gone; you cannot sign in
+or recover the account during it). Records we must keep for tax or accounting purposes survive
+in anonymised or legally-required form; the retention periods are the ones in the table above.
 
 **Security.** Traffic is encrypted in transit (TLS). Credentials are stored hashed; a
 supplied API key is stored encrypted. Access to production systems is limited and logged.

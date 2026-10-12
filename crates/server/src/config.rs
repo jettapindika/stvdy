@@ -83,6 +83,17 @@ pub struct AppConfig {
     pub idr_per_usd: i64,
     /// How long an `upsert` change is kept before `compact_change_log` removes it (A184).
     pub change_log_retention_days: i64,
+    /// How long a deleted account's row is kept before `purge_deleted_accounts` removes its
+    /// data (A355).
+    ///
+    /// The window is the `run_at` of the purge job the deletion request schedules, so it is
+    /// the *only* thing that decides when a marked account is purged — there is no second
+    /// comparison in the handler, which is what makes "purge this account now" a statement a
+    /// test can make by moving the clock. It is configuration rather than a constant for the
+    /// same reason `CHANGE_LOG_RETENTION_DAYS` is: it is a retention window, and a retention
+    /// window that needs a deploy to change is one nobody changes. Seven days is the default
+    /// and the justification is in `docs/ASSUMPTIONS.md` A355.
+    pub account_deletion_grace_days: i64,
     /// How often a live calendar connection is polled (A238).
     ///
     /// Fifteen minutes: an academic calendar changes a few times a term, and the cost of a
@@ -522,6 +533,18 @@ impl AppConfig {
             grace_period_days: get_i64(&get, "GRACE_PERIOD_DAYS", 3)?,
             idr_per_usd: get_i64(&get, "IDR_PER_USD", 17889)?,
             change_log_retention_days: get_i64(&get, "CHANGE_LOG_RETENTION_DAYS", 90)?,
+            // Zero is legal and means "purge on the next scheduler pass" — a deployment that
+            // wants the deletion to be final as fast as the queue allows says so, and the
+            // route still revokes and cancels immediately. Negative is refused: a window
+            // before the request is not a window.
+            account_deletion_grace_days: {
+                let days = get_i64(&get, "ACCOUNT_DELETION_GRACE_DAYS", 7)?;
+                anyhow::ensure!(
+                    days >= 0,
+                    "ACCOUNT_DELETION_GRACE_DAYS must not be negative, got {days}"
+                );
+                days
+            },
             calendar_poll_interval: {
                 // A zero interval is not "poll constantly": it makes the dedupe window one
                 // second wide, so a poll pass enqueues a job per connection per second. Refused

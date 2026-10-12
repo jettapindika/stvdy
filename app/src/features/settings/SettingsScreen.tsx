@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
+import { EXPORT_FORMATS, useDeleteAccount, useExportAccount } from '@/api/queries/account'
 import { useSaveSettings, useSettings, type ReminderChannel } from '@/api/queries/settings'
 import { useUsage } from '@/api/queries/usage'
 import { PageHeader, Section } from '@/components/layout/Section'
@@ -10,6 +11,7 @@ import { ApiErrorNotice, LoadingState } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { planForReminderChannel } from '@/features/billing/plans'
 import { LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n'
+import { saveBlob } from '@/lib/download'
 import { platform } from '@/platform'
 import { UpdatesPanel } from './UpdatesPanel'
 
@@ -33,10 +35,17 @@ import { UpdatesPanel } from './UpdatesPanel'
  * **The timezone is on the account, not on the settings row** (A203), which is why
  * it is saved through the same `PUT /settings` but read from `GET /auth/me`.
  *
- * **The sections this phase does not own are named.** Calendar connections
- * (Phase 10), data export and deletion (Phase 7/15) and BYOK (Phase 13) each say
- * which phase brings them, rather than being an absent control a student would
- * look for and not find.
+ * **The sections this phase does not own are named.** BYOK (Phase 13) says which
+ * phase brings it, rather than being an absent control a student would look for and
+ * not find. Data export and deletion used to be in that list and is now a section of
+ * its own (A355) — copy that outlives its phase is worse than no copy, because it
+ * tells a student a working feature does not exist.
+ *
+ * **Deleting the account is behind a type-to-confirm, and the copy states the
+ * consequences before the button is reachable.** A destructive action behind one tap
+ * is the wrong default on a phone, where a mis-tap is easy and the account is not
+ * recoverable; and the forfeiture of remaining prepaid time is what `docs/EULA.md`
+ * § 5 promises will be said before confirmation (A350).
  *
  * **This screen is the phone's only route to the plan.** The credit meter lives in
  * the sidebar, which a phone does not render, and both `LockedFeature` and the
@@ -425,12 +434,14 @@ export function SettingsScreen() {
           rather than present and disabled. */}
       <UpdatesPanel />
 
+      {/* The data controls (A355). Between the account's own devices and the "not built
+          yet" list, because both are facts about this account: what we hold and how to
+          take it or leave. The section used to be a line under "Not built yet", and the
+          copy that said so is gone rather than left to contradict the code. */}
+      <DataSection />
+
       <Section title={t('settings.later.title')}>
         <ul className="card flex flex-col gap-3 p-4">
-          <li className="flex flex-col gap-1">
-            <span className="text-body">{t('settings.later.data')}</span>
-            <span className="meta">{t('settings.later.dataPhase')}</span>
-          </li>
           <li className="flex flex-col gap-1">
             <span className="text-body">{t('settings.later.byok')}</span>
             <span className="meta">{t('settings.later.byokPhase')}</span>
@@ -438,5 +449,141 @@ export function SettingsScreen() {
         </ul>
       </Section>
     </div>
+  )
+}
+
+/**
+ * Export and deletion.
+ *
+ * Three decisions the copy and the structure both carry:
+ *
+ *  * **The export is three documents, not one.** The spec names JSON + Markdown + ICS, and
+ *    they answer different questions: the JSON is for a machine, the Markdown is for the
+ *    student reading what we hold, and the ICS is what a calendar can import. Offering one
+ *    would be choosing for the student.
+ *  * **The deletion is behind a type-to-confirm.** The student types their own email
+ *    address, which is the one string that cannot be produced by a mis-tap, and the final
+ *    button stays disabled until it matches. The consequences are stated *above* that field,
+ *    because `docs/EULA.md` § 5 promises the forfeiture is said before confirmation (A350).
+ *  * **What happens next is the server's answer, not this screen's.** The response carries
+ *    the purge date; the copy below renders it rather than computing one, so the sentence on
+ *    screen cannot disagree with the row in the database.
+ */
+function DataSection() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const exportAccount = useExportAccount()
+  const deleteAccount = useDeleteAccount()
+  const [confirming, setConfirming] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const email = session.status === 'signed-in' ? session.user.email : ''
+  // Case-insensitive and trimmed: the address is the confirmation, not a password, and a
+  // student who types it with a trailing space has still confirmed what they meant.
+  const matches = email !== '' && typed.trim().toLowerCase() === email.toLowerCase()
+  const exportError = asApiError(exportAccount.error)
+  const deleteError = asApiError(deleteAccount.error)
+
+  return (
+    <Section title={t('settings.data.title')}>
+      <div className="card flex flex-col gap-3 p-4">
+        <p className="text-small text-muted">{t('settings.data.exportHint')}</p>
+        <div className="flex flex-wrap gap-2">
+          {EXPORT_FORMATS.map((format) => (
+            <button
+              key={format}
+              type="button"
+              className="btn btn-secondary min-h-11"
+              disabled={exportAccount.isPending}
+              onClick={() => {
+                setError(null)
+                exportAccount.mutate(format, {
+                  onSuccess: ({ blob }) => {
+                    saveBlob(blob, `stvdy-export.${format}`)
+                  },
+                  onError: (failure) => setError(asApiError(failure)),
+                })
+              }}
+            >
+              {t(`settings.data.export.${format}`)}
+            </button>
+          ))}
+        </div>
+        {exportError !== null ? (
+          <p role="alert" className="text-small text-danger">
+            {t('settings.data.exportFailed', { message: exportError.message })}
+          </p>
+        ) : null}
+
+        <hr className="border-border" />
+
+        {/* The consequence is stated before the control that acts on it. The wording is the
+            EULA's: deletion is immediate, remaining prepaid time is forfeited, and the
+            records we must keep for tax or accounting survive in anonymised form. */}
+        <p className="text-small text-muted">{t('settings.data.deleteConsequences')}</p>
+        <p className="text-small text-muted">{t('settings.data.deleteForfeit')}</p>
+
+        {!confirming ? (
+          <button
+            type="button"
+            className="btn btn-secondary min-h-11 self-start"
+            onClick={() => {
+              setError(null)
+              setConfirming(true)
+            }}
+          >
+            {t('settings.data.deleteStart')}
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="label">{t('settings.data.deleteConfirmLabel', { email })}</span>
+              <input
+                className="field max-w-72"
+                value={typed}
+                autoComplete="off"
+                onChange={(event) => setTyped(event.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-danger min-h-11"
+                // Disabled until the address matches: the confirmation has to be something a
+                // mis-tap cannot produce.
+                disabled={!matches || deleteAccount.isPending}
+                onClick={() => {
+                  setError(null)
+                  deleteAccount.mutate(undefined, {
+                    onError: (failure) => setError(asApiError(failure)),
+                  })
+                }}
+              >
+                {deleteAccount.isPending
+                  ? t('settings.data.deleting')
+                  : t('settings.data.deleteConfirm')}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary min-h-11"
+                onClick={() => {
+                  setTyped('')
+                  setConfirming(false)
+                }}
+              >
+                {t('settings.data.cancel')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error ?? deleteError ? (
+          <p role="alert" className="text-small text-danger">
+            {t('settings.data.deleteFailed', { message: (error ?? deleteError)?.message ?? '' })}
+          </p>
+        ) : null}
+      </div>
+    </Section>
   )
 }

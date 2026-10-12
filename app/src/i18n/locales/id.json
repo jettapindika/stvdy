@@ -1330,10 +1330,26 @@
     },
     "later": {
       "title": "Belum dibuat",
-      "data": "Ekspor dan penghapusan data",
-      "dataPhase": "Ekspor dan penghapusan akun datang di Fase 15.",
       "byok": "Pakai kunci model sendiri",
       "byokPhase": "BYOK datang di Fase 13."
+    },
+    "data": {
+      "title": "Data Anda",
+      "exportHint": "Unduh semua yang kami simpan tentang akun Anda. JSON untuk mesin, Markdown untuk dibaca, dan ICS untuk diimpor ke aplikasi kalender.",
+      "export": {
+        "json": "Ekspor JSON",
+        "md": "Ekspor Markdown",
+        "ics": "Ekspor kalender (ICS)"
+      },
+      "exportFailed": "Ekspor tidak selesai: {{message}}",
+      "deleteConsequences": "Menghapus akun Anda langsung mengeluarkan Anda dari semua perangkat, membatalkan semua yang masih berjalan, dan menghapus ruang kerja, sumber, obrolan, kartu, kuis, laporan, tugas, acara, dan pengaturan Anda. Catatan yang wajib kami simpan untuk pajak atau akuntansi tetap ada dalam bentuk anonim.",
+      "deleteForfeit": "Penghapusan bersifat langsung dan tidak dapat dibatalkan. Sisa waktu prabayar hangus.",
+      "deleteStart": "Hapus akun saya",
+      "deleteConfirmLabel": "Ketik {{email}} untuk mengonfirmasi",
+      "deleteConfirm": "Hapus akun saya secara permanen",
+      "deleting": "Menghapus…",
+      "cancel": "Batal",
+      "deleteFailed": "Penghapusan tidak selesai: {{message}}"
     }
   },
   "agent": {

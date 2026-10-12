@@ -191,14 +191,17 @@ describe('the settings form', () => {
 
     // Each names the phase that brings it, so a student looking for a control
     // finds the reason it is not there instead of nothing at all.
-    expect(await screen.findByText('Data export and deletion')).toBeInTheDocument()
-    expect(screen.getByText('Bring your own model key')).toBeInTheDocument()
+    expect(await screen.findByText('Bring your own model key')).toBeInTheDocument()
 
     // And the list shrinks when a section arrives, which is the half that is easy
     // to forget: "Google Calendar and ICS arrive in Phase 10" was true until
     // Phase 10 shipped the calendar screen and `/calendar` stopped being a
     // `NotBuiltRoute`. Copy that outlives its phase is worse than no copy, because
-    // it tells a student a working feature does not exist.
+    // it tells a student a working feature does not exist. Data export and deletion
+    // was the same case until A355 shipped it: it is now a section of its own, so
+    // the line that said it was not built must be gone rather than left standing.
+    expect(screen.queryByText('Data export and deletion')).toBeNull()
+    expect(screen.queryByText(/arrive in Phase 15/)).toBeNull()
     expect(screen.queryByText('Calendar connections')).toBeNull()
     expect(screen.queryByText(/arrive in Phase 10/)).toBeNull()
   })
@@ -256,6 +259,10 @@ describe('the settings form', () => {
  */
 describe('the channel rows', () => {
   it('gives every channel label a 44px box in both directions, not just the short one', async () => {
+    // `setup()` rather than relying on the platform a previous test installed. Without it
+    // this test only passed when a sibling had run first and left its fake platform behind,
+    // which is a test that passes for a reason unrelated to what it asserts.
+    setup()
     const { container } = renderWithProviders(<SettingsScreen />, { route: '/settings' })
     await screen.findByLabelText('Email')
 

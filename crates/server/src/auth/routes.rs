@@ -243,15 +243,27 @@ pub async fn signup(
 
     // The unique index on `users.email` is the real guard; this pre-check turns
     // the common case into a clear message instead of a constraint error.
-    let existing: Option<Uuid> = sqlx::query_scalar("select id from users where email = $1")
-        .bind(&email)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("checking for an account: {error}")))?;
-    if existing.is_some() {
-        return Err(AppError::Conflict(
-            "an account with this email already exists".to_string(),
-        ));
+    //
+    // A row that exists but is marked deleted is *not* the same case, and saying "an account
+    // with this email already exists" would send the student looking for a password reset on
+    // an account they deliberately deleted (A355). The address is held by the tombstone until
+    // the purge anonymizes it, so this is the refusal that describes what actually happened.
+    let existing: Option<Option<DateTime<Utc>>> =
+        sqlx::query_scalar("select deleted_at from users where email = $1")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!("checking for an account: {error}"))
+            })?;
+    match existing {
+        Some(Some(deleted_at)) => return Err(deletion_refusal(&state, deleted_at)),
+        Some(None) => {
+            return Err(AppError::Conflict(
+                "an account with this email already exists".to_string(),
+            ));
+        }
+        None => {}
     }
 
     let user_id = Uuid::now_v7();
@@ -335,11 +347,20 @@ pub async fn login(
     let email = normalize_email(&body.email)?;
     validate_device(&body.device)?;
 
+    // `deleted_at` is selected rather than filtered, and the refusal comes **after** the
+    // password check (A355). Both halves matter:
+    //
+    //  * filtering it out would answer 401 for an account that exists and was deleted at the
+    //    student's own request, which sends them to the password-reset path for an account
+    //    that cannot be signed into — the remedy is wrong, not just the message;
+    //  * refusing before the check would make the endpoint an oracle for "this address had an
+    //    account that was deleted", which is a fact about a person that the caller has not
+    //    proved they are.
     let row = sqlx::query_as::<_, LoginRow>(
         "select id, email, password_hash, email_verified, email_verified_at, plan_id,
-                timezone, student_verified, created_at
+                timezone, student_verified, created_at, deleted_at
            from users
-          where email = $1 and deleted_at is null",
+          where email = $1",
     )
     .bind(&email)
     .fetch_optional(&state.pool)
@@ -361,6 +382,12 @@ pub async fn login(
     }
     if !password::verify(&body.password, &stored) {
         return Err(AppError::Unauthorized);
+    }
+
+    // The credentials were right, so this is the student. Now tell them the truth about the
+    // account they just proved they own: they deleted it, and when its data goes.
+    if let Some(deleted_at) = row.deleted_at {
+        return Err(deletion_refusal(&state, deleted_at));
     }
 
     let device_id = resolve_device(&state, row.id, &body.device).await?;
@@ -397,6 +424,21 @@ pub(crate) struct LoginRow {
     pub(crate) timezone: String,
     pub(crate) student_verified: bool,
     pub(crate) created_at: Option<DateTime<Utc>>,
+    /// `Some` for an account the student asked to delete (A355). Selected rather than filtered
+    /// so the refusal can say so instead of pretending the address is unknown.
+    pub(crate) deleted_at: Option<DateTime<Utc>>,
+}
+
+/// The refusal a marked account meets, with the date its data is removed (A355).
+///
+/// One function for the three entry points — `login`, `signup` and Google's `resolve_user` —
+/// so the sentence a student reads cannot differ by which door they came through. It is
+/// `account_deleted` rather than `unauthorized` because the remedy is different: nothing on
+/// the sign-in screen can fix it, and the honest answer names the account's own state.
+pub(crate) fn deletion_refusal(state: &AppState, deleted_at: DateTime<Utc>) -> AppError {
+    AppError::AccountDeleted {
+        purges_at: deleted_at + chrono::Duration::days(state.config.account_deletion_grace_days),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -465,9 +507,14 @@ pub async fn resend_verification(
 
 /// `GET /auth/me`
 pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<UserView>> {
+    // `deleted_at` is selected because [`LoginRow`] carries it. This route cannot see a
+    // marked account — `AuthUser` requires `deleted_at is null` — so the value is always
+    // `null` here; it is in the select because a struct's columns and a statement's columns
+    // have to agree, and one struct for "the account as auth needs it" is better than two
+    // that drift.
     let row = sqlx::query_as::<_, LoginRow>(
         "select id, email, password_hash, email_verified, email_verified_at, plan_id,
-                timezone, student_verified, created_at
+                timezone, student_verified, created_at, deleted_at
            from users where id = $1",
     )
     .bind(user.user_id)

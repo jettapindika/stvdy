@@ -22,6 +22,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sqlx::Row;
@@ -210,7 +211,7 @@ pub async fn exchange(
 
     let user = sqlx::query_as::<_, super::routes::LoginRow>(
         "select id, email, password_hash, email_verified, email_verified_at, plan_id,
-                timezone, student_verified, created_at
+                timezone, student_verified, created_at, deleted_at
            from users where id = $1 and deleted_at is null",
     )
     .bind(user_id)
@@ -400,29 +401,44 @@ async fn verify_id_token(
 async fn resolve_user(state: &AppState, claims: &IdTokenClaims) -> AppResult<Uuid> {
     let email = super::routes::normalize_email(&claims.email)?;
 
-    if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
-        "select id from users where google_sub = $1 and deleted_at is null",
-    )
-    .bind(&claims.sub)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("looking up a Google account: {error}")))?
-    {
-        return Ok(existing);
+    // The lookup deliberately does **not** filter `deleted_at` (A355). Filtering it out would
+    // take the two paths below to their insert, and the insert would fail on the unique index
+    // over `users.email` — a 500 for a student who deleted their account, which is the worst
+    // possible answer to a deliberate act. Selecting the column instead lets the refusal name
+    // what happened, and it costs one comparison.
+    let by_sub = sqlx::query("select id, deleted_at from users where google_sub = $1")
+        .bind(&claims.sub)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("looking up a Google account: {error}"))
+        })?;
+
+    if let Some(row) = by_sub {
+        let user_id: Uuid = row.get("id");
+        if let Some(deleted_at) = row.get::<Option<DateTime<Utc>>, _>("deleted_at") {
+            return Err(super::routes::deletion_refusal(state, deleted_at));
+        }
+        return Ok(user_id);
     }
 
-    let by_email = sqlx::query(
-        "select id, password_hash, google_sub from users where email = $1 and deleted_at is null",
-    )
-    .bind(&email)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("looking up an account: {error}")))?;
+    let by_email =
+        sqlx::query("select id, password_hash, google_sub, deleted_at from users where email = $1")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|error| {
+                AppError::Internal(anyhow::anyhow!("looking up an account: {error}"))
+            })?;
 
     if let Some(row) = by_email {
         let user_id: Uuid = row.get("id");
         let password_hash: Option<String> = row.get("password_hash");
         let google_sub: Option<String> = row.get("google_sub");
+
+        if let Some(deleted_at) = row.get::<Option<DateTime<Utc>>, _>("deleted_at") {
+            return Err(super::routes::deletion_refusal(state, deleted_at));
+        }
 
         if google_sub.is_none() && password_hash.is_some() {
             // Account-takeover refusal. A signed-in linking step is the way in,
