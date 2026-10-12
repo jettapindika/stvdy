@@ -8,7 +8,9 @@ import { PageHeader } from '@/components/layout/Section'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
 import { checkoutState, clock, countdown, orderLines, type CheckoutState } from '@/features/billing/checkout'
 import { CheckoutStatus } from '@/features/billing/CheckoutStatus'
+import { policyFor } from '@/features/billing/policy'
 import { qrModules } from '@/features/billing/qrcode'
+import { platform } from '@/platform'
 
 /**
  * The QRIS checkout screen: the amount, the code, and what the server says.
@@ -52,6 +54,7 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
   const payment = usePayment(paymentId)
   const checkout = useCheckout()
   const [now, setNow] = useState(() => Date.now())
+  const policy = policyFor(platform.kind())
 
   const view = payment.data
   const state: CheckoutState =
@@ -97,6 +100,26 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
             billing_period: (view.billing_period ?? undefined) as 'monthly' | 'yearly' | undefined,
           },
       { onSuccess: (next) => void navigate(`/billing/checkout/${next.id}`) },
+    )
+  }
+
+  // The platform gate, first, and before the poll: on a platform whose policy
+  // forbids purchase UI this screen renders the honest statement and **mounts
+  // nothing else** — no query, no QR, no order summary, no way to pay. The route
+  // is registered unconditionally (the table is evaluated at module scope, before
+  // a platform exists), so this is the check that makes an unreachable-by-
+  // navigation URL *stay* unreachable when a reviewer types it: a store build must
+  // not present a purchase screen on any path, not merely lack a link to one.
+  //
+  // It is the same shape `PricingScreen` uses, deliberately: one convention for
+  // "this platform does not sell", rather than a route-level gate here and a
+  // component-level one there.
+  if (!policy.allowPurchaseUi) {
+    return (
+      <div className="flex flex-col gap-6 px-5 py-6">
+        <PageHeader title={t('checkout.title')} subtitle={t('plan.subtitle')} />
+        <p className="max-w-prose text-sm text-muted">{t('plan.mobile.noPurchase')}</p>
+      </div>
     )
   }
 

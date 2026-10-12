@@ -190,6 +190,27 @@ describe('the checkout screen', () => {
     expect(await screen.findByText(/Order stvdy_0f1e2d3c/)).toBeInTheDocument()
   })
 
+  it('offers no purchase surface on a platform whose policy forbids one', async () => {
+    // The route is registered unconditionally — the table is evaluated at module
+    // scope, before a platform exists — so a phone build has a
+    // `/billing/checkout/:id` URL that must not present a purchase screen when a
+    // reviewer types it. Nothing on mobile links here and the deep-link classifier
+    // has no billing path, so this is the check that keeps it that way, and it is
+    // the defect P14AbsencePhone found: the screen rendered the amount, the QR and
+    // the countdown on `ios` because it never consulted `billing_policy`.
+    installFakePlatform('ios')
+    // The route's own answer is planted: if the screen reached the poll at all,
+    // this payment would render. The assertion is that it never gets that far.
+    const { container } = renderCheckout()
+
+    expect(await screen.findByText(/does not sell subscriptions/)).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/Rp\u00a0|IDR\u00a0/)
+    expect(container.querySelectorAll('button, a')).toHaveLength(0)
+    expect(qr(container)).toBeNull()
+    // And no request was made for the invoice, because there is nothing to show.
+    expect(container.textContent).not.toContain('Waiting for confirmation')
+  })
+
   it('reads the whole screen in Indonesian, including the state', async () => {
     await i18n.changeLanguage('id')
     renderCheckout()
