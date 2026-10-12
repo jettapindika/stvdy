@@ -143,6 +143,25 @@ smoke-server-phase6:
 smoke-phase6:
     BASE=http://localhost:8099 bash scripts/smoke-phase6.sh
 
+# Phase 7's run. Same stub and server as Phase 2: nothing in this phase needs a
+# strict-JSON reply, so the stub's default prose answer is what the chat turns use. No
+# browser is needed — this run prints no PDF — so unlike Phase 6, CHROME_PATH is not part
+# of the pairing.
+#
+# It does read the database back (the concurrency proof, the downgrade's read-only flags,
+# the ceiling's untouched ledger), so it needs `DATABASE_URL`, which it reads out of `.env`
+# itself. It also prunes `signup_attempts` for 127.0.0.1 at the start, because A154's window
+# is 24h and every run of this script adds to it.
+smoke-llm-phase7:
+    python3 scripts/stub-llm.py --port 8100 --log var/stub-phase7-requests.jsonl
+
+smoke-server-phase7:
+    LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
+      BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
+
+smoke-phase7:
+    BASE=http://localhost:8099 bash scripts/smoke-phase7.sh
+
 # --- Phase 3 smoke: web search against the real academic tier ---
 #
 # The academic tier is keyless and reachable from this machine, so the run gets
