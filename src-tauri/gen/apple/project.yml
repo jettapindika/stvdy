@@ -56,7 +56,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.0
+        CFBundleShortVersionString: 0.1.1
         CFBundleVersion: "0.1.0"
     entitlements:
       path: stvdy-shell_iOS/stvdy-shell_iOS.entitlements
@@ -131,7 +131,7 @@ targets:
         # `bundle.iOS.bundleVersion` merge reaches the app's plist only. So these two
         # mirror `tauri.conf.json`'s `version` and `bundle.iOS.bundleVersion`, and
         # `tests/share_group.rs` asserts they still do rather than trusting a comment.
-        CFBundleShortVersionString: 0.1.0
+        CFBundleShortVersionString: 0.1.1
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
