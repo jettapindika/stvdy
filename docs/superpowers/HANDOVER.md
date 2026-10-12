@@ -3,6 +3,47 @@
 Written while the remaining phases execute. Everything that could be done without you has
 been; this is the list of things that cannot be.
 
+## Launch blockers found in the code, not in `ASSUMPTIONS.md`
+
+These are **code gaps**, not credential gaps, and each one stops a store submission on its own.
+They were found while writing the store checklists (Phase 15), and they are recorded here because
+nothing in a phase's own file list owned them:| # | What is missing | Why it blocks |
+|---|---|---|
+| **In-app account deletion** | No route exists: no `/account` handler in `crates/server/src/routes/mod.rs`, and `purge_deleted_accounts` appears only as a **comment** in `migrations/0015_jobs.sql:11` with no dispatching handler. `SettingsScreen.tsx:37` lists it under "Not built yet" | Apple requires in-app deletion of an account an app can create. Phase 7's plan re-tagged `## Account` away from itself (A160) and deferred it to "the release prerequisites", where nothing picked it up |
+| **The Play account-deletion URL** | The public URL and the server route behind it both do not exist | Google Play requires a public deletion URL for any app with account creation |
+| **The iOS build number** | `src-tauri/tauri.conf.json` sets no `bundle.bundleVersion`, so `CFBundleVersion` is derived from the shell version (`0.1.0`). Bumping the shell version is currently the only way to bump the build number | A second submission without a higher build number is rejected as a duplicate |
+
+The first two are the same feature and it is a product-scope decision rather than a task: they need
+the retention/purge machinery, a confirm step, and copy that says what is deleted. Say the word and
+I will implement it — it is not large, but it is not mine to invent either.
+
+## One environment note worth acting on
+
+**The machine is nearly out of disk, and it has already cost work.** `/System/Volumes/Data` is 95%
+full with ~22 GB free, and the repository's `target/debug` alone is **74 GB** (plus 2.7 GB of
+`target/release`). Two builds have failed on it: Phase 13's test run died mid-run with
+`No space left on device`, and Phase 15's one local `docker build` attempt died with the Docker
+daemon, which no longer starts (`docker info` fails; `~/Library/Containers/com.docker.docker` is
+6.2 GB).
+
+Nothing on the critical path needs Docker except the server-image build, which CI is meant to be the
+evidence for anyway. What it does need is enough space for `cargo test --workspace` and
+`npm --prefix app test` to finish, so the remaining slices can verify.
+
+If you want 40 GB back cheaply:
+
+```bash
+cd /Users/mac/Documents/Coding/project/Stvdy
+cargo clean -p stvdy-server -p stvdy-core -p stvdy-sync -p stvdy-shell   # or just: cargo clean
+```
+
+`cargo clean` deletes all 76 GB under `target/` and the next build rebuilds it from scratch (a few
+minutes for this workspace). That is the single largest reclaimable thing on the disk, and it costs
+only time. **I have not run it**: a full rebuild competes with several live `cargo` invocations for
+the same `target/` lock, and the machine's 128 GB `~/Documents` is somewhere I will not touch. Your
+call — and if you would rather not, the failures above will show up again as flakes rather than as
+errors.
+
 ## Standing blockers (from `docs/ASSUMPTIONS.md` § Blockers)
 
 These need **you**, not code, and they block a public launch rather than a phase:
