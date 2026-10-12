@@ -11,6 +11,7 @@ stvdy-core.workspace = true
 stvdy-sync.workspace = true
 anyhow.workspace = true
 headless_chrome.workspace = true
+rust-embed.workspace = true
 dotenvy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -69,6 +70,20 @@ quick-xml = "0.42"
 pdf-extract.workspace = true
 tokio = { workspace = true, features = ["full"] }
 http-body-util = "0.1.3"
+toml = { workspace = true }
+# `tests/release.rs` exercises the updater's trust chain (Phase 15, Task 1). These
+# two are the exact crates on either side of it, so the test verifies the way the
+# app verifies rather than the way a re-implementation of it would:
+#
+# - `minisign-verify` is what `tauri-plugin-updater` 2.13.3 itself calls
+#   (`updater.rs:1808-1811`), pinned to the same major so a plugin bump that
+#   changed the algorithm would move this test too.
+# - `minisign` generates the **fixture** keypair and signs the fixture manifest.
+#   It can sign, which is why it is a dev-dependency and never a dependency: the
+#   production private key is a GitHub Actions secret and the verification script
+#   refuses to run with it set (A332).
+minisign-verify = "0.3"
+minisign = "0.10"
 
 [lints]
 workspace = true

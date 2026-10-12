@@ -144,6 +144,10 @@ pub struct Renderer {
     /// the executable path rather than as `LaunchOptions` because that type is not `Clone`.
     executable: Option<String>,
     allow_no_sandbox: bool,
+    /// Where the template's print assets are served from, applied to every document before it
+    /// reaches the page (`rewrite_asset_base`). `None` leaves the template's own references
+    /// alone, which is the state a unit test that renders a hand-written document wants.
+    assets_base: Option<String>,
     browser: std::sync::Mutex<Arc<Browser>>,
 }
 
@@ -156,11 +160,20 @@ impl Renderer {
     /// `sandbox` is off only when explicitly asked for, because a container that cannot use
     /// the namespace sandbox is a deployment fact, not a default. Outside dev the renderer
     /// must not run unsandboxed: it is rendering model-influenced HTML.
-    pub fn launch(executable: Option<&str>, allow_no_sandbox: bool) -> Result<Self, RenderError> {
+    ///
+    /// `assets_base` is the origin the template's print assets are served from. `None` means
+    /// the document keeps whatever references it carries, which is right for a document with
+    /// no template assets in it.
+    pub fn launch(
+        executable: Option<&str>,
+        allow_no_sandbox: bool,
+        assets_base: Option<&str>,
+    ) -> Result<Self, RenderError> {
         let browser = Self::launch_browser(executable, allow_no_sandbox)?;
         Ok(Self {
             executable: executable.map(str::to_string),
             allow_no_sandbox,
+            assets_base: assets_base.map(str::to_string),
             browser: std::sync::Mutex::new(browser),
         })
     }
@@ -257,6 +270,15 @@ impl Renderer {
 
         tab.set_default_timeout(RENDER_TIMEOUT);
 
+        // The template's print assets are pointed at this server before the page is written,
+        // so a render never depends on a third-party origin being reachable. Applied here
+        // rather than in the caller because both callers (the cheatsheet job and the report
+        // export) render a compiled-in template and neither knows the base.
+        let html = match &self.assets_base {
+            Some(base) => rewrite_asset_base(html, base),
+            None => html.to_string(),
+        };
+
         // `load` rather than `domcontentloaded`: the template's KaTeX renderer waits for
         // `load` because it needs the deferred scripts to have executed, and a PDF taken
         // before that has every formula as literal `$...$`.
@@ -264,7 +286,7 @@ impl Renderer {
         // URL length limit, and `document.write` is what a document with no URL needs.
         let script = format!(
             "document.open(); document.write({}); document.close();",
-            serde_json::to_string(html).map_err(|error| RenderError::Page(error.to_string()))?
+            serde_json::to_string(&html).map_err(|error| RenderError::Page(error.to_string()))?
         );
         tab.evaluate(&script, false)
             .map_err(|error| RenderError::Page(error.to_string()))?;
@@ -355,6 +377,84 @@ fn math_ready_probe(timeout_ms: u64) -> String {
          \x20 check();\n\
          }})"
     )
+}
+
+/// The KaTeX version the print assets are vendored at (`assets/checksums.txt`).
+///
+/// Named here because the rewrite matches the template's CDN URLs, which carry it: bumping
+/// the template to another KaTeX without re-vendoring must not silently leave the reference
+/// remote. It does not — `crates/server/tests/assets.rs` asserts the rewritten document has
+/// no reference outside the server, so a version bump that is not paired with a rewrite
+/// rule fails the suite.
+const KATEX_VERSION: &str = "0.19.0";
+
+/// Points the template's CDN references at the server's own origin.
+///
+/// The template documents this rewrite and nothing implemented it — its own comment
+/// (`templates/cheatsheet.v1.html`) says `ASSET_BASE` is rewritten to a local mount, and
+/// `grep ASSET_BASE --include=*.rs` found no code. So a container with no egress rendered
+/// every formula as literal `$…$`, which the `data-math-ready` guard turns into a failed job
+/// rather than a wrong document (A339, A340).
+///
+/// `base` is the server's loopback origin — `AppConfig::assets_base_url`, defaulting to
+/// `http://127.0.0.1:<BIND_ADDR port>`. It has to be an **absolute** URL: `document.write`
+/// gives the page no base URL, so a relative reference would not resolve, and a `file://`
+/// one is a scheme the browser refuses for a written document.
+///
+/// The pairs are exact prefixes rather than a regex over "any remote URL", so a template that
+/// gained a *new* remote reference is not silently rewritten to the wrong local path: it
+/// survives the rewrite, and `crates/server/tests/assets.rs` fails on it. That is the whole
+/// reason the function is a table of known URLs and not a general rewriter.
+pub fn rewrite_asset_base(html: &str, base: &str) -> String {
+    let base = base.trim_end_matches('/');
+
+    // The `dist/` prefix is replaced rather than the whole URL, so the file path
+    // (`katex.min.css`, `contrib/auto-render.min.js`, …) is carried over and one rule covers
+    // all three references.
+    let mut rewritten = html.replace(
+        &format!("https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist/"),
+        &format!("{base}/assets/katex/"),
+    );
+
+    // The stylesheet the template linked from `fonts.googleapis.com` is replaced by the one
+    // `assets/fonts.css` declares, and the *whole* URL goes: the leftover
+    // `?family=Inter:…&display=swap` would name a Google API query that is no longer made.
+    rewritten = replace_url(
+        &rewritten,
+        "https://fonts.googleapis.com/css2",
+        &format!("{base}/assets/fonts.css"),
+    );
+
+    // The two preconnect hints become hints about the server, so the browser does not open a
+    // connection to an origin the document no longer uses. Rewritten rather than deleted
+    // because the template's markup is the template's business; what this function promises is
+    // that no third-party origin survives in it.
+    for origin in ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] {
+        rewritten = replace_url(&rewritten, origin, base);
+    }
+
+    rewritten
+}
+
+/// Replaces `prefix` **and the rest of the URL it begins** with `replacement`.
+///
+/// The end of the URL is the first character that cannot be in one: a quote, an angle bracket,
+/// a closing paren, or whitespace. Needed for the Google Fonts stylesheet, whose query string
+/// is part of the URL the template wrote and not part of what replaces it.
+fn replace_url(html: &str, prefix: &str, replacement: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(at) = rest.find(prefix) {
+        out.push_str(&rest[..at]);
+        out.push_str(replacement);
+        let after = &rest[at + prefix.len()..];
+        let end = after
+            .find(|c: char| matches!(c, '"' | '\'' | '>' | ')' | ' ' | '\n' | '\r' | '\t'))
+            .unwrap_or(after.len());
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The running header, on every page.

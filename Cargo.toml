@@ -35,6 +35,13 @@ headless_chrome = "1.0.22"
 # returning nothing, which would have made the `no raw $` assertion pass vacuously: the
 # one assertion the test exists for. A real extractor is the only honest option.
 pdf-extract = "0.12.1"
+# The print assets (`assets/`) are embedded at compile time and served from
+# `GET /assets/{*path}` (A339). Embedded rather than read from disk so a missing file is
+# a build failure instead of a 404 at print time — the asset that would be missing is a
+# KaTeX stylesheet, and the failure it causes is a PDF full of literal `$…$`.
+# No `mime-guess`: the route maps the three extensions it serves to their content types
+# explicitly, so the dependency would only be a second source of truth.
+rust-embed = "8.13.0"
 
 # --- errors / logging ---
 thiserror = "2.0.21"
@@ -139,6 +146,10 @@ reqwest = { version = "0.13.5", default-features = false, features = [
   "rustls",
   "stream",
   "multipart",
+  # APNs' provider API is HTTP/2-only (A288). `default-features = false` turns the
+  # feature off, and without it the request is HTTP/1.1, which APNs answers with
+  # nothing useful — a `BadRequest` with no explanation of what was wrong.
+  "http2",
 ] }
 url = "2.5.8"
 oauth2 = "5.0.0"

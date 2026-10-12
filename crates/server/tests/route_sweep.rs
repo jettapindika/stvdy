@@ -223,6 +223,30 @@ fn read_only_rows() -> Vec<Row> {
         ),
         ro("GET", "/tasks", "reads the caller's own tasks"),
         ro("POST", "/tasks", "creating a task spends nothing"),
+        // Phase 11. Goals are not plan-gated: the free plan has goals and a **manual**
+        // planner, so only the two generating routes carry a refusal. `GET /plans/{id}` and
+        // `POST /plans/accept` are reads of the caller's own proposal — the two credits were
+        // charged at plan time (A264).
+        ro("GET", "/goals", "reads the caller's own goals"),
+        ro(
+            "POST",
+            "/goals",
+            "creating a goal spends nothing; the planner is the gated part",
+        ),
+        ro("GET", "/goals/{id}", "reads the caller's own goal"),
+        ro("PATCH", "/goals/{id}", "editing a goal spends nothing"),
+        ro("DELETE", "/goals/{id}", "deleting frees the anchor, not a slot"),
+        ro(
+            "GET",
+            "/goals/{id}/progress",
+            "computed from the caller's own attempts",
+        ),
+        ro("GET", "/plans/{id}", "reads the caller's own proposal"),
+        ro(
+            "POST",
+            "/plans/accept",
+            "the 2 credits were charged at plan time",
+        ),
         ro("PATCH", "/tasks/{id}", "editing a task spends nothing"),
         ro("DELETE", "/tasks/{id}", "deleting a task spends nothing"),
         ro("GET", "/events", "reads the caller's own events"),
@@ -276,6 +300,27 @@ fn read_only_rows() -> Vec<Row> {
             "/settings",
             "a channel the plan does not grant is refused per channel by the engine, which \
              crates/server/tests/settings.rs asserts with a body (A209)",
+        ),
+        // BYOK (A302). `GET` and `DELETE` are read-only in the sweep's sense: removing a key
+        // is the remedy a refusal names, and a read of one's own key description must work for
+        // an account whose plan no longer grants BYOK — that is exactly when a student needs
+        // to see what is stored. `PUT` is the one that is gated, by the plan *and* the
+        // platform, and both are asserted in tests/byok.rs.
+        ro(
+            "GET",
+            "/settings/api-key",
+            "reads whether the caller has a key, never the key",
+        ),
+        ro(
+            "DELETE",
+            "/settings/api-key",
+            "removing one's own key is a remedy, not a spend",
+        ),
+        ro(
+            "PUT",
+            "/settings/api-key",
+            "the plan gate (Feature::Byok) and the platform refusal are asserted in \
+             tests/byok.rs, the same way tests/settings.rs asserts the channel refusal (A302)",
         ),
         // Phase 13's billing routes. All `ReadOnly`, and the reason is the same for all of
         // them: **buying is the remedy an exhausted account needs**, so gating checkout on
@@ -448,6 +493,23 @@ fn swept_rows() -> Vec<Row> {
             "SyllabusImport",
             422,
             "limit_reached",
+        ),
+        // Phase 11. The plan generation is priced and gated: free's `planner = "manual"`
+        // makes `Feature::PlanGeneration` false, so an exhausted free account meets
+        // `plan_required` before the two credits are considered (A257).
+        swept(
+            "POST",
+            "/goals/{id}/plan",
+            "PlanGeneration",
+            403,
+            "plan_required",
+        ),
+        swept(
+            "POST",
+            "/plan/replan",
+            "PlanGeneration",
+            403,
+            "plan_required",
         ),
     ]
 }

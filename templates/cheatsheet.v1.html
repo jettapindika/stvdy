@@ -45,12 +45,18 @@
 
   ASSETS
   ------
-  KaTeX and the Google Fonts are the only external dependencies, as specified.
-  For hermetic server-side rendering the renderer rewrites ASSET_BASE (below) to
-  a local mount, so a PDF never depends on a CDN being reachable. If KaTeX fails
-  to load for any reason, formulas fall back to the literal text between the
-  delimiters. Which is why every formula is also written to be readable as
-  plain text.
+  KaTeX and the typefaces are the only external dependencies. They are **vendored**
+  under `assets/` and served by this server from `/assets/{*path}`: the renderer
+  rewrites the CDN URLs below to the server's own origin before the page is written
+  (`crates/server/src/render/chrome.rs::rewrite_asset_base`, A339). So a PDF never
+  depends on a third-party CDN being reachable — a slow or blocked CDN would
+  otherwise leave every formula as the literal text between its delimiters.
+
+  **The URLs below are the browser-print fallback and the rewrite's input.** They are
+  not a mistake to be "cleaned up": `rewrite_asset_base` matches them, and
+  `crates/server/tests/assets.rs` fails if a remote reference survives the rewrite —
+  so a new remote reference here must be paired with a rule there, or the test says so.
+  Which is also why every formula is written to be readable as plain text.
 -->
 <html lang="{{lang}}">
 <head>
@@ -58,17 +64,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{doc_title}}</title>
 
-<!-- KaTeX. ASSET_BASE is rewritten to a local mount by the server renderer, which
-     vendors katex + the woff2 fonts into the image. The CDN URLs are the
-     browser-print fallback; a PDF export must not depend on a third-party CDN at
-     render time, because a slow or blocked CDN leaves every formula as literal
-     $...$ text in the PDF. A silent, plausible-looking failure, and a cheatsheet
-     is mostly math.
-
-     No `integrity` attribute on purpose: these are placeholder-free CDN URLs and
-     a hand-written SRI hash would be a guess. A wrong hash does not degrade, it
-     BLOCKS the script. If SRI is wanted, copy the real published hashes from the
-     jsdelivr package page. Never write one by hand. -->
+<!-- KaTeX, at the version `assets/checksums.txt` pins and `rewrite_asset_base` names.
+     The server rewrites this to its own `/assets/katex/…`, so a render does not depend
+     on a third-party CDN. A PDF export that could not reach the CDN would leave every
+     formula as literal $...$ text in the PDF: a silent, plausible-looking failure, and a
+     cheatsheet is mostly math. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css">
 <!-- `defer` so these execute after parsing, in order, before the `load` event
      the render script below waits for. A non-deferred inline script in <head>
@@ -76,6 +76,8 @@
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/contrib/auto-render.min.js"></script>
 
+<!-- The typefaces. The server rewrites this whole stylesheet link to `/assets/fonts.css`,
+     which declares Inter and JetBrains Mono against the vendored woff2 files. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"

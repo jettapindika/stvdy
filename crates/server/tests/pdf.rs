@@ -28,6 +28,39 @@ fn chrome_path() -> Option<String> {
     find_executable()
 }
 
+/// Serves the print assets on a loopback port and returns the origin they answer on.
+///
+/// The acceptance test renders the **real** template, whose asset references the renderer
+/// rewrites to `<base>/assets/…` (A339) — so the test needs something at that base. Serving the
+/// server's own route on an ephemeral port is the honest way to get one: it exercises the real
+/// handler and the real embedded bytes, it needs no database and no network, and it fails for
+/// an asset reason rather than for "the server is not up yet".
+///
+/// The runtime is moved to its own thread and never shut down, which is what a `#[test]` that
+/// drives a blocking browser needs: the server must outlive the render.
+fn serve_assets() -> String {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime for the asset server");
+    let listener = runtime.block_on(async {
+        tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a loopback port")
+    });
+    let port = listener.local_addr().expect("the bound address").port();
+
+    let app = axum::Router::new().route(
+        "/assets/{*path}",
+        axum::routing::get(stvdy_server::assets::serve),
+    );
+    std::thread::spawn(move || {
+        let _ = runtime.block_on(async { axum::serve(listener, app).await });
+    });
+
+    format!("http://127.0.0.1:{port}")
+}
+
 fn labels() -> ContextLabels {
     ContextLabels::new(
         vec![LabeledChunk {
@@ -157,7 +190,14 @@ fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
         .expect("the document renders")
         .html;
 
-    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    // The template's KaTeX and font references are rewritten to this server before the page is
+    // written, so the render depends on the assets being served rather than on a CDN being
+    // reachable. That is what makes the `no raw $` assertion below a statement about the print
+    // assets: if a stylesheet or a script 404s, `renderMathInElement` is undefined, the template
+    // reports `unavailable`, and the render fails rather than printing literal LaTeX.
+    let base = serve_assets();
+
+    let renderer = Renderer::launch(Some(&path), false, Some(&base)).expect("the browser launches");
     let pdf = renderer
         .render(&html, "Cheatsheet UTS Jaringan Komputer")
         .expect("the PDF renders");
@@ -174,17 +214,34 @@ fn the_cheatsheet_renders_to_a_six_page_a4_pdf() {
     );
 
     let text = extract_text(&pdf.bytes);
+
+    // The footer and the running header are matched with **all** whitespace removed from both
+    // sides, and that is not a weakened assertion — it is the same one against a lossy reader.
+    //
+    // `pdf-extract` reconstructs text from glyph positions, and at the footer's 8pt it splits
+    // words at a kerning boundary: the Phase 15 image work extracted
+    // `H alaman 2 dari 6` and `C heatsheet UTS  Jaringan K omputer` from a document whose
+    // footer and header render correctly, and only once the typefaces resolved (with the CDN
+    // stylesheet unreachable the footer fell back to Arial and the same extractor read it
+    // cleanly). The property this assertion exists for is "CDP's footer and header templates
+    // reached the PDF", and a space inside a word is the extractor's, not the document's.
+    // Stripping whitespace keeps the word sequence — `CheatsheetUTSJaringanKomputer` — so a
+    // footer that was absent or carried different words still fails.
+    //
+    // The `no raw $` assertion below is deliberately **not** run against this: a `$` is a
+    // character rather than a spacing artefact, and no normalisation can hide one.
+    let unspaced: String = text.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(
-        text.contains("Halaman"),
-        "the footer text is in the PDF, so the CDP template reached it"
+        unspaced.contains("Halaman"),
+        "the footer text is in the PDF, so the CDP template reached it: {text}"
     );
     assert!(
-        text.contains("Cheatsheet UTS Jaringan Komputer"),
-        "the running header is in the PDF"
+        unspaced.contains("CheatsheetUTSJaringanKomputer"),
+        "the running header is in the PDF: {text}"
     );
     assert!(
-        text.contains("Bab 1") || text.contains("Bab 1".to_uppercase().as_str()),
-        "the chapter titles are in the PDF"
+        unspaced.contains("Bab1") || unspaced.contains("BAB1"),
+        "the chapter titles are in the PDF: {text}"
     );
 
     // The assertion that matters. A broken KaTeX asset leaves the maths as literal `$...$`:
@@ -224,7 +281,7 @@ fn a_document_that_never_reports_its_maths_fails_the_render() {
         panic!("no Chromium found; set CHROME_PATH");
     };
 
-    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    let renderer = Renderer::launch(Some(&path), false, None).expect("the browser launches");
     // Complete, printable, and silent about its maths.
     let html = "<!DOCTYPE html><html lang=\"id\"><head><meta charset=\"utf-8\">\
                 <title>T</title></head><body><p>$x$</p></body></html>";
@@ -259,7 +316,7 @@ fn a_template_that_reports_katex_unavailable_fails_the_render() {
         panic!("no Chromium found; set CHROME_PATH");
     };
 
-    let renderer = Renderer::launch(Some(&path), false).expect("the browser launches");
+    let renderer = Renderer::launch(Some(&path), false, None).expect("the browser launches");
     let html = "<!DOCTYPE html><html lang=\"id\"><head><meta charset=\"utf-8\"><title>T</title>\
                 </head><body><p>$x$</p><script>\
                 document.documentElement.dataset.mathReady = 'unavailable';</script></body></html>";
