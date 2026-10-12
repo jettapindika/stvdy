@@ -213,18 +213,36 @@ named here rather than fixed, and neither is this slice's code to write.
 
 ## Privacy labels
 
-Store privacy disclosures must be confirmed before launch. Known data the app
-handles: account email, uploaded study material, chat content, calendar events,
-device identifiers for push, and payment records. B2 in `docs/ASSUMPTIONS.md`.
+Store privacy disclosures must be confirmed before launch, and **the inventory is
+`docs/EULA.md` § 9** ("What we collect, why, and for how long") — it is listed once, there, so the
+notice the user reads and the labels the stores require cannot drift into two different claims.
+This section deliberately does not repeat the list.
+
+The two forms are App Store Connect's privacy labels and Play's Data Safety form, and **both are
+typed `user`** in § Store submission checklists (A1, G1): the data classes are known and written
+down, but the wording and the mapping to each store's categories are B2's legal input. A class the
+product collects and the form omits is a false statement to the store, which is why the rows are
+not closed by an agent.
 
 ## Account deletion
 
-In-app `Delete account`, also required by app store rules. It deletes or
-anonymizes the user's data, revokes all sessions, and cancels pending jobs. There
-are no recurring charges to cancel; remaining prepaid time is forfeited, which
-must be stated in the UI before confirmation.
+**In-app `Delete account` is required by app store rules, and it is not built.** This is the
+intended behaviour, and the distinction is load-bearing rather than pedantic:
 
-`Export my data` produces JSON + Markdown + ICS.
+- It will delete or anonymize the user's data, revoke all sessions, and cancel pending jobs.
+- There are no recurring charges to cancel. **Remaining prepaid time is forfeited, and that must be
+  stated in the UI before confirmation** — deleting an account is immediate and irreversible, and
+  nobody should discover this afterwards.
+- `Export my data` will produce JSON + Markdown + ICS.
+
+**What exists today: nothing.** There is no `/account` route in `crates/server/src/routes/mod.rs`,
+no `DELETE /account` or `GET /account/export` handler, and no `purge_deleted_accounts` dispatcher —
+only a comment naming the job kind in `migrations/0015_jobs.sql`. `docs/API.md` § Account tags both
+routes as Phase 15 work, `app/src/features/settings/SettingsScreen.tsx` renders the control under a
+"not built yet" label, and `docs/OPERATIONS.md` § Retention records the same gap from the retention
+side. Both stores require in-app deletion **and** a public deletion URL for an app that can create
+accounts, so checklist rows A2 and G2 are typed `blocked` rather than `code`, and the same gap is
+why `docs/EULA.md` § 9's deletion promise is a draft rather than a description of the product.
 
 ## Release process
 
@@ -431,8 +449,19 @@ than shipping a document full of LaTeX source (A340).
 
 ## Tax and PPN
 
-Unconfirmed (B2). Invoices currently carry no tax line items. Tax treatment and
-PPN handling must be settled before launch.
+**Unconfirmed, and it is B2 that blocks it** (`docs/superpowers/HANDOVER.md`). Invoices currently
+carry no tax line items, so a receipt issued today is not a tax document — which is why this is a
+launch blocker rather than a formatting issue, and why launch checklist row 9 is typed `user`.
+
+**The same blocker covers the privacy text.** B2 is "tax/PPN treatment **and** store privacy-label
+text" because both are legal questions rather than technical ones, and `docs/EULA.md` carries the
+draft of both: its tax clause and the retention window for payment records are `<placeholders>` on
+purpose, and its § 9 data inventory is what the App Store privacy labels and the Play Data Safety
+form are derived from. A value invented in either place would be a false statement made to every
+user, so the draft says what it does not know. Launch checklist row 8 is the privacy half.
+
+`docs/EULA.md` is **not published** and its own banner says so: it requires legal review before a
+single user sees it. The service is not launched publicly until rows 8 and 9 are closed.
 
 ## Versioning
 
