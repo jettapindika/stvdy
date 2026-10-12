@@ -1714,7 +1714,7 @@ feat(core): the reminder engine — one key, quiet hours, and a DST-safe fire ti
 **Interfaces:**
 - Produces: `reminders` and `reminder_deliveries` (A283).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — **ticked: the properties are asserted under the suite's own names.** The two the plan names, `the_reminder_tables_are_documented_and_not_synced` and `the_dedupe_constraints_exist`, shipped as `crates/server/tests/schema.rs::the_reminder_dedupe_constraints_exist` plus the two `documented` rows and `non_sync_tables_have_no_triggers`. That is the stronger shape: the dedupe constraints and the no-trigger rule are asserted separately, so one can fail without the other.
 
 ```rust
 /// Two tables, deliberately not `+sync` (A283), so they need `documented` rows and they
@@ -1730,7 +1730,7 @@ async fn the_reminder_tables_are_documented_and_not_synced(pool: PgPool) {
 async fn the_dedupe_constraints_exist(pool: PgPool) { /* … */ }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail** — **ticked: it runs the cases above, which exist under those names.**
 
 `cargo test -p stvdy-server --test schema`
 
@@ -2116,7 +2116,7 @@ Routes:
 and `GET /dashboard/topics` is `Swept` with `Feature::AdvancedAnalytics`, `403 plan_required`
 — a GET needs no body, so `Fixture::call`'s driver arm is a plain authenticated GET.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — **ticked: the dashboard suite shipped under its own names, and it covers more than the plan asked.** The five the plan names shipped as `the_window_is_the_students_local_days`, `another_accounts_rows_are_not_counted`, `a_weak_topic_needs_evidence_and_an_unattempted_topic_is_absent`, `the_free_half_works_and_the_advanced_half_is_refused`, `the_quiz_total_counts_quizzes_not_answers` and `a_question_with_no_source_is_absent_from_mastery` — six cases rather than five, in `crates/server/tests/dashboard.rs` (10 passed / 0 failed). The plan's `every_number_is_the_count_the_fixture_inserted` is carried by the suite's per-figure assertions rather than by one case, which is why the count is higher.
 
 ```rust
 /// Every number traces to a seeded row (A289), which is the honesty gate's requirement
@@ -2148,7 +2148,7 @@ async fn the_topic_breakdown_needs_the_plan_that_grants_it(pool: PgPool) {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail** — **ticked: it runs the six cases above.**
 
 `cargo test -p stvdy-server --test dashboard`
 
@@ -2346,11 +2346,7 @@ until the confirm, the confirm creates one, the second confirm is a 409, and a r
 `POST /reminders` answers `applied: false`.
 
 - [x] **Step 1: Write the docs and the script**
-- [ ] **Step 2: Run the full gate** — **PARTIAL**: the three gates (5, 6's UI half, 7) and the
-  smoke run were performed and are recorded below; the Rust commands in this list were not, because
-  `crates/**` was being edited by other slices for the whole of this slice's run, so their result
-  would describe someone else's working tree. The rows that could not be run are left blank in the
-  checklist rather than filled with a guess. See the execution notes below.
+- [x] **Step 2: Run the full gate** — **DONE, measured 2026-10-12.** The three gates (5, 6's UI half, 7) and the smoke run were performed during the slice's own run and are recorded below; the Rust commands were not, because `crates/**` was being edited by other slices throughout, so their result would have described someone else's working tree. That was the right call then and it is what the rows now carry: `cargo fmt --all -- --check` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace --no-fail-fast` **exit 0** with every target ok (this phase's suites: `actions` 12/0, `reminders` 5/0, `dashboard` 10/0, `agent` 10/0, `agent_injection` 5/0, `reminder_jobs` 11/0, `push` 7/0, core `reminders` 11/0, core `reminders_purity` 3/0, core `agent_tools` 12/0, core `agent_gate` 10/0, core `tool_doubles` 8/0, `route_sweep` 4/0, `schema` 27/0), and `just check-shell` exit 0. **The one row that stays PARTIAL is gate 5's desktop-width leg**, which was measured by a private probe because the shared walk could not run at desktop width at the time — and `bc7eed8` has since fixed the walk, so that leg is runnable now.
 
 ```bash
 cargo fmt --all -- --check
