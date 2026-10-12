@@ -11,6 +11,7 @@ import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen'
 import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { CalendarScreen } from './features/calendar/CalendarScreen'
+import { DashboardScreen } from './features/dashboard/DashboardScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { SettingsScreen } from './features/settings/SettingsScreen'
@@ -123,6 +124,13 @@ export const router = createBrowserRouter([
           {
             path: 'tasks',
             element: <TasksScreen />,
+          },
+          // The progress dashboard. It is reached from the plan section of Settings
+          // rather than from the nav: the rail and the tab bar share five labels
+          // (A189), and a sixth would take width from all of them.
+          {
+            path: 'dashboard',
+            element: <DashboardScreen />,
           },
           {
             path: 'settings',
