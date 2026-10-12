@@ -2376,7 +2376,7 @@ docs(phase 12): the agent, the reminders, and the dashboard as built
 |---|---|---|---|
 | 1 | Formatting | `cargo fmt --all -- --check` | **PASS** — clean, exit 0 |
 | 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **PASS** — clean, exit 0 (was red with twelve lints until `31900fb`) |
-| 3 | Rust tests | `cargo test --workspace` | **NOT MEASURED** — `cargo test --workspace` cannot complete: it stops at the first failing binary, `crates/server/tests/syllabus.rs` (**14 passed / 5 failed**, Phase 11's exit gate, still being diagnosed), so it says nothing about the Phase 12 suites. Those are counted individually in rows 9–22 |
+| 3 | Rust tests | `cargo test --workspace` | **PASS, measured 2026-10-12.** `cargo test --workspace --no-fail-fast` → **exit 0**, every target ok — the first green run of this gate in the project's history. This phase's own suites are counted individually in rows 9–22 (`actions` 12/0, `reminders` 5/0, `dashboard` 10/0, `agent` 10/0, `agent_injection` 5/0, core `reminders` 11/0, core `reminders_purity` 3/0, `reminder_jobs` 11/0, `push` 7/0, core `agent_tools` 12/0, core `agent_gate` 10/0, core `tool_doubles` 8/0, `route_sweep` 4/0, `schema` 27/0). The earlier **NOT MEASURED** was true when written: the run stopped at the first failing binary, `crates/server/tests/syllabus.rs` at 14/5, and `9f1d6ae` fixed that suite |
 | 4 | Web tests | `npm --prefix app test` | **585 passed, 0 failed** (this slice's directories: 187) |
 | 5 | Web build | `npm --prefix app run build` | **PASS** (`tsc --noEmit && vite build`) |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | **PASS** — "no third-party loads in 3 shipped file(s)" |

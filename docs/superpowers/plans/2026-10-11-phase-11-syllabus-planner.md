@@ -1931,7 +1931,7 @@ exist, which is why it is written here rather than with the server tests.
 |---|---|---|---|
 | 1 | Formatting | `cargo fmt --all -- --check` | **PASS** — clean, exit 0 |
 | 2 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | **PASS** — clean, exit 0 |
-| 3 | Rust tests | `cargo test --workspace` | **NOT MEASURED** — not run: the tree is mid-edit by six slices and currently fails to compile (`could not find account in the crate root`), so a workspace run cannot be quoted as green even though it was green on a cleaner tree an hour earlier. The Phase 11 suites are counted individually in rows 9–15 |
+| 3 | Rust tests | `cargo test --workspace` | **PASS, measured 2026-10-12.** `cargo test --workspace --no-fail-fast` → **exit 0**, every target ok. This phase's own suites: `syllabus` **19 passed / 0 failed** (the first time it has been green — it was 14/5 on committed code until `9f1d6ae`), `planner` 8/0, `planner_jakarta` 2/0, core `planner` 18/0, core `planner_purity` 1/0, core `generation_syllabus` 21/0, core `prompts` 47/0, `route_sweep` 4/0, `schema` 27/0. The earlier **NOT MEASURED** was true when written (the tree was mid-edit by six slices and failed to compile) and is superseded |
 | 4 | Web tests | `npm --prefix app test` | **570 passed / 62 files, 0 failed** (`.superpowers/sdd/2026-10-11-phase-11-syllabus-planner/task-D-report.md`) |
 | 5 | Web build | `npm --prefix app run build` | `tsc --noEmit` clean, `vite build` ok. |
 | 6 | No CDN | `node scripts/check-no-cdn.mjs` | `no third-party loads in 3 shipped file(s)`. |
