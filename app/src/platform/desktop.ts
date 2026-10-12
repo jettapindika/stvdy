@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import {
@@ -9,6 +10,7 @@ import {
 } from '@tauri-apps/plugin-notification'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
+import { check, type Update } from '@tauri-apps/plugin-updater'
 
 import type {
   DeepLinkIntent,
@@ -17,6 +19,7 @@ import type {
   SyncApi,
   SyncReport,
   SyncStatus,
+  UpdateProgress,
 } from './types'
 import type { SyncCredentials } from './index'
 import { webPlatform } from './web'
@@ -43,6 +46,17 @@ interface WireReport {
   last_synced_at: string | null
   outbox: number
 }
+
+/**
+ * The update the last check found, held so `installUpdate` installs *that* one.
+ *
+ * Module-level rather than per-adapter because there is one app and one update
+ * channel: a second `desktopPlatform()` call (the tests make several) must not be
+ * able to install an update the panel never showed. It is also what makes the
+ * order of the two calls a contract — `installUpdate` before `checkForUpdate`
+ * rejects instead of silently checking on its own.
+ */
+let pendingUpdate: Update | null = null
 
 function reportOf(wire: WireReport): SyncReport {
   return {
@@ -279,12 +293,67 @@ export function desktopPlatform(kind: PlatformKind): NativePlatform {
 
     openExternal: (url) => openUrl(url),
 
+    /**
+     * The Tauri updater, and the only module allowed to import it.
+     *
+     * Two facts this adapter is built around.
+     *
+     * **The plugin is the verifier, not this code.** `check()` fetches the manifest
+     * from the configured endpoint and `downloadAndInstall()` verifies the
+     * artifact's minisign signature against the public key compiled into the app
+     * *before* running it, so a forged manifest fails in the shell rather than
+     * being caught here. Nothing in this file may re-implement that, and nothing
+     * here may trust the manifest: `version` and `body` are passed through as the
+     * strings the manifest carried (A336).
+     *
+     * **The check result is held, not re-fetched.** `installUpdate` installs the
+     * update the last `checkForUpdate` returned. Re-checking at install time could
+     * install a *different* version from the one the panel showed the user, which
+     * is the one bug this panel can have that nobody can see.
+     */
     async checkForUpdate() {
-      // The updater plugin is not registered yet: it needs a signing keypair and
-      // a release endpoint, which arrive in Phase 15 (A35). Returning false
-      // rather than calling a command that does not exist keeps the same
-      // no-fabricated-capability rule the Rust side follows.
-      return false
+      // The capability is desktop-only (`capabilities/desktop.json`), so this
+      // import is reached only on a build that has it. `check` resolves to `null`
+      // when the endpoint announces nothing newer.
+      const update = await check()
+      if (update === null) {
+        return { kind: 'up-to-date', current: await getVersion() }
+      }
+
+      pendingUpdate = update
+      return {
+        kind: 'available',
+        current: update.currentVersion,
+        // Verbatim. `body` is the manifest's `notes` field, absent when the
+        // manifest carried none — and `null` renders as no notes at all rather
+        // than as an invented "Improvements and fixes".
+        version: update.version,
+        notes: update.body ?? null,
+      }
+    },
+
+    async installUpdate(onProgress) {
+      const update = pendingUpdate
+      if (update === null) {
+        throw new Error('no update has been checked for')
+      }
+
+      // `Started` → downloading, `Finished` → the bytes are in place and the
+      // installer is next. There is deliberately no percentage: see
+      // `UpdateProgress`.
+      let phase: UpdateProgress['phase'] = 'downloading'
+      onProgress({ phase })
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Finished' && phase === 'downloading') {
+          phase = 'installing'
+          onProgress({ phase })
+        }
+      })
+
+      // macOS and Linux relaunch the new version by hand; the Windows installer
+      // takes over. Saying so is a fact the app has either way.
+      pendingUpdate = null
+      onProgress({ phase: 'restart-required' })
     },
   }
 }

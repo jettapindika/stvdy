@@ -171,7 +171,13 @@ export function webPlatform(kind: PlatformKind = 'web'): Platform {
       // No-op: haptics only exist on mobile.
     },
     async checkForUpdate() {
-      return false
+      // A browser tab has no installer to hand an update to. `unsupported` rather
+      // than a rejection, so the panel can be absent instead of rendering a button
+      // it cannot honour.
+      return { kind: 'unsupported' } as const
+    },
+    async installUpdate() {
+      throw new Error('installing an update is not available in the web build')
     },
   }
 }

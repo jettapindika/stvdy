@@ -139,6 +139,50 @@ export interface LocalStateApi {
   delete(key: string): Promise<void>
 }
 
+/**
+ * What a check for updates found, as the shell reports it (A336).
+ *
+ * Four cases, and each is a different thing the user can do next:
+ *
+ * - `unsupported` — this build has no update channel. The web build has no
+ *   installer, and mobile ships through TestFlight and Play, where the Tauri
+ *   updater declares `ios: none, android: none` (A335). This is deliberately a
+ *   *value* rather than a rejection: a screen that has to catch an exception to
+ *   learn the platform has no updater ends up rendering a disabled button, and a
+ *   disabled "Check for updates" on a phone is a promise the platform cannot keep.
+ * - `up-to-date` — the check ran and the manifest announced nothing newer. It
+ *   carries `current` because the version the user is running is a fact the check
+ *   established, not a value to be guessed at render time.
+ * - `available` — the manifest announced a newer version. `version` and `notes`
+ *   are **verbatim from the manifest** and are the only two facts about the
+ *   release this app has: it never composes a "what's new" line, never computes a
+ *   download size, and never labels a release a "security update" it was not told
+ *   about (roadmap gate 7a, A336).
+ * - `error` — the check did not complete. This is a state of its own precisely so
+ *   a failed check cannot read as "you are up to date": a user who cannot detect
+ *   that failure is a user who believes they are patched when they are not.
+ */
+export type UpdateStatus =
+  | { kind: 'unsupported' }
+  | { kind: 'up-to-date'; current: string }
+  | { kind: 'available'; current: string; version: string; notes: string | null }
+  | { kind: 'error'; message: string }
+
+/**
+ * How far an install has got, as a **phase and never a number**.
+ *
+ * The updater's download events carry byte counts and sometimes a total, and it
+ * would be easy to render "43%". This union deliberately has nowhere to put one:
+ * `contentLength` is optional in the plugin's own `DownloadEvent`, so a percentage
+ * is computable on some downloads and not others, and a progress bar that stalls
+ * at 100% or jumps backwards is a claim about data the app does not have (A336,
+ * roadmap gate 7a). A phase is a fact the app always has.
+ */
+export type UpdateProgress =
+  | { phase: 'downloading' }
+  | { phase: 'installing' }
+  | { phase: 'restart-required' }
+
 export interface Platform {
   kind(): PlatformKind
   runtime(): Runtime
@@ -149,8 +193,21 @@ export interface Platform {
   openExternal(url: string): Promise<void>
   /** Haptics are a no-op off mobile. */
   haptic(kind: 'light' | 'medium' | 'success'): Promise<void>
-  /** Desktop only; resolves false elsewhere. */
-  checkForUpdate(): Promise<boolean>
+  /**
+   * Asks the update endpoint what it has, and reports it (A336).
+   *
+   * Never throws: a failed check is `{ kind: 'error' }`, because the one bug this
+   * call can have that a user cannot see is a failure that renders as success.
+   */
+  checkForUpdate(): Promise<UpdateStatus>
+  /**
+   * Downloads and installs the update the last check found, reporting phases.
+   *
+   * Rejects when there is nothing to install (no check has run, or it found
+   * nothing), rather than re-checking: re-checking here could install a different
+   * version from the one the panel showed the user.
+   */
+  installUpdate(onProgress: (progress: UpdateProgress) => void): Promise<void>
   /** The local-first cache and outbox; the web build has neither (A14). */
   sync: SyncApi
   /**

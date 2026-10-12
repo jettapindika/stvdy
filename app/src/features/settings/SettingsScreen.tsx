@@ -11,6 +11,7 @@ import { useSession } from '@/features/auth/useSession'
 import { planForReminderChannel } from '@/features/billing/plans'
 import { LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n'
 import { platform } from '@/platform'
+import { UpdatesPanel } from './UpdatesPanel'
 
 /**
  * Settings: what the student chooses, and what another phase owns.
@@ -374,6 +375,13 @@ export function SettingsScreen() {
           </button>
         </div>
       </Section>
+
+      {/* Between the account's own devices and the "not built yet" list: an update
+          is a fact about this installation, which is what the section above is
+          about too, and it is not a feature another phase owes. The component
+          renders nothing on web and mobile (A335), so the section is absent there
+          rather than present and disabled. */}
+      <UpdatesPanel />
 
       <Section title={t('settings.later.title')}>
         <ul className="card flex flex-col gap-3 p-4">

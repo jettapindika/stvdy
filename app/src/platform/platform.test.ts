@@ -37,6 +37,15 @@ describe('web adapter degradation', () => {
   })
 
   it('reports no update path on the web', async () => {
-    expect(await webPlatform().checkForUpdate()).toBe(false)
+    // `unsupported` rather than a rejection or `false`: the Updates panel is absent
+    // in a browser tab, and a value is what lets it decide that without catching an
+    // exception on mount (A336).
+    expect(await webPlatform().checkForUpdate()).toEqual({ kind: 'unsupported' })
+  })
+
+  it('reports no update path on a phone either', async () => {
+    // Mobile updates ship through TestFlight and Play; the Tauri updater declares
+    // `ios: none, android: none` (A335).
+    expect(await webPlatform('ios').checkForUpdate()).toEqual({ kind: 'unsupported' })
   })
 })

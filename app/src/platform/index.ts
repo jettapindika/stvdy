@@ -14,6 +14,8 @@ export type {
   SyncApi,
   SyncReport,
   SyncStatus,
+  UpdateProgress,
+  UpdateStatus,
 } from './types'
 
 export function detectRuntime(scope: Record<string, unknown>): Runtime {

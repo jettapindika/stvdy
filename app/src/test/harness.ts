@@ -9,6 +9,8 @@ import {
   type SyncApi,
   type SyncCredentials,
   type SyncReport,
+  type UpdateProgress,
+  type UpdateStatus,
 } from '@/platform'
 import { webPlatform } from '@/platform/web'
 
@@ -146,6 +148,16 @@ export function installFakePlatform(
     current?: DeepLinkIntent | null
     deepLinks?: boolean
     sync?: Partial<SyncApi>
+    /**
+     * Overridden so a test can drive the Updates panel. The panel's whole subject
+     * is what it does with a manifest's answer, so the fake has to be able to
+     * return each of `UpdateStatus`'s four cases rather than always
+     * `unsupported`.
+     */
+    update?: {
+      checkForUpdate: () => Promise<UpdateStatus>
+      installUpdate: (onProgress: (progress: UpdateProgress) => void) => Promise<void>
+    }
     /** Overridden so a test can render the native-only paths (A14). */
     runtime?: Runtime
   } = {},
@@ -196,6 +208,7 @@ export function installFakePlatform(
       runtime: () => options.runtime ?? (kind === 'web' ? 'web' : 'tauri'),
       secureStore,
       sync: syncApi,
+      ...(options.update ?? {}),
       async openExternal(url) {
         opened.push(url)
       },

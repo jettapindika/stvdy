@@ -63,8 +63,12 @@ export function mobilePlatform(kind: PlatformKind): NativePlatform {
     },
 
     async checkForUpdate() {
-      // Mobile updates ship through TestFlight / Play.
-      return false
+      // Mobile updates ship through TestFlight and Play; the Tauri updater declares
+      // `ios: none, android: none` (A335), so there is no endpoint to ask.
+      return { kind: 'unsupported' } as const
+    },
+    async installUpdate() {
+      throw new Error('installing an update is not available on mobile')
     },
   }
 }
