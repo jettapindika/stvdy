@@ -86,6 +86,48 @@ describe('the calendar screen can shrink to a phone at 200% text', () => {
     expect(label?.[1]).toContain('flex-1')
   })
 
+  it('pins the week grid against the same class of overflow', () => {
+    // The second finding, and the one that survived the `min-w-60` fix: a table's
+    // `min-content` width is the sum of its cells' unbreakable content, and that
+    // number propagates up the ancestor chain until something gives. Measured at
+    // 200% text on a 390px phone: the week grid's table was **361.2px** of
+    // min-content against **310px** available, and the page scrolled sideways —
+    // `scrollWidth` **430** against `clientWidth` **390**, both themes, nothing at
+    // 100%. Three properties together are the fix, and each is asserted separately
+    // because dropping any one of them brings the overflow back:
+    //
+    //   1. `table-fixed`, so the table takes the width it is given instead of
+    //      demanding its content's;
+    //   2. the column widths declared as fractions, never in rem (a rem width
+    //      doubles with the reader's text size — the `min-w-60` mechanism again);
+    //   3. no `shrink-0` on a *text* item inside the event row, and `overflow-wrap:
+    //      anywhere` where a single word must be able to break.
+    //
+    // Re-measured after the change: `scrollWidth === clientWidth === 390` at both
+    // scales, both themes, 0 clipped and 0 overlapped.
+    const grid = readFileSync(join(here, 'WeekGrid.tsx'), 'utf8')
+    expect(grid, 'the week table must be table-fixed').toContain('table-fixed')
+    // `[^-]` before the `w` so `min-w-0` is not read as a width, and `(?!\/)` so a
+    // fraction (`w-1/3`) is not either: the rem scale is the integer form only.
+    expect(grid, 'a rem column width doubles with the text scale').not.toMatch(
+      /[^-]w-[0-9]{1,2}\b(?!\/)/,
+    )
+    // The marker and the single-initial chip may keep `shrink-0` — 4px and one
+    // character cannot be the cause of an overflow — so this counts rather than
+    // forbids: the time label, the title, the course and the read-only word must
+    // all be shrinkable.
+    const shrinkZero = [...grid.matchAll(/className="([^"]*shrink-0[^"]*)"/g)].map((m) => m[1])
+    for (const classes of shrinkZero) {
+      expect(
+        classes?.includes('course-marker') || classes?.includes('chip'),
+        `shrink-0 is only safe on the marker and the initial chip, not on: ${String(classes)}`,
+      ).toBe(true)
+    }
+    expect(grid, 'a word that must break needs overflow-wrap: anywhere').toContain(
+      "overflowWrap: 'anywhere'",
+    )
+  })
+
   it('detects the pattern it is looking for', () => {
     // A rule that cannot fail is worse than no rule: this proves the scan sees the
     // pre-fix form, and that it does not fire on the safe values or on a comment

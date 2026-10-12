@@ -88,13 +88,40 @@ export function WeekGrid({
         })
 
   return (
-    <table className="w-full border-collapse text-left">
+    // A scroll container, and the same trade Phase 6 accepted for the tab bar. A
+    // two-column grid is a *table*, and a table's `min-content` width is not a
+    // number CSS can be told to shrink below: at 200% text the day column's label
+    // plus one event's unbreakable time string came to **361.2px** against **310px**
+    // of available width (the container's own `px-5` is `1.25rem`, which doubles to
+    // 80px total at a 32px root), so the page scrolled sideways — measured
+    // `scrollWidth` **430** against `clientWidth` **390**, both themes, and nothing
+    // at 100%. Wrapping the table in its own scroller is what makes the *box* fit
+    // while the content keeps its legible width: the reader scrolls one row instead
+    // of losing the right-hand edge of every row. `overscroll-x-contain` keeps that
+    // scroll from chaining to the page, and at 100% nothing scrolls, so the visual
+    // is unchanged.
+    <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain">
+      {/* `table-fixed`, like the month grid: with the automatic algorithm a table's
+          `min-content` width is the sum of its cells' unbreakable content, and that
+          number propagates up the ancestor chain until something gives — which is
+          what put the page 40px wider than the phone. With a fixed layout the table
+          takes the width it is given and the columns take the widths declared in the
+          first row, so the box can shrink to any phone while the text inside wraps
+          (`min-w-0 break-words` on every text item). Measured before the change: the
+          page was 430 against a 390 viewport at 200% text in both themes. */}
+      <table className="w-full table-fixed border-collapse text-left">
       {/* The caption is what names the table to a screen reader; it is visually
           hidden because the heading above the grid already says the same week. */}
       <caption className="sr-only">{caption}</caption>
       <thead>
         <tr>
-          <th scope="col" className="label w-32 border-b border-border pb-2 text-left">
+          {/* `w-1/3` and not a quarter: at 200% text the day column has to hold
+              "Monday" at 28px, and a quarter of a 310px content box minus the
+              cell's own padding is 54px. The arbitrary `overflow-wrap: anywhere`
+              is the load-bearing part — `break-word` does not reduce an item's
+              intrinsic width, so the word stayed 109px wide inside a 54px box and
+              bled into the events column. `anywhere` is what lets it wrap. */}
+          <th scope="col" className="label w-1/3 border-b border-border pb-2 text-left">
             {t('calendar.column.day')}
           </th>
           <th scope="col" className="label border-b border-border pb-2 text-left">
@@ -109,8 +136,11 @@ export function WeekGrid({
             <Fragment key={bucket.day.key}>
               <tr className="border-b border-border align-top">
                 <th scope="row" className="min-w-0 py-3 pr-3 text-left font-normal">
-                  <span className="flex flex-col gap-1">
-                    <span className="text-body font-medium text-text">
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <span
+                      className="min-w-0 break-words text-body font-medium text-text"
+                      style={{ overflowWrap: 'anywhere' }}
+                    >
                       {formatInZone(new Date(`${bucket.day.key}T12:00:00Z`), zone, {
                         weekday: 'long',
                       })}
@@ -122,7 +152,19 @@ export function WeekGrid({
                       })}
                     </span>
                     {bucket.day.key === todayKey && (
-                      <span className="chip self-start">{t('calendar.today')}</span>
+                      // The chip is the second thing that would not shrink: a pill
+                      // with `0.6rem` of padding each side plus "Today" at 24px is
+                      // **108.6px** measured, against a 79px day column at 200%
+                      // text, and `min-width: auto` on a flex item means it kept
+                      // that width and bled out of its cell. `min-w-0` is the
+                      // permission to shrink; `overflow-wrap: anywhere` is what
+                      // makes the word itself wrap rather than overflow.
+                      <span
+                        className="chip min-w-0 self-start"
+                        style={{ overflowWrap: 'anywhere' }}
+                      >
+                        {t('calendar.today')}
+                      </span>
                     )}
                   </span>
                 </th>
@@ -181,7 +223,20 @@ export function WeekGrid({
                                   {(course ?? event.title).charAt(0)}
                                 </span>
                               )}
-                              <span className="meta shrink-0">{time}</span>
+                              {/* `min-w-0 break-words` and **no** `shrink-0` on the
+                                  three text items below. A flex item with
+                                  `shrink-0` contributes its full width to the
+                                  container's min-content width, so a row of
+                                  non-shrinkable text items cannot compress below
+                                  their sum — and inside a table cell that sum
+                                  becomes the column's minimum and pushes the whole
+                                  page wider. Measured at 200% text on a 390px
+                                  phone: the time label alone sat 6.1px past the
+                                  right edge and the page scrolled sideways. The
+                                  marker and the single-initial chip keep
+                                  `shrink-0`, because 4px and one character are
+                                  sizes that cannot be the cause of an overflow. */}
+                              <span className="meta min-w-0 break-words">{time}</span>
                               <span className="min-w-0 break-words text-body text-text">
                                 {event.title}
                               </span>
@@ -191,9 +246,11 @@ export function WeekGrid({
                                 </span>
                               )}
                               {external && (
-                                <span className="flex shrink-0 items-center gap-1 text-caption text-muted">
+                                <span className="flex min-w-0 items-center gap-1 text-caption text-muted">
                                   <Icon name="lock" size={16} />
-                                  {t('calendar.event.readOnly')}
+                                  <span className="min-w-0 break-words">
+                                    {t('calendar.event.readOnly')}
+                                  </span>
                                 </span>
                               )}
                             </button>
@@ -215,6 +272,7 @@ export function WeekGrid({
           )
         })}
       </tbody>
-    </table>
+      </table>
+    </div>
   )
 }
