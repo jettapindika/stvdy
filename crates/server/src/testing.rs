@@ -224,6 +224,7 @@ pub fn state(pool: PgPool) -> AppState {
         // A real HMAC over the bytes a test posts, so a webhook test that passes
         // actually verified something. `TestState` keeps a handle to the same object.
         payment: Some(Arc::new(TestGateway::new())),
+        push: Arc::new(crate::integrations::push::PushRouter::default()),
         jobs: Queue::new(),
     }
 }
@@ -406,6 +407,11 @@ impl TestState {
                 fetcher: offline_fetcher(),
                 ics_fetch: offline_ics_fetch(),
                 payment: Some(gateway.clone()),
+                // Empty by default, so a suite that does not ask for a transport gets the
+                // deployment a developer actually has: in-app and email reminders deliver,
+                // `channels_available` omits `push`, and no test accidentally depends on a
+                // vendor it did not script.
+                push: Arc::new(crate::integrations::push::PushRouter::default()),
                 jobs: Queue::new(),
             },
             storage,
@@ -481,6 +487,21 @@ impl TestState {
         search: Arc<crate::integrations::search::composite::CompositeSearch>,
     ) -> Self {
         self.state.search = Some(search);
+        self
+    }
+
+    /// The same state with a push router of the test's own.
+    ///
+    /// The reminder-job suite installs `ScriptedPush` here, which is the only way the
+    /// delivery fan-out is assertable: the real transports need a vendor, and a test that
+    /// pointed one at a local server would be testing `reqwest` rather than the handler's
+    /// decisions about which device, which channel and which failure deletes a token.
+    ///
+    /// Both halves move together — the router and the config's `push` — because "is push
+    /// available" is one question, and a state whose router had a transport while
+    /// `channels_available` said otherwise would be a state that cannot exist in production.
+    pub fn with_push(mut self, push: Arc<crate::integrations::push::PushRouter>) -> Self {
+        self.state.push = push;
         self
     }
 

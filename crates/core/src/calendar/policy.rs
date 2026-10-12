@@ -205,7 +205,11 @@ mod tests {
 
         // And the quiet case: nothing moved on either side.
         assert_eq!(
-            resolve(Origin::Google, LocalState::clean(), RemoteState::unchanged()),
+            resolve(
+                Origin::Google,
+                LocalState::clean(),
+                RemoteState::unchanged()
+            ),
             Winner::Neither
         );
         assert_eq!(
