@@ -107,8 +107,57 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_notifications::init());
     }
 
+    // The shell's pass, handed to the mobile plugin below (A311/A315).
+    //
+    // The plugin cannot name the shell crate — the dependency runs the other way (the
+    // shell registers the plugin), so a path dependency back would be a cycle cargo
+    // refuses with `error: cyclic package dependency: package `stvdy-shell` depends on
+    // itself`. This cell is the handover instead: the closure is built here, the shell
+    // fills it in `setup` once the cache is open, and the pass reads it on every call
+    // rather than capturing a value — a background launch may run before `setup`, and
+    // the session changes under it whenever the SPA reconfigures.
+    //
+    // `OnceLock` rather than `LazyLock`: the value comes from runtime input (the cache
+    // open in `setup`), which is exactly the case where the initializer cannot live with
+    // the declaration. Declared outside the `cfg` below so the `setup` closure can see
+    // it on every platform; only the mobile block ever fills or reads it.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let background_pass: std::sync::Arc<
+        std::sync::OnceLock<Option<std::sync::Arc<sync::SyncShell>>>,
+    > = std::sync::Arc::new(std::sync::OnceLock::new());
+
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        // The custom mobile plugin (A311): the `BGTaskScheduler` / `WorkManager`
+        // background seam and the Android share intake. Registered here for the same
+        // reason it is a plugin at all — its `setup()` is the only hook that runs
+        // before the launch sequence ends, which is when a `BGTaskScheduler` handler
+        // must be registered (a launch the scheduler woke for an unregistered
+        // identifier kills the app).
+        let pass_cell = background_pass.clone();
+        builder = builder.plugin(tauri_plugin_stvdy_mobile::init(std::sync::Arc::new(
+            move || {
+                let cell = pass_cell.clone();
+                Box::pin(async move {
+                    let Some(shell) = cell.get().and_then(Option::as_ref) else {
+                        // The cache could not be opened, or this is a background launch
+                        // that beat `setup`. Either way the honest answer is the same:
+                        // nothing was reached, and the next foreground sync is the
+                        // remedy (A316).
+                        return Err("the local cache is not available".to_string());
+                    };
+                    let report = shell.sync_once().await.map_err(|error| error.to_string())?;
+                    Ok(tauri_plugin_stvdy_mobile::PassOutcome {
+                        state: report.state.to_string(),
+                        outbox: report.outbox,
+                    })
+                })
+            },
+        )));
+    }
+
     let result = builder
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -185,6 +234,19 @@ pub fn run() {
                     }
                 };
                 app.manage(sync::commands::ShellState { shell });
+            }
+
+            // Hands the background pass the shell it needs, once. On a phone this is
+            // what makes `BGAppRefreshTask`/`WorkManager` reach the engine; on a
+            // desktop the closure is never called, because the plugin that holds it is
+            // mobile-only. The cell is empty when the cache could not be opened, and
+            // the pass then reports that rather than pretending to have synced.
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            {
+                let shell = app.state::<sync::commands::ShellState>().shell.clone();
+                if background_pass.set(shell).is_err() {
+                    tracing::warn!("the background pass already has a shell; keeping the first");
+                }
             }
 
             Ok(())

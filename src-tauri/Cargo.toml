@@ -102,6 +102,12 @@ android-native-keyring-store = "1.0.0"
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 tauri-plugin-haptics = "2.4.2"
+# The custom mobile plugin (A311): the `BGTaskScheduler`/`WorkManager` background
+# seam and the Android share intake, in one crate because they share a `setup()`
+# hook and a Rust entry point. Mobile-only, like the plugins above: it links the
+# native halves, and a desktop build that linked them would compile Swift and Kotlin
+# for platforms it cannot run on.
+tauri-plugin-stvdy-mobile = { path = "plugins/mobile" }
 # Push receive (A310). Mobile-only for two reasons: the plugin's own matrix says
 # Windows is not yet available, and the seam's pure half (`push::provider_for`,
 # `push::validate_token`) is deliberately compiled and tested on macOS, so the

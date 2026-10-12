@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-mobile-scheduler-register"
+description = "Enables the mobile_scheduler_register command without any pre-configured scope."
+commands.allow = ["mobile_scheduler_register"]
+
+[[permission]]
+identifier = "deny-mobile-scheduler-register"
+description = "Denies the mobile_scheduler_register command without any pre-configured scope."
+commands.deny = ["mobile_scheduler_register"]

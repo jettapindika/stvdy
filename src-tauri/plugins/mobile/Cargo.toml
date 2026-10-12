@@ -1,0 +1,57 @@
+# The custom mobile plugin (A311): one crate that owns everything native the
+# plugin layer cannot do — the iOS `BGTaskScheduler` registration, the Android
+# `WorkManager` worker, the FCM service seam and the Android share intake — because
+# they share a `setup()` hook and a Rust entry point. Three crates would be three
+# copies of the same lifecycle code.
+#
+# NOTE: no `[workspace]` here, and that is a change from the plan's file list. A
+# second workspace root nested inside `src-tauri` makes cargo refuse to build the
+# shell at all:
+#
+#   error: multiple workspace roots found in the same workspace:
+#     .../src-tauri
+#     .../src-tauri/plugins/mobile
+#
+# So this crate is a member of the shell's workspace (a path dependency of a
+# workspace root is a member automatically), which is also what lets it inherit the
+# shell's lint block through `[lints] workspace = true` rather than repeating it.
+[package]
+name = "tauri-plugin-stvdy-mobile"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+publish = false
+# Required by `tauri_plugin::Builder`: the ACL generator resolves the plugin's
+# permissions through this field, and without it the build script panics with
+# "package.links field in the Cargo manifest is not set, it should be set to the
+# same as package.name".
+links = "tauri-plugin-stvdy-mobile"
+
+[lints]
+workspace = true
+
+[lib]
+name = "tauri_plugin_stvdy_mobile"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-plugin = { version = "2.7.1", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2.12.3" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+# A fresh intake id per share. Not a content hash: two shares of the same file are
+# two intents, and collapsing them would silently drop the second.
+uuid = { version = "1.28.0", features = ["v4", "serde"] }
+# NOTE: no `stvdy-shell` dependency, and that is a change from the plan's file list.
+# The plan has this crate depend on the shell *and* the shell depend on this crate:
+#
+#   error: cyclic package dependency: package `stvdy-shell` depends on itself
+#
+# Cargo refuses it outright, so one direction had to go. The shell owns the sync
+# engine (`SyncShell::sync_once`), so the shell is what supplies the pass and this
+# crate supplies the native boundary it is supplied to — see `src/scheduler.rs`.
+

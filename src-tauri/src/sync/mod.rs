@@ -241,6 +241,25 @@ impl SyncShell {
 
     /// One pass. The outbox first, then every page, then the facts the status reads.
     pub async fn now(&self) -> Result<SyncReport, SyncError> {
+        self.pass(true).await
+    }
+
+    /// The pass itself, with the notifier made optional.
+    ///
+    /// `announce` is `false` for exactly one caller: the background scheduler (A315).
+    /// The notifier is how the shell reaches the SPA — `sync::commands::emit` turns a
+    /// [`SyncNotice`] into a Tauri event — and a background launch has no listener: the
+    /// webview may not exist, and if it does it is suspended and will not hear an event
+    /// that was never queued. Emitting there would be a report nobody can see, and the
+    /// property A315 asks for is stronger than "harmless" — the background entry points
+    /// emit no frontend event at all. The pass's *result* is returned either way, which
+    /// is what the scheduler logs.
+    ///
+    /// `forget` still runs on a revoked device, because that is not a notification: it
+    /// drops the session and the refresh token, and a background pass that discovered a
+    /// revocation and left the credentials in place would be one that made the next
+    /// foreground pass fail instead of sign out.
+    async fn pass(&self, announce: bool) -> Result<SyncReport, SyncError> {
         let Some(session) = self.session() else {
             // Nothing was reached because there is nothing to reach with; the engine's word
             // for that is `offline`, and waiting is the remedy once a session arrives.
@@ -250,12 +269,37 @@ impl SyncShell {
         let state = engine.sync_once().await?;
         if state == SyncState::Revoked {
             self.forget();
-            (self.notifier)(SyncNotice::Revoked);
+            if announce {
+                (self.notifier)(SyncNotice::Revoked);
+            }
             return Ok(SyncReport::revoked());
         }
         let report = self.report(state)?;
-        (self.notifier)(SyncNotice::Status(report.clone()));
+        if announce {
+            (self.notifier)(SyncNotice::Status(report.clone()));
+        }
         Ok(report)
+    }
+
+    /// One pass, for a caller that has no webview (A315).
+    ///
+    /// This is the function the native background schedulers call — the iOS
+    /// `BGAppRefreshTask`/`BGProcessingTask` handlers and the Android `WorkManager`
+    /// worker — and it is deliberately the *same* pass `sync_now` runs rather than a
+    /// second path: the engine's outbox drain, its pull, its conflict handling and its
+    /// revocation rule all live in `stvdy_sync::client::Engine::sync_once`, and a
+    /// background sync that reimplemented any of that would be a second answer to
+    /// "what does a pass do".
+    ///
+    /// **It is called with no frontend, and that shapes what it can promise.** A
+    /// background launch may run before the SPA ever has, and the shell's credentials
+    /// are pushed by the SPA and never stored (this module's own rule: the keychain
+    /// holds a refresh token, not an access token), so a pass with no session reports
+    /// `offline` — the engine's word for "nothing was reached, waiting is the remedy" —
+    /// rather than failing. That is A316: a background window is opportunistic and the
+    /// next foreground sync is what makes the device correct.
+    pub async fn sync_once(&self) -> Result<SyncReport, SyncError> {
+        self.pass(false).await
     }
 
     /// Empties the cache and the outbox, then rebuilds from zero: "Reset local data and
@@ -263,7 +307,7 @@ impl SyncShell {
     pub async fn reset(&self) -> Result<SyncReport, SyncError> {
         let mut cache = self.cache.clone();
         cache.wipe()?;
-        let report = self.now().await?;
+        let report = self.pass(true).await?;
         (self.notifier)(SyncNotice::Status(report.clone()));
         Ok(report)
     }

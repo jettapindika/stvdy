@@ -1,8 +1,12 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile-only",
-  "description": "Haptics and push receive are mobile only.",
+  "description": "Haptics, push receive and the background scheduler are mobile only.",
   "windows": ["main"],
   "platforms": ["iOS", "android"],
-  "permissions": ["haptics:default", "notifications:default"]
+  "permissions": [
+    "haptics:default",
+    "notifications:default",
+    "stvdy-mobile:default"
+  ]
 }

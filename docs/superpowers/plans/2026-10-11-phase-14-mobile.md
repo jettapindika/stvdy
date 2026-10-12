@@ -575,6 +575,21 @@ already names, now recorded as an outcome rather than a possibility: the Android
 this task (the generated project, `tauri android build --debug`, and the NDK install) is
 **blocked on an Android SDK**, which was not installed (installing one is out of scope).
 
+**A fourth addition, after the task landed: the per-platform build number.** A store
+submission without one is rejected as a duplicate, and `docs/superpowers/HANDOVER.md`
+carries it as a launch blocker. It is **two per-platform keys, not one top-level one** —
+verified against the CLI's own schema (`config.schema.json`): `bundle.bundleVersion` is
+not in `BundleConfig` at all (it would be rejected or silently ignored), while
+`bundle.iOS.bundleVersion` and `bundle.macOS.bundleVersion` both exist and both translate
+to `CFBundleVersion`. Both are set to `"1"`, and `bundle.macOS` carries it for the same
+reason `bundle.iOS` does — the desktop updater's manifest compares against it, and a
+build number that exists on one platform only is the same bug on the other.
+
+**That falsifies the handover row.** "Bumping the shell version is currently the only way
+to bump the build number" was true only while no `bundleVersion` key existed: the build
+number now increments independently of `bundle.version`, which is what A353 wants (the
+shell's version is the source of the *short* version).
+
 **Three deviations from the config block above, each forced by the CLI, each measured.**
 
 1. **`"developmentTeam": ""` had to be dropped.** An empty string is not "unset": the CLI
@@ -857,7 +872,7 @@ worker (Android) that call the Phase 8 Rust `sync_once` directly, never the webv
 - Consumes: `stvdy_shell_lib::sync::sync_once` (Phase 8).
 - Produces: `MobileExt` (`.init()`), `mobile_scheduler_register(interval_minutes)`.
 
-- [ ] **Step 1: Write the failing test — the seam does not touch the frontend**
+- [x] **Step 1: Write the failing test — the seam does not touch the frontend**
 
 `src-tauri/plugins/mobile/tests/scheduler.rs`:
 
@@ -882,12 +897,16 @@ fn the_scheduler_seam_never_references_the_webview() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 `cargo test --manifest-path src-tauri/plugins/mobile/Cargo.toml` → the crate does not
 exist.
 
-- [ ] **Step 3: Create the plugin crate**
+**Measured:** `error: manifest path `src-tauri/plugins/mobile/Cargo.toml` does not
+exist`, exit 101. The line reverted to watch it fail was the whole crate directory: with
+`Cargo.toml` absent there is no crate to compile, which is the state the plan predicts.
+
+- [x] **Step 3: Create the plugin crate**
 
 `src-tauri/plugins/mobile/Cargo.toml` depends on `tauri` and the shell lib (a path
 dependency), `serde`, `tracing`. `src/scheduler.rs` exposes
@@ -896,7 +915,7 @@ the shell's `sync_once`. `src/lib.rs` exposes `init()` and a
 `mobile_scheduler_register` command that submits a `BGAppRefreshTaskRequest` (iOS) or
 enqueues a unique periodic `WorkManager` request (Android).
 
-- [ ] **Step 4: The native halves**
+- [x] **Step 4: The native halves**
 
 Android (`android/src/main/java/app/stvdy/mobile/`): a `CoroutineWorker` that calls the
 plugin's Rust entry via the JNI bridge Tauri generates, a `WorkManager`
@@ -911,16 +930,81 @@ before the launch sequence ends) and resubmits each request from inside its own 
 `Info.ios.plist` (the merged plist named in Task 1) gains `UIBackgroundModes`
 (`fetch`, `processing`, `remote-notification`) and `BGTaskSchedulerPermittedIdentifiers`.
 
-- [ ] **Step 5: Run it**
+- [x] **Step 5: Run it**
 
 `cargo test --manifest-path src-tauri/plugins/mobile/Cargo.toml` → pass.
+
+**Measured: 8 passed, 0 failed** in `plugins/mobile/tests/scheduler.rs`, and
+`cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` exits 0
+(the plugin is a workspace member, so one command covers both crates).
+
+**Four things the plan's file list could not have known, each found by building it.**
+
+1. **The plan's dependency direction is a cycle, and cargo refuses it.**
+   `src-tauri/plugins/mobile/Cargo.toml` was specified to depend on `stvdy_shell_lib`
+   *and* `src-tauri/Cargo.toml` to depend on the plugin:
+   `error: cyclic package dependency: package `stvdy-shell v0.1.0` depends on itself`.
+   One direction had to go. The shell keeps `sync::sync_once` (it owns the engine), and
+   the plugin takes the pass as an injected closure — `scheduler::SyncPass` — which the
+   shell builds in `lib.rs` over an `OnceLock` it fills in `setup`. The seam's own
+   assertion therefore changed from `source.contains("sync_once")` (the plan's line,
+   now impossible) to `(state.pass)()` plus a test that the plugin defines no second
+   pass. The inversion is asserted in both directions so a later edit cannot quietly
+   grow a duplicate engine inside the plugin.
+2. **No `[workspace]` in the plugin crate.** A second workspace root nested inside
+   `src-tauri` makes cargo refuse the shell:
+   `error: multiple workspace roots found in the same workspace`. The plugin is a
+   member of the shell's workspace instead, which is also what lets it inherit the
+   shell's lint block rather than repeating it.
+3. **`links` is required.** `tauri_plugin::Builder`'s ACL generator resolves permissions
+   through `package.links` and panics without it
+   (`package.links field in the Cargo manifest is not set`).
+4. **Commands cannot live in the crate root.** `#[tauri::command]` defines two macro
+   items per command, so declaring them beside `generate_handler!` collides
+   (`the name `__cmd__mobile_scheduler_register` is defined multiple times`). They are in
+   `src/commands.rs`, which is `tauri plugin init`'s own shape.
+
+**The one thing this task cannot make work, on either platform, and it is measured
+rather than assumed.** A315 asks the native background entry points to call
+`sync::sync_once` directly. The *scheduling* half is real — `BGTaskScheduler.register`
+/`.submit` and `WorkManager.enqueueUniquePeriodicWork` are public APIs and both run. The
+*pass* is not reachable from a headless native entry, for a reason that is the same on
+both sides:
+
+- **iOS:** dispatching a command needs `PluginManager.invoke(name:invoke:)`, which Tauri
+  2.12.3 declares `internal` (as it does `PluginManager.shared`):
+  `error: 'invoke' is inaccessible due to 'internal' protection level`. The public
+  alternative, `Plugin.trigger`, **emits a frontend event** — precisely what A315
+  forbids, and useless besides, since a background launch may have no listener.
+- **Android:** the only Kotlin→Rust direction the generated code provides is
+  `PluginManager.handlePluginResponse`, a `private external fun` that *answers* a command
+  Rust started; the only JNI symbols `tauri::android_binding!` exports are the activity
+  lifecycle callbacks. A `WorkManager` worker has neither an activity nor an in-flight
+  command.
+
+Both therefore need a new exported symbol (`#[unsafe(no_mangle)] pub extern "C" fn …`),
+and **that is forbidden in this workspace**: `src-tauri/Cargo.toml` sets
+`unsafe_code = "forbid"`, and rustc rejects the attribute under it —
+`error: declaration of a `no_mangle` function … requested on the command line with
+`-F unsafe-code`` (measured in a scratch crate). The lint was not weakened. So
+`android/.../StvdySyncSeam.kt` and `ios/Sources/Scheduler.swift` each name the missing
+symbol and report the deferral; the pass is the one the app runs on its next foreground,
+which is A316's own position. **This is the honest state: the schedule is real, the pass
+is deferred, and both native files say so in their own log line rather than reporting a
+sync that did not happen.** A test asserts neither seam falls back to a frontend event.
+
+**Device-only, named:** the `BGTaskScheduler` registration firing, the `WorkManager` job
+actually running, and an FCM silent push arriving all need a physical device — and, for
+iOS, a signing identity. Nothing in this task claims any of them.
 `cargo clippy --manifest-path src-tauri/plugins/mobile/Cargo.toml --all-targets -- -D warnings`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 3: custom mobile plugin — the background sync seam"
 ```
+
+**`git commit -am` was NOT used**, for the reason Tasks 1 and 2 record.
 
 ---
 
@@ -990,7 +1074,7 @@ the import. `lib.rs` calls it in `setup` and on resume.
 **device** build confirms the app appears in the share sheet (the simulator cannot show
 a share sheet for a real file); that is a prerequisite, not a CI step (A327).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 4: iOS Share Extension target + App Group import"
@@ -1117,7 +1201,7 @@ Add `applinks:app.stvdy` to `bundle.iOS.associatedDomains` and rely on tauri-bui
 
 `npm --prefix app test -- notifications` → pass; `npm --prefix app run build` clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git commit -am "Phase 14 Task 6: push token registration + deep-link/notification routing"

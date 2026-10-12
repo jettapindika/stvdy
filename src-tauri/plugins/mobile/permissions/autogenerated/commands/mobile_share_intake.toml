@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-mobile-share-intake"
+description = "Enables the mobile_share_intake command without any pre-configured scope."
+commands.allow = ["mobile_share_intake"]
+
+[[permission]]
+identifier = "deny-mobile-share-intake"
+description = "Denies the mobile_share_intake command without any pre-configured scope."
+commands.deny = ["mobile_share_intake"]

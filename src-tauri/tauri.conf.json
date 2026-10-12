@@ -44,6 +44,7 @@
     "createUpdaterArtifacts": true,
     "iOS": {
       "minimumSystemVersion": "15.0",
+      "bundleVersion": "1",
       "infoPlist": "gen/apple/Info.ios.plist",
       "template": "gen/apple/project.yml.template"
     },
@@ -59,6 +60,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0",
+      "bundleVersion": "1",
       "hardenedRuntime": true,
       "entitlements": "entitlements.plist"
     },
