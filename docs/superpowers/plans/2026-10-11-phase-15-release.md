@@ -977,9 +977,21 @@ xcrun stapler validate "$DMG"                                 # the ticket is st
 lipo -archs "$APP/Contents/MacOS/Stvdy" | grep -q 'x86_64 arm64'  # it is universal
 ```
 
-- [ ] **Step 4: Record what was measured**
+- [x] **Step 4: Record what was measured**
 
-*(Not ticked: `docs/RELEASE.md` § Desktop distribution states the requirement in prose but carries none of the commands this step asks for — no `codesign`, no `spctl`, no `xcrun stapler validate`, no `lipo`, and no runner image — so the "transcript rather than an adjective" the step asks for is not there.)*
+`docs/RELEASE.md` § Desktop distribution now carries the four commands and the runner
+(`macos-15`), each with what it catches and why none of the four implies another — a valid
+signature with no stapled ticket launches only with a network; a stapled dmg whose app is
+unstapled fails after the user copies the app out; and a single-architecture binary passes the
+first three and fails only on the machine it was not built for. It also names the two traps
+`scripts/notarize-macos.sh` exists to close, because a reader who finds those lines in a script
+and not in the release document would be right to wonder whether they matter.
+
+**What is still not a transcript, stated rather than implied:** the four commands have not been
+run. They cannot be on this machine — no Apple Developer ID certificate, no notary credential,
+no signed `.dmg`, and the notary service is unreachable. So the commands are documented from the
+contract and the job that runs them is written and unexecuted; the row is ticked for the
+*documentation* this step asks for, not for a measurement that has not happened.
 
 `docs/RELEASE.md` § Desktop distribution gains the exact commands and the runner image
 they ran on, so the claim "signed and notarized" is a transcript rather than an adjective.
