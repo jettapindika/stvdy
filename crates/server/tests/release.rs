@@ -642,3 +642,77 @@ fn the_version_is_the_workspace_version() {
         "A353: `tauri.conf.json`'s version is the shell's own, so the two move together"
     );
 }
+
+/// **The container runs as a non-root user with Chromium's sandbox on, and nothing
+/// checked either one until this test.**
+///
+/// Both are security properties that hold only because two facts agree across three
+/// files, which is the shape that rots silently:
+///
+/// 1. `Dockerfile` ends with `USER stvdy` (uid 10001), so the process is not root.
+/// 2. `Dockerfile` sets `APP_ENV=prod`, and `integrations/mod.rs` derives the
+///    renderer's sandbox from `cfg.env.is_dev()` — so in the image
+///    `allow_no_sandbox` is **false** and `chrome.rs` launches with
+///    `.sandbox(true)`.
+///
+/// A reader can follow that chain today. What a reader cannot do is notice a later
+/// change that breaks it: flipping `APP_ENV` to `dev` for convenience, or dropping
+/// the `USER` line while debugging, produces a container that renders
+/// model-influenced HTML unsandboxed as root and reports nothing. This is the
+/// roadmap's own "a control that is configured but not enforced" row, so the two
+/// facts are asserted where they live.
+///
+/// **The assertion is on the file, not on the running container**, and that limit is
+/// real: a `docker run` observation is the stronger evidence and it needs a Docker
+/// daemon, which is why `docs/superpowers/plans/2026-10-11-phase-15-release.md` keeps
+/// its container item open with this test named as the readable half.
+#[test]
+fn the_container_is_non_root_and_renders_with_the_sandbox_on() {
+    let dockerfile = repo_file("Dockerfile");
+
+    // (1) The last `USER` wins, and it must not be root.
+    let user = dockerfile
+        .lines()
+        .filter_map(|line| line.strip_prefix("USER "))
+        .next_back()
+        .unwrap_or_else(|| panic!("the Dockerfile names no USER, so the image runs as root"));
+    assert_ne!(
+        user.trim(),
+        "root",
+        "the container must not run as root (A338)"
+    );
+    assert!(
+        dockerfile.contains("useradd") && dockerfile.contains("--uid 10001"),
+        "the non-root user is created with a fixed uid so a mounted volume has predictable ownership"
+    );
+
+    // (2) The env the sandbox derivation reads. `is_dev()` is `matches!(self, Env::Dev)`,
+    // so anything but `dev` disables `allow_no_sandbox` — and `prod` is what a release
+    // ships. Asserted as "not dev" rather than "== prod" so a new non-dev env does not
+    // fail this test while leaving the sandbox correct.
+    //
+    // **The value is taken as the first whitespace-separated token, not `trim()`ed.**
+    // `ENV APP_ENV=prod \` is a multi-line assignment whose line ends in a continuation
+    // backslash, so `trim()` leaves `"dev \"` — which is not `"dev"`, and the assertion
+    // below would pass on a planted `dev`. That is not hypothetical: it is what the first
+    // version of this test did, and planting the defect is what showed it.
+    let app_env = dockerfile
+        .lines()
+        .filter_map(|line| line.strip_prefix("ENV APP_ENV="))
+        .next_back()
+        .unwrap_or_else(|| panic!("the Dockerfile sets no APP_ENV, so the sandbox is unset"));
+    let app_env = app_env.split_whitespace().next().unwrap_or("");
+    assert_eq!(
+        app_env, "prod",
+        "APP_ENV must be `prod` in the image: `dev` means the renderer runs unsandboxed on \
+         model-influenced HTML (A338)"
+    );
+
+    // (3) And the derivation itself, so the chain is closed rather than assumed: the
+    // call site is the only place `allow_no_sandbox` is decided.
+    let integrations = repo_file("crates/server/src/integrations/mod.rs");
+    assert!(
+        integrations.contains("let allow_no_sandbox = cfg.env.is_dev();"),
+        "the renderer's sandbox must be derived from the environment, not defaulted on"
+    );
+}
