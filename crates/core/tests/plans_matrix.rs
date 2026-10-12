@@ -417,3 +417,22 @@ fn the_whole_config_round_trips_through_json() {
         "the config must round-trip losslessly"
     );
 }
+
+/// The pure planner's horizon constant is bound to the shipped `[planner].max_horizon_days`.
+///
+/// The pure planner reads no config (A256) and contract § 6 fixes `PlannerConfig` at six
+/// fields (A259), so `max_horizon_days` cannot reach it: the module carries
+/// `slots::MAX_HORIZON_DAYS` as a backstop and the server is the policy. A mirrored constant
+/// that can drift silently is the exact "two sources of truth" this project keeps catching,
+/// so this test makes a config edit fail here rather than leave the two disagreeing. If the
+/// shipped value is retuned, this constant moves in the same commit — which is the point.
+#[test]
+fn the_planner_horizon_constant_matches_the_shipped_config() {
+    let plans = shipped();
+    assert_eq!(
+        stvdy_core::planner::slots::MAX_HORIZON_DAYS,
+        plans.planner_tunables.max_horizon_days,
+        "crates/core/src/planner/slots.rs::MAX_HORIZON_DAYS must equal \
+         config/plans.toml's [planner].max_horizon_days; the two are a pair"
+    );
+}

@@ -24,6 +24,23 @@ free = 0.50
 pro = 2.00
 power = 6.00
 
+# The planner's non-user tunables (A255). The three knobs the student *does* choose
+# (`block_len_min`, `break_min`, `max_study_min_per_day`) live in `user_settings` (A256)
+# and are composed with these by the server; the pure planner reads no config at all.
+#
+# `max_horizon_days` is a bound, not a preference: a goal dated five years out would
+# otherwise make the planner's day loop unbounded. The pure module mirrors it as
+# `crates/core/src/planner/slots.rs::MAX_HORIZON_DAYS`, and a test binds the constant to
+# this value so a config edit fails a test rather than drifting silently.
+#
+# A missing `[planner]` table is a boot error, not a silent default — the same reason the
+# credit table has no defaults.
+[planner]
+deadline_buffer_min = 120
+revisit_days = 3
+spread_k = 1.5
+max_horizon_days = 120
+
 [plans.free]
 name = "Free"
 price_idr_monthly = 0

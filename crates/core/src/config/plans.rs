@@ -327,12 +327,58 @@ impl CreditPacks {
     }
 }
 
+/// The planner's non-user tunables (A255), from `config/plans.toml`'s `[planner]` table.
+///
+/// These are policy the student did not choose: the buffer before a deadline, how many days
+/// of revisits precede an exam, the Power balancer's spread, and the horizon bound. The
+/// three knobs the student *does* choose (`block_len_min`, `break_min`,
+/// `max_study_min_per_day`) stay in `user_settings` (A256) and are composed with these into
+/// a `PlannerConfig` by the server, never read by the pure planner.
+///
+/// **No `overload_pct` here** (A259): contract § 6 fixes `PlannerConfig` at six fields, so
+/// `balance::OVERLOAD_PCT` is a documented constant in the pure module rather than a seventh
+/// tunable. A field here would be a contract change made by a config edit.
+///
+/// `Default` is all zeroes, which is *invalid* on purpose: a missing `[planner]` table
+/// deserializes to the default and `validate()` rejects it, so the error names the missing
+/// policy rather than silently defaulting it — the same reason the credit table has no
+/// defaults.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannerTunables {
+    /// How long before a goal's `target_date` new material stops being placed (A255).
+    pub deadline_buffer_min: i64,
+    /// How many days of revisits precede an exam (A255).
+    pub revisit_days: i64,
+    /// The Power balancer's weakness spread, `1 + spread_k × (1 − accuracy)` (A255/A258).
+    pub spread_k: f64,
+    /// The hard bound on the planning horizon, in days (A255/A267).
+    ///
+    /// This is the value `crates/core/src/planner/slots.rs::MAX_HORIZON_DAYS` mirrors. The
+    /// server clips each goal's target date to `[today, today + max_horizon_days]` before
+    /// composing a `PlannerInput`, and a test binds the constant to this value so a config
+    /// edit fails a test rather than drifting silently.
+    pub max_horizon_days: i64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlansFile {
     pub meta: Meta,
     pub credits: Credits,
     pub provider_cost_ceiling_usd: BTreeMap<PlanId, f64>,
+    /// The planner's non-user tunables (A255), from `config/plans.toml`'s `[planner]` table.
+    ///
+    /// Named `planner_tunables` rather than `planner` on purpose: `PlanConfig::planner` is a
+    /// different thing entirely (the plan's `PlannerMode`), and two fields called `planner`
+    /// on adjacent structs is a reader's trap. The serde name stays `planner` because that
+    /// is the table's name in the shipped file.
+    ///
+    /// `#[serde(default)]` so a file with no `[planner]` table produces the actionable
+    /// "must be greater than 0" error from `validate()` rather than serde's "missing field
+    /// `planner`" — the same reason `credit_packs` and `plans` are defaulted.
+    #[serde(default, rename = "planner")]
+    pub planner_tunables: PlannerTunables,
     /// Defaulted so that a file with no `[credit_packs]` table produces the actionable
     /// "must define at least one pack" error from `validate()` rather than serde's
     /// "missing field `credit_packs`".
@@ -449,6 +495,38 @@ impl PlansFile {
                     "provider_cost_ceiling_usd is missing an entry for {plan}"
                 )));
             }
+        }
+
+        // The planner's tunables (A255). Checked here for the same reason the credit table
+        // is: a missing or mis-edited `[planner]` table must fail at boot, naming the field,
+        // rather than surface as a planner that silently places no blocks or loops forever.
+        // The zero default a missing table deserializes to fails every bound below, so the
+        // message is the field's, not serde's.
+        let planner = self.planner_tunables;
+        if planner.deadline_buffer_min < 0 {
+            return Err(CoreError::ConfigInvalid(
+                "planner.deadline_buffer_min must not be negative".into(),
+            ));
+        }
+        if planner.revisit_days < 0 {
+            return Err(CoreError::ConfigInvalid(
+                "planner.revisit_days must not be negative".into(),
+            ));
+        }
+        if !planner.spread_k.is_finite() || planner.spread_k < 0.0 {
+            return Err(CoreError::ConfigInvalid(format!(
+                "planner.spread_k must be a finite number >= 0 (got {})",
+                planner.spread_k
+            )));
+        }
+        // The horizon bound is load-bearing rather than a preference (A255): a goal dated
+        // years out would otherwise make the day loop unbounded, which the roadmap's risk
+        // register calls "a real server hang". Zero therefore fails rather than meaning
+        // "unbounded".
+        if planner.max_horizon_days <= 0 {
+            return Err(CoreError::ConfigInvalid(
+                "planner.max_horizon_days must be greater than 0".into(),
+            ));
         }
 
         // Limits must not shrink as the price rises. Checked here rather than only
