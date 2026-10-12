@@ -617,7 +617,7 @@ fn schema(tool: ToolName) -> Value {
                 "kind": {
                     "type": "string",
                     "enum": enum_values(&EventKind::ALL.map(|kind| kind.as_str())),
-                    "description": "class, exam or deadline. Use schedule_study_block for a study block."
+                    "description": "class, exam, study_block or deadline. Use schedule_study_block when the block is study time."
                 },
                 "starts_at": timestamp("When it starts."),
                 "ends_at": timestamp("When it ends."),
