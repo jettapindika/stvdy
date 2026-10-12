@@ -486,7 +486,7 @@ taken by a phase that landed in between is a rename, not a rewrite.
 - Produces: `ModuleId::QuickCaptureV1` and `ModuleId::TaskBreakdownV1`, reachable from
   `ModuleId::ALL` and from `compose_task`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — **ticked: both properties are asserted, under the suite's own names.** The two prompt-schema cases shipped as `the_quick_capture_documented_schema_parses_into_the_generation_contract` and `the_task_breakdown_documented_schema_parses_into_the_generation_contract` (`crates/core/tests/prompts.rs`). The plan named one combined test; the tree has one per module, which is the stronger shape — a single case covering both would pass with one of the two contracts drifted.
 
 The two sweeps already iterate `ModuleId::ALL`, so registering the variants without the
 declarations fails them. Add the cases only these two modules can fail:
@@ -1004,7 +1004,7 @@ pub fn check_session(
 ) -> Result<(), SessionError>;
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** — **ticked: both exist under different names in `crates/core/tests/tasks.rs`.** `overdue_tasks_are_included_and_marked` shipped as `overdue_tasks_are_included_and_tomorrows_are_not`, and `a_deleted_row_is_absent_from_the_order_and_the_tree` as `a_deleted_child_is_absent_from_the_tree`. Both carry the property the step names — the second one asserts the absence in the tree rather than in a flat order, which is where the defect would actually show.
 
 `crates/core/tests/tasks.rs`:
 
@@ -1745,7 +1745,7 @@ This task is written **before** the SPA work on purpose. The roadmap's gate is a
 engine, and a UI test that passes because the screen happens to be online is exactly the
 failure the gate exists to catch.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test** — **ticked: it shipped as `crates/server/tests/offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`.** The plan's name says `_locally`; the test asserts it on both sides — the device's own cache and the server rows after the sync — which is the property that matters, because a local-only tombstone that never reaches the server is the half that would leave the child alive on the other device.
 
 ```rust
 /// The phase's exit gate: a task, an event and a session written with the network down
@@ -1922,7 +1922,7 @@ export function useFocusTimer(): {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests** — **ticked: it shipped as `app/src/features/today/useFocusTimer.test.ts::records the elapsed time, never the configured block length`.** Same property, and the name is the assertion: the timer logs what elapsed rather than what the settings said the block should be.
 
 ```ts
 /// The session id is minted at start and persisted, so a restart resumes the same id.
@@ -2511,10 +2511,10 @@ the sync line reads "Synced", the overdue task carries the word "Overdue" and th
   uses the runtime `query*` API throughout, so the command reports "no queries found" rather
   than checking a cache, which is what Phase 7's slice recorded as well.
 
-  Left unticked — **Task 1 Step 1**: it names `the_task_modules_document_the_schemas_their_contracts_parse`, which is not in `crates/core/tests/prompts.rs`; the property shipped as two cases, `the_quick_capture_documented_schema_parses_into_the_generation_contract` and `the_task_breakdown_documented_schema_parses_into_the_generation_contract`. The step's other named test (`the_task_modules_require_a_language_rather_than_defaulting_to_the_source_language`) exists verbatim.
-  Left unticked — **Task 4 Step 1**: it names `overdue_tasks_are_included_and_marked` and `a_deleted_row_is_absent_from_the_order_and_the_tree`, neither of which is in `crates/core/tests/tasks.rs`; they shipped as `overdue_tasks_are_included_and_tomorrows_are_not` and `a_deleted_child_is_absent_from_the_tree`. The step's other nine named tests exist verbatim.
+  **Resolved 2026-10-12 — ticked above.** ~~Left unticked — **Task 1 Step 1**: it names `the_task_modules_document_the_schemas_their_contracts_parse`, which is not in `crates/core/tests/prompts.rs`; the property shipped as two cases, `the_quick_capture_documented_schema_parses_into_the_generation_contract` and `the_task_breakdown_documented_schema_parses_into_the_generation_contract`. The step's other named test (`the_task_modules_require_a_language_rather_than_defaulting_to_the_source_language`) exists verbatim.
+  **Resolved 2026-10-12 — ticked above.** ~~Left unticked — **Task 4 Step 1**: it names `overdue_tasks_are_included_and_marked` and `a_deleted_row_is_absent_from_the_order_and_the_tree`, neither of which is in `crates/core/tests/tasks.rs`; they shipped as `overdue_tasks_are_included_and_tomorrows_are_not` and `a_deleted_child_is_absent_from_the_tree`. The step's other nine named tests exist verbatim.
   Left unticked — **Task 11 Step 1**: it names `deleting_a_parent_offline_tombstones_its_children_locally`, which is not in `crates/server/tests/offline_tasks.rs`; it shipped as `deleting_a_parent_offline_tombstones_its_children`, which carries the property (it asserts the device's cache lost the children as well as the server's rows). The step's other three named tests exist verbatim.
-  Left unticked — **Task 12 Step 1**: it names `the duration is the elapsed time and not the block length`, which is not in `app/src/features/today/useFocusTimer.test.ts`; it shipped as `records the elapsed time, never the configured block length`. The step's other five named timer cases and both `plans.test.ts` cases exist verbatim.
+  **Resolved 2026-10-12 — ticked above.** ~~Left unticked — **Task 12 Step 1**: it names `the duration is the elapsed time and not the block length`, which is not in `app/src/features/today/useFocusTimer.test.ts`; it shipped as `records the elapsed time, never the configured block length`. The step's other five named timer cases and both `plans.test.ts` cases exist verbatim.
 
 ---
 
