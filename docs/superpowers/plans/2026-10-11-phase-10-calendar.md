@@ -475,7 +475,7 @@ change to `sync/apply.rs`'s rule for `Event`, and no change to `0017_sync_trigge
 ## File structure (new this phase)
 
 ```
-migrations/0029_calendar.sql                # calendar_connections: created_at, updated_at,
+migrations/0030_calendar.sql                # calendar_connections: created_at, updated_at,
                                             # status, error, ics_etag, ics_last_modified,
                                             # study_calendar_id, last_sync_was_full,
                                             # watch_channel_id, watch_expires_at
@@ -876,10 +876,10 @@ feat(core): bounded recurrence expansion, and the hang it prevents
 
 ---
 
-## Task 3: `migrations/0029_calendar.sql` — the connection's state
+## Task 3: `migrations/0030_calendar.sql` — the connection's state
 
 **Files:**
-- Create: `migrations/0029_calendar.sql`
+- Create: `migrations/0030_calendar.sql`
 - Modify: `crates/server/tests/schema.rs`
 
 - [ ] **Step 1: Confirm the number and the trigger rule**
@@ -887,10 +887,11 @@ feat(core): bounded recurrence expansion, and the hang it prevents
 ```
 ls migrations/
 ```
-Expected: `0025_entitlements_limits.sql` is the highest committed number (Phases 7–9's
-`0026`/`0027`/`0028` land first, in their own phases). Confirm the highest number present
-and use the next one; if it is not `0029`, use the next free number and adjust this task's
-filename and every reference to it in this plan.
+Expected: `0028_tasks_events_settings.sql` is the highest committed number, and Phase 9 adds
+`0029_tasks_cascade_restore.sql` for the parent-restore marker (a defect its offline gate
+found: restoring a parent left its cascade-tombstoned children deleted forever). Confirm the
+highest number present and use the next one; if it is not `0030`, use the next free number and
+adjust this task's filename and every reference to it in this plan.
 
 Confirm `migrations/0017_sync_triggers.sql` is **not** in this task's diff, and that no new
 table is `+sync`.
@@ -1836,7 +1837,7 @@ entry point for a feed (A233); the conditional GET and the `change_log` churn it
 - [ ] **Step 4: `docs/ASSUMPTIONS.md`**
 
 Append A230–A249 as rows in the pinned-decisions table. Add to "Schema deviations" one row
-for `0029_calendar.sql`'s nine columns on `calendar_connections`. Note under "Crate-list
+for `0030_calendar.sql`'s nine columns on `calendar_connections`. Note under "Crate-list
 deviations" that `icalendar`/`rrule` are now **pinned in `Cargo.toml`**, not only recorded
 here — the deviation row was aspirational until this phase — and that `icalendar` needs its
 non-default `parser` feature for the import half.

@@ -467,8 +467,8 @@ holds A190–A229 and Phase 10 holds A230–A249, so this block starts at A250.
 ## File structure (new this phase)
 
 ```
-migrations/0030_syllabus_drafts.sql                 # new table; not +sync (A251)
-migrations/0031_plan_proposals.sql                  # new table + events.goal_id (A252/A263)
+migrations/0031_syllabus_drafts.sql                 # new table; not +sync (A251)
+migrations/0032_plan_proposals.sql                  # new table + events.goal_id (A252/A263)
 crates/core/src/generation/syllabus.rs              # the extraction contract + review items
 crates/core/src/generation/effort.rs                # the effort contract + reconcile
 crates/core/src/planner/mod.rs                      # PlannerInput, PlanProposal, propose()
@@ -795,10 +795,10 @@ pub fn reconcile(estimate: &EffortFile, requested: &[String]) -> Result<Vec<(Str
 
 ---
 
-## Task 3: `migrations/0030_syllabus_drafts.sql`
+## Task 3: `migrations/0031_syllabus_drafts.sql`
 
 **Files:**
-- Create: `migrations/0030_syllabus_drafts.sql`
+- Create: `migrations/0031_syllabus_drafts.sql`
 - Modify: `crates/server/tests/schema.rs` (the `documented` list)
 - Modify: `docs/ASSUMPTIONS.md` (one row in § Schema deviations)
 
@@ -1501,10 +1501,10 @@ by accuracy ascending then by name — the same ordering rule A266 uses, for the
 
 ---
 
-## Task 10: `migrations/0031_plan_proposals.sql` and `events.goal_id`
+## Task 10: `migrations/0032_plan_proposals.sql` and `events.goal_id`
 
 **Files:**
-- Create: `migrations/0031_plan_proposals.sql`
+- Create: `migrations/0032_plan_proposals.sql`
 - Modify: `crates/server/tests/schema.rs`, `docs/ASSUMPTIONS.md`, `docs/SYNC.md`
 - Modify: `src-tauri/src/cache/schema.rs` (the `events.goal_id` column)
 

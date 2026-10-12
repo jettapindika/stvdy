@@ -586,8 +586,8 @@ starts at A270.
 ## File structure (new this phase)
 
 ```
-migrations/0032_pending_actions_resolution.sql   # six columns on an existing +sync table
-migrations/0033_reminders.sql                    # two new tables; not +sync (A283)
+migrations/0033_pending_actions_resolution.sql   # six columns on an existing +sync table
+migrations/0034_reminders.sql                    # two new tables; not +sync (A283)
 crates/core/src/agent/mod.rs                     # the module: re-exports, AgentError
 crates/core/src/agent/tools.rs                   # ToolName, ToolKind, ToolArgs, specs, parse
 crates/core/src/agent/gate.rs                    # GateContext, GateDecision, gate, tool_result
@@ -1036,10 +1036,10 @@ feat(core): the push trait, and a double that can actually call a tool
 
 ---
 
-## Task 4: `migrations/0032_pending_actions_resolution.sql`
+## Task 4: `migrations/0033_pending_actions_resolution.sql`
 
 **Files:**
-- Create: `migrations/0032_pending_actions_resolution.sql`
+- Create: `migrations/0033_pending_actions_resolution.sql`
 - Test: `crates/server/tests/schema.rs` (no new `documented` row — the table is known)
 
 **Interfaces:**
@@ -1704,10 +1704,10 @@ feat(core): the reminder engine — one key, quiet hours, and a DST-safe fire ti
 
 ---
 
-## Task 10: `migrations/0033_reminders.sql`
+## Task 10: `migrations/0034_reminders.sql`
 
 **Files:**
-- Create: `migrations/0033_reminders.sql`
+- Create: `migrations/0034_reminders.sql`
 - Modify: `crates/server/tests/schema.rs` (two `documented` rows)
 - Test: `crates/server/tests/schema.rs`
 

@@ -452,7 +452,7 @@ Each is a place the spec, the roadmap and the tree leave a choice. They are appe
 ## File structure (new this phase)
 
 ```
-migrations/0034_payments_hardening.sql     # payments.platform/amount_before_discount_idr/
+migrations/0035_payments_hardening.sql     # payments.platform/amount_before_discount_idr/
                                            # discount_percent/student_discount/review_reason/
                                            # reconciled_at/provider_status; webhook_events.payment_id;
                                            # usage_events.plan_id; credit_ledger.plan_id;
@@ -509,11 +509,12 @@ scripts/smoke-phase13.sh                   # NEW — the sandbox end-to-end run
 docs/{API,ARCHITECTURE,RELEASE,THREAT_MODEL,ASSUMPTIONS}.md
 ```
 
-**Migration numbers.** Phases 8–11 claim `0027`–`0031`; Phase 12 claims `0032` and `0033`;
-this phase claims `0034_payments_hardening.sql`. **Re-read `migrations/` before writing it**
-rather than trusting this line, the way Phase 11's plan says to. Whatever the number,
-`0017_sync_triggers.sql` stays the last trigger-attaching migration and this phase appends
-nothing to its array, because no table this phase touches is `+sync`.
+**Migration numbers.** Phase 9 claims `0028` and `0029`; Phase 10 claims `0030`; Phase 11
+claims `0031` and `0032`; Phase 12 claims `0033` and `0034`; this phase claims
+`0035_payments_hardening.sql`. **Re-read `migrations/` before writing it** rather than trusting
+this line, the way Phase 11's plan says to. Whatever the number, `0017_sync_triggers.sql` stays
+the last trigger-attaching migration and this phase appends nothing to its array, because no
+table this phase touches is `+sync`.
 
 ---
 
@@ -824,7 +825,7 @@ git commit -m "feat(core): the pricing function and the period rules, as pure fu
 
 **Files:**
 - Create: `crates/server/src/billing/{checkout,routes,student}.rs`,
-  `crates/server/tests/billing.rs`, `migrations/0034_payments_hardening.sql`
+  `crates/server/tests/billing.rs`, `migrations/0035_payments_hardening.sql`
 - Modify: `crates/server/src/billing/mod.rs`, `crates/server/src/routes/mod.rs`,
   `crates/server/src/lib.rs`, `crates/server/tests/route_sweep.rs`
 
@@ -906,7 +907,7 @@ file-structure block.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/0034_payments_hardening.sql crates/server/src/billing \
+git add migrations/0035_payments_hardening.sql crates/server/src/billing \
         crates/server/src/{routes/mod,lib}.rs crates/server/tests/{billing,route_sweep}.rs
 git commit -m "feat(server): checkout with the student price, discounts, and one QR per period"
 ```
