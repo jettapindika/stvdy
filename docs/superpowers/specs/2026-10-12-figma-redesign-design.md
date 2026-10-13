@@ -266,18 +266,37 @@ from them.
 - `app/src/features/phoneLayout.test.ts` and the layout tests are updated to the
   new shell.
 - i18n key parity holds with new keys for every added string.
-- **Every new screen has a surface in the shared walk**, and the walk reaches it by
-  tapping the control a user would. The admin console is the one that was missing, and
-  it was missing its entry point as well — so the two were fixed together and the
-  surface is what proves the link exists.
-- **`/styleguide` is the one screen the walk does not cover**, and that is a known gap
-  rather than an oversight: it is a developer gallery with no route into it from the
-  shell (it is reached by typing the URL), and the walk only reaches a surface by
-  tapping. Its axe run is `StyleguideScreen.a11y.test.tsx`, so its contrast and
-  semantics are checked and its **layout at 200% text is not**. It carries several
-  fixed-count grids (`sm:grid-cols-2`, `sm:grid-cols-4`) whose text is a token name
-  rather than student copy, which is why it was left; if it is ever linked from
-  Settings it needs a surface like the console's.
+- **Every screen the redesign added has a surface in the shared walk**, and the walk
+  reaches it by tapping the control a user would. Two of them did not, and closing that
+  is what this round did:
+  - **The admin console** had no surface *and* no route in — its only link is the
+    Settings section an operator sees, which did not exist. The two were fixed together,
+    and the surface is what proves the link renders.
+  - **The task board** had no surface. `TasksScreen` renders the list by default and the
+    board only for `?view=tasks&layout=board` on a non-phone, and nothing clicked the
+    Board link — even though `LayoutSwitch`'s own comment says the links exist "so each
+    layout is an address the student can come back to and the accessibility walk can
+    reach". `tasks-board` is a **desktop-only** surface (a phone renders the card list for
+    both layouts, so walking it there would measure the list twice and report a PASS for a
+    screen it never saw), and the harness gained that one flag to express it.
+- **Two surfaces remain unmeasured, and both are stated rather than implied.** Neither is
+  a coverage claim:
+  - **`/styleguide`** is a developer gallery with no route into it from the shell (it is
+    reached by typing the URL), and the walk only reaches a surface by tapping. Its axe run
+    is `StyleguideScreen.a11y.test.tsx`, so its contrast and semantics are checked and its
+    **layout at 200% text is not**. It carries several fixed-count grids (`sm:grid-cols-2`,
+    `sm:grid-cols-4`) whose text is a token name rather than student copy, which is why it
+    was left; if it is ever linked from Settings it needs a surface like the console's.
+  - **The command palette**, and this one was *tried*. `ONLY_SURFACES=palette` at 1365×900
+    reported **450 problems** against a dialog behaving exactly as designed: every one was
+    the scrim covering the page behind it, plus `372 trapping` and `4 without a ring` from
+    the Tab leg — because a modal *does* cover the page and *does* trap focus. Those two
+    criteria exist to catch a control a neighbour paints over and a focus order that
+    escapes a page, so walking a modal reports its design as a defect, and teaching the
+    harness about modals would weaken both checks for the other 30 surfaces. What the
+    palette gets instead is axe over the combobox/listbox/option structure
+    (`a11y.test.tsx`) and the arrow/Enter/scroll contract (`CommandPalette.test.tsx`); its
+    **layout at 200% text is the one property nothing measures**.
 - Fidelity is judged **per screen against its frame at the frame's own viewport**
   (1440×900 desktop, 390 phone) with the frame's data state. A dev account with
   no data renders the empty states, so each screen is also checked against a
@@ -298,11 +317,19 @@ VIEWPORT_WIDTH=1365 VIEWPORT_HEIGHT=900 VIEWPORT_DPR=2 \
 | Leg | Surfaces | Combinations | Targets | Text pairs | Lowest contrast | Tab stops |
 |---|---|---|---|---|---|---|
 | 390×844, both themes, 100%/200% | 29 | 116 | 1,924 | 5,516 | 4.97:1 | 1,928, 0 unreached, 0 without a ring |
-| 1365×900, both themes, 100%/200% | 29 | 116 | 2,468 | 7,532 | 4.97:1 | 2,384, 0 unreached, 0 without a ring |
+| 1365×900, both themes, 100%/200% | 30 | 120 | 2,556 | 7,772 | 4.79:1 | 2,472, 0 unreached, 0 without a ring |
 
-Zero clipped, zero overlapped, and the page width exact at every one of the 232
+Zero clipped, zero overlapped, and the page width exact at every one of the 236
 combinations. The desktop leg is the one that had never run for any phase until this
-change; it is also the only leg that can see the summary-card clipping above.
+change; it is also the only leg that can see the summary-card clipping above, and it walks
+**one surface more than the phone does** — the task board, which a phone does not render.
+
+The desktop leg's lowest pair is the board's own empty-column line, `text-subtle` on
+`surface-raised` ("Nothing here yet.", 4.79:1 against the 4.5:1 body minimum). It is worth
+naming because it is the *caption on a raised block* pair `tokens.ts` declares, and the
+board is the first surface to render it — so the number moved from 4.97 to 4.79 when the
+surface was added, and it moved because a declared pair finally got measured rather than
+because anything regressed.
 
 ---
 

@@ -977,7 +977,7 @@ dollars are admin-only (`GET /admin/margin`). `resets_at` is the first midnight
 of the caller's own local month, expressed in UTC, so a `Asia/Jakarta` account
 reads the date it will actually reset on.
 
-### Every route, and what it is
+### The routes this document classifies, and what each is
 
 `crates/server/tests/route_sweep.rs` is the authority on how a route relates to the
 entitlement decision: `every_registered_route_is_classified` fails when a registered

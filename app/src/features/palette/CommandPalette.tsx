@@ -294,9 +294,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             activate(results[active])
             return
           }
-          // Tab is intercepted rather than trapped with a sentinel element: the
-          // dialog has exactly one focusable control plus its rows, and cycling
-          // between them is the whole of what a trap would do.
+          // Tab is intercepted rather than trapped with a sentinel element, and the
+          // interception **is** the whole trap: the rows are `role="option"` inside a
+          // listbox, so they are not focusable at all, and the input is the dialog's
+          // only focusable control. Swallowing Tab therefore keeps focus where it is,
+          // which is what a sentinel would do in two elements instead of one. (The
+          // rows were `<button>`s before the combobox rework, when this needed the
+          // "plus its rows" it used to say.)
           if (event.key === 'Tab') event.preventDefault()
         }}
       >

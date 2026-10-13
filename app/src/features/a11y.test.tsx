@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { Route, Routes } from 'react-router'
 
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { CheatsheetScreen } from '@/features/reports/CheatsheetScreen'
+import { CommandPalette } from '@/features/palette/CommandPalette'
 import { ReportScreen } from '@/features/reports/ReportScreen'
 import { PlanUsageScreen } from '@/features/billing/PlanUsageScreen'
 import { DevicesScreen } from '@/features/devices/DevicesScreen'
@@ -399,6 +400,41 @@ describe('screen accessibility', () => {
     )
     await screen.findByRole('heading', { name: 'Jaringan Komputer' })
     await expectAccessible(container, () => heading(container, 'the cheatsheet preview'))
+  })
+
+  it('the command palette has no axe violations', async () => {
+    // The redesign's one new surface the layout walk cannot reach, and the reason is
+    // measured rather than assumed: a modal covers the page and traps focus *by design*,
+    // and the walk's overlap and Tab legs read exactly that as defects (450 of them, all
+    // the scrim over the page behind it). So this is where the dialog is checked — and
+    // the structure is the part that needs it, because the palette is a combobox whose
+    // active row is named by `aria-activedescendant`. That attribute is only exposed when
+    // the input is a `role="combobox"` owning a `role="listbox"` of `role="option"`
+    // children, which is precisely what axe's `aria-required-children` and
+    // `aria-required-parent` rules catch when the nesting is wrong — and the markup
+    // shipped wrong once already, with the attribute on a plain `<input>` over a list of
+    // `<button aria-current>`.
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/workspaces') return jsonResponse(200, { workspaces: [WORKSPACE] })
+      if (path === '/tasks') return jsonResponse(200, { tasks: [] })
+      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [SOURCE] })
+      if (path === '/workspaces/w1/decks') return jsonResponse(200, { decks: [DECK] })
+      return notFound()
+    })
+    const { container } = renderWithProviders(<CommandPalette open onClose={() => {}} />)
+
+    // The positive check, supplied here rather than by `heading`: the palette is a dialog
+    // and has no heading — the heading belongs to the screen that hosts it — and an empty
+    // container passes every axe rule. What is asserted is the structure the case exists
+    // for, so a palette that stopped rendering its options fails here rather than going
+    // green over nothing.
+    const listbox = await screen.findByRole('listbox')
+    expect(within(listbox).getAllByRole('option').length).toBeGreaterThan(0)
+
+    await expectAccessible(container, () => {
+      expect(screen.getByRole('combobox')).toHaveAttribute('aria-controls', listbox.id)
+    })
   })
 
   it('the plan and usage screen has no axe violations', async () => {

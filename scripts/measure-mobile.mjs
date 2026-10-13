@@ -908,7 +908,17 @@ const STUDY_STEPS = [
 const ADMIN_STEPS = [{ nav: 'More' }, { link: 'Open the admin console' }]
 
 /**
- * The phone surfaces this walks, by the taps a phone takes to reach them.
+ * The surfaces this walks, by the taps a user takes to reach them.
+ *
+ * **One table for both viewports** — it was written for the phone and the redesign's
+ * desktop leg walks the same list, which is why the phone's short nav labels are aliased
+ * to the sidebar's in `openSurface` rather than duplicated here.
+ *
+ * A surface may carry **`desktopOnly`**, and one does: the task board, which a phone does
+ * not render at all (it draws the card list for both layouts). Walking it at 390px would
+ * measure the list a second time and report a PASS for a screen the leg never saw — the
+ * vacuity the other guards in this file exist to prevent — so it is dropped from the
+ * phone leg and from that leg's surface count.
  *
  * The tab bar's five labels are the five destinations, and `/billing` is reached
  * the way a phone reaches it — through Settings — which is also the assertion that
@@ -949,6 +959,46 @@ const SURFACES = [
     expect: 'Selesaikan tugas kriptografi untuk kuliah hari Jumat',
     steps: [{ nav: 'Planner' }, { link: 'Tasks' }],
   },
+  // --- The board, which is the second layout of the same screen and had no surface ----
+  //
+  // `TasksScreen` renders the list by default and `TaskBoard` only for
+  // `?view=tasks&layout=board` on a non-phone (`TasksScreen.tsx`'s `layout === 'board' &&
+  // !isPhone`), and nothing clicked the Board link — even though `LayoutSwitch`'s own
+  // comment says the links exist "so each layout is an address the student can come back
+  // to and the accessibility walk can reach". That promise was unkept: the board is a
+  // three-column grid of cards with its own target sizes and its own headings, and it was
+  // measured nowhere.
+  //
+  // **`desktopOnly`, and that flag is the honest form of the constraint rather than a
+  // convenience.** A phone renders the card list for both layouts, so a phone walk of this
+  // surface would measure the list a second time and report a PASS for a screen it never
+  // saw — the vacuity every other guard in this file exists to prevent.
+  //
+  // The guard is the effort line, which is board-only copy and comes from the fixture's
+  // `estimate_min`: the list has no equivalent, so a Board click that landed without the
+  // layout changing leaves the string absent and fails rather than measuring the list twice.
+  {
+    name: 'tasks-board',
+    expect: '1h · total estimated effort',
+    desktopOnly: true,
+    steps: [{ nav: 'Planner' }, { link: 'Tasks' }, { link: 'Board' }],
+  },
+  // --- The command palette is deliberately NOT a surface, and the reason is measured ----
+  //
+  // It was tried (`ONLY_SURFACES=palette`, desktop, 1365×900) and the walk reported **450
+  // problems** against a dialog that is behaving exactly as designed: every one was the
+  // scrim covering the page behind it (`overlapped … by div.fixed.inset-0.z-50`) plus
+  // `372 trapping` and `4 without a ring` from the Tab leg, because a modal *does* cover
+  // the page and *does* trap focus. Those two criteria are page-shaped — they exist to
+  // catch a control a neighbour paints over, and a focus order that escapes a page — so
+  // walking a modal reports its design as a defect, and teaching the harness about modals
+  // would weaken both checks for the other 30 surfaces.
+  //
+  // What the palette gets instead is `a11y.test.tsx`, which renders it and runs axe over
+  // the combobox/listbox/option structure this redesign added — the thing no other check
+  // covers — plus `CommandPalette.test.tsx` for the arrow/Enter/scroll contract. Its
+  // layout at 200% text is the one property that remains unmeasured, and that is stated in
+  // the design doc's §10 rather than left implicit.
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
   // --- Phase 11: the planner and the syllabus import, which had never been walked -----
@@ -2464,13 +2514,22 @@ async function main() {
   const results = []
   const problems = []
 
-  // The surfaces this run walks: all of them, or the subset named by `ONLY_SURFACES`.
+  // The surfaces this run walks: the leg's own, or the subset named by `ONLY_SURFACES`.
   // A name that matches nothing is a failure rather than an empty walk, because
   // `ONLY_SURFACES=stduy` would otherwise report a clean run over zero screens.
+  //
+  // `desktopOnly` is dropped on the phone leg, and the *reason* is in the surface's own
+  // comment: a screen a phone does not render cannot be measured at 390px, and walking it
+  // there would measure whatever the phone renders instead and report a PASS. The
+  // denominator below is this list rather than `SURFACES`, so neither leg can claim
+  // coverage of a surface it cannot reach.
+  const available = SURFACES.filter(
+    (surface) => surface.desktopOnly !== true || MIN_TARGET === DESKTOP_TARGET,
+  )
   const surfaces =
     ONLY === undefined
-      ? SURFACES
-      : SURFACES.filter((surface) => ONLY.split(',').includes(surface.name))
+      ? available
+      : available.filter((surface) => ONLY.split(',').includes(surface.name))
   if (surfaces.length === 0) {
     fail(`ONLY_SURFACES=${ONLY} matched no surface`)
   }
@@ -2760,7 +2819,7 @@ async function main() {
   const coverage =
     ONLY === undefined
       ? `all ${String(surfaces.length)} surfaces`
-      : `${String(surfaces.length)} of ${String(SURFACES.length)} surfaces (ONLY_SURFACES=${ONLY}) — NOT a full gate run`
+      : `${String(surfaces.length)} of ${String(available.length)} surfaces (ONLY_SURFACES=${ONLY}) — NOT a full gate run`
   const verdict = (result) =>
     `gate 5 on a ${leg} viewport: ${result} (${String(VIEWPORT.width)}x${String(VIEWPORT.height)}, ${String(SCALES.length)} scale(s), both themes; ` +
     `${coverage}; keyboard: ${String(totalStops)} Tab stops, ${String(totalUnreached)} unreached, ${String(totalExcused)} excused, ` +

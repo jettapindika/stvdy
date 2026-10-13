@@ -265,7 +265,18 @@ function MarginSummary({
       <ul className="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
         {cards.map((card) => (
           <li key={card.label} className="card flex min-w-0 flex-col gap-1 p-6">
-            <span className="text-label text-muted">{card.label}</span>
+            {/* `break-words` on all three, and the label is the one that needs it most:
+                it is the widest single line in the card ("Contribution margin" measured
+                164px against 175px of content at an 8rem floor), so it is what sets the
+                card's min-content width and therefore the grid track's floor. A long
+                unbroken word that cannot break is what forces a track wider than the
+                space it has. The value keeps `break-words` rather than
+                `whitespace-nowrap`, and that is the safer half of the trade: measured at
+                200% on a 1365px window, every figure is **one line** (the card has 313px
+                of content and the widest, "Rp 45.000", needs 162px), while `nowrap` would
+                turn a figure that stopped fitting into a clipped one — a failure the gate
+                reports — where wrapping keeps it readable. */}
+            <span className="text-label text-muted break-words">{card.label}</span>
             <span className="text-h2 break-words">{card.value}</span>
             <span className="meta break-words">{card.note}</span>
           </li>

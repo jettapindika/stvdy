@@ -259,14 +259,16 @@ export const router = createBrowserRouter([
           // The pricing page and the checkout screen, where the build allows
           // purchase UI at all (A322). Empty in the store build.
           ...purchaseRoutes,
-          // Two entries, and both are real as of the redesign. The sync status
-          // control links here (`A189`: the sidebar and the phone tab bar are both
-          // built from the same five labels, so Devices is not one of them), and
-          // Settings' own "Devices & sync" section links here too — that section is
-          // where the spec nests it. This comment said Settings was still a
-          // `NotBuiltRoute`; it is a real screen (`settings`/`settings/:section` above)
-          // and has been since the redesign, which is exactly the kind of claim a
-          // comment keeps making after the code has moved.
+          // The full Devices screen, and it has exactly one inbound link: the sync
+          // status control (`SyncStatus.tsx`), which is why it is not a nav item
+          // (`A189` — the sidebar and the phone tab bar are both built from the same
+          // five labels). **Settings does not link here**: its "Devices & sync"
+          // section renders `DevicesPanel` in place, at `/settings/devices`, so the
+          // same capability is reachable two ways and only one of them is this route.
+          // This comment previously said Settings was still a `NotBuiltRoute` because
+          // Phase 9 owned it; it has been a real screen (`settings`/`settings/:section`
+          // above) since the redesign, which is the kind of claim a comment keeps
+          // making after the code has moved.
           {
             path: 'devices',
             element: <DevicesScreen />,
