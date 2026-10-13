@@ -68,7 +68,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
               carries "Last synced …" and a pending count, which is three lines in a
               80px bar and made the whole header twice its height. */}
           <SyncStatus variant="compact" />
-          <CreditMeter variant="pill" />
+          <CreditMeter />
           <AccountMenu />
         </div>
       </div>
@@ -116,11 +116,11 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
         </div>
       </div>
       {/* Its own row, left-aligned, so the pill does not compete with the header
-          controls for width on a narrow phone. It is the **pill** variant, which is
-          what the phone frame draws here (`Account and timezone` → `Credit meter`,
-          153x34): the same capsule as the desktop bar, with the level bar in it. */}
+          controls for width on a narrow phone. The frame draws the capsule here too
+          (`Account and timezone` → `Credit meter`, 153x34), so it is the same control
+          as the desktop bar's. */}
       <div className="px-5 pb-3">
-        <CreditMeter variant="pill" />
+        <CreditMeter />
       </div>
     </div>
   )

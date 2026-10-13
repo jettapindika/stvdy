@@ -475,15 +475,14 @@ pub(crate) async fn open_invoice(
 /// how hard the id is to guess.
 ///
 /// **Expiry is re-checked here**, so a client whose clock is wrong cannot extend its own
-/// invoice by not noticing. A pending row past its expiry reads `expired`, and the poll
-/// stops on every terminal status.
-///
-/// **And the gateway is asked, once, before the row is read.** The bridge never pushes, so
-/// this poll is the fast ingress: without it a student who has paid waits for the
-/// five-minute sweep to notice, which is a "waiting for confirmation" screen in front of
-/// money that already moved (A301). It is asked *after* the expiry check, so a row this
-/// request just expired is not resurrected by a late answer, and its result is only ever a
-/// committed status — the read below is what the client sees either way.
+/// invoice by not noticing — but the check allows the gateway's grace
+/// ([`SETTLEMENT_GRACE`](crate::integrations::payment::SETTLEMENT_GRACE)), because the bridge
+/// still accepts a settlement for a minute past the deadline it gave us. Declaring the row dead
+/// at `expires_at` was the other half of a lost-payment gap: this update runs **before** the
+/// gateway is asked, so it closed the row on the very request that would have recorded the
+/// settlement. The student sees the code expire on time regardless — the screen decides from
+/// `expires_at` against its own clock — so the grace is invisible to them and only keeps the
+/// money path open.
 pub async fn show(state: &AppState, user: &AuthUser, payment_id: Uuid) -> AppResult<PaymentView> {
     let mut conn =
         state.pool.acquire().await.map_err(|error| {
@@ -492,10 +491,12 @@ pub async fn show(state: &AppState, user: &AuthUser, payment_id: Uuid) -> AppRes
 
     let expired = sqlx::query(
         "update payments set status = 'expired'
-          where id = $1 and user_id = $2 and status = 'pending' and expires_at <= now()",
+          where id = $1 and user_id = $2 and status = 'pending'
+            and expires_at <= now() - make_interval(secs => $3::int)",
     )
     .bind(payment_id)
     .bind(user.user_id)
+    .bind(crate::integrations::payment::SETTLEMENT_GRACE.num_seconds() as i32)
     .execute(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("expiring the invoice: {error}")))?;

@@ -77,7 +77,15 @@ export function FocusTimer() {
 
   return (
     <div className="card flex flex-col gap-4 p-6">
-      <WidgetHeading title={t('today.timer.title')} meta={stateWord} />
+      {/* The state word goes through `action` rather than `meta`, because the frame
+          types it in caps (`READY`) and `WidgetHeading`'s `meta` renders the sentence-case
+          `.meta`. `.eyebrow` is the class carrying the uppercase treatment; the word is
+          still a plain word, so the state is readable in monochrome and to a screen
+          reader. */}
+      <WidgetHeading
+        title={t('today.timer.title')}
+        action={<span className="eyebrow">{stateWord}</span>}
+      />
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         {/* The design's readout is 36/47.5 mono, and the scale's nearest step is

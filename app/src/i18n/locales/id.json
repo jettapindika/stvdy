@@ -391,7 +391,8 @@
     "total": "{{credits}} kredit tersisa",
     "none": "Kredit habis",
     "loading": "Memeriksa kredit",
-    "unavailable": "Kredit tidak tersedia"
+    "unavailable": "Kredit tidak tersedia",
+    "level": "{{remaining}} dari {{allowance}} kredit bulanan tersisa"
   },
   "palette": {
     "title": "Cari dan perintah",

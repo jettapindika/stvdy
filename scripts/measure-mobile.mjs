@@ -360,6 +360,104 @@ const EVENT = {
   updated_at: '2026-10-11T08:00:00Z',
 }
 
+/**
+ * An instant on the **anchor's own day**, at a fixed time of day.
+ *
+ * `thisWeek` above deliberately steps off the anchor's day so the `today` surface stays
+ * stable across weekdays. This is the opposite need: the `today-populated` surface exists
+ * to put rows *on* today, and `day.ts`'s `overlapsDay` decides that by the event's local
+ * calendar date, so the emitted instant has to fall on that date in the student's zone.
+ *
+ * The times handed to it stay inside `00:00`-`16:00Z`, because Jakarta is `+07:00`: an
+ * instant at `17:00Z` is midnight *the next day* there, which would move the row off
+ * today's timeline and onto tomorrow's — a fixture that silently renders a different
+ * screen, which is the failure mode the anchoring above exists to prevent.
+ */
+function todayAt(time = '09:00:00') {
+  const localDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: USER.timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(ANCHOR)
+  return `${localDate}T${time}Z`
+}
+
+/**
+ * Today's timeline with one row of each kind, so every branch of the row markup is
+ * rendered at once: the course tag, the kind word at the row's right end, the warning
+ * tone a `deadline` takes, and a task's own detail line.
+ *
+ * The titles are Indonesian and long for the reason `EVENT`'s is — a string that fits
+ * proves nothing — and each is a **student-authored string in a fixed-width card**, which
+ * is the class of defect this surface exists to measure at 200% text.
+ */
+const TODAY_ROWS = [
+  { kind: 'class', title: 'Kuliah kriptografi dan keamanan informasi', start: '01:00:00', end: '03:00:00' },
+  { kind: 'exam', title: 'Ujian tengah semester', start: '03:00:00', end: '05:00:00' },
+  { kind: 'study_block', title: 'Membran transport review', start: '05:00:00', end: '07:00:00' },
+  { kind: 'deadline', title: 'Laporan praktikum', start: '09:00:00', end: '09:00:00' },
+]
+
+const TODAY_EVENTS = TODAY_ROWS.map((row, index) => ({
+  id: `et${String(index)}`,
+  workspace_id: 'w1',
+  kind: row.kind,
+  title: row.title,
+  starts_at: todayAt(row.start),
+  ends_at: todayAt(row.end),
+  source: 'manual',
+  task_id: null,
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+}))
+
+/** One task due later today, so the timeline carries a `task` row as well as events. */
+const TODAY_TASKS = [
+  {
+    ...TASK,
+    id: 'tt1',
+    title: 'Kerjakan bab kriptografi',
+    workspace_id: 'w1',
+    due_at: todayAt('11:00:00'),
+  },
+]
+
+/** The four local days the streak strip draws, ending today: three marked, one not. */
+function todayActivity() {
+  return [0, 1, 2, 3].map((back) => {
+    const day = new Date(todayAt('02:00:00'))
+    day.setUTCDate(day.getUTCDate() - back)
+    return day.toISOString()
+  })
+}
+
+/** One logged session, so the timeline's `N min logged` is a real sum and not a zero. */
+const TODAY_SESSION = {
+  id: 'st1',
+  workspace_id: 'w1',
+  task_id: null,
+  started_at: todayAt('00:30:00'),
+  duration_min: 50,
+  created_at: todayAt('00:30:00'),
+  updated_at: todayAt('00:30:00'),
+  deleted_at: null,
+}
+
+/**
+ * Whether the Today surfaces read the on-the-day fixtures.
+ *
+ * A mutable flag rather than a second `ROUTES` table, because the handlers below close
+ * over it and the whole point is that the *same* paths answer differently per surface —
+ * which is the shape `checkoutStateFixture` established for the checkout states.
+ */
+const TODAY_STATE = { populated: false }
+
+/** Switch the Today reads between the harness's fixtures and the on-the-day ones. */
+function todayFixture(populated) {
+  TODAY_STATE.populated = populated
+}
+
 /** One calendar connection, so the connections panel renders a row rather than its empty state. */
 const CONNECTION = {
   id: 'c1',
@@ -949,7 +1047,7 @@ const SURFACES = [
   // prevent, and it cannot fail while a translation is being merged. (It replaced
   // `Due flashcards`, which the frame now types in caps — `innerText` applies
   // `text-transform`, so that string is no longer on the page.)
-  { name: 'today', expect: 'Kriptografi Kunci Publik', steps: [{ nav: 'Today' }] },
+  { name: 'today', expect: 'Kriptografi Kunci Publik', set: () => todayFixture(false), steps: [{ nav: 'Today' }] },
   { name: 'workspaces', steps: [{ nav: 'Work' }] },
   // Calendar and Tasks are **views inside the planner** as of the redesign, so they are
   // reached through the Planner tab and its own switcher rather than as tabs of their own.
@@ -1246,6 +1344,39 @@ const SURFACES = [
   // screen's loading state if the copy happened to match, while an account's address is
   // only on the page when the users table resolved.
   { name: 'admin', expect: 'rani.putri@example.test', steps: ADMIN_STEPS },
+
+  // --- Today with rows on it, which is the state the frame draws --------------------
+  //
+  // The default `today` surface above measures the harness's own fixtures, and those are
+  // built for *other* screens: `EVENT` is deliberately moved off the anchor's day (see
+  // `thisWeek`) and `TASK` sits four days out, so Today's timeline renders its empty
+  // state there. That is the state a new account sees, and it is not the screen
+  // `411:26794` draws — nor does it exercise the row markup, which renders **student-authored
+  // strings** (an event title, a task title, a course name) inside a fixed-width card. That
+  // is exactly the class the priority block's deck line was clipped by, so leaving it
+  // unmeasured would be leaving the defect class open one card over.
+  //
+  // **It is last in the list on purpose.** `set` mutates the shared `ROUTES` table, so a
+  // surface that swaps `/events` and `/tasks` leaks into every surface walked after it —
+  // the calendar and the tasks board both read those paths and both carry an `expect` that
+  // would fail. Being last leaves nothing after it to leak into, and the `today` surface's
+  // own `set` restores the default at the start of the next theme/scale iteration. The
+  // `checkout-*` surfaces above are the same shape, and they can be consecutive only
+  // because each one sets its own state before its own steps.
+  //
+  // **`remount` then a nav tap**, and both are needed. The fixture has to be in place
+  // *before* Today's queries fire, and the shell mounts Today at `/` inside `signIn`,
+  // which happens before any `set` can run — so the remount (a fresh JS context, hence an
+  // empty query cache) is what makes the flag take effect at all. But a fresh sign-in
+  // lands on `/workspaces`, not on Today, so the tap is what mounts the screen the surface
+  // is about. See the step's own comment for why re-clicking the active nav item inside
+  // the same page and a plain `page.reload()` both fail to do this.
+  {
+    name: 'today-populated',
+    expect: 'Kerjakan bab kriptografi',
+    set: () => todayFixture(true),
+    steps: [{ remount: true }, { nav: 'Today' }],
+  },
 ]
 
 /**
@@ -1357,15 +1488,27 @@ const ROUTES = {
       { source_id: 's2', title: 'Algoritma Kunci Publik', attempts: 8, correct: 3, accuracy: 0.375 },
     ],
   }),
-  '/tasks': () => ({ tasks: [TASK] }),
+  // The four reads the `today-populated` surface swaps, and the reason they read a flag
+  // rather than a second table: the *same* paths have to answer differently per surface,
+  // and the handlers below are the only place the walk's fixtures are resolved.
+  '/tasks': () => ({ tasks: TODAY_STATE.populated ? TODAY_TASKS : [TASK] }),
   '/settings': () => ({ settings: SETTINGS_ROW, timezone: USER.timezone }),
   // The calendar reads these five; a missing one 404s and the walk measures the
   // failure state instead of the screen.
-  '/events': () => ({ events: [EVENT] }),
+  '/events': () => ({ events: TODAY_STATE.populated ? TODAY_EVENTS : [EVENT] }),
   '/calendar/connections': () => ({ connections: [CONNECTION] }),
   '/calendar/ics-token': () => ({ ics_feed_token: 'feed-token-1' }),
   '/calendar/google/connect': () => ({ url: 'https://accounts.google.com/o/oauth2/v2/auth' }),
-  '/sessions': () => ({ sessions: [] }),
+  '/sessions': () => ({ sessions: TODAY_STATE.populated ? [TODAY_SESSION] : [] }),
+  // The streak's three instants. It answers empty by default, which is what the `today`
+  // surface has always rendered (the path was absent, so the read 404'd and the screen
+  // fell back to its own empty arrays) — declaring it makes that state a fixture rather
+  // than a missing route.
+  '/activity': () => ({
+    reviews: TODAY_STATE.populated ? todayActivity() : [],
+    attempts: [],
+    sessions: [],
+  }),
   '/devices': () => ({ devices: [] }),
   // Phase 13's three reads. `/plans` is also what the existing `plan` surface needed:
   // `/billing` renders `BillingScreen`, and without this entry the walk measured that
@@ -2167,11 +2310,42 @@ const STEP_TIMEOUT_MS = 5000
  * surface's `expect` is asserted after them, so a key with no handler leaves the
  * screen where the steps left it and the surface fails.
  */
-async function openSurface(page, surface) {
+async function openSurface(page, surface, scale = 100) {
   // A fixture switch, not a tap: it changes what the *next* request is answered with, so
   // it runs before the first step touches the page.
   if (typeof surface.set === 'function') surface.set()
   for (const step of surface.steps) {
+    // A `remount` step gives the surface a **fresh JS context**: it navigates to the app
+    // root and signs in again, which is the only way a surface can be measured under a
+    // fixture its `set` chose.
+    //
+    // **Why the tap kinds cannot do this.** The app mounts Today at `/` inside `signIn`,
+    // which happens *before* any `set` can run — so a surface whose fixture differs from
+    // the harness default has its queries answered under the wrong flag. Re-clicking the
+    // active nav item does not help (React Router does not remount the same route), and a
+    // remount would not either: the client's `staleTime` is 30s, so a fresh mount inside
+    // the same page serves the *cached* default rows and the surface measures the screen
+    // it was trying to replace. A new JS context has an empty query cache, so every read
+    // fires against the flag its `set` just wrote.
+    //
+    // **A plain `page.reload()` is not it.** The access token lives in module memory only
+    // (`lib/tokens.ts` — deliberately never written to storage) and the web adapter's
+    // `secureStore` throws, so a reload lands on the sign-in form. Signing in again is what
+    // re-establishes the session, and it is also what makes the state deterministic.
+    //
+    // The root font size is re-applied afterwards because it is an inline style on the
+    // document, which a new document does not inherit — without that, a remounted surface
+    // on the 200% leg would be measured at 100% and report a pass over the wrong screen.
+    if (step.remount === true) {
+      await page.goto(APP_URL, { waitUntil: 'domcontentloaded' })
+      await signIn(page)
+      await page.evaluate((px) => {
+        document.documentElement.style.fontSize = `${String(px)}px`
+      }, (16 * scale) / 100)
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      continue
+    }
     // A `fill` step writes a value into a field, which the four tap kinds cannot express.
     // The syllabus review screen is why it exists: a draft is only reachable after an
     // upload, and the upload needs text in `#syllabus-text` — so without this the screen
@@ -2611,6 +2785,14 @@ async function main() {
       await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: theme }])
       await page.setRequestInterception(true)
 
+      // **Every page starts from the harness default, and that is not tidiness.** The app
+      // mounts Today at `/` inside `signIn` below, before any surface's `set` can run — so
+      // without this reset the mount would read the *previous* page's last value, and a
+      // surface would measure a mixture of two fixtures (the mount's answers and the
+      // post-`set` ones) with nothing failing. Resetting here makes the mount's state a
+      // property of the page rather than of the walk's history.
+      todayFixture(false)
+
       const seen = new Set()
       page.on('request', (request) => {
         const url = new URL(request.url())
@@ -2668,7 +2850,7 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 300))
 
       for (const surface of surfaces) {
-        await openSurface(page, surface)
+        await openSurface(page, surface, scale)
         // **Wait for the webfonts before measuring anything.**
         //
         // The app self-hosts Plus Jakarta Sans and JetBrains Mono, and a heading measured

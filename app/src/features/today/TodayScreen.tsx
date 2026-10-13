@@ -185,15 +185,17 @@ export function TodayScreen() {
               <LoadingState label={t('today.dueCards.loading')} />
             ) : buckets.dueCards > 0 && data.reviewDeckId !== null ? (
               <>
-                {/* `lg:min-w-56` is a floor, not zero, and it is the same remedy
-                    `.search-field` carries: at a 32px root the action column is
-                    `14rem` of a 773px card, so a `min-w-0` text column was squeezed
-                    to **75px** and this line — the course and deck the count belongs
-                    to — was clipped (measured 140px of scroll in a 75px box, both
-                    themes). With the floor the row's own `flex-wrap` puts the action
-                    on the next line instead, which is a taller block and a readable
-                    line. */}
-                <div className="flex min-w-0 flex-1 flex-col gap-3 lg:min-w-56">
+                {/* `min-w-[min(14rem,100%)]`, not `min-w-0` and not a bare `min-w-56`.
+                    The block is `[text | action]` and the action column is 14rem, so
+                    `min-w-0` let the text column be squeezed to **75px** at a 32px root
+                    and clipped the deck line (measured: 140px of scroll in a 75px box,
+                    both themes). A bare rem floor fixes that at 1365px and breaks below
+                    ~1320px, where 14rem (448px) is wider than the card's own content box
+                    and the column overflows its border box — the defect `QuizPanel.tsx`
+                    and `DevicesScreen.tsx` both record. The cap makes the floor collapse
+                    to the container's own width where there is less room than the floor,
+                    so the row's `flex-wrap` puts the action on its own line instead. */}
+                <div className="flex min-w-0 flex-1 flex-col gap-3 lg:min-w-[min(14rem,100%)]">
                   <p className="eyebrow eyebrow-primary flex items-center gap-2">
                     <Icon name="layers" size={20} className="shrink-0" />
                     {t('today.due.eyebrow')}
@@ -362,8 +364,14 @@ export function TodayScreen() {
                           /* The frame's own tone: "Today" is amber and a later day is
                              muted. The word is the signal and the tone repeats it, so
                              nothing is carried by colour alone — and "In 2 days" is
-                             not a warning, which is why only the zero offset takes it. */
-                          <span className={offset === 0 ? 'eyebrow text-warning' : 'eyebrow'}>
+                             not a warning, which is why only the zero offset takes it.
+                             **`meta`, not `eyebrow`**: the frame renders this line in
+                             sentence case ("Today", "In 2 days") where the week range
+                             above it and the due line below are caps, and `.eyebrow`
+                             is the uppercase form — plus it is defined as the line
+                             *above* a heading, which this is not. `SPEC.md:82` asks for
+                             sentence case in plain words. */
+                          <span className={offset === 0 ? 'meta text-warning' : 'meta'}>
                             {offset === 0
                               ? t('today.deadlines.today')
                               : t('today.deadlines.inDays', { count: offset })}
@@ -628,15 +636,28 @@ function timelineRows(rows: TimelineRow[], now: Date, timeZone: string, t: TFunc
       placed = true
     }
     out.push(
-      <li key={row.id} className="flex gap-4">
+      <li key={row.id} className="flex flex-wrap gap-4">
         <div className="flex w-13 shrink-0 flex-col">
           <span className="meta">{clock(row.at, timeZone)}</span>
           {row.endAt !== null ? <span className="meta">{clock(row.endAt, timeZone)}</span> : null}
         </div>
+        {/* `min-w-[min(10rem,100%)]`, not `min-w-0`, and the two together with the row's
+            own `flex-wrap` are what the 200%-text case needs. The row is `[time | body]`,
+            and the time column is `w-13` — **3.25rem, so 104px at a 32px root** — beside a
+            `gap-4` (32px) and the body's `p-3` (48px): 184px of a phone card's 214px content
+            box is chrome, leaving 30px for the body. With `min-w-0` the body simply shrank
+            into that and the category row inside it was clipped — measured in Chromium at
+            390px/200%, `scrollWidth` **53** against a `clientWidth` of **28**, both themes,
+            and reachable only once a fixture put a row on today's timeline. The capped rem
+            floor is the same instrument `QuizPanel` and `DevicesScreen` use: at 100% it is
+            160px, which is under the room available so nothing changes, and at 200% it
+            exceeds the leftover width, so the row **wraps the body onto its own line** and
+            the body gets the full 214px. `min(…, 100%)` is what keeps the floor from
+            exceeding its own container below `lg`. */}
         <div
           className={`${
             row.tone === 'warning' ? 'bg-warning-tint' : 'raised'
-          } flex min-w-0 flex-1 flex-col gap-2 rounded-field p-3`}
+          } flex min-w-[min(10rem,100%)] flex-1 flex-col gap-2 rounded-field p-3`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CourseTag course={row.course} />
@@ -645,7 +666,7 @@ function timelineRows(rows: TimelineRow[], now: Date, timeZone: string, t: TFunc
                 what it is. `ml-auto` rather than relying on `justify-between`,
                 because a row with no course renders no tag and a lone child of a
                 `justify-between` row stays at the left. */}
-            <span className="eyebrow ml-auto">{row.kindWord}</span>
+            <span className="eyebrow ml-auto wrap-anywhere">{row.kindWord}</span>
           </div>
           <p className="text-label break-words">
             <span className="sr-only">

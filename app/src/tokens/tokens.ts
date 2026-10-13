@@ -142,6 +142,13 @@ export const PAIRS: Pair[] = [
   { fg: 'success', bg: 'success-tint', min: MIN.text, where: 'a "ready" chip' },
   { fg: 'warning', bg: 'warning-tint', min: MIN.text, where: 'a "due" chip' },
   { fg: 'warning', bg: 'surface', min: MIN.text, where: 'a "due today" label on a card' },
+  // A deadline's timeline row is drawn on the warning tint (`today`), and the two text
+  // levels it carries are the body levels rather than the warning colour: the row's
+  // title is `.text-label` and its course line is `.text-caption text-muted`. Declared
+  // because this file's rule is that a rendered pair is named here rather than eyeballed,
+  // and because the row is the only surface that puts body text on a warning ground.
+  { fg: 'text', bg: 'warning-tint', min: MIN.text, where: "a deadline row's title" },
+  { fg: 'text-muted', bg: 'warning-tint', min: MIN.text, where: "a deadline row's course line" },
   { fg: 'danger', bg: 'danger-tint', min: MIN.text, where: 'an error note' },
   { fg: 'danger', bg: 'surface', min: MIN.text, where: 'an error message on a card' },
   { fg: 'bg', bg: 'danger', min: MIN.text, where: 'the label on a destructive button' },

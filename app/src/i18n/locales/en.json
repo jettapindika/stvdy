@@ -396,7 +396,8 @@
     "total": "{{credits}} credits left",
     "none": "No credits left",
     "loading": "Checking credits",
-    "unavailable": "Credits unavailable"
+    "unavailable": "Credits unavailable",
+    "level": "{{remaining}} of {{allowance}} monthly credits left"
   },
   "palette": {
     "title": "Search and commands",

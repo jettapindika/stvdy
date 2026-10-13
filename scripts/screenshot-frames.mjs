@@ -85,6 +85,17 @@ const FRAMES = [
 
   // --- C. Core app ----------------------------------------------------------------
   { name: 'today-desktop', figma: '411:26794', width: 1440, height: 1466, surface: 'today' },
+  // The frame's own state, which the entry above cannot show: the walk's fixtures put the
+  // event off the anchor's day and the task four days out, so `today-desktop` is a
+  // photograph of the empty timeline. `411:26794` draws four rows, so the comparison
+  // against *that* frame is this one.
+  {
+    name: 'today-populated-desktop',
+    figma: '411:26794',
+    width: 1440,
+    height: 1466,
+    surface: 'today-populated',
+  },
   { name: 'today-mobile', figma: '411:27057', width: 390, height: 2965, surface: 'today' },
   {
     name: 'workspaces-desktop',

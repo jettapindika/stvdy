@@ -363,7 +363,9 @@ comparison needs its own instruments, and two were added:
   padding, the 216px rail and the `176x44` nav item were confirmed.
 
 Both are development instruments, not gates: they print, they do not pass or fail, and
-neither is wired into CI.
+neither is wired into CI. **A state a fixture cannot reach belongs in `SURFACES`, not in a
+third script**: `today-populated` below is the worked example, and it exists because a
+throwaway capture would have photographed the row markup without ever measuring it.
 
 ---
 
@@ -462,14 +464,103 @@ desktop leg:
 | The priority block's deck line was **clipped**: `Kriptografi dan Keamanan Informasi Terapan` measured `scrollWidth` 140px against a `clientWidth` of **75px**, both themes | The block became a flex row, so the text column was `flex-1 min-w-0` beside a `max-w-56` action column. `min-w-0` lets the column shrink to *nothing*, and at a 32px root the action column's 14rem left the text column 75px. The remedy is the same one `.search-field` carries: a **floor** (`lg:min-w-56`), after which the row's own `flex-wrap` puts the action on the next line instead of squeezing the text | The phone leg passes the same markup, because a phone stacks the block; the desktop leg is the only one that renders the row |
 | The clipped string was a **course name** — the student's own text, with no break opportunity at 200% | `break-words` (`overflow-wrap: break-word`) does not lower a box's min-content size, so a long unbroken word keeps overflowing. `wrap-anywhere` (`anywhere`) does, and that is the utility the capture draft card already uses for the same class of string | The string is a fixture course name that fits at 100%; only the 32px root makes one word wider than the column |
 
+### The second round, from the surface that put rows on the timeline
+
+Adding `today-populated` immediately found a defect the previous pass could not have: the
+row markup had **never been rendered** by any instrument, because no fixture put a row on
+today's timeline.
+
+| Defect | Mechanism | Why nothing else caught it |
+|---|---|---|
+| The timeline row's category row was **clipped** at 200% text on a phone: `IF4020` + the kind word measured `scrollWidth` **53** against a `clientWidth` of **28**, both themes | The row is `[time \| body]`, and its chrome is all in rems: the time column is `w-13` (**104px** at a 32px root), the gap is `gap-4` (32px) and the body's padding is `p-3` (48px) — **184px of a phone card's 214px content box**. With `min-w-0` on the body it simply shrank into the 30px that was left. Now the body carries `min-w-[min(10rem,100%)]` and the row `flex-wrap`, so at 200% the body takes a line of its own and gets the full 214px; at 100% the 160px floor is under the room available and nothing moves | Only reachable once a fixture put a row on today's timeline — the `today` surface had always rendered the empty state. The phone leg alone could not see it before that, and the desktop leg has room to spare |
+| The kind word could not break inside its own word | `Task` is one word, and at 200% it is wider than the space left for it. `wrap-anywhere` on the span, the same remedy as the course name above | Same — the string only renders when there is a row |
+
+Three smaller corrections came out of the same review round, each a fidelity or
+correctness point rather than a layout one:
+
+- The **relative-due label** on a deadline card is `.meta`, not `.eyebrow`. The frame
+  renders it in sentence case ("Today", "In 2 days") where the week range above it and the
+  due line below are caps, `.eyebrow` is the uppercase form, and `SPEC.md:82` asks for
+  sentence case in plain words. The zero-offset tone is `text-warning`, which is what the
+  frame's amber "Today" is.
+- The **priority block's floor** is `min-w-[min(14rem,100%)]`, not a bare `lg:min-w-56`.
+  A bare rem floor fixes 1365px and breaks below ~1320px, where 14rem (448px) is wider than
+  the card's own content box and the column overflows its border box — the defect
+  `QuizPanel.tsx` and `DevicesScreen.tsx` both record and both cap for. Neither leg walks
+  the 1024-1320px band.
+- The **timer's state word** goes through `WidgetHeading`'s `action` as an `.eyebrow`
+  rather than through `meta`, because the frame types it in caps (`READY`) and `meta`
+  renders the sentence-case `.meta`.
+
+The **credit meter** changed shape in the same round, and two of its details are
+corrections rather than additions:
+
+- It has **one** variant now. The `plain` branch became unreachable once both call sites
+  (the desktop top bar and the phone header's row) took the capsule the frames draw, and a
+  branch nothing can reach is dead code rather than a caller waiting to appear.
+- The level bar is `role="img"` with an `aria-label`, not `aria-hidden`. The pill's label
+  states `credits.total` (the monthly bucket **plus** anything purchased, "72 credits
+  left") while the bar draws `credits.monthly` against the plan's monthly allowance —
+  **different facts**, so the bar is the only carrier of its own and needs a name. That is
+  the `DashboardScreen` bar's pattern; the plan screen's `aria-hidden` is correct only
+  because the two counts are printed beside it there. The read is guarded
+  (`limits: {}` is what `Shell.test.tsx` answers with, and the bar is omitted rather than
+  drawn from an undefined allowance).
+- The two pairs the deadline row actually renders on the warning tint are now **declared**
+  in `tokens.ts` (`text` and `text-muted` on `warning-tint`), because that file's rule is
+  that a rendered pair is named there rather than eyeballed, and the row is the only
+  surface that puts body text on a warning ground.
+
 **Verification.** `ONLY_SURFACES=today` at both viewports, both themes, 100% and 200%:
 390×844 → 15 targets, 0 under 44px, 47 text pairs, lowest 5.28:1, 0 clipped, 0
 overlapped, page 390/390; 1365×900 → 16 targets, 0 under 32px, 54 text pairs, lowest
 5.28:1, 0 clipped, 0 overlapped, page 1365/1365. Both legs PASS with 0 unreached Tab
-stops and 0 without a ring. `scripts/screenshot-frames.mjs today-desktop` and
-`today-mobile` capture the frame's own viewports at its own width; the harness's own
-fixtures put the task four days out and the event on the week's Wednesday, so the
-timeline's populated state was photographed separately (a throwaway that overrides
-`/tasks`, `/events`, `/activity` and `/sessions` to today-anchored rows) and its
-summary line then reads `1 CLASS · 1 EXAM · 1 STUDY BLOCK · 1 DEADLINE · 1 TASK · 50 MIN
-LOGGED`.
+stops and 0 without a ring.
+
+The **whole app** was then walked with the same change in place, because the credit
+pill's level bar is shell chrome on every screen:
+
+| Leg | Surfaces | Combinations | Targets | Text pairs | Lowest contrast | Tab stops |
+|---|---|---|---|---|---|---|
+| 390×844, both themes, 100%/200% | 29 | 116 | 1,920 | 5,500 | 4.97:1 | 1,924, 0 unreached, 0 without a ring |
+| 1365×900, both themes, 100%/200% | 30 | 120 | 2,552 | 7,756 | 4.79:1 | 2,468, 0 unreached, 0 without a ring |
+
+Zero clipped, zero overlapped, and the page width exact at every one of the 236
+combinations. The 4.79:1 pair is the board's own empty-column caption, which was the
+desktop leg's lowest before this change as well.
+
+`scripts/screenshot-frames.mjs today-desktop` and `today-mobile` capture the frame's
+own viewports at its own width, but the harness's fixtures put the task four days out
+and the event on the week's Wednesday — they exist for the Tasks and Calendar surfaces
+— so Today has no row on it in that capture, and `today-desktop` is therefore a
+photograph of the empty timeline rather than of the screen `411:26794` draws.
+
+**The populated state is a walk surface, not a throwaway instrument.** `today-populated`
+is the last entry in `SURFACES`, and `today-populated-desktop` is a `FRAMES` entry
+pointing at it, so the timeline's populated rows — which are the only place the row
+markup renders, and they carry student-authored strings in a fixed-width card — are
+measured for clipping at 200% text on both legs. That is not a formality: the surface
+found a real defect on its first run (below).
+
+Getting it deterministic needed one new step kind, `remount`, and the reason is worth
+recording because the obvious two remedies both fail:
+
+- **The screen is already mounted before any `set` can run.** The shell mounts Today at
+  `/` inside `signIn`, and surfaces are walked after that, so a surface whose fixture
+  differs from the harness default has its queries answered under the wrong flag. The
+  failure is not a crash but a *mixture*: `/tasks` answered under the new flag while
+  `/sessions` landed after a later reset, which the first run of this surface showed as
+  `1 task · 0 min logged` beside `No study days yet`.
+- **Re-clicking the active nav item does nothing** (React Router does not remount the
+  same route), and **a fresh mount inside the same page serves the cached default rows**,
+  because the client's `staleTime` is 30s. So the only thing that works is a new JS
+  context, and the only way to get one without losing the session is to navigate to the
+  root and sign in again: the access token lives in module memory only
+  (`lib/tokens.ts` — deliberately never written to storage) and the web adapter's
+  `secureStore` throws, so a plain `page.reload()` lands on the sign-in form.
+- `remount` therefore navigates and re-signs-in, then re-applies the root font size —
+  which is an inline style on the document and would otherwise be lost, silently
+  measuring a remounted surface at 100% on the 200% leg. Sign-in lands on `/workspaces`,
+  so the surface follows it with `{ nav: 'Today' }`.
+- Every page also resets the flag before its own mount, so the *default* surface is a
+  property of the page rather than of the walk's history.

@@ -105,7 +105,14 @@ pub async fn refresh_pending(state: &AppState, user_id: Uuid, payment_id: Uuid) 
     }
 }
 
-/// The sweep: pending payments inside their expiry window, asked one at a time.
+/// The sweep: pending payments inside their window, asked one at a time.
+///
+/// **The window is `expires_at + SETTLEMENT_GRACE`, not `expires_at`.** The gateway keeps
+/// accepting a settlement for a minute past the deadline we show the student, so asking only
+/// until `expires_at` dropped every payment that arrived in that minute: the money was taken and
+/// nothing recorded it. Asking for the grace is what makes A295's two branches reachable at all —
+/// a payment made after the deadline lands in `review`, and one made before it whose confirmation
+/// was late is honoured.
 ///
 /// Returns how many payments the gateway reported paid.
 pub async fn poll_pending(state: &AppState) -> AppResult<u64> {
@@ -114,11 +121,13 @@ pub async fn poll_pending(state: &AppState) -> AppResult<u64> {
     let pending: Vec<PendingPayment> = sqlx::query_as(
         "select id, provider_payment_id
            from payments
-          where status = 'pending' and expires_at > now()
+          where status = 'pending'
+            and expires_at > now() - make_interval(secs => $2::int)
           order by expires_at
           limit $1",
     )
     .bind(POLL_BATCH)
+    .bind(super::super::integrations::payment::SETTLEMENT_GRACE.num_seconds() as i32)
     .fetch_all(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("listing pending payments: {error}")))?;

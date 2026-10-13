@@ -2098,7 +2098,11 @@ as its own line so the student can see why the figure is not the price.
 - `GET /billing/payments/:id` → the poll the checkout screen runs (A306), scoped by
   `user_id` in the statement rather than checked after the read. **Expiry is re-checked here**,
   so a client whose clock is wrong cannot extend its own invoice by not noticing: a `pending`
-  row past its expiry reads `expired`. 404 for another account's payment.
+  row past its expiry reads `expired`. The check allows the gateway's own 60-second acceptance
+  window (`SETTLEMENT_GRACE`), because the bridge still takes a payment for that minute — closing
+  the row at `expires_at` dropped exactly the settlements that arrived there. The student sees the
+  code expire on time either way: the screen decides from `expires_at` against its own clock.
+  404 for another account's payment.
   **And the gateway is asked, once, before the row is read.** The bridge never pushes, so this
   request is the fast ingress: without it a student who has paid waits up to five minutes for
   the sweep, staring at "waiting for confirmation" in front of money that already moved. A

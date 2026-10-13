@@ -24,11 +24,10 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * carries no colour of its own — the state is in the words ("No credits left"),
  * so nothing is conveyed by colour alone.
  *
- * **Two variants, one reading.** `pill` is the shell's, in both form factors: the
- * desktop top bar's account group and the phone header's own row under it, which is
- * where the frames draw a bordered capsule beside the avatar. `plain` remains for a
- * caller that wants the bare label. Both render the same string from the same
- * formatter, so the number cannot differ between them.
+ * **One shape, in both form factors.** The capsule is what the design draws in the
+ * desktop top bar's account group *and* in the phone header's own row under the
+ * controls (`411:27057` → `Account and timezone` → `Credit meter`, 153x34), so there
+ * is no second variant to keep in step.
  */
 
 /**
@@ -43,13 +42,7 @@ export function formatCount(value: number, language: string): string {
   return new Intl.NumberFormat(tag).format(value)
 }
 
-export function CreditMeter({
-  className = '',
-  variant = 'plain',
-}: {
-  className?: string
-  variant?: 'plain' | 'pill'
-}) {
+export function CreditMeter({ className = '' }: { className?: string }) {
   const { t, i18n } = useTranslation()
   const usage = useUsage()
   // `credits` is reached with optional chaining even though the contract types it
@@ -81,42 +74,39 @@ export function CreditMeter({
         ? t('meter.none')
         : t('meter.total', { credits: formatCount(total, i18n.language) })
 
-  if (variant === 'pill') {
-    return (
-      <Link
-        to="/billing"
-        className={`credit-pill hover:border-border-strong focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
-      >
-        <Icon name="sparkles" size={16} className="shrink-0 text-primary-text" />
-        {/* `whitespace-nowrap`: the balance is two words at most in either
-            language, and a capsule that wrapped "60 credits left" onto two lines
-            made the whole top bar twice its height. */}
-        <span className="meta whitespace-nowrap text-text">{label}</span>
-        {/* The frame's 24x4 level bar: a second reading of the same balance, never
-            the only one — the label above says the count in words, so nothing here
-            depends on the bar. `aria-hidden` for the same reason the plan screen's
-            monthly bar is: the sentence is the fact, and a bar carrying a fact no
-            text carries would be unreadable to a screen reader.
-            The ratio is the payload's own two numbers (`limits.credits_per_month`
-            is the plan's monthly allowance, `credits.monthly` the unspent part of
-            it), which is the same pair `PlanUsageSections` draws — deliberately not
-            a percentage, which is a figure the server never computes. Omitted, not
-            zero-filled, when either number is absent. */}
-        {share !== null ? (
-          <span className="credit-level" aria-hidden="true">
-            <span className="credit-level-fill" style={{ width: `${String(share)}%` }} />
-          </span>
-        ) : null}
-      </Link>
-    )
-  }
+  // The bar's own name, which is **not** the pill's label and cannot be derived from it:
+  // the label states `credits.total` (the monthly bucket *plus* anything purchased, "72
+  // credits left") while the bar draws `credits.monthly` against the plan's monthly
+  // allowance. Those are different facts, so the bar needs a name of its own — the
+  // `DashboardScreen` bar's `role="img"` + `aria-label` pattern rather than the plan
+  // screen's `aria-hidden`, which is correct only because the two counts are printed
+  // beside it there.
+  const barLabel =
+    typeof allowance === 'number' && typeof remaining === 'number'
+      ? t('meter.level', {
+          remaining: formatCount(remaining, i18n.language),
+          allowance: formatCount(allowance, i18n.language),
+        })
+      : undefined
 
   return (
     <Link
       to="/billing"
-      className={`flex min-h-11 flex-col justify-center rounded-field px-2 py-1 hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
+      className={`credit-pill hover:border-border-strong focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
     >
-      <span className="meta">{label}</span>
+      <Icon name="sparkles" size={16} className="shrink-0 text-primary-text" />
+      {/* `whitespace-nowrap`: the balance is two words at most in either
+          language, and a capsule that wrapped "60 credits left" onto two lines
+          made the whole top bar twice its height. */}
+      <span className="meta whitespace-nowrap text-text">{label}</span>
+      {/* The frame's 24x4 level bar, omitted rather than zero-filled when either number
+          is absent — `Shell.test.tsx` answers `/usage` with `limits: {}`, and a bar drawn
+          from an undefined allowance would be a figure nothing measured. */}
+      {share !== null && barLabel !== undefined ? (
+        <span className="credit-level" role="img" aria-label={barLabel}>
+          <span className="credit-level-fill" style={{ width: `${String(share)}%` }} />
+        </span>
+      ) : null}
     </Link>
   )
 }

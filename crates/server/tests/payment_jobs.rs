@@ -299,13 +299,20 @@ async fn poll_payment_expires_an_invoice_the_gateway_says_is_dead(pool: PgPool) 
         "pending"
     );
 
-    // And the client's own poll expires it once the deadline passes, so the screen stops
+    // And the client's own poll expires it once the deadline is past, so the screen stops
     // waiting even when the gateway never says anything.
-    sqlx::query("update payments set expires_at = now() - interval '1 minute' where id = $1::uuid")
-        .bind(second["id"].as_str().unwrap())
-        .execute(&harness.state.pool)
-        .await
-        .unwrap();
+    //
+    // Five minutes, not one: the gateway keeps accepting a settlement for
+    // `SETTLEMENT_GRACE` (60s) past the deadline, and this check now allows it — so an expiry
+    // exactly one minute ago would sit on the boundary and the assertion would flake by
+    // microseconds.
+    sqlx::query(
+        "update payments set expires_at = now() - interval '5 minutes' where id = $1::uuid",
+    )
+    .bind(second["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
     let (status, polled) = json(
         &_app,
         "GET",
@@ -379,6 +386,135 @@ async fn reconcile_flags_a_gateway_payment_we_never_recorded(pool: PgPool) {
     // The unknown transaction is counted; our own pending payment is inside the ten-minute
     // grace and is not flagged, because an invoice created seconds ago is not a mismatch.
     assert_eq!(flagged, 1, "an unknown gateway transaction was not flagged");
+}
+
+/// **A settlement inside the gateway's grace window must be read, not dropped.**
+///
+/// The gateway accepts a transaction until `expiresAt + clockSkew` — its matcher's
+/// `windowEnd`, and the instant its own sweep expires the payment — so for sixty seconds after
+/// our `expires_at` the code is still live at the gateway. Our poller asked only while
+/// `expires_at > now()`, and the client's poll marks the row `expired` at the same instant, so a
+/// settlement in that window was **invisible**: the money was taken and nothing recorded it.
+///
+/// A295 says what should happen, and it is not silence: a payment made *after* the expiry is
+/// `review` unconditionally, and one made before it whose confirmation arrived late is honoured.
+/// Both branches live in `apply_paid` and neither was reachable, because the answer never
+/// arrived.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_settlement_inside_the_gateways_grace_window_reaches_the_review_queue(pool: PgPool) {
+    let (harness, _app, _token, payment) = checkout(pool).await;
+    let amount = payment["amount_idr"].as_i64().unwrap();
+
+    // Thirty seconds past expiry: dead to us, still live at the gateway.
+    sqlx::query(
+        "update payments set expires_at = now() - interval '30 seconds' where id = $1::uuid",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // And the student paid ten seconds ago — after the expiry, inside the grace.
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now() - chrono::Duration::seconds(10),
+        amount_idr: amount,
+        provider_payment_id: Some("gw-late".to_string()),
+        fee_idr: None,
+    });
+
+    stvdy_server::billing::poll::poll_pending(&harness.state)
+        .await
+        .unwrap();
+
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("select status, review_reason from payments where id = $1::uuid")
+            .bind(payment["id"].as_str().unwrap())
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        status, "review",
+        "a settlement inside the grace window was dropped instead of queued for a human"
+    );
+    let reason = reason.expect("a review names its reason");
+    assert!(
+        reason.contains("expired"),
+        "the reason must name the expiry it missed: {reason}"
+    );
+    assert_eq!(
+        live_subscriptions(&harness).await,
+        0,
+        "a payment made after the deadline must not activate a plan on its own (A295)"
+    );
+}
+
+/// The other half of A295: paid **before** the deadline, confirmed after it — the lateness is
+/// ours, and `QRIS_HONOR_LATE_PAYMENT` (default true) decides that it must not cost the student
+/// their plan. This is the case the grace window exists for.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_payment_made_before_the_deadline_is_honoured_when_read_inside_the_grace(pool: PgPool) {
+    let (harness, _app, _token, payment) = checkout(pool).await;
+    let amount = payment["amount_idr"].as_i64().unwrap();
+
+    sqlx::query(
+        "update payments set expires_at = now() - interval '30 seconds' where id = $1::uuid",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // Paid ten seconds *before* the deadline, read twenty seconds after it.
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now() - chrono::Duration::seconds(40),
+        amount_idr: amount,
+        provider_payment_id: Some("gw-intime".to_string()),
+        fee_idr: None,
+    });
+
+    let applied = stvdy_server::billing::poll::poll_pending(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(applied, 1, "an in-time payment was not activated");
+    assert_eq!(live_subscriptions(&harness).await, 1);
+    assert_eq!(ledger_rows(&harness).await, 1);
+}
+
+/// A payment that has been dead for longer than the gateway's grace is not asked about again.
+///
+/// The assertion is a `Paid` answer waiting in the double's queue: if the pass asks about this
+/// payment it gets that answer and activates, so "nothing happened" is proof the query excluded
+/// it. An empty queue would not do — a `Provider` error is treated as transient and logged, so
+/// asking would still pass.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_payment_dead_past_the_grace_is_not_asked_about_again(pool: PgPool) {
+    let (harness, _app, _token, payment) = checkout(pool).await;
+    let amount = payment["amount_idr"].as_i64().unwrap();
+
+    sqlx::query(
+        "update payments set expires_at = now() - interval '10 minutes' where id = $1::uuid",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now(),
+        amount_idr: amount,
+        provider_payment_id: Some("gw-too-late".to_string()),
+        fee_idr: None,
+    });
+
+    let applied = stvdy_server::billing::poll::poll_pending(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(applied, 0);
+    assert_eq!(
+        payment_status(&harness, payment["id"].as_str().unwrap()).await,
+        "pending",
+        "a payment past the grace was asked about, and a settlement the gateway would refuse was applied"
+    );
 }
 
 /// **A live, unpaid invoice is not a mismatch**, and flagging one is not a cosmetic error.
