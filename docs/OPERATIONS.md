@@ -297,20 +297,36 @@ signup is completable at all here** — `SMTP_URL` is unset (B3), so the link is
 `data/mail` rather than an inbox, and it is written by uid 10001, which is why the smoke script
 reads it with `sudo`.
 
-**The image is built on the host, from the whole build context, and `migrations/` is the part that
-is easy to leave out.** There is no registry in this deployment: the build context is rsynced to
-`~/stvdy/src` and `docker build` runs there, natively (`amd64`), because the laptop is `arm64` and
-a cross-build of this workspace is slower than the copy. `scripts/staging-sync.sh` is that step:
+**The image is built on the host, from a git checkout, and the host pulls it itself.** There is no
+registry in this deployment: the build context is a clone at `~/stvdy/src` and `docker build` runs
+there, natively (`amd64`), because the laptop is `arm64` and a cross-build of this workspace is
+slower than the fetch. `scripts/staging-sync.sh` is that step:
 
 ```bash
-bash scripts/staging-sync.sh                    # ubuntu@129.225.10.139, stvdy-server:0.1.2
-bash scripts/staging-sync.sh host tag           # or explicitly
+bash scripts/staging-sync.sh                    # ubuntu@129.225.10.139, stvdy-server:0.1.2, main
+bash scripts/staging-sync.sh host tag ref       # or explicitly
 ```
+
+**A commit is the unit, not a working tree, and that is the point.** The script moves the clone to
+a commit on `origin` — `git fetch --depth 1` then `reset --hard FETCH_HEAD` — so what runs on the
+host is a revision anyone can look up, and a rebuild there needs no laptop. It warns when `HEAD`
+differs from `origin/main`, because the host builds **what was pushed**: a deploy that silently
+ships the previous commit is worse than one that fails, and uncommitted work is invisible to the
+host by construction.
+
+**`migrations/` was the part that was easy to leave out, and a checkout retires that class of
+mistake.** `sqlx::migrate!` embeds the migration files at **compile** time, so an image built from a
+tree whose `migrations/` is stale carries code for a schema its database does not have — and
+`--migrate-only` cannot repair it, because it runs *that image's* embedded set. With an rsynced
+context the file list had to be right by hand; with a clone the tree is whatever the commit says it
+is. The same applies to `prompts/`, `templates/`, `config/` and `assets/`, all of which are
+compiled in.
 
 **It also ships the three deployment artifacts, which are not part of the build context.**
 `docker-compose.staging.yml`, `web/nginx.conf` and `.env.staging.example` are derived from this
-tree, but nothing compiles them — so the build context's rsync would not notice a change and the
-host would keep running whatever was last copied by hand. That is how a compose service can exist
+tree, but nothing compiles them and they are not read from `~/stvdy/src` either — the deploy reads
+them at `~/stvdy/`. So a git pull alone would not put them anywhere that matters, and the host would
+keep running whatever was last copied by hand. That is how a compose service can exist
 in this repository and not on the host: `gopay-bridge` did, and a deploy that looked green had no
 payment gateway in it. `.env.staging` is deliberately **not** shipped — it is the one file on the
 host that is not derived from this tree, and it holds the deployment's secrets and its filled-in

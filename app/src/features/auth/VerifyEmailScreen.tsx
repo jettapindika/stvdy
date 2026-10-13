@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { asApiError } from '@/api/errors'
@@ -40,6 +40,7 @@ export function VerifyEmailScreen() {
   const verify = useVerifyEmail()
   const resend = useResendVerification()
   const signOut = useSignOut()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const started = useRef(false)
 
@@ -136,7 +137,15 @@ export function VerifyEmailScreen() {
                 className="btn btn-quiet w-full"
                 disabled={signOut.isPending}
                 onClick={() => {
-                  signOut.mutate()
+                  // Navigate to sign-in rather than leaving them on this screen: the label
+                  // promises a different address, and this page's signed-out state is about
+                  // opening a link, not about choosing an account. `onSettled` rather than
+                  // `onSuccess`, because the local session is cleared either way (the hook
+                  // clears it even when the revocation request fails) and a student who is
+                  // signed out has to end up where they can sign in.
+                  signOut.mutate(undefined, {
+                    onSettled: () => void navigate('/signin', { replace: true }),
+                  })
                 }}
               >
                 {t('auth.verify.useAnotherAddress')}
