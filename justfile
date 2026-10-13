@@ -310,6 +310,24 @@ fmt:
 test:
     cargo test --workspace
 
+# The workspace checks, on the staging host instead of on this machine.
+#
+# `target/` is the largest thing this repository produces — a debug build of the workspace
+# plus its test targets was 62 GB, against 5 MB of source under `crates/` — and nothing
+# about a compiler invocation needs to be local. The container is `rust:1.94.1-trixie`, the
+# same `FROM` the `Dockerfile`'s build stage uses, so the checks and the image are the same
+# compiler rather than two pins of the same version.
+#
+# `check-rust` stays as it is and still runs locally: it is the gate CI runs, and it is what
+# a change is checked with when the host is unreachable. `check-web` and `check-shell` cannot
+# move at all — the shell is excluded from this workspace and an iOS or Android bundle needs
+# Xcode or the Android SDK. See `docs/OPERATIONS.md` § The workspace checks.
+# The mode is the recipe's first argument because it is the one that varies; the script takes
+# the host first, like `staging-sync.sh` does. `just remote-check` alone is the same three
+# commands `check-rust` runs.
+remote-check mode="all" host="ubuntu@129.225.10.139":
+    bash scripts/remote-check.sh {{host}} {{mode}}
+
 # Regenerate the committed offline query cache after changing any query.
 prepare:
     cargo sqlx prepare --workspace

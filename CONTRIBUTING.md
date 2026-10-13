@@ -208,6 +208,16 @@ just check          # all three areas: rust, web AND shell
 | `check-rust` | `fmt --check`, `clippy -D warnings`, `cargo test` (workspace) |
 | `check-web` | `npm test`, `npm run build` |
 | `check-shell` | `fmt`, `clippy`, `cargo test` for `src-tauri` |
+| `remote-check` | `check-rust`'s three commands, on the staging host (see below) |
+
+`just remote-check` runs the workspace half of that list on `129.225.10.139`, in a
+`rust:1.94.1-trixie` container against a Postgres container the script owns. It exists
+because `target/` is the biggest thing this repository makes — 62 GB of debug build against
+5 MB of `crates/` source — and the host builds the same image with the same toolchain
+anyway. `check-rust` is unchanged and still runs locally; `check-web` and `check-shell` have
+no remote form, because the shell is outside this workspace and a native bundle needs Xcode
+or the Android SDK. `docs/OPERATIONS.md` § The workspace checks has the details, including
+the disk guard.
 
 `src-tauri` is excluded from the Cargo workspace so `tauri_build::build()` never
 runs during workspace clippy. Which means the workspace commands skip it

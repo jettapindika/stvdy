@@ -232,7 +232,8 @@ Nothing about the replacement changes what the host may hold — see A45. It exi
 here**: no Google OAuth redirect URI, no updater manifest, and no user data
 whose loss matters. It is the integration environment — the compose stack, SearXNG, the real server
 image, the SPA — and the tests it exists to make possible are the ones that need a second machine
-rather than a second laptop.
+rather than a second laptop. The workspace checks run here too, in a container rather than on a
+laptop — see § The workspace checks.
 
 **What runs there.** `deploy/staging/docker-compose.staging.yml` deploys as
 `~/stvdy/docker-compose.staging.yml`, beside the host's own `docker-compose.yml` (the SearXNG
@@ -291,11 +292,16 @@ unaffected.
 
 `scripts/staging-deploy.sh` starts Postgres, runs `--migrate-only`, starts the replica and the SPA,
 probes `/health`, `/` and one `/assets/` path, and then runs `scripts/staging-smoke.sh`, which is
-the part `/health` cannot cover: signup → the verification link read out of the mail sink →
-`POST /auth/verify-email` → login → an authenticated `GET /workspaces`. **The mail sink is why a
-signup is completable at all here** — `SMTP_URL` is unset (B3), so the link is a file under
-`data/mail` rather than an inbox, and it is written by uid 10001, which is why the smoke script
-reads it with `sudo`.
+the part `/health` cannot cover: signup → the verification link → `POST /auth/verify-email` →
+login → an authenticated `GET /workspaces`. **Which of those the smoke can close depends on the
+mailer, and on this host the mailer is real.** `SMTP_URL` points at a Resend relay with
+`MAIL_FROM=no-reply@ztvn.my.id` (2026-10-13), so a signup's link is delivered to the address
+rather than written under `data/mail`, and the smoke's mailbox legs are skipped unless
+`SMOKE_EMAIL` names an inbox it may write to. The empty-`SMTP_URL` posture is unchanged and
+still what B3 describes: the message is a file under `data/mail`, written by uid 10001, which is
+why the script reads it with `sudo`. The sending domain's records are the provider's (`send`,
+`resend._domainkey`, `rsend`) and are separate from the Email Routing MX, SPF and DKIM on the
+apex, so onboarding a sender does not disturb inbound routing.
 
 **The image is built on the host, from a git checkout, and the host pulls it itself.** There is no
 registry in this deployment: the build context is a clone at `~/stvdy/src` and `docker build` runs
@@ -437,6 +443,75 @@ The tunnel is unaffected by this: `cloudflared` dials out and reaches nginx over
 | R2 | `STORAGE_BACKEND=local` with `OBJECTS_PUBLIC_BASE_URL` pointing back at the API. A331's presigned-reads-only rule is a production requirement, and staging is not worth a bucket |
 | Backups | The database volume is not dumped: A347's RPO and restore drill are about the production database, and a staging restore proves nothing about it. Treat every row here as disposable |
 | Monitoring and alerting | A348's four signals and their owner are production obligations |
+
+## The workspace checks, on the staging host
+
+**`check-rust` has a remote form, and it is the one to use.** `target/` is the largest thing this
+repository produces: a debug build of the workspace with its test targets measured **62 GB** on the
+development machine, against **5 MB** of source under `crates/`. Nothing about a compiler
+invocation is local, and this host compiles the same code with the same toolchain anyway — the
+`Dockerfile`'s build stage is `rust:1.94.1-trixie` — so the checks run where the artifacts have to
+exist regardless.
+
+```sh
+just remote-check             # fmt --check, clippy -D warnings, cargo test — on the host
+just remote-check test        # one of the three, when the other two are already green
+```
+
+What `scripts/remote-check.sh` does:
+
+1. `tar` the `Dockerfile`'s own `COPY` list — `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
+   `crates/`, `migrations/`, `prompts/`, `templates/`, `config/`, `assets/` — plus `clippy.toml`
+   and `.cargo/config.toml`, into `~/stvdy-check/src`, **wiped first** so the tree the check sees
+   is the tree that was sent rather than a merge with the previous run.
+2. Start `stvdy-check-pg` if it is not already running: `pgvector/pgvector:pg16`, on its own
+   `stvdy-check` network, with its own `stvdy-check-pgdata` volume and **no published port**.
+3. Run the three commands in `rust:1.94.1-trixie`, with the source bind-mounted at `/src` and
+   `/src/target` on the `stvdy-check-target` volume.
+
+**The database is the script's own container, and that is a safety property rather than a
+convenience.** 53 of the 57 suites in `crates/server/tests` are `#[sqlx::test]`, which creates and
+drops a scratch database per case, so pointing them at the staging instance would let a check run
+drop databases under the running deployment. The container is created once and kept, because the
+volume is what makes the second run cheap. Nothing runs `sqlx migrate run`: `sqlx::test` applies
+`migrations/` to each scratch database itself.
+
+**The disk is the binding constraint, and both guards are load-bearing.** This host is 45 GB with
+the staging stack on the same filesystem — postgres, the server image, and an image build cache
+that measured **25 GB** when this was written. The script **refuses to start below 5 GB free**, and
+a watchdog **kills the container if free space falls below 2 GB while it runs**: the check failing
+loudly is the only acceptable direction for this to fail in, because the thing on the other side of
+the line is the deployment's WAL. The two commands that give space back are named in the refusal —
+`docker builder prune` (the large one) and `docker volume rm stvdy-check-target` (forces a cold
+recompile) — rather than run, because pruning costs the next staging image build its cache.
+
+**Three settings keep the artifacts small, and one of them is a trade rather than a win.**
+`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0` (the `test` profile inherits `dev`,
+and the pair is set explicitly so neither is inherited by accident) drop the debugger's line table,
+which a check never reads and which is most of the size. `CARGO_INCREMENTAL=0` gives up a few
+seconds of rebuild time for the gigabytes of incremental state. What is *not* traded away is the
+profile itself: the tests run in `dev`, as CI runs them, because `--release` turns off
+`debug_assertions` and overflow checks and would be a different check.
+
+**The volume is worth having because `bsdtar` restores mtimes.** A file nobody touched keeps the
+timestamp cargo fingerprinted on the previous run, so the second run recompiles what changed rather
+than the whole graph. The registry cache is *not* a volume — `$CARGO_HOME` lives in the container —
+so each run re-downloads the crate sources before it can compile, which is the one part of a warm
+run that is not warm.
+
+**What does not move, and each is a capability the host does not have.** `src-tauri` is excluded
+from the workspace (root `Cargo.toml`) and is the part that could not run there anyway: an iOS
+bundle needs Xcode, an Android one the SDK and a JDK, and a Linux `cargo check` of it needs
+`libwebkit2gtk-4.1-dev`. So `just check-shell` and everything under `src-tauri/gen/` stay on the
+Mac, as do `just check-web` and the `#[ignore]`d PDF acceptance test — which `just image-check`
+already runs inside the image, on this host, against the image's own Chromium.
+
+**`.github/workflows/ci.yml` runs the same three commands on every push**, so this is the same check
+without a push: the reason to have it is the loop before the commit, not a second opinion.
+
+**`--no-xattrs` on the `tar` is load-bearing.** macOS stamps every file it writes with
+`com.apple.provenance`, and GNU tar prints a warning per file for it — 20 KB of noise in front of
+the check's own output.
 
 ## Payments: the gateway sidecar (B1, resolved)
 
@@ -645,7 +720,9 @@ to the production database that does not exist yet.
 1. **The archive holds live secrets.** `.env.staging` carries `JWT_SECRET`, `ENCRYPTION_KEY_HEX`,
    `POSTGRES_PASSWORD`, `LLM_API_KEY` and both Google client secrets; `etc/` carries the SSH host
    keys. The Drive folder is private to one account and **must stay that way** — a link share on
-   it hands out this machine's identity. `data/mail` also holds real verification emails.
+   it hands out this machine's identity. `data/mail` also holds the verification emails written
+   before the host was given a real relay (2026-10-13), links and all, and the archive keeps
+   them.
 2. **rclone's shared Google Drive `client_id` is being retired during 2026**, and every run logs
    the notice. It is a deadline rather than a warning: when it lands, uploads fail and the only
    symptom is `die "upload failed"` in `/var/log/stvdy-backup.log`. The fix is the operator's —

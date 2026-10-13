@@ -17,7 +17,9 @@
 #     and the signup address has to be one that receives mail: a synthetic `@example.test`
 #     address would make the relay bounce on every deploy. The account is therefore created
 #     at `SMOKE_EMAIL`, with a per-run plus-address so a second deploy is not a duplicate
-#     signup, and the verification step belongs to that inbox.
+#     signup. The verification row is then set the way the mailed link would set it — the leg
+#     this script exists to close is the authenticated read behind A359's gate, and an account
+#     left unverified would 403 there and report a pass for a chain it never walked.
 #
 # With `SMTP_URL` set and `SMOKE_EMAIL` unset, the legs that need a mailbox are **skipped and
 # said to be skipped** rather than reported as a failure — the pattern A76's smoke uses to
@@ -64,7 +66,15 @@ curl -fsS -X POST "$base/auth/signup" -H 'content-type: application/json' \
   | head -c 120; echo
 
 if [ "$smtp" = 1 ]; then
-  echo "=== the verification link was mailed to $email; open it there, this script cannot read an inbox"
+  echo "=== the verification link was mailed to $email; this script cannot read an inbox, so the"
+  echo "    row is set the way that link would set it and the mailed token stays unused"
+  # The same two columns `POST /auth/verify-email` writes from the token, so the state the
+  # authenticated read below runs against is the state a click on that link produces. Reached
+  # the way `staging-billing-check.sh` reaches it, which is the other script that needs a
+  # verified account on a host whose mailer is real.
+  docker compose -f docker-compose.staging.yml exec -T postgres \
+    psql -U stvdy -d stvdy -tA \
+    -c "update users set email_verified = true, email_verified_at = now() where email = '$email'" >/dev/null
 else
   echo "=== the verification link is a file (SMTP_URL is unset)"
   # The message is written by the container's `stvdy` user (uid 10001), so reading it needs

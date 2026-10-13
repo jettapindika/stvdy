@@ -7,10 +7,18 @@
 #
 #   bash staging-billing-check.sh [base-url] [pay-wait-seconds]
 #
-# Run it **on the host**, from the deployment root. Two legs need that: the verification link is
-# read out of the mail sink under `data/mail` (written by uid 10001, so only root can read it),
-# and the gateway's own payment id is read from the database, because `PaymentView` deliberately
-# does not expose it — a client has no business knowing the gateway's identifiers.
+# Run it **on the host**, from the deployment root. Two legs need that: the account's
+# verification, which is either the mailed link read out of the mail sink under `data/mail`
+# (written by uid 10001, so only root can read it) or a direct row update when `SMTP_URL` is set
+# and the link leaves the host, and the gateway's own payment id, which is read from the
+# database because `PaymentView` deliberately does not expose it — a client has no business
+# knowing the gateway's identifiers.
+#
+# **`BILLING_EMAIL` is required when `SMTP_URL` is set.** The signup then sends a real message,
+# so the address has to be one that receives it: a synthetic `@example.test` address makes the
+# relay bounce on every run, and a bounce is charged to the sending domain's reputation — the
+# deliverability of the very verification mail this deployment exists to send. Any inbox works;
+# the per-run plus-suffix is added below.
 #
 # **What it proves, in order, and each step is an assertion rather than a print.**
 #
@@ -43,7 +51,6 @@ base="${1:-http://localhost/api}"
 wait_seconds="${2:-0}"
 root="$(pwd)"
 password="staging-password-1234"
-email="billing-$(date +%s)@example.test"
 
 # `docker compose exec` rather than a published port: the bridge deliberately publishes none
 # (A292), so the only way to ask it anything is from a container on `stvdy_default`. The web
@@ -67,6 +74,20 @@ print(doc)' "$@"; }
 say() { printf '\n=== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+# Which mailer is live decides two things at once — whether this signup's message leaves the
+# host, and therefore how the account gets verified. Read from `.env.staging` at the deployment
+# root, which is the file the compose stack configures the server from: the same source and the
+# same rule `staging-smoke.sh` uses, so the two scripts cannot disagree about which mailer ran.
+smtp=0
+if grep -qE '^SMTP_URL=.+' .env.staging 2>/dev/null; then smtp=1; fi
+
+if [ "$smtp" = 1 ]; then
+  [ -n "${BILLING_EMAIL:-}" ] || fail "SMTP_URL is set, so this signup sends real mail: set BILLING_EMAIL to an address that receives it (a plus-address on any inbox will do)"
+  email="${BILLING_EMAIL%%@*}+billing$(date +%s)@${BILLING_EMAIL##*@}"
+else
+  email="billing-$(date +%s)@example.test"
+fi
+
 say "health"
 curl -fsS "$base/health"; echo
 
@@ -75,14 +96,23 @@ curl -fsS -X POST "$base/auth/signup" -H 'content-type: application/json' \
   -d "{\"email\":\"$email\",\"password\":\"$password\",\"device\":{\"name\":\"billing\",\"platform\":\"web\"}}" \
   >/dev/null
 
-say "the verification link is a file (SMTP_URL is unset)"
-eml="$(sudo ls -t "$root/data/mail"/*.eml 2>/dev/null | head -1)"
-[ -n "$eml" ] || fail "no message under $root/data/mail"
-token="$(sudo grep -o 'token=[A-Za-z0-9_-]*' "$eml" | head -1 | cut -d= -f2)"
-[ -n "$token" ] || fail "no verification token in $eml"
-echo "token ${token:0:8}…"
-curl -fsS -X POST "$base/auth/verify-email" -H 'content-type: application/json' \
-  -d "{\"token\":\"$token\"}" >/dev/null
+if [ "$smtp" = 1 ]; then
+  say "the account is verified directly (SMTP_URL is set, so the link went to a real inbox)"
+  # The row `POST /auth/verify-email` sets from the mailed token, so the state the billing legs
+  # run against is the state a click on that link produces. The mailbox is real and this script
+  # cannot read it, so the token in it is left unused — spending it is the student's act, not
+  # this one's.
+  db "update users set email_verified = true, email_verified_at = now() where email = '$email'" >/dev/null
+else
+  say "the verification link is a file (SMTP_URL is unset)"
+  eml="$(sudo ls -t "$root/data/mail"/*.eml 2>/dev/null | head -1)"
+  [ -n "$eml" ] || fail "no message under $root/data/mail"
+  token="$(sudo grep -o 'token=[A-Za-z0-9_-]*' "$eml" | head -1 | cut -d= -f2)"
+  [ -n "$token" ] || fail "no verification token in $eml"
+  echo "token ${token:0:8}…"
+  curl -fsS -X POST "$base/auth/verify-email" -H 'content-type: application/json' \
+    -d "{\"token\":\"$token\"}" >/dev/null
+fi
 
 say "login"
 login="$(curl -fsS -X POST "$base/auth/login" -H 'content-type: application/json' \
