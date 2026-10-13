@@ -17,15 +17,17 @@ import { TimeGrid, eventCellId } from './TimeGrid'
  *    which is the honest reading of a schema with no `all_day` column (A199);
  *  - a timed event is in its own day's row, with its time as text, and its block is
  *    positioned by its start and sized by its duration;
- *  - the current-time line is on today's row only, and its position is a function of
- *    the `now` prop and never of a clock read at render;
+ *  - the current-time line is on today's row only, and **whether** it renders is a
+ *    function of the `now` prop and never of a clock read at render — it carries no
+ *    positional offset, which is the design's own treatment (`411:26931`) and not an
+ *    omission;
  *  - an external row's accessible name says it is read-only and the student's own
  *    row has no `aria-label` at all, so the state is in the tree rather than only in
  *    a glyph.
  *
  * `now` is a **fixed instant**, which is the whole reason the component takes it as
- * a prop: a test that read the clock could not assert a percentage, and neither
- * could the screen show the same line twice.
+ * a prop: a test that read the clock could not decide whether the line is inside the
+ * 07:00–22:00 window, and neither could the screen show the same line twice.
  */
 
 const ZONE = 'Asia/Jakarta'

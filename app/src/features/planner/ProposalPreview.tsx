@@ -319,24 +319,23 @@ export function ProposalPreview({
                           </li>
                         )
                       })}
-                      {/* The current-time line, on today's row only, positioned
-                          from the instant the grid was opened — never from a
-                          fresh `new Date()`, so two renders of the same grid
-                          cannot disagree about where the line is. */}
+                      {/* The current-time line, on today's row only.
+
+                          **The rule spans the remaining width; it is not offset by the
+                          hour.** This is the same construction the calendar's `TimeGrid`
+                          carried, and it is a defect for the same reason: a percentage
+                          `margin-left` is not a flexible length, so late in the day it
+                          claimed most of the row. It failed *differently* here — the label
+                          is `shrink-0`, so the rule was what collapsed, leaving a bare
+                          "Now" with no line — which is why the 200%-text clip check never
+                          saw it. The design's own current-time row (`411:26931`) is
+                          `label — flex-1 rule — label` with no positional offset at all,
+                          and the label keeps its intrinsic width while the `aria-hidden`
+                          hairline is the item that gives way. */}
                       {day.date === today && nowInWindow ? (
                         <li className="flex min-w-0 items-center gap-2">
                           <span className="meta shrink-0">{t('planner.grid.now')}</span>
-                          <span
-                            aria-hidden="true"
-                            className="h-px flex-1 bg-border-strong"
-                            style={{
-                              marginLeft: `${
-                                String(
-                                  ((nowMin - GRID_START_HOUR * 60) / GRID_MINUTES) * 100,
-                                )
-                              }%`,
-                            }}
-                          />
+                          <span aria-hidden="true" className="h-px min-w-0 flex-1 bg-border-strong" />
                         </li>
                       ) : null}
                     </ul>
