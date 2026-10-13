@@ -42,6 +42,24 @@ documented there: `notarytool submit --wait` exits 0 for a **rejected** submissi
 script parses `status: Accepted` and prints the log id otherwise), and the ticket must be
 stapled to the `.app` **before** the dmg is rebuilt.
 
+**Two consequences of `createUpdaterArtifacts: true` that the four commands above do not cover**
+(A361), both found by reproducing the build on 2026-10-13:
+
+- **The build step needs the updater key, not only the manifest job.** The bundler signs
+  `Stvdy.app.tar.gz` as it writes it, so a build without `TAURI_SIGNING_PRIVATE_KEY` writes the
+  bundles and then **exits 1** with `A public key has been found, but no private key`. The key was
+  set in the manifest job alone, which meant the macOS job could not get past its own build step.
+- **The archive must be re-packed from the stapled app, and re-signed.** The bundler writes the
+  archive *while bundling* and notarization staples the `.app` *afterwards*, so the archive as
+  first written carries a bundle with no ticket: an **update** installs an app that fails to launch
+  with no network, which is the failure the double staple exists to prevent (A333). `release.yml`
+  therefore re-packs the archive from the stapled `.app` with the bundler's own
+  `ditto -c -k --keepParent`, re-signs it (`--app-version` bound, as the manifest's own signing
+  is), and `verify-release-artifacts.sh --macos` unpacks the archive and validates the ticket
+  inside it. The `.sig` covers the archive's bytes, so the re-pack and the re-sign are one step:
+  a stale signature is worse than none, because `latest.json` would name a signature that does not
+  match the file it points at.
+
 - macOS: `universal-apple-darwin` target, `codesign` + `notarytool`, hardened
   runtime, minimum macOS 11.0, **and the notarization ticket stapled into both the `.app` and
   the `.dmg`** (A333) — an unstapled dmg fails on a machine with no network.
@@ -503,6 +521,14 @@ is fail-closed — a check that cannot read what it needs is a `FAIL`, never a s
 **refuses to run at all (exit 2) when `TAURI_SIGNING_PRIVATE_KEY` or its password is in its
 environment**, because a verification tool that can sign cannot establish the one property it
 exists to establish (A332).
+
+**`--macos` also opens the updater archive.** The `.app` and the `.dmg` are what a *download*
+installs; `Stvdy.app.tar.gz` is what an **update** installs, and it is a third artifact with its
+own staple. The check unpacks the archive and validates the ticket on the `.app` inside it,
+because the two can differ: the bundler writes the archive while bundling and notarization staples
+the app afterwards, so an archive built from the pre-notarization app carries an unstapled bundle
+and an update installs something that fails to launch offline (A333). That is what `release.yml`'s
+`Re-pack the updater archive…` step prevents, and this check is what proves it did.
 
 > **The consequence for the workflow, stated so it is not discovered by a failing release:** the
 > signing secret must be scoped to the signing **step**, never to the job. A job-wide secret is how

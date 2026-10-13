@@ -436,6 +436,40 @@ check_macos() {
         fail "macos: no stapled notarization ticket on $(basename "$target")"
       fi
     done
+
+    # **The updater archive is the artifact that actually installs, and it is not the .app.**
+    # The bundler writes `Stvdy.app.tar.gz` and its `.sig` while it is bundling, and
+    # notarization staples the `.app` and the `.dmg` afterwards — so unless the archive is
+    # rebuilt around the stapled app, the updater hands a user an unstapled bundle and a first
+    # launch with no network fails with "cannot be opened" (A333), which is the exact failure
+    # the double staple exists to prevent. This was true of every release until the archive
+    # was added here: the checks above pass on a release whose *update* is broken, because
+    # neither `$app` nor `$dmg` is the file the updater reads (A361).
+    #
+    # Unpacked to a temporary directory and validated there, because `stapler` reads a bundle
+    # or an image and not a tar: the property is about the `.app` the archive carries.
+    local archive
+    archive="$(find "$dir" -maxdepth 4 -name '*.app.tar.gz' 2>/dev/null | head -1)"
+    if [ -z "$archive" ]; then
+      fail "macos: no .app.tar.gz under $dir, so there is nothing for the updater to install (A345)"
+    else
+      local unpacked
+      unpacked="$(mktemp -d)"
+      if ! tar xzf "$archive" -C "$unpacked" 2>/dev/null; then
+        fail "macos: $(basename "$archive") does not unpack as a gzipped tar"
+      else
+        local archived_app
+        archived_app="$(find "$unpacked" -maxdepth 1 -name '*.app' -type d 2>/dev/null | head -1)"
+        if [ -z "$archived_app" ]; then
+          fail "macos: $(basename "$archive") carries no .app at its root, so the updater cannot extract it"
+        elif xcrun stapler validate "$archived_app" >/dev/null 2>&1; then
+          ok "macos: the updater archive carries the stapled app ($(basename "$archive"))"
+        else
+          fail "macos: the .app inside $(basename "$archive") has no stapled ticket, so an update installs a bundle that fails to launch offline (A333)"
+        fi
+      fi
+      rm -rf "$unpacked"
+    fi
   fi
 
   if need_tool lipo "macos: architectures"; then

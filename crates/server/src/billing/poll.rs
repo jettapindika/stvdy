@@ -369,15 +369,26 @@ pub async fn reconcile(state: &AppState) -> AppResult<u64> {
         }
     }
 
-    // Direction two: one of ours the gateway has no transaction for. Only payments inside
-    // the window, and only ones the gateway should have settled by now — a pending invoice
-    // created seconds ago is not a mismatch.
+    // Direction two: one of ours the gateway has no transaction for.
+    //
+    // **`expires_at < now()` is the load-bearing clause, and leaving it out costs a student
+    // their plan.** Before the invoice dies, "the gateway has no transaction for it" is the
+    // ordinary state of an unpaid invoice rather than a mismatch — so flagging one moves a
+    // *live* row to `review`, and `apply_paid` activates only a row still in `pending`. A
+    // settlement that arrives afterwards then updates zero rows and lands on `AlreadyPaid`:
+    // the student pays and nothing activates. It is reachable rather than theoretical, because
+    // `payment_pass` enqueues this sweep every 300 seconds while an invoice lives for 900, so
+    // a five-minute sweep usually lands inside the window where the old rule flagged every
+    // invoice a student had not paid yet (`reconcile_leaves_a_live_unpaid_invoice_alone`).
+    //
+    // The age clause stays as a lower bound on the window: an invoice that died a minute ago is
+    // not yet a human's problem.
     let ours: Vec<(Uuid, Option<String>, i64)> = sqlx::query_as(
         "select id, provider_payment_id, coalesce(payable_amount_idr, amount_idr)::bigint as payable
            from payments
           where status in ('pending', 'paid')
             and created_at >= now() - make_interval(hours => $1::int)
-            and created_at < now() - interval '10 minutes'",
+            and expires_at < now() - interval '10 minutes'",
     )
     .bind(hours)
     .fetch_all(&state.pool)

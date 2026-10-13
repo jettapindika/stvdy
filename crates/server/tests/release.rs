@@ -475,6 +475,145 @@ fn the_updater_is_desktop_only() {
     }
 }
 
+/// The macOS job builds the updater archive from the app the notary stapled.
+///
+/// Three properties, and two of them were live defects on 2026-10-13:
+///
+/// 1. **The build step carries the updater key.** The committed config has
+///    `bundle.createUpdaterArtifacts: true`, so the bundler signs `Stvdy.app.tar.gz` as it
+///    writes it and **exits 1** without the key — `A public key has been found, but no private
+///    key`, reproduced on this tree. The key used to be set in the manifest job alone, so the
+///    macOS job could not get past its own build.
+/// 2. **The archive is re-packed from the stapled app, after notarization.** The bundler
+///    writes the archive while bundling and notarization staples the `.app` afterwards, so the
+///    archive shipped an unstapled bundle: an update installed an app that fails to launch
+///    offline (A333), which is the failure the double staple exists to prevent.
+/// 3. **The gate step carries no key.** `scripts/verify-release-artifacts.sh` refuses to run
+///    with the private key in its environment (A332), so a job-wide secret would turn the last
+///    step of this job into an exit-2 refusal.
+///
+/// Read as **text**, not parsed as YAML: the workspace has no YAML dependency, and the
+/// properties are about presence and order, which a scan of the step names establishes. A
+/// reordering that moved the re-pack above the notarization — the defect itself — is exactly
+/// what the index comparison catches.
+#[test]
+fn the_macos_job_repacks_the_updater_archive_after_notarization() {
+    let workflow = repo_file(".github/workflows/release.yml");
+
+    // The macOS job's own slice, so a step of the same name in another job cannot satisfy
+    // these assertions.
+    let start = workflow
+        .find("\n  macos:")
+        .expect("release.yml declares a `macos` job");
+    let rest = &workflow[start + 1..];
+    let end = rest
+        .find("\n  windows:")
+        .expect("the macOS job is followed by the Windows job");
+    let job = &rest[..end];
+
+    /// The index of a step's `- name:` line, and the text of that step up to the next one.
+    fn step<'a>(job: &'a str, name: &str) -> Option<(usize, &'a str)> {
+        let needle = format!("- name: {name}");
+        let index = job.find(&needle)?;
+        let after = &job[index..];
+        // A step ends at the next `- name:` at the same indentation, or at the end of the job.
+        let length = after[1..]
+            .find("\n      - name:")
+            .map(|offset| offset + 1)
+            .unwrap_or(after.len());
+        Some((index, &after[..length]))
+    }
+
+    let build_name = "Build the universal bundle";
+    let notarize_name = "Notarize, and staple the ticket into both the .app and the .dmg";
+    let repack_name = "Re-pack the updater archive around the stapled .app, and re-sign it";
+    let gate_name = "The machine-readable gate";
+
+    let (build_at, build) = step(job, build_name).expect("the macOS job builds the bundle");
+    assert!(
+        build.contains("TAURI_SIGNING_PRIVATE_KEY"),
+        "{build_name} must set the updater key: with `createUpdaterArtifacts: true` the bundler \
+         signs the archive and exits 1 without it, so the job cannot build at all (A332)"
+    );
+
+    let (notarize_at, _) = step(job, notarize_name).expect("the macOS job notarizes the dmg");
+
+    let (repack_at, repack) = step(job, repack_name).unwrap_or_else(|| {
+        panic!(
+            "no `{repack_name}` step: the updater archive is written by the bundler *before* \
+             notarization, so without this step the archive ships an unstapled app and an \
+             update installs a bundle that fails to launch offline (A333)"
+        )
+    });
+    assert!(
+        repack_at > notarize_at,
+        "`{repack_name}` must run **after** `{notarize_name}`, or it re-packs an app whose \
+         ticket has not been stapled yet and the archive is unstapled again"
+    );
+    assert!(
+        repack.contains("ditto -c -k --keepParent"),
+        "`{repack_name}` must rebuild the archive with the command the bundler uses, so the \
+         plugin's extraction and its `--keepParent`-shaped path are unchanged"
+    );
+    assert!(
+        repack.contains("signer sign"),
+        "`{repack_name}` must re-sign the archive: the `.sig` covers the archive's bytes and \
+         the re-pack changes them, so a stale signature fails verification on every client"
+    );
+    assert!(
+        repack.contains("stapler validate"),
+        "`{repack_name}` must assert the app is stapled before it packs it, or it replaces a \
+         good archive with an equally unstapled one"
+    );
+
+    let (gate_at, gate) = step(job, gate_name).expect("the macOS job ends with the gate");
+    assert!(
+        gate_at > repack_at,
+        "`{gate_name}` must run after `{repack_name}`, so it validates the archive that ships"
+    );
+    assert!(
+        !gate.contains("TAURI_SIGNING_PRIVATE_KEY"),
+        "`{gate_name}` must not carry the updater key: the verifier refuses to run with it in \
+         its environment (exit 2), which would make the last step of this job a refusal (A332)"
+    );
+
+    // And the key reaches the build only through the two steps that need it, so a job-wide
+    // secret — the drift A332 forbids — fails here.
+    let job_level = &job[..build_at];
+    assert!(
+        !job_level.contains("TAURI_SIGNING_PRIVATE_KEY"),
+        "the updater key must be scoped to the steps that sign, never to the job (A332)"
+    );
+}
+
+/// The gate opens the updater archive, not only the `.app` and the `.dmg`.
+///
+/// The archive is the artifact an update actually installs, and it was the one file the gate
+/// never read: it validated the `.app` and the `.dmg` and reported green on a release whose
+/// *update* carried an unstapled bundle. This asserts the check exists, so the property is
+/// mechanical at release time rather than a claim in a comment.
+#[test]
+fn the_release_gate_validates_the_updater_archive() {
+    let script = repo_file("scripts/verify-release-artifacts.sh");
+
+    let check = script
+        .find("app.tar.gz")
+        .expect("the gate must look for the updater archive");
+    let after = &script[check..];
+    let staple_check = after.find("stapler validate").unwrap_or_else(|| {
+        panic!(
+            "the gate finds the updater archive but never validates a staple inside it: an \
+             unstapled bundle in the archive is what an update installs, and it fails to launch \
+             offline (A333)"
+        )
+    });
+    assert!(
+        staple_check < 3000,
+        "the `stapler validate` after the archive lookup must be the archive's own check, not a \
+         distant one for another target"
+    );
+}
+
 /// The macOS bundle pins the hardened runtime, the floor and the entitlements.
 ///
 /// `hardenedRuntime` defaults to `true` in the schema, so leaving it out is not a

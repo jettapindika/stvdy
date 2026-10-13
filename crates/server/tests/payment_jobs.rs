@@ -378,17 +378,82 @@ async fn reconcile_flags_a_gateway_payment_we_never_recorded(pool: PgPool) {
     assert_eq!(flagged, 1, "an unknown gateway transaction was not flagged");
 }
 
+/// **A live, unpaid invoice is not a mismatch**, and flagging one is not a cosmetic error.
+///
+/// The gateway has no transaction for an invoice the student has not paid yet — that is the
+/// normal state of every pending invoice, not evidence of a problem. The consequence of
+/// flagging one is the reason this test exists: `flag_review` moves the row to `review`, and
+/// `apply_paid` activates only a row whose status is still `pending`, so a settlement arriving
+/// afterwards updates zero rows and lands on `AlreadyPaid`. The student pays and gets nothing.
+///
+/// The window is what makes this reachable rather than theoretical: the sweep is enqueued by
+/// `payment_pass` every [`PAYMENT_TICK`](stvdy_server::jobs::schedule::PAYMENT_TICK) — 300
+/// seconds — and it treats any payment created more than ten minutes ago as a candidate, while
+/// an invoice lives for fifteen. So every invoice is exposed for five minutes of its life, and
+/// a five-minute sweep will usually hit that window.
+#[sqlx::test(migrations = "../../migrations")]
+async fn reconcile_leaves_a_live_unpaid_invoice_alone(pool: PgPool) {
+    let (harness, _app, _token, payment) = checkout(pool).await;
+
+    // Old enough to be a candidate on the age rule, and **still inside its expiry** — which is
+    // exactly the state a student who is taking their time to pay is in.
+    sqlx::query(
+        "update payments set created_at = now() - interval '11 minutes' where id = $1::uuid",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+    let live: i64 = sqlx::query_scalar(
+        "select count(*) from payments where id = $1::uuid and expires_at > now()",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        live, 1,
+        "the fixture must be inside its expiry for this test to mean anything"
+    );
+
+    // The gateway lists nothing, because the student has not paid.
+    harness.gateway.push_transactions(vec![]);
+
+    let flagged = stvdy_server::billing::poll::reconcile(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(
+        flagged, 0,
+        "a live unpaid invoice was flagged; a settlement arriving later could never activate it"
+    );
+
+    let status: String = sqlx::query_scalar("select status from payments where id = $1::uuid")
+        .bind(payment["id"].as_str().unwrap())
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "pending",
+        "the row moved out of pending, so a payment cannot land"
+    );
+}
+
 /// One of ours the gateway does not know is the other flag.
 #[sqlx::test(migrations = "../../migrations")]
 async fn reconcile_flags_a_payment_the_gateway_does_not_know(pool: PgPool) {
     let (harness, _app, _token, payment) = checkout(pool).await;
 
-    // Age the payment past the ten-minute grace, so it is a candidate.
-    sqlx::query("update payments set created_at = now() - interval '1 hour' where id = $1::uuid")
-        .bind(payment["id"].as_str().unwrap())
-        .execute(&harness.state.pool)
-        .await
-        .unwrap();
+    // Past its expiry: the invoice is over, so "the gateway has no transaction for it" is a
+    // fact a human should read rather than the ordinary state of an unpaid invoice.
+    sqlx::query(
+        "update payments
+            set created_at = now() - interval '1 hour', expires_at = now() - interval '45 minutes'
+          where id = $1::uuid",
+    )
+    .bind(payment["id"].as_str().unwrap())
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
 
     // The gateway lists nothing at all.
     harness.gateway.push_transactions(vec![]);

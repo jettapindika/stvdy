@@ -248,11 +248,32 @@ jobs:
         # `tauri.conf.json` and asserted by `crates/server/tests/release.rs`, so the job does
         # not pass a second copy of them on the command line — two places to change is how
         # one of them ends up stale.
+        #
+        # **The updater signing key is required here, not only in the manifest job.** The
+        # committed config has `bundle.createUpdaterArtifacts: true`, and the bundler signs
+        # `Stvdy.app.tar.gz` as it writes it — so a build without the key produces the bundles
+        # and then **exits 1** with `A public key has been found, but no private key`
+        # (reproduced on this tree, 2026-10-13, by building the same target with the same
+        # config and no `TAURI_SIGNING_PRIVATE_KEY`). That is what this step used to do: the
+        # key was set in the manifest job alone, so the macOS job could not get past its own
+        # build. The guard below says so before the bundler does, and in those words.
+        #
+        # The key is scoped to this **step** and the re-signing step below, never to the job:
+        # `scripts/verify-release-artifacts.sh` refuses to run with it in its environment
+        # (A332), and it is the last step of this job.
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: ./app/node_modules/.bin/tauri build --target universal-apple-darwin
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set. The committed config has bundle.createUpdaterArtifacts: true, so the bundler signs the updater archive during this build and refuses to finish without the key — it exits 1 after writing the bundles, which reads like a bundling failure rather than a missing secret (A332, A345)."
+            exit 1
+          fi
+          ./app/node_modules/.bin/tauri build --target universal-apple-darwin
 
       - name: Notarize, and staple the ticket into both the .app and the .dmg
         # The notary credentials are the app-specific-password pair. `notarytool` also accepts
@@ -266,6 +287,62 @@ jobs:
           dmg="$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)"
           echo "notarizing $dmg"
           bash scripts/notarize-macos.sh "$dmg"
+
+      - name: Re-pack the updater archive around the stapled .app, and re-sign it
+        # **The archive the updater installs is not the artifact the notary approved, and this
+        # step is what makes them the same file.**
+        #
+        # The bundler writes `Stvdy.app.tar.gz` and its `.sig` *while it is bundling*, and
+        # notarization runs afterwards: `scripts/notarize-macos.sh` staples the ticket into the
+        # `.app` (twice — the copy inside the mounted dmg, and the sibling the release job
+        # validates) and into the rebuilt `.dmg`. Nothing stapled the archive, because the
+        # archive already existed by then. So every release shipped an updater that installs an
+        # **unstapled** bundle: a first launch with no network gets "cannot be opened", which is
+        # the exact failure the double staple exists to prevent (A333) — and
+        # `verify-release-artifacts.sh --macos` passed it, because it validated the `.app` and
+        # the `.dmg` and never opened the archive. Both halves are fixed: this step, and the
+        # archive check that now runs in the gate.
+        #
+        # (A361.) The archive is rebuilt from the sibling `.app` (already stapled, by the step above)
+        # rather than from the copy inside the dmg, because that is the path this job validates
+        # and the one the gate reads. `ditto -c -k --keepParent` is the same command the bundler
+        # uses and reproduces its layout exactly — `Stvdy.app/` at the archive root, verified by
+        # unpacking a locally built archive (2026-10-13) — so the plugin's extraction and its
+        # `--keepParent`-shaped path are unchanged.
+        #
+        # **Re-signing is not optional.** The `.sig` covers the archive's bytes, and the bytes
+        # just changed; a stale signature is worse than none, because `latest.json` would carry
+        # a signature that does not match the file it names and every update would fail
+        # verification at the client. The key is therefore scoped to this step, and
+        # `--app-version` binds the signature to the version the way the manifest job's own
+        # signing does (the plugin's `requireSignedVersion` reads it from the trusted comment).
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set: the re-packed archive cannot be re-signed, and an archive whose signature does not cover its bytes fails verification on every client (A332, A345)."
+            exit 1
+          fi
+
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle/macos
+          app="$(ls -d "$bundle"/*.app | head -1)"
+          archive="$(ls "$bundle"/*.app.tar.gz | head -1)"
+          echo "app:     $app"
+          echo "archive: $archive"
+
+          # The staple is the whole reason for this step: without it the re-pack would replace
+          # a good archive with an equally unstapled one and the gate would catch it only after
+          # a notarization round trip had been spent.
+          xcrun stapler validate "$app"
+
+          rm -f "$archive" "$archive.sig"
+          ditto -c -k --keepParent "$app" "$archive"
+          ./app/node_modules/.bin/tauri signer sign --app-version "$VERSION" "$archive"
+          test -s "$archive.sig" || { echo "::error::no .sig beside the re-packed archive"; exit 1; }
+          echo "re-packed and re-signed: $(basename "$archive") ($(du -h "$archive" | cut -f1))"
 
       - name: What was built is signed, accepted, stapled and universal
         run: |
