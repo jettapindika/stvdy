@@ -51,6 +51,16 @@
 # rather than a bare `build/`, which would also swallow a source directory of that name.
 /src-tauri/plugins/mobile/android/build/
 
+# The Tauri API **copied into** the plugin's Android project, which is what
+# `tauri_plugin::Builder`'s `android_path("android")` does on every Rust build of the
+# plugin (`build.gradle.kts` says so, and the app's Gradle build includes the directory as
+# a module). It is 220 files and 2.4 MB of a dependency's own Kotlin sources, regenerated
+# from the pinned crate version rather than edited here — so committing it would pin a
+# second copy of Tauri's code and a `git add -A` would carry it. The plugin's own
+# `tauri-api/.gitignore` excludes only its `build/`, which is why this rule has to exist at
+# the repository level.
+/src-tauri/plugins/mobile/android/.tauri/
+
 # Mobile signing and service credentials (A328). `google-services.json` is the
 # Android Google Services plugin's project credential; a committed one is a leaked
 # key. `src-tauri/google-services.json.example` documents the shape and is tracked.
