@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { ApiErrorNotice, LoadingState } from '@/components/ui/States'
-import type { ApiError } from '@/api/errors'
 import { formatInZone } from '@/lib/time'
 import {
   GRID_END_HOUR,
@@ -30,8 +28,20 @@ import {
  *
  * **It is a "Suggested …" plan, and accepting is a separate act** (honesty gate
  * 7(e)). `POST /plans/accept` is what writes events, tasks and goals; nothing
- * before it does, and the label and the `honesty.nothingAddedYet` line say so. The
- * two actions are Accept and Dismiss, and the edit is the block's own control.
+ * before it does, and the label and the `honesty.nothingAddedYet` line say so.
+ *
+ * **The actions are not here; they are in the plan banner above.** The design puts
+ * `Accept all` / `Accept selected` / `Dismiss` at the top of the suggested plan and
+ * leaves the grid below as the thing being decided about, which is also what keeps
+ * one screen from having two primary actions. So this component is **controlled**:
+ * the banner owns the block list and the per-block keep flags, and everything here
+ * asks the banner to change them. The two cannot disagree about what will be
+ * written, because there is only one copy.
+ *
+ * **Selection is per block, and `Accept all` is not the same button as `Accept
+ * selected`.** A plan that could only be taken or left whole would force a student
+ * to drop a session they wanted in order to avoid one they did not, and the design
+ * asks for both. A kept block that the student then unchecks is not written.
  *
  * **The grid is a table, one row per day.** A grid of absolutely-positioned
  * `<div>`s is a grid a keyboard cannot enter and a screen reader cannot read
@@ -73,10 +83,10 @@ export function ProposalPreview({
   settings,
   busy,
   goalTitles,
-  saving,
-  error,
-  onAccept,
-  onDismiss,
+  blocks,
+  onBlocks,
+  kept,
+  onKept,
 }: {
   proposal: Proposal
   /** The instant the grid was opened, fixed for the life of the mount. */
@@ -86,13 +96,14 @@ export function ProposalPreview({
   /** The busy intervals the grid was given: classes, exams, anything not this plan. */
   busy: Interval[]
   goalTitles: (goalId: string) => string | undefined
-  saving: boolean
-  error: ApiError | null
-  onAccept: (blocks: ProposedBlock[]) => void
-  onDismiss: () => void
+  /** The block list, owned by the banner: a move changes it for the banner too. */
+  blocks: ProposedBlock[]
+  onBlocks: (next: ProposedBlock[]) => void
+  /** One flag per block, in the same order as `blocks`. */
+  kept: boolean[]
+  onKept: (next: boolean[]) => void
 }) {
   const { t } = useTranslation()
-  const [blocks, setBlocks] = useState<ProposedBlock[]>(proposal.blocks)
   const [refusal, setRefusal] = useState<MoveRefusal | null>(null)
 
   const today = todayKey(now, timeZone)
@@ -108,7 +119,7 @@ export function ProposalPreview({
       busy,
     })
     if (result.ok) {
-      setBlocks(result.blocks)
+      onBlocks(result.blocks)
       setRefusal(null)
       return
     }
@@ -143,10 +154,6 @@ export function ProposalPreview({
 
       {refusal !== null ? (
         <p className="note note-warning wrap-anywhere">{t(`planner.refused.${refusal}`)}</p>
-      ) : null}
-
-      {error !== null ? (
-        <ApiErrorNotice error={error} noun={t('planner.proposal.what')} action={t('actions.retry')} />
       ) : null}
 
       <div className="card overflow-x-auto p-4">
@@ -208,16 +215,44 @@ export function ProposalPreview({
                         const subject = blockSubject(placed.block, goalTitles)
                         const left = ((placed.start_min - GRID_START_HOUR * 60) / GRID_MINUTES) * 100
                         const width = ((placed.end_min - placed.start_min) / GRID_MINUTES) * 100
-                        const kept = subject.kind === 'kept'
+                        const keptBlock = subject.kind === 'kept'
                         return (
                           <li key={`${placed.block.starts_at}-${String(position)}`} className="flex min-w-0 flex-col gap-1">
+                            <span className="flex min-w-0 items-start gap-2">
+                              {/* The keep flag, beside the block rather than
+                                  inside it: a `<button>` may not contain another
+                                  control, so nesting this input would be invalid
+                                  markup that a browser silently reparents. Its
+                                  accessible name is the block's own subject and
+                                  time, so `Accept selected` has something the
+                                  student can name. A kept block is checked by
+                                  default — the proposal arrives with everything
+                                  in it, which is what `Accept all` means. */}
+                              <input
+                                id={`keep-${placed.block.starts_at}-${String(position)}`}
+                                className="mt-3 shrink-0"
+                                type="checkbox"
+                                checked={kept[index] ?? true}
+                                aria-label={t('planner.proposal.selectBlock', {
+                                  subject: keptBlock ? t('planner.pinned') : subject.text,
+                                  start: clockLabel(placed.block.starts_at, timeZone),
+                                  end: clockLabel(placed.block.ends_at, timeZone),
+                                })}
+                                onChange={(event) =>
+                                  onKept(
+                                    blocks.map((_block, at) =>
+                                      at === index ? event.target.checked : (kept[at] ?? true),
+                                    ),
+                                  )
+                                }
+                              />
                             <button
                               type="button"
                               // The label carries what the block is and what the
                               // arrow keys do, because the position on the grid is
                               // a visual fact and the keyboard user has no grid.
                               aria-label={
-                                kept
+                                keptBlock
                                   ? t('planner.grid.keptLabel', {
                                       start: clockLabel(placed.block.starts_at, timeZone),
                                       end: clockLabel(placed.block.ends_at, timeZone),
@@ -232,7 +267,7 @@ export function ProposalPreview({
                               // than bound-and-refused: the server resolves it by its exact
                               // range, so a move makes the whole accept a 409 (A265).
                               onKeyDown={
-                                kept
+                                keptBlock
                                   ? undefined
                                   : (event) => {
                                       if (event.key === 'ArrowLeft') {
@@ -260,18 +295,19 @@ export function ProposalPreview({
                                 {clockLabel(placed.block.ends_at, timeZone)}
                               </span>
                               <span className="min-w-0 break-words text-body text-text wrap-anywhere">
-                                {kept ? t('planner.pinned') : subject.text}
+                                {keptBlock ? t('planner.pinned') : subject.text}
                               </span>
-                              {kept ? (
+                              {keptBlock ? (
                                 <span className="chip shrink-0">{t('planner.pinnedMark')}</span>
                               ) : null}
                               {placed.block.kind.toLowerCase() === 'review' ? (
                                 <span className="chip shrink-0">{t('planner.review')}</span>
                               ) : null}
-                              {placed.block.pinned && !kept ? (
+                              {placed.block.pinned && !keptBlock ? (
                                 <span className="chip shrink-0">{t('planner.moved')}</span>
                               ) : null}
                             </button>
+                            </span>
                             <span
                               aria-hidden="true"
                               className="h-1 rounded-pill bg-primary"
@@ -312,23 +348,6 @@ export function ProposalPreview({
         </table>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={saving}
-          onClick={() => {
-            onAccept(blocks)
-          }}
-        >
-          {t('planner.proposal.accept')}
-        </button>
-        <button type="button" className="btn btn-quiet" onClick={onDismiss}>
-          {t('actions.dismiss')}
-        </button>
-      </div>
-
-      {saving ? <LoadingState label={t('planner.proposal.saving')} /> : null}
     </div>
   )
 }

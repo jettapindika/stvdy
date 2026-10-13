@@ -48,6 +48,7 @@ export const COLORS: Record<Theme, Record<string, string>> = {
     'text-muted': '#464555',
     'text-subtle': '#6b6a7c',
     primary: '#4f46e5',
+    'primary-hover': '#3525cd',
     'on-primary': '#ffffff',
     'primary-text': '#3525cd',
     'primary-tint': '#e2dfff',
@@ -71,6 +72,7 @@ export const COLORS: Record<Theme, Record<string, string>> = {
     'text-muted': '#a3b1c6',
     'text-subtle': '#8493aa',
     primary: '#4f46e5',
+    'primary-hover': '#3f37c9',
     'on-primary': '#ffffff',
     'primary-text': '#a5b4fc',
     'primary-tint': '#1e1b4b',
@@ -118,6 +120,15 @@ export const PAIRS: Pair[] = [
 
   // Actions and brand.
   { fg: 'on-primary', bg: 'primary', min: MIN.text, where: 'the label on a primary button' },
+  // The hover fill, declared because a pair the gate does not measure is a pair that
+  // drifts: using `primary-text` as the hover fill put white on `#A5B4FC` in dark
+  // (2.0:1) while every declared pair stayed green.
+  {
+    fg: 'on-primary',
+    bg: 'primary-hover',
+    min: MIN.text,
+    where: 'the label on a primary button, hovered',
+  },
   { fg: 'primary-text', bg: 'bg', min: MIN.text, where: 'a link in body copy' },
   { fg: 'primary-text', bg: 'surface', min: MIN.text, where: 'a link on a card' },
   { fg: 'primary-text', bg: 'primary-tint', min: MIN.text, where: 'the active nav item' },
@@ -136,6 +147,7 @@ export const PAIRS: Pair[] = [
 
   // Non-text: a boundary has to be a real edge, and a focus ring has to be visible.
   { fg: 'border-strong', bg: 'surface', min: MIN.ui, where: 'an input boundary' },
+  { fg: 'border-strong', bg: 'surface', min: MIN.ui, where: 'a secondary button boundary' },
   { fg: 'border-strong', bg: 'bg', min: MIN.ui, where: 'an input boundary on the ground' },
   { fg: 'ring', bg: 'bg', min: MIN.ui, where: 'the focus ring on the ground' },
   { fg: 'ring', bg: 'surface', min: MIN.ui, where: 'the focus ring on a card' },
@@ -183,21 +195,49 @@ export function isCourseName(value: string): value is CourseName {
   return (COURSE_NAMES as readonly string[]).includes(value)
 }
 
-/** A course colour pair, with the fallback applied. */
-export function courseColor(name: string, theme: Theme = 'light'): { marker: string; tint: string } {
-  // An unrecognised value falls back to indigo rather than throwing: a course row
-  // whose colour column holds something unexpected must still render, and the
-  // marker is never the only signal (the initial and the name are always there).
-  const hue = isCourseName(name) ? name : 'indigo'
-  // `indigo` is declared in both themes, so the fallback is total; the explicit
-  // constant keeps the return type non-optional.
-  return COURSES[theme][hue] ?? COURSES[theme].indigo ?? { marker: '#4f46e5', tint: '#e2dfff' }
+/**
+ * The CSS custom properties for a course colour, ready to spread into `style`.
+ *
+ * **It emits variable *references*, not literals, and that is the whole point.** The
+ * app has no runtime theme — the theme is a `prefers-color-scheme` block in the
+ * stylesheet — so a caller that inlined `COURSES.light.indigo` painted the *light* pair
+ * on a dark page. That was not theoretical: every caller passed one argument, so the old
+ * `theme = 'light'` default meant the light indigo marker (`#4f46e5`) rendered on the dark
+ * ground at **3.05:1**, under the 4.5:1 `contrast.test.ts` asserts for the dark theme's
+ * own values, and the gate could not see it because it reads `COURSES` directly rather
+ * than through this function. References resolve per theme, so there is now nothing to get
+ * wrong at a call site and no theme parameter to default incorrectly.
+ *
+ * `COURSES` remains the *assertion* side, which is what the contrast gate compares;
+ * `COURSE_VARS` below is the reference table this reads.
+ */
+export function courseVars(name: string): Record<string, string> {
+  const { marker, tint } = COURSE_VARS[isCourseName(name) ? name : 'indigo']
+  return { '--course-marker': marker, '--course-tint': tint }
 }
 
-/** The CSS custom properties for a course colour, ready to spread into `style`. */
-export function courseVars(name: string, theme: Theme = 'light'): Record<string, string> {
-  const { marker, tint } = courseColor(name, theme)
-  return { '--course-marker': marker, '--course-tint': tint }
+/**
+ * The six course hues as CSS variable *references*, for a component that paints
+ * its own chip rather than setting the pair on an ancestor.
+ *
+ * `COURSES` above holds the literals, which is what the contrast gate compares;
+ * these are references, and the same hue resolves to a different value inside the
+ * dark block. The distinction matters because the app has no runtime theme — the
+ * theme is a `prefers-color-scheme` block in the stylesheet — so a component that
+ * inlined `COURSES.light.indigo` would paint the light pair on a dark page, and
+ * every screenshot in the design is light, which is why that mistake survives
+ * review.
+ *
+ * The hue names are the ones `styles.css` declares; `invariants.test.ts` fails the
+ * build if one of these reads a property nothing declares.
+ */
+export const COURSE_VARS: Record<CourseName, { marker: string; tint: string }> = {
+  indigo: { marker: 'var(--course-indigo)', tint: 'var(--course-indigo-tint)' },
+  sky: { marker: 'var(--course-sky)', tint: 'var(--course-sky-tint)' },
+  emerald: { marker: 'var(--course-emerald)', tint: 'var(--course-emerald-tint)' },
+  amber: { marker: 'var(--course-amber)', tint: 'var(--course-amber-tint)' },
+  rose: { marker: 'var(--course-rose)', tint: 'var(--course-rose-tint)' },
+  violet: { marker: 'var(--course-violet)', tint: 'var(--course-violet-tint)' },
 }
 
 /**

@@ -115,7 +115,7 @@ export function VerifyEmailScreen() {
     <AuthCard title={copy[view].title} subtitle={copy[view].subtitle}>
       {view === 'awaiting-link' && (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-muted">
+          <p className="text-body text-muted">
             {signedIn
               ? t('auth.verify.sentTo', { email: session.user.email })
               : t('auth.verify.needLink')}

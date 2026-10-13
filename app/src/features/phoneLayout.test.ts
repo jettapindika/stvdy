@@ -72,24 +72,33 @@ function remMinimums(text: string): string[] {
  */
 const classOf = (text: string, opening: RegExp): string | null => opening.exec(text)?.[1] ?? null
 
-describe('the workspace list row survives 200% text', () => {
-  it('gives the name its own line at phone width', () => {
-    // `flex-1` gives the name a flex basis of `0`, and the row's other three children
-    // (a count, Rename, Delete) are all effectively fixed-width. At 200% text they
-    // take the whole line, so the name was left **44px** of a 390px phone: measured
+describe('the workspace list survives 200% text', () => {
+  it('gives the name a box it can wrap in, and lets the card controls wrap around it', () => {
+    // The redesign turned the row into a **card in a grid**, and that changes which
+    // defect is possible here rather than removing the class of defect.
+    //
+    // The row's old failure: `flex-1` on the name beside three effectively
+    // fixed-width siblings left it **44px** of a 390px phone at 200% text — measured
     // `scrollWidth` 81 against a `clientWidth` of 44, the workspace's own name
-    // wrapping six lines at 100% text and twelve at 200%. `w-full` at phone width
-    // pushes the other three to the next line; `sm:` restores the one-line row where
-    // there is room for all four.
+    // wrapping six lines at 100% text and twelve at 200%. The name is no longer in
+    // that row at all: it is the card's heading, in a vertical flex column, so
+    // nothing competes with it for width and `flex-1` is not the property to assert.
+    //
+    // What is left to get wrong is the box itself — a card in a grid track is a
+    // definite width, but a long unbroken word still overflows one unless it may
+    // break — and the header row inside the card, where the source-count chip does
+    // sit beside Rename and Delete and must wrap out of the way at 200%.
     const file = read('features/workspaces/WorkspaceListScreen.tsx')
-    const name = classOf(file, /className="([^"]*)"\s*>\s*\{workspace\.name\}/)
-    expect(name, 'the workspace name link must exist').not.toBeNull()
-    expect(name).toContain('w-full')
-    expect(name).toContain('sm:w-auto')
-    expect(name).toContain('sm:flex-1')
-    // And the property, not only the utilities: the name must still be allowed to
-    // shrink below its intrinsic width, or it overflows a narrow row instead.
+    const name = classOf(file, /className="([^"]*text-h4[^"]*)"\s*>\s*<Link/)
+    expect(name, 'the workspace name heading must exist').not.toBeNull()
     expect(name).toContain('min-w-0')
+    expect(name).toContain('wrap-anywhere')
+
+    // The header row: the chip plus two controls, which at 200% text do not fit one
+    // line of a phone card.
+    const header = classOf(file, /className="(flex flex-wrap items-center justify-between[^"]*)"/)
+    expect(header, 'the card header row must exist').not.toBeNull()
+    expect(header).toContain('flex-wrap')
   })
 })
 
@@ -225,7 +234,7 @@ describe('the workspace panels survive 200% text', () => {
     // affects min-content sizing, and it inherits, so one rule on the container
     // reaches every descendant.
     const file = read('features/workspaces/WorkspaceScreen.tsx')
-    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*)"\s*>\s*\{panel\.id/)
+    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*@container[^"]*)"/)
     expect(container, 'the panel content container must exist').not.toBeNull()
     expect(container).toContain('wrap-anywhere')
     // The container, not each box: the rule is about the width the boxes are laid
@@ -273,7 +282,7 @@ describe('the workspace panels survive 200% text', () => {
     // The container the `@md:` in those rows is measured against has to exist, or the
     // variant falls back to the viewport and the desktop window gets the squeeze back.
     const file = read('features/workspaces/WorkspaceScreen.tsx')
-    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*)"\s*>\s*\{panel\.id/)
+    const container = classOf(file, /className="([^"]*overflow-y-auto[^"]*@container[^"]*)"/)
     expect(container, 'the panel content container must exist').not.toBeNull()
     expect(container).toContain('@container')
     // The source picker's row is the same shape without `font-medium`, and it is the
@@ -318,6 +327,125 @@ describe('the citation chip is an inline target, and the desktop floor does not 
     expect(css.slice(phone, phone + 260)).toContain('min-height: 2.75rem')
     // And the reason is written where the next reader meets the rule, not only here.
     expect(css).toContain('SC 2.5.8')
+  })
+})
+
+describe('the Today screen survives 200% text', () => {
+  it('keeps a second string out of the widget heading, and wraps what it moves out', () => {
+    // `WidgetHeading` is a `justify-between` flex row whose `<h3>` has no `min-w-0`,
+    // so the heading cannot shrink out of a sibling's way. Measured at 390px with
+    // the root font at 32px, the timeline's heading with the timezone on its right
+    // was `scrollWidth` **250** against a `clientWidth` of **212**, and the timer's
+    // with its state word was **233** against 212 — both clipped inside the card.
+    // The state word and the timezone therefore live in the wrapping rows below the
+    // heading: the timer's with the readout, the timeline's in its mono summary
+    // line, which is where the frame puts the timezone anyway.
+    const screen = withoutComments(read('features/today/TodayScreen.tsx'))
+    const timer = withoutComments(read('features/today/FocusTimer.tsx'))
+
+    // The two that were measured: a heading followed by a *word* — the timer's state
+    // and the timeline's zone. A bare count is `WidgetHeading`'s own use and the one
+    // string short enough to share the row (the deadlines widget's "3" was measured
+    // with them and did not clip), so the rule is about the phrase, not the prop.
+    expect(screen).toMatch(/<WidgetHeading title=\{t\('today\.timeline\.title'\)\} \/>/)
+    expect(timer).toMatch(/<WidgetHeading title=\{t\('today\.timer\.title'\)\} \/>/)
+    // And the rows they moved into can wrap, so the next long string moves to its
+    // own line instead of being clipped.
+    expect(timer).toContain('flex flex-wrap items-center gap-x-6 gap-y-2')
+    expect(screen).toContain('meta break-words')
+  })
+})
+
+describe('the study screen survives 200% text', () => {
+  const study = read('features/study/StudyScreen.tsx')
+
+  it('gives the card an internal scroll instead of clipping its content', () => {
+    // `SPEC.md:86` — "Cards auto-size with internal scroll (never clip)" — is the one
+    // requirement of this screen that a browser is needed to *see* and a source
+    // assertion can still pin, because the failure is the absence of two properties:
+    // with no `max-height` the card grows past the viewport and the revealed answer
+    // runs under the tab bar, and with no `overflow-y: auto` a `max-height` clips the
+    // text the student just asked for. `max-h-[70dvh]` is the bound and `overflow-y-auto`
+    // is the scroll, and the card's own text has to be able to wrap inside them or the
+    // scroll would only be horizontal.
+    const card = classOf(study, /aria-label=\{t\('study\.cardLabel'\)\}[\s\S]*?className="([^"]*)"/)
+    expect(card, 'the flashcard must exist').not.toBeNull()
+    expect(card).toContain('overflow-y-auto')
+    expect(card).toMatch(/max-h-\[[\d.]+dvh\]/)
+    expect(card).toContain('min-w-0')
+    // Both faces wrap rather than pushing the card sideways: the question at `text-h1`
+    // is the largest text on any screen in the app.
+    expect(study).toContain('break-words whitespace-pre-wrap font-heading text-h2')
+    expect(study).toContain('break-words whitespace-pre-wrap text-h4')
+  })
+
+  it('uses no rem-based minimum width, and gives the page a definite width', () => {
+    // The same class of defect the workspace list and the devices row were fixed for:
+    // `min-w-<n>` doubles with the root font size. And the root carries `w-full`, so
+    // its width is the container's content box rather than its own fit-content — the
+    // property that stops a wide intrinsic child (a 32px heading, a long Indonesian
+    // word) from resizing the screen.
+    expect(remMinimums(study)).toEqual([])
+    // The root's width is its container's, not its content's. The className is a
+    // template literal (it swaps the reading column for the panel's two), so the
+    // assertion is on the two branches rather than on a `className="…"` capture.
+    expect(study).toContain('mx-auto flex w-full flex-col gap-6 px-5 py-6')
+    expect(study).toContain('panelOpen ? \'max-w-5xl\' : \'max-w-3xl\'')
+  })
+
+  it('lets the grade row reflow, and keeps every word on its button', () => {
+    // Four buttons do not fit a narrow column, which is what the design's own mobile
+    // frame shows: two rows of two. Each button also carries its own grade *word*,
+    // because the four tones are the design's and a tone alone is not a state — gate
+    // 5(d) fails a screen whose grade is identifiable only by its colour.
+    //
+    // **A rem floor rather than a fixed count**, which is the part that changed: at a
+    // 32px root the study screen's side-panel column is 165px and four fixed columns
+    // leave each grade 64px, while "Again" renders at 28px. The floor grows with the
+    // root, so the row drops to fewer columns as the reader enlarges their text — and
+    // the harness measured the clipping that a fixed count produced.
+    expect(study).toContain('grid-cols-[repeat(auto-fit,minmax(5rem,1fr))]')
+    expect(study).toContain('btn btn-primary')
+    expect(study).toContain('border-danger text-danger')
+    expect(study).toContain('border-warning text-warning')
+    expect(study).toContain('border-success text-success')
+  })
+})
+
+describe('the quiz screen survives 200% text', () => {
+  const quiz = read('features/quiz/QuizScreen.tsx')
+
+  it('uses no rem-based minimum width, and lets an option row wrap', () => {
+    // The option row is the control gate 5(c) names on this screen, and it holds three
+    // things that each want to be on their own line at 200%: the radio, the option
+    // text (an option is a sentence, in Indonesian often a long one) and the state
+    // word. `flex-wrap` plus `min-w-0` on the text is what puts the word on its own
+    // line rather than out of the card.
+    expect(remMinimums(quiz)).toEqual([])
+    // The row's className is a template literal (it picks the tone from the state), so
+    // the assertion is on the literal's own prefix rather than on a capture.
+    expect(quiz).toContain('flex min-h-11 min-w-0 flex-wrap items-center gap-x-3')
+    expect(quiz).toContain('min-w-0 flex-1 basis-40 break-words text-label')
+  })
+
+  it('keeps the question navigator out of the tab order and off the target floor', () => {
+    // The frame draws ten 40x40 cells, and 40px is under the phone floor. They are
+    // therefore not controls: this screen has no jump-to-question behaviour, and adding
+    // one would change what an attempt means. So the navigator is an `<ol>` whose
+    // position is announced with `aria-current`, and the slice between the navigator's
+    // own label and the legend under it holds no control at all.
+    expect(quiz).toContain("aria-label={t('quiz.session.navigatorLabel')}")
+    expect(quiz).toContain('aria-current={current ?')
+    expect(quiz).toContain('h-10 w-10')
+
+    const from = quiz.indexOf("quiz.session.navigatorLabel")
+    const to = quiz.indexOf("quiz.session.legend")
+    expect(from, 'the navigator must exist').toBeGreaterThan(-1)
+    expect(to, 'the legend must follow it').toBeGreaterThan(from)
+    const cells = quiz.slice(from, to)
+    expect(cells).toContain('<li')
+    expect(cells).not.toContain('<button')
+    expect(cells).not.toContain('<input')
   })
 })
 

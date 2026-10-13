@@ -35,7 +35,7 @@
 //! asserting a contract the tree does not implement. It is reported as a gate-6 finding with
 //! the exact fix (two locale entries plus one renderer, or the server stops sending a key
 //! nothing reads); what *is* asserted below is the copy the phase's screens actually render,
-//! including the in-app renewal line (`plan.periodEnd`), which is the sentence a student
+//! including the in-app renewal line (`plan.renewalDate`), which is the label a student
 //! sees for a period ending.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -226,7 +226,11 @@ fn the_money_copy_is_complete_in_both_languages() {
         keys.extend(keys_below(&en, namespace));
     }
     keys.extend([
-        "plan.periodEnd".to_string(),
+        // The label the plan screen renders for a paid period. It replaced
+        // `plan.periodEnd`, which was a whole sentence built from the instant; the
+        // design labels the row and prints the date beside it through `formatInZone`,
+        // which is the behaviour this file exists to check.
+        "plan.renewalDate".to_string(),
         "plan.subscription".to_string(),
     ]);
     // Indonesian has no plural form, so `_one` exists only in English — the same rule
@@ -307,7 +311,10 @@ fn the_money_copy_is_complete_in_both_languages() {
             "id.checkout.state.review.detail",
             render(&copy(&id, "checkout.state.review.detail")),
         ),
-        ("id.plan.periodEnd", render(&copy(&id, "plan.periodEnd"))),
+        (
+            "id.plan.renewalDate",
+            render(&copy(&id, "plan.renewalDate")),
+        ),
     ];
     for (name, sentence) in quoted {
         assert!(
@@ -469,7 +476,7 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     // **The month boundary.** Paid 06:00 Jakarta on 1 September; the period ends 06:00
     // Jakarta on 1 October. The local end day is one day *later* than the UTC end day,
     // which is exactly the reading a UTC-bucketed implementation reports — and it is the
-    // date the UI prints, because `PlanUsageSections` renders `plan.periodEnd` through
+    // date the UI prints, because `PlanUsageSections` renders `plan.renewalDate` beside
     // `formatInZone(instant, 'Asia/Jakarta')`.
     assert_eq!(
         local_day(clock),
@@ -527,7 +534,7 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     assert_eq!(
         local_day(reported),
         "2026-10-01",
-        "and the plan screen's `plan.periodEnd` sentence prints Jakarta's 1 October"
+        "and the plan screen's `plan.renewalDate` row prints Jakarta's 1 October"
     );
     assert_eq!(
         usage["subscription"]["status"], "active",

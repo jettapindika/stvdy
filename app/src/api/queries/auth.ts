@@ -29,6 +29,8 @@ export interface User {
   plan_id: string
   timezone: string
   student_verified: boolean
+  /** Display only: every admin route re-reads this from the row, server-side. */
+  is_admin: boolean
   created_at: string
 }
 

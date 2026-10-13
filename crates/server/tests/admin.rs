@@ -504,7 +504,13 @@ async fn a_non_admin_sees_not_found(pool: PgPool) {
     let target_id = user_id_of(&harness, "victim@example.test").await;
     let admin = admin_token(&app, &harness, "admin-routes@example.test").await;
 
-    let requests: [(&str, String, serde_json::Value); 3] = [
+    // Every admin route this test covers, in one list. A route added to `admin::routes()`
+    // must be added here too, or the claim below — "every admin route is 404 for a
+    // non-admin" — is narrower than it reads. The list is a `Vec` rather than a fixed-size
+    // array so that a new route is an addition rather than a length nobody revisits; the
+    // routes the redesign added (`GET /admin/users`) are exactly what the old fixed
+    // three-slot array could not hold.
+    let requests: Vec<(&str, String, serde_json::Value)> = vec![
         (
             "PATCH",
             format!("/admin/users/{target_id}/plan"),
@@ -516,6 +522,7 @@ async fn a_non_admin_sees_not_found(pool: PgPool) {
             serde_json::json!({ "credits": 10, "idempotency_key": "nonadmin" }),
         ),
         ("GET", "/admin/margin".to_string(), serde_json::Value::Null),
+        ("GET", "/admin/users".to_string(), serde_json::Value::Null),
     ];
 
     for (method, uri, body) in &requests {

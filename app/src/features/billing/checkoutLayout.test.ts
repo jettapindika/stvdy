@@ -111,10 +111,17 @@ describe('the checkout screen survives 200% text on a phone', () => {
     const root = ROOT_CLASSES(CHECKOUT)
     // The reader chose 200%; shrinking the type to make the string fit would defeat
     // the setting, and moving the padding would be fitting the text by changing the
-    // page rather than by letting it wrap.
+    // page rather than by letting it wrap. The padding is the idiom's `px-5 py-8`
+    // (the screen took `py-6` before the redesign), and the width is the modal's own
+    // `max-w-2xl` — the checkout is a route, so it says its own width.
     expect(root).toContain('px-5')
-    expect(root).toContain('py-6')
-    expect(ORDER_CLASSES(CHECKOUT)).toContain('text-sm')
+    expect(root).toContain('py-8')
+    expect(root).toContain('max-w-2xl')
+    // `text-label`, not `text-sm`: the app's scale replaced the Tailwind defaults,
+    // and `text-sm` is 14px — between two named steps, and the same 14/20 as
+    // `text-label`. The assertion is that the list keeps a real body step, so it
+    // names the step the scale actually has.
+    expect(ORDER_CLASSES(CHECKOUT)).toContain('text-label')
     expect(ORDER_BODY(CHECKOUT)).toContain('meta')
   })
 

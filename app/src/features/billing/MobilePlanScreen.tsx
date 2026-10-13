@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next'
 
-import { PageHeader } from '@/components/layout/Section'
+import { PageFooter, PageHeader } from '@/components/layout/Section'
 import { PlanUsageSections } from '@/features/billing/PlanUsageSections'
+import { useSession } from '@/features/auth/useSession'
+import { DEFAULT_TIMEZONE } from '@/lib/time'
 
 /**
  * Plan and usage, on iOS and Android: the read-only plan screen.
@@ -34,12 +36,15 @@ import { PlanUsageSections } from '@/features/billing/PlanUsageSections'
  */
 export function MobilePlanScreen() {
   const { t } = useTranslation()
+  const session = useSession()
+  const timezone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
 
   return (
-    <div className="flex flex-col gap-6 px-5 py-6">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
       <PageHeader title={t('billing.planAndUsage')} subtitle={t('plan.subtitle')} />
       <PlanUsageSections />
-      <p className="text-sm text-muted">{t('plan.mobile.noPurchase')}</p>
+      <p className="note">{t('plan.mobile.noPurchase')}</p>
+      <PageFooter left={t('plan.footer.timezone', { zone: timezone })} />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { screen, within } from '@testing-library/react'
+import { Route, Routes } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -83,12 +84,12 @@ const USAGE = {
   provider_cost: { paused: false, resets_at: null },
 }
 
-function setup(row: Row = ROW, available: string[] = []) {
+function setup(row: Row = ROW, available: string[] = [], user: Record<string, unknown> = USER) {
   const cache = fakeCache({ user_settings: [{ id: 'u1', ...row }] })
   const fake = installFakePlatform('macos', { sync: { read: cache.read } })
   mockFetch((url) => {
     const path = new URL(url).pathname
-    if (path === '/auth/me') return jsonResponse(200, USER)
+    if (path === '/auth/me') return jsonResponse(200, user)
     if (path === '/usage') return jsonResponse(200, USAGE)
     // `channels_available` is a **second** question from the plan's grant (A288):
     // what this deployment can deliver on. It defaults to empty here, which is what
@@ -117,14 +118,24 @@ describe('the settings form', () => {
     // `start < end` (A202), and the form says which window it means rather than
     // leaving the student to work out whether the pair is allowed.
     setup({ ...ROW, quiet_start_hour: 22, quiet_end_hour: 7 })
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
     expect(await screen.findByText('Quiet from 22:00 to 7:00 the next day.')).toBeInTheDocument()
   })
 
   it('saves the wrapping window as a pair', async () => {
     const user = userEvent.setup()
     const { fake } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
 
     const from = await screen.findByLabelText('From')
     await user.clear(from)
@@ -145,14 +156,24 @@ describe('the settings form', () => {
 
   it('names a same-day window as the same day', async () => {
     setup({ ...ROW, quiet_start_hour: 13, quiet_end_hour: 15 })
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
     expect(await screen.findByText('Quiet from 13:00 to 15:00.')).toBeInTheDocument()
   })
 
   it('locks a channel the plan does not grant and names the plan that does', async () => {
     const user = userEvent.setup()
     const { fake } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
 
     const telegram = await screen.findByLabelText('Telegram')
     // The plan that first has it, read from `config/plans.toml`: free has web and
@@ -172,22 +193,37 @@ describe('the settings form', () => {
   it('offers the local reset and calls it', async () => {
     const user = userEvent.setup()
     const { fake } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/devices' },
+    )
 
-    const reset = await screen.findByRole('button', { name: 'Reset local data and resync' })
-    // The copy says what it deletes, because a control that silently removes
-    // queued work is one a student cannot consent to.
+    // The reset control is now the Devices panel's, so the copy is the panel's:
+    // the assertion is about the meaning (the copy names what it deletes, because
+    // a control that silently removes queued work is one a student cannot consent
+    // to), not about the sentence.
+    const reset = await screen.findByRole('button', { name: 'Reset and resync' })
     expect(
-      screen.getByText(/deletes everything cached on this device, including changes you have not synced yet/),
+      screen.getByText(/Deletes this device's local copy of your data, including any changes it has not sent yet/),
     ).toBeInTheDocument()
 
     await user.click(reset)
+    // Two steps, because the wipe takes queued work with it: the panel asks before
+    // it deletes, and the confirmation names what is lost.
+    await user.click(await screen.findByRole('button', { name: 'Delete and resync' }))
     expect(fake.sync.resets).toBe(1)
   })
 
   it('names the sections other phases own rather than omitting them', async () => {
     setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/appearance' },
+    )
 
     // Each names the phase that brings it, so a student looking for a control
     // finds the reason it is not there instead of nothing at all.
@@ -202,8 +238,16 @@ describe('the settings form', () => {
     // the line that said it was not built must be gone rather than left standing.
     expect(screen.queryByText('Data export and deletion')).toBeNull()
     expect(screen.queryByText(/arrive in Phase 15/)).toBeNull()
-    expect(screen.queryByText('Calendar connections')).toBeNull()
     expect(screen.queryByText(/arrive in Phase 10/)).toBeNull()
+
+    // And the sections that *have* arrived are reachable rather than merely
+    // absent from the list. "Calendar connections" used to be a line saying the
+    // feature was not built; it is now the section itself, so the assertion moved
+    // from "this copy is gone" to "the destination is here".
+    expect(screen.getByRole('link', { name: 'Calendar connections' })).toHaveAttribute(
+      'href',
+      '/settings/calendar',
+    )
   })
 
   it('links to the plan screen, which is a phone build\'s only route to it', async () => {
@@ -214,7 +258,12 @@ describe('the settings form', () => {
     // open it. The link is on every platform, because the destination is the plan
     // and not a purchase.
     setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/account' },
+    )
 
     expect(await screen.findByRole('link', { name: 'Open plan and usage' })).toHaveAttribute(
       'href',
@@ -225,7 +274,12 @@ describe('the settings form', () => {
   it('saves a language choice to the synced row, so the other device uses it', async () => {
     const user = userEvent.setup()
     const { fake } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
 
     const language = await screen.findByLabelText('Interface and generated text')
     await user.selectOptions(language, 'id')
@@ -263,7 +317,12 @@ describe('the channel rows', () => {
     // this test only passed when a sibling had run first and left its fake platform behind,
     // which is a test that passes for a reason unrelated to what it asserts.
     setup()
-    const { container } = renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    const { container } = renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
     await screen.findByLabelText('Email')
 
     const labels = [...container.querySelectorAll('label[for^="channel-"]')]
@@ -307,7 +366,12 @@ describe('a settings row from an older server', () => {
     const older = { ...ROW, reminder_channels: undefined } as unknown as Row
     setup(older)
 
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
 
     // The screen rendered its own content rather than the error boundary's.
     const inApp = await screen.findByLabelText('In the app')
@@ -322,7 +386,12 @@ describe('a settings row from an older server', () => {
     const user = userEvent.setup()
     const older = { ...ROW, reminder_channels: undefined } as unknown as Row
     const { fake } = setup(older, ['web', 'push'])
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/study' },
+    )
 
     // `web` rather than `email`: the free plan grants only web and push, and a
     // channel the plan does not grant is disabled by design (A288), so clicking it
@@ -331,5 +400,50 @@ describe('a settings row from an older server', () => {
 
     const last = fake.sync.writes.at(-1)
     expect(last?.payload.reminder_channels).toEqual(['web'])
+  })
+})
+
+/**
+ * The operator console's only route in.
+ *
+ * `/admin` is registered for every account and the **server** is the gate
+ * (`AdminUser` answers 404 to a non-admin, A7), so the link is not a security
+ * boundary and a client-side check here would be cosmetic. What it *is* is the
+ * difference between a screen an operator can find and one they have to be told
+ * about by hand — and the layout walk reaches the console by tapping this link, so
+ * if it stops rendering the console stops being measured at all.
+ *
+ * The two cases are the pair that matters: an administrator sees it, and everyone
+ * else does not. A single positive case would pass on a screen that rendered the
+ * link for every account.
+ */
+describe('the operator console link', () => {
+  it('is offered to an administrator', async () => {
+    setup(ROW, [], { ...USER, is_admin: true })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/account' },
+    )
+
+    const link = await screen.findByRole('link', { name: 'Open the admin console' })
+    expect(link).toHaveAttribute('href', '/admin')
+  })
+
+  it('is absent for a student', async () => {
+    setup(ROW, [], { ...USER, is_admin: false })
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings/account' },
+    )
+
+    // The account section rendered, so the absence is the flag and not a screen
+    // that failed to draw: a check that only asserted the missing link would pass
+    // on a blank page.
+    expect(await screen.findByText(USER.email)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open the admin console' })).not.toBeInTheDocument()
   })
 })

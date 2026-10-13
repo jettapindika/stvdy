@@ -11,16 +11,22 @@ import { setAccessToken } from '@/lib/tokens'
 /**
  * The workspace list against a scripted server.
  *
- * The mock is a tiny in-memory version of the four routes this screen uses,
- * rather than a per-test assertion on a fetch stub, because the behaviour worth
- * testing is a sequence: the screen reads, the user acts, the list is refetched
- * and shows the server's answer. A stub that returns one canned response cannot
- * express that.
+ * The mock is a tiny in-memory version of the routes this screen uses, rather
+ * than a per-test assertion on a fetch stub, because the behaviour worth testing
+ * is a sequence: the screen reads, the user acts, the list is refetched and shows
+ * the server's answer. A stub that returns one canned response cannot express
+ * that.
  *
  * The limit case is here rather than in a component test of the notice, because
  * the thing that can go wrong is the *wiring*: a prompt that renders correctly
  * and is never shown when a limit is hit is the defect the spec's "inline upgrade
  * prompt exactly where a limit is hit" is about.
+ *
+ * **The create form is behind the header's one primary action.** The redesign's
+ * page header carries a single `+ New workspace` button and the form is what it
+ * opens, so every test that creates one clicks it first. That is the interaction,
+ * not an obstacle: the alternative — a form permanently open above the list —
+ * costs the first screenful to a control most sessions do not use.
  */
 
 function workspace(over: Partial<Workspace> & { id: string; name: string }): Workspace {
@@ -28,6 +34,12 @@ function workspace(over: Partial<Workspace> & { id: string; name: string }): Wor
     created_at: '2026-10-11T08:00:00Z',
     updated_at: '2026-10-11T08:00:00Z',
     source_count: 0,
+    // The course fields the redesign added. Defaulted here rather than in every
+    // call site: a workspace with no code and no exam date is the ordinary case,
+    // and a test that has to state them is a test stating the wrong thing.
+    course_code: null,
+    color: 0,
+    exam_date: null,
     ...over,
   }
 }
@@ -35,12 +47,15 @@ function workspace(over: Partial<Workspace> & { id: string; name: string }): Wor
 let workspaces: Workspace[] = []
 let refuseWithLimit = false
 let refuseWithLocked = false
+/** The account-wide due-card count the review band reads. `null` means "not served". */
+let cardsDue: number | null = 12
 
 beforeEach(() => {
   installFakePlatform('macos')
   setAccessToken('access-1')
   refuseWithLimit = false
   refuseWithLocked = false
+  cardsDue = 12
   workspaces = [
     workspace({ id: 'w1', name: 'Data Structures', source_count: 2 }),
     workspace({ id: 'w2', name: 'Linear Algebra', source_count: 1 }),
@@ -57,6 +72,21 @@ function serve() {
     const path = new URL(url).pathname
 
     if (path === '/workspaces' && method === 'GET') return jsonResponse(200, { workspaces })
+
+    if (path === '/dashboard' && method === 'GET' && cardsDue !== null) {
+      return jsonResponse(200, {
+        from: '2026-10-12',
+        to: '2026-10-12',
+        time_per_course: [],
+        review_activity: [],
+        totals: {
+          minutes_studied: 0,
+          reviews: 0,
+          cards_due: cardsDue,
+          quizzes_taken: 0,
+        },
+      })
+    }
 
     if (path === '/workspaces' && method === 'POST') {
       if (refuseWithLocked) {
@@ -77,8 +107,17 @@ function serve() {
           used: 2,
         })
       }
-      const body = JSON.parse(String(init.body)) as { name: string }
-      const created = workspace({ id: 'w3', name: body.name })
+      const body = JSON.parse(String(init.body)) as {
+        name: string
+        course_code: string | null
+        exam_date: string | null
+      }
+      const created = workspace({
+        id: 'w3',
+        name: body.name,
+        course_code: body.course_code,
+        exam_date: body.exam_date,
+      })
       workspaces = [...workspaces, created]
       return jsonResponse(201, { workspace: created })
     }
@@ -87,13 +126,16 @@ function serve() {
     if (match?.[1] !== undefined) {
       const id = match[1]
       if (method === 'PATCH') {
-        const body = JSON.parse(String(init.body)) as { name: string }
+        const body = JSON.parse(String(init.body)) as {
+          name: string
+          course_code: string | null
+          exam_date: string | null
+        }
         const renamed = workspaces.find((entry) => entry.id === id)
         if (renamed === undefined) return jsonResponse(404, { code: 'not_found' })
-        workspaces = workspaces.map((entry) =>
-          entry.id === id ? { ...entry, name: body.name } : entry,
-        )
-        return jsonResponse(200, { workspace: { ...renamed, name: body.name } })
+        const next = { ...renamed, ...body }
+        workspaces = workspaces.map((entry) => (entry.id === id ? next : entry))
+        return jsonResponse(200, { workspace: next })
       }
       if (method === 'DELETE') {
         workspaces = workspaces.filter((entry) => entry.id !== id)
@@ -125,6 +167,34 @@ describe('the workspace list', () => {
     expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument()
   })
 
+  it('shows the course code and the exam date only when the workspace has them', async () => {
+    // The honesty rule at the card: `course_code` and `exam_date` are nullable, and
+    // a card that printed a dash or a placeholder would be stating a fact no row
+    // holds. One workspace has both, the other neither.
+    workspaces = [
+      workspace({
+        id: 'w1',
+        name: 'Cell biology',
+        course_code: 'BIO 201',
+        exam_date: '2026-11-05',
+      }),
+      workspace({ id: 'w2', name: 'Statistics' }),
+    ]
+    serve()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    expect(await screen.findByText('BIO 201')).toBeInTheDocument()
+    // Formatted from the date the student set, at UTC midnight so the reader's zone
+    // cannot shift it a day.
+    expect(screen.getByText('Next exam · 05 Nov 2026')).toBeInTheDocument()
+
+    const statistics = (await screen.findByRole('link', { name: 'Statistics' })).closest('li')
+    expect(statistics).not.toBeNull()
+    expect(within(statistics as HTMLElement).queryByText(/Next exam/)).not.toBeInTheDocument()
+    // And no code line at all, rather than an empty one.
+    expect(within(statistics as HTMLElement).queryByText('BIO 201')).not.toBeInTheDocument()
+  })
+
   it('says what a workspace is for when there are none', async () => {
     workspaces = []
     serve()
@@ -135,19 +205,65 @@ describe('the workspace list', () => {
     expect(screen.getByText(/Create one per course/)).toBeInTheDocument()
   })
 
-  it('creates a workspace and shows it in the refetched list', async () => {
+  it('creates a workspace with its course code and exam date', async () => {
     const calls = serve()
     const user = userEvent.setup()
     renderWithProviders(<WorkspaceListScreen />)
 
+    // The create form is behind the header's one primary action.
+    await user.click(screen.getByRole('button', { name: 'New workspace' }))
     await user.type(await screen.findByLabelText('New workspace'), 'Algorithms')
+    await user.type(screen.getByLabelText('Course code'), 'CS 401')
+    await user.type(screen.getByLabelText('Next exam'), '2026-11-05')
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
     expect(await screen.findByRole('link', { name: 'Algorithms' })).toBeInTheDocument()
+    expect(await screen.findByText('CS 401')).toBeInTheDocument()
 
     const posted = calls.find((call) => call.init.method === 'POST')
     expect(posted).toBeDefined()
-    expect(JSON.parse(String(posted?.init.body))).toEqual({ name: 'Algorithms' })
+    expect(JSON.parse(String(posted?.init.body))).toEqual({
+      name: 'Algorithms',
+      course_code: 'CS 401',
+      exam_date: '2026-11-05',
+    })
+  })
+
+  it('clears the course fields by sending null, not by omitting them', async () => {
+    // `PATCH` distinguishes an absent field ("leave it alone") from an explicit
+    // `null` ("clear it"), so a form that omitted an emptied field could never
+    // remove a code or a date once it had one. The body is the contract here.
+    workspaces = [
+      workspace({
+        id: 'w1',
+        name: 'Cell biology',
+        course_code: 'BIO 201',
+        exam_date: '2026-11-05',
+      }),
+    ]
+    const calls = serve()
+    const user = userEvent.setup()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    const card = (await screen.findByRole('link', { name: 'Cell biology' })).closest('li')
+    await user.click(within(card as HTMLElement).getByRole('button', { name: 'Rename' }))
+    await user.clear(screen.getByLabelText('Course code'))
+    await user.clear(screen.getByLabelText('Next exam'))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.init.method === 'PATCH')).toBe(true)
+    })
+    const patched = calls.find((call) => call.init.method === 'PATCH')
+    expect(JSON.parse(String(patched?.init.body))).toEqual({
+      name: 'Cell biology',
+      course_code: null,
+      exam_date: null,
+    })
+    // And the card stops claiming them.
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Next exam · 05 Nov 2026')).not.toBeInTheDocument()
+    })
   })
 
   it('shows the plan limit, with the numbers, when the server refuses the create', async () => {
@@ -156,6 +272,8 @@ describe('the workspace list', () => {
     const user = userEvent.setup()
     renderWithProviders(<WorkspaceListScreen />)
 
+    // The create form is behind the header's one primary action.
+    await user.click(screen.getByRole('button', { name: 'New workspace' }))
     await user.type(await screen.findByLabelText('New workspace'), 'Third course')
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -187,6 +305,62 @@ describe('the workspace list', () => {
     ).toBeInTheDocument()
     const patched = calls.find((call) => call.init.method === 'PATCH')
     expect(patched?.url.endsWith('/workspaces/w1')).toBe(true)
+  })
+
+  it('sorts by name when the student asks for it', async () => {
+    // The sort is real: the two names are in the opposite order to their
+    // `updated_at`, so an implementation that ignored the control would leave the
+    // cards where they were and pass a weaker assertion.
+    workspaces = [
+      workspace({ id: 'w1', name: 'Statistics', updated_at: '2026-10-11T09:00:00Z' }),
+      workspace({ id: 'w2', name: 'Cell biology', updated_at: '2026-10-11T08:00:00Z' }),
+    ]
+    serve()
+    const user = userEvent.setup()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    await screen.findByRole('link', { name: 'Statistics' })
+    const cardNames = (): (string | null)[] =>
+      screen
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('h3')?.textContent ?? null)
+    expect(cardNames()).toEqual(['Statistics', 'Cell biology'])
+
+    await user.selectOptions(screen.getByLabelText('Sort'), 'name')
+    expect(cardNames()).toEqual(['Cell biology', 'Statistics'])
+  })
+
+  it('shows the account due count in the review band', async () => {
+    cardsDue = 44
+    serve()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    expect(await screen.findByText('44 flashcards to revisit')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Review due cards' })).toBeInTheDocument()
+  })
+
+  it('says nothing is due rather than offering an empty queue', async () => {
+    // Zero is a real answer and reads as one; the action that would open an empty
+    // queue is not offered.
+    cardsDue = 0
+    serve()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    expect(await screen.findByText('Nothing is due today')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Review due cards' })).not.toBeInTheDocument()
+  })
+
+  it('omits the review band when the due count cannot be read', async () => {
+    // The band's one figure is the reason it exists, so a failed read renders no
+    // band at all rather than a heading over nothing. The workspaces below are
+    // complete without it.
+    cardsDue = null
+    serve()
+    renderWithProviders(<WorkspaceListScreen />)
+
+    expect(await screen.findByRole('link', { name: 'Data Structures' })).toBeInTheDocument()
+    expect(screen.queryByText(/flashcards to revisit/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Nothing is due today')).not.toBeInTheDocument()
   })
 
   it('asks before deleting, and says what else goes', async () => {
@@ -231,6 +405,8 @@ describe('the workspace list', () => {
     const user = userEvent.setup()
     renderWithProviders(<WorkspaceListScreen />)
 
+    // The create form is behind the header's one primary action.
+    await user.click(screen.getByRole('button', { name: 'New workspace' }))
     await user.type(await screen.findByLabelText('New workspace'), 'Third course')
     await user.click(screen.getByRole('button', { name: 'Create' }))
 

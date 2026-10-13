@@ -5,6 +5,98 @@
       "restoring": "Restoring your session"
     }
   },
+  "admin": {
+    "title": "Operations overview",
+    "eyebrow": "Admin console / overview",
+    "subtitle": "User activity, QRIS payments and provider contribution margin.",
+    "noun": "admin console",
+    "loading": "Loading the console",
+    "scope": "Restricted scope · web only",
+    "webOnly": "The admin console runs in a browser on a desktop.",
+    "webOnlyTitle": "Not available on this device",
+    "webOnlyReason": "The console shows account data, so it is web-only. Open Stvdy in a desktop browser to use it.",
+    "returnToApp": "Return to the student app",
+    "footer": "All figures computed over the window above · {{zone}}",
+    "window": "{{from}} – {{to}}",
+    "summary": {
+      "title": "Summary",
+      "month": "Newest month in the report: {{month}} (UTC)",
+      "activeUsers": "Accounts",
+      "activeUsersNote": "{{paying}} paying · {{free}} free, at the report date",
+      "revenue": "Retained revenue",
+      "revenueNote": "Paid orders only · refunds excluded",
+      "cost": "Provider costs",
+      "costNote": "Converted at {{rate}} per USD",
+      "margin": "Contribution margin",
+      "marginNote": "{{contribution}} contribution · excludes gateway fees and opex",
+      "noRevenue": "No revenue",
+      "asOf": "Report computed {{when}}"
+    },
+    "users": {
+      "title": "User activity",
+      "loading": "Loading accounts",
+      "count_one": "{{count}} account",
+      "count_other": "{{count}} accounts",
+      "emptyTitle": "No accounts yet",
+      "emptyReason": "Accounts appear here as soon as one signs up.",
+      "columnUser": "Account",
+      "columnPlan": "Plan",
+      "columnRequests": "Requests",
+      "columnSources": "Sources added",
+      "columnLastActive": "Last active",
+      "admin": "Administrator",
+      "neverActive": "Never active",
+      "cardTitle": "Every account"
+    },
+    "payments": {
+      "title": "QRIS payment audit log",
+      "loading": "Loading payments",
+      "count_one": "{{count}} order",
+      "count_other": "{{count}} orders",
+      "emptyTitle": "No orders yet",
+      "emptyReason": "Orders appear here when a student starts a checkout.",
+      "columnOrder": "Order / reference",
+      "columnPlan": "Plan",
+      "columnAmount": "Amount · IDR",
+      "columnStatus": "QRIS status",
+      "columnUpdated": "Updated",
+      "credits": "{{count}} credits",
+      "cardTitle": "Every order"
+    },
+    "margin": {
+      "title": "Provider cost & margin report",
+      "loading": "Loading the margin report",
+      "months_one": "{{count}} month",
+      "months_other": "{{count}} months",
+      "emptyTitle": "No months in range",
+      "emptyReason": "The report has nothing to compute over this window.",
+      "rate": "The FX rate every conversion above used: {{rate}} per USD, from configuration.",
+      "columnPlan": "Plan",
+      "columnCost": "Provider cost · USD",
+      "columnByok": "On own key · USD",
+      "columnRevenue": "Revenue · IDR",
+      "columnMargin": "Gross margin · IDR",
+      "columnCeiling": "Ceiling · USD",
+      "monthLine": "{{paying}} paying · {{free}} free · Rp {{revenue}} collected · Rp {{fee}} gateway fees",
+      "conversion": "Conversion of free {{ofFree}} · of all accounts {{ofTotal}} · free credits used {{utilization}}",
+      "unknown": "Not computable",
+      "noCeiling": "No ceiling",
+      "usd": "USD {{amount}}",
+      "monthEmpty": "No rows in this month.",
+      "cardTitle": "By month"
+    },
+    "tripwire": {
+      "title": "Thresholds",
+      "eyebrow": "Watched · three-valued",
+      "freeUtilization": "Free-tier credit use over 30%",
+      "conversion": "Conversion of free accounts under 3%",
+      "freeSpend": "Free-tier cost over a quarter of revenue",
+      "twoMonths": "Two consecutive months at a loss",
+      "triggered": "Triggered",
+      "clear": "Not triggered",
+      "notMeasured": "Not measured"
+    }
+  },
   "nav": {
     "today": "Today",
     "workspaces": "Workspaces",
@@ -71,7 +163,10 @@
     "nav": {
       "main": "Main"
     },
-    "skipToContent": "Skip to content"
+    "skipToContent": "Skip to content",
+    "semester": "This semester",
+    "railNote": "Your work, in one place. One step at a time.",
+    "settingsEyebrow": "Your workspace / Settings"
   },
   "routes": {
     "notFound": {
@@ -125,8 +220,6 @@
     "free": "Free",
     "current": "Your plan",
     "choose": "Choose {{plan}}",
-    "creditsIncluded_one": "{{count, number}} credit a month",
-    "creditsIncluded_other": "{{count, number}} credits a month",
     "studentBanner": "Your student address is verified, so every plan is {{percent}}% off.",
     "comparison": "What each plan includes",
     "comparisonCaption": "Each plan and the limit it sets on every axis.",
@@ -149,13 +242,17 @@
         "q": "How do I get the student price?",
         "a": "Verify an Indonesian campus address in Settings. The discount applies at checkout, to the plan you choose."
       }
-    }
+    },
+    "accountPlan": "On the {{plan}} plan",
+    "priceHidden": "Price not shown",
+    "noPaymentRequired": "No payment required",
+    "billedInterval": "Billed {{period}} · {{currency}}",
+    "currencyNote": "All amounts in {{currency}}"
   },
   "checkout": {
     "title": "Checkout",
     "subtitle": "Scan the code with any QRIS app. This page updates by itself.",
     "loading": "Loading your invoice",
-    "order": "What you are paying for",
     "qrLabel": "QRIS code for this payment",
     "reference": "Order {{orderId}}",
     "expiresIn": "The code expires in {{time}}",
@@ -200,7 +297,11 @@
         "title": "We could not reach Stvdy",
         "detail": "Your code may still be valid, so nothing is lost. Check your connection and try again."
       }
-    }
+    },
+    "orderSummary": "Order summary",
+    "totalCurrency": "Total · {{currency}}",
+    "windowLabel": "Payment window",
+    "guidance": "Keep this window open while you complete your payment."
   },
   "plan": {
     "subtitle": "What your plan includes, what you have used this month, and what each action costs.",
@@ -213,7 +314,6 @@
       "expired": "Expired",
       "canceled": "Canceled"
     },
-    "periodEnd": "Current period ends {{date}}",
     "credits": "Credits",
     "creditsMonthly": "Monthly grant",
     "creditsPurchased": "Purchased",
@@ -263,6 +363,32 @@
       "included": "Included in your plan: {{formats}}",
       "md": "Markdown",
       "pdf": "PDF"
+    },
+    "currentPlan": "Current plan",
+    "statusLabel": "Status",
+    "renewalDate": "Renewal date",
+    "creditsCard": {
+      "title": "Monthly AI credits",
+      "left": "left",
+      "remainingOfTotal": "{{remaining}} of {{total}}",
+      "reset": "Credits reset on {{date}}."
+    },
+    "features": {
+      "title": "Feature access",
+      "policy": "Features locked based on your plan.",
+      "included": "Included",
+      "locked": "Locked"
+    },
+    "feature": {
+      "advanced_analytics": "Advanced study reports",
+      "task_ai_breakdown": "AI task breakdown",
+      "quick_capture": "Quick capture",
+      "google_calendar": "Google Calendar",
+      "agent_actions": "Assistant actions",
+      "byok": "Your own API key"
+    },
+    "footer": {
+      "timezone": "Dates in {{zone}}"
     }
   },
   "meter": {
@@ -270,6 +396,25 @@
     "none": "No credits left",
     "loading": "Checking credits",
     "unavailable": "Credits unavailable"
+  },
+  "palette": {
+    "title": "Search and commands",
+    "open": "Open search",
+    "searchPlaceholder": "Search courses, notes or sources",
+    "escape": "Esc",
+    "move": "to move",
+    "shortcut": "Opens with {{shortcut}}",
+    "noResults": "Nothing matches “{{query}}”. Titles are searched; the text inside a source is not.",
+    "noCourse": "No course",
+    "sourceCount_one": "{{count}} source",
+    "sourceCount_other": "{{count}} sources",
+    "group": {
+      "go": "Go to",
+      "workspaces": "Courses",
+      "sources": "Sources",
+      "decks": "Decks",
+      "tasks": "Tasks"
+    }
   },
   "brand": {
     "illustration": {
@@ -301,28 +446,30 @@
   },
   "auth": {
     "field": {
-      "email": "Email",
+      "email": "University email",
       "password": "Password"
     },
     "signIn": {
       "title": "Sign in",
-      "subtitle": "Your workspaces, sources, and study material, on every device you sign in from.",
+      "subtitle": "Sign in to your study workspace.",
       "newHere": "New to Stvdy?",
       "createAccount": "Create an account",
       "mismatchTitle": "That did not match",
       "mismatchReason": "Check the email and the password and try again. Neither is shown to anyone else.",
-      "pending": "Signing in"
+      "pending": "Signing in",
+      "welcome": "Welcome back"
     },
     "signUp": {
       "title": "Create your account",
-      "subtitle": "One workspace per course, with everything inside it readable together.",
+      "subtitle": "Use your university email to start your study workspace.",
       "haveAccount": "Already have an account?",
       "takenTitle": "That address is already registered",
       "takenReason": "Sign in with it instead, or use a different email address for this account.",
       "deviceLabel": "This device",
       "deviceHint": "The name this machine appears under in your device list. You can rename it later.",
       "pending": "Creating your account",
-      "submit": "Create account"
+      "submit": "Create account",
+      "passwordHint": "Use at least 8 characters."
     },
     "verify": {
       "awaitingTitle": "Check your email",
@@ -360,7 +507,8 @@
       "pendingTitle": "Signing you in",
       "pendingSubtitle": "Finishing the Google sign-in you just started.",
       "loading": "Completing sign-in"
-    }
+    },
+    "metadata": "STVDY / ACCOUNT"
   },
   "today": {
     "subtitle": "Study blocks, due cards, and deadlines, arranged by the time you have available.",
@@ -378,13 +526,13 @@
       "review": "Review {{count}} cards"
     },
     "tasks": {
-      "emptyTitle": "Nothing due",
-      "emptyReason": "Tasks from a workspace, a syllabus import, or a quick capture land here, ordered by due date."
+      "emptyTitle": "Nothing scheduled today",
+      "emptyReason": "Classes, deadlines and tasks due today land on this timeline, earliest first."
     },
     "exams": {
-      "title": "Upcoming exams",
-      "emptyTitle": "No exams tracked",
-      "emptyReason": "Add an exam as a goal and it becomes the anchor the planner schedules against."
+      "title": "Deadlines this week",
+      "emptyTitle": "No deadlines this week",
+      "emptyReason": "Deadlines and exams in the next seven days appear here. Add an exam as a goal and it becomes the anchor the planner schedules against."
     },
     "timer": {
       "running": "Running",
@@ -397,11 +545,21 @@
       "minutesLabel": "Minutes studied",
       "save": "Save session",
       "discard": "Discard",
-      "title": "Focus timer"
+      "title": "Focus timer",
+      "sessionLength": "{{focus}} min focus / {{rest}} min break"
     },
     "timeline": {
-      "title": "Today",
-      "at": "at {{when}}"
+      "title": "Today's Timeline",
+      "at": "at {{when}}",
+      "summaryEvents_one": "{{count}} event",
+      "summaryEvents_other": "{{count}} events",
+      "summaryTasks_one": "{{count}} task",
+      "summaryTasks_other": "{{count}} tasks",
+      "summaryMinutes_one": "{{count}} min logged",
+      "summaryMinutes_other": "{{count}} min logged",
+      "kindTask": "Task",
+      "finished": "Finished",
+      "now": "Now"
     },
     "overdue": {
       "title": "Overdue",
@@ -423,7 +581,8 @@
     "activity": {
       "title": "Your study",
       "minutes": "{{count}} minutes logged today",
-      "streak": "{{count}} day streak"
+      "streak": "{{count}}-day study streak",
+      "loading": "Checking your study"
     },
     "capture": {
       "title": "Quick capture",
@@ -438,14 +597,47 @@
       "due": "Due {{when}}",
       "estimate": "About {{count}} minutes",
       "warning": "The assistant could not use one field: {{detail}}",
-      "lockedReason": "Type one line and get a task draft you confirm before anything is saved."
+      "lockedReason": "Type one line and get a task draft you confirm before anything is saved.",
+      "offline": "AI actions need a connection."
+    },
+    "greeting": {
+      "morning": "Good morning, {{name}}.",
+      "afternoon": "Good afternoon, {{name}}.",
+      "evening": "Good evening, {{name}}."
+    },
+    "openDay": "Open the calendar for {{date}}",
+    "due": {
+      "eyebrow": "Due now",
+      "count_one": "{{count}} flashcard due for review",
+      "count_other": "{{count}} flashcards due for review"
+    },
+    "streak": {
+      "encouragement": "A little study, at your own pace.",
+      "emptyTitle": "No study days yet",
+      "emptyReason": "A day counts when you review a card, take a quiz, or log a session. One session today is enough to start.",
+      "emptyAction": "Open Study",
+      "dayActive": "A day you studied",
+      "dayIdle": "A day with no study"
+    },
+    "deadlines": {
+      "weekRange": "{{from}}–{{to}}",
+      "today": "Today",
+      "inDays_one": "In {{count}} day",
+      "inDays_other": "In {{count}} days",
+      "openPlanner": "Open Planner"
+    },
+    "footer": {
+      "savedOnDevice": "Saved on this device · Sync pending"
     }
   },
   "workspaces": {
     "noun": "workspaces",
     "keepIt": "Keep it",
     "detail": {
-      "titleFallback": "Workspace"
+      "titleFallback": "Workspace",
+      "sourceCount_one": "{{count}} source",
+      "sourceCount_other": "{{count}} sources",
+      "exam": "exam {{date}}"
     },
     "panels": {
       "label": "Workspace panels"
@@ -486,7 +678,8 @@
       "removing": "Removing",
       "removeIt": "Remove it",
       "noun": "sources",
-      "kindOther": "Source"
+      "kindOther": "Source",
+      "open": "Open source"
     },
     "upload": {
       "legend": "Add material",
@@ -533,7 +726,26 @@
       "deleteSources_one": "{{count}} source goes with it. This cannot be undone.",
       "deleteSources_other": "{{count}} sources go with it. This cannot be undone.",
       "deleting": "Deleting",
-      "deleteConfirm": "Delete workspace"
+      "deleteConfirm": "Delete workspace",
+      "eyebrow": "Your courses",
+      "courseCodeLabel": "Course code",
+      "courseCodePlaceholder": "BIO 201",
+      "courseCodeHint": "Optional. Up to 16 characters. Shown on the card and in the sidebar.",
+      "examDateLabel": "Next exam",
+      "examDateHint": "Optional. Shown on the card as the date you set.",
+      "examLine": "Next exam · {{date}}",
+      "open": "Open workspace →",
+      "sortLabel": "Sort",
+      "sortRecent": "Recently updated",
+      "sortName": "Name",
+      "reviewEyebrow": "Due today / {{count}} workspaces",
+      "reviewTitle_one": "{{count}} flashcard to revisit",
+      "reviewTitle_other": "{{count}} flashcards to revisit",
+      "reviewNone": "Nothing is due today",
+      "reviewReason": "Start with a course below, or review across your workspaces.",
+      "reviewAction": "Review due cards",
+      "footerCounts_one": "{{workspaces}} workspace · {{sources}} sources",
+      "footerCounts_other": "{{workspaces}} workspaces · {{sources}} sources"
     }
   },
   "chat": {
@@ -661,6 +873,26 @@
     }
   },
   "study": {
+    "hub": {
+      "eyebrow": "Every course / one queue",
+      "subtitle": "Your decks and quizzes across every course, in one place.",
+      "loading": "Loading your decks",
+      "reviewAll": "Review a deck",
+      "decks": "Decks",
+      "quizzes": "Quizzes",
+      "cardCount_one": "{{count}} card",
+      "cardCount_other": "{{count}} cards",
+      "generating": "Generating",
+      "totals": "{{decks}} decks · {{quizzes}} quizzes",
+      "empty": {
+        "title": "No decks yet",
+        "reason": "Decks come from a course. Open a workspace, pick sources, and make flashcards from them."
+      },
+      "dueNow_one": "{{count}} card due across your courses",
+      "dueNow_other": "{{count}} cards due across your courses",
+      "nothingDue": "Nothing is due right now.",
+      "reviewOpens": "Opens {{deck}}, the deck with the most cards."
+    },
     "backToWorkspace": "Back to the workspace",
     "refreshFailed": "Could not refresh this deck. Your session is unaffected.",
     "loadingDue": "Loading this deck's due cards",
@@ -679,6 +911,28 @@
       "title": "Nothing due in this deck",
       "scheduled": "Every card in this deck has been scheduled. Come back after the next one is due.",
       "next": "Every card here is scheduled. The next one comes due {{when}}."
+    },
+    "endSession": "End session",
+    "questionLabel": "Question",
+    "answerLabel": "Answer",
+    "recallHint": "Take a moment to recall before revealing.",
+    "revealHint": "Space to reveal",
+    "rateRecall": "How well did you recall the answer?",
+    "rateHint": "Rate your recall, not the card.",
+    "keyHints": "1 {{again}} · 2 {{hard}} · 3 {{good}} · 4 {{easy}}",
+    "interval": {
+      "days": "{{days}}d"
+    },
+    "sessionProgress": "{{reviewed}} reviewed · {{remaining}} remaining",
+    "receipt": {
+      "rated": "Previous card rated {{grade}}",
+      "next": "Card {{position}} · next review in {{days}}"
+    },
+    "undo": {
+      "tooLate": {
+        "title": "Too late to undo",
+        "reason": "The window for undoing has closed, so this grade stands."
+      }
     }
   },
   "quiz": {
@@ -721,7 +975,39 @@
       "answeredOfWaiting": "{{answered}} of {{total}} answered, {{waiting}} waiting for you to mark",
       "topics": "Where to look again",
       "sourceUnavailable": "Source unavailable",
-      "everyQuestion": "Every question"
+      "everyQuestion": "Every question",
+      "title": "Quiz results",
+      "subtitle": "A clear view of what you know and what to review next.",
+      "reflection_one": "{{count}} question needs another look.",
+      "reflection_other": "{{count}} questions need another look.",
+      "backToStudy": "Back to Study"
+    },
+    "breadcrumbLabel": "Breadcrumb",
+    "endQuiz": "End quiz",
+    "fromSources": "Built from {{sources}}",
+    "oneCorrect": "One correct answer",
+    "writeYourAnswer": "Write your answer",
+    "selected": "Selected",
+    "correctAnswer": "Correct answer",
+    "correctYourAnswer": "Correct · your answer",
+    "generatedNote": "AI-generated practice · Check the cited pages when reviewing explanations.",
+    "guidance": {
+      "choose": "Choose one answer to continue.",
+      "write": "Write your answer to continue.",
+      "selected": "Answer selected. Ready to check.",
+      "written": "Answer written. Ready to check.",
+      "recorded": "Answer recorded. Review the explanation before continuing.",
+      "markIt": "Compare your answer, then mark it."
+    },
+    "session": {
+      "title": "Your session",
+      "navigatorLabel": "Question progress",
+      "legend": "Current question outlined. Filled steps have been answered.",
+      "focus": "Focus of this quiz",
+      "noTimeLimit": "No time limit",
+      "hint": "Use mistakes to identify what needs another review.",
+      "noSourcesTitle": "No sources behind this quiz",
+      "noSourcesReason": "This quiz was generated without a source, so an explanation has no page to check against."
     }
   },
   "studio": {
@@ -818,11 +1104,14 @@
   },
   "styleguide": {
     "title": "Design reference",
-    "subtitle": "Not a product screen. The tokens and components in one place, with placeholder content rather than sample data.",
+    "subtitle": "The design system in one page: the palette, the type scale, the controls and the academic patterns, rendered from the live tokens rather than copied from a sheet.",
     "palette": {
       "title": "Palette",
-      "description": "Indigo is the action: it fills the primary button, marks the selected item, and carries the brand. Sky is reserved for sources and citations, and nothing else — a sky chip on screen means the text beside it came from your own material. Emerald is done, amber is due soon, rose is again, overdue, or destructive. Every text/background pair below is checked in both themes by the contrast test, so this list cannot drift from what renders.",
-      "contrastNote": "Text pairs clear 4.5:1 and borders, icons and the focus ring clear 3:1, in light and dark. The check runs in CI and fails the build on a miss."
+      "description": "The palette is roles, not swatches. Indigo is the action, sky marks a citation and nothing else, emerald is done, amber is due soon, and rose is overdue or destructive. Every pair below is measured in both themes by the contrast test, so this list cannot drift from what renders.",
+      "contrastNote": "Text pairs clear 4.5:1 and borders, icons and the focus ring clear 3:1, in light and dark. The check runs in CI and fails the build on a miss.",
+      "meta": "Light and dark",
+      "light": "Light",
+      "dark": "Dark"
     },
     "swatch": {
       "success": "done and mastered",
@@ -844,18 +1133,32 @@
       "warningTint": "the due chip",
       "dangerTint": "the error note",
       "ring": "the focus ring",
-      "danger": "errors"
+      "danger": "errors",
+      "onPrimary": "the label on a primary button"
     },
     "type": {
-      "title": "Type",
+      "title": "Type families",
       "headingOne": "Heading one",
       "headingTwo": "Heading two",
       "headingThree": "Heading three",
-      "body": "Body text at 14px on desktop and 16px on mobile. Inter for the interface, Plus Jakarta Sans for headings, JetBrains Mono for page refs and timestamps. All three are bundled, so the app renders with no network.",
+      "body": "Build understanding, one concept at a time.",
       "meta": "Monospace metadata: page 12, 24 min, 2026-10-11",
       "linkBefore": "A",
       "linkText": "link in body copy",
-      "linkAfter": "uses the body-text indigo, because the fill indigo is for surfaces that carry white text."
+      "linkAfter": "uses the body-text indigo, because the fill indigo is for surfaces that carry white text.",
+      "familyHeadings": "Headings",
+      "familyHeadingsNote": "Calm authority / 600",
+      "familyBody": "Body and interface",
+      "familyBodyNote": "Legibility first / 400 to 600",
+      "familyMono": "Metadata and code",
+      "familyMonoNote": "Timestamps, citations, counts / 400",
+      "scale": "Type scale",
+      "scaleMeta": "Ten steps",
+      "display": "A clear path to understanding.",
+      "h4": "A card title inside a card",
+      "label": "Start review session",
+      "small": "A secondary line inside a card",
+      "caption": "Helper text under a field"
     },
     "citations": {
       "title": "Citation marks",
@@ -878,60 +1181,134 @@
       "secondary": "Secondary",
       "quiet": "Quiet",
       "disabled": "Disabled",
-      "fieldLabel": "Field label",
-      "placeholder": "Placeholder text"
+      "fieldLabel": "Session name",
+      "placeholder": "Placeholder text",
+      "danger": "Delete session",
+      "inputTitle": "Text inputs and validation",
+      "inputMeta": "Visible labels / recovery copy",
+      "inputHint": "Give your session a clear, specific name.",
+      "inputError": "Enter a session name to continue.",
+      "inputManaged": "This name is managed by your course.",
+      "targets": "Target sizes",
+      "targetsMeta": "32 / 44 px",
+      "targetsDescription": "44px is the shared default and the phone minimum; 32px with 8px gaps is the desktop floor. The field is 44px for the same reason: on a phone a control that is hard to hit is a control that gets missed.",
+      "liveStates": "Hover and focus are the stylesheet's live states on a real control: hover darkens the fill and the focus ring is drawn by :focus-visible."
     },
-    "states": {
-      "title": "States",
-      "emptyTitle": "Empty state",
-      "emptyReason": "Names why it is empty and what fills it. The reason is a required prop, so a blank state cannot ship by forgetting.",
-      "errorTitle": "Error state",
-      "errorReason": "Names what failed and what to do about it.",
-      "loading": "Loading a named thing, not just loading",
-      "loadingRows": "Loading rows"
-    },
+    "states": {},
     "course": {
-      "title": "Course colours",
+      "title": "Course cards",
       "description": "Six categorical hues. Each is a 4px marker plus a tinted chip plus an initial or icon, and never the only signal: two courses in the same colour are told apart by their names, and a course colour is not a status colour.",
       "indigo": "Algorithms",
       "sky": "Statistics",
       "emerald": "Biology",
       "amber": "Economics",
       "violet": "Literature",
-      "rose": "Calculus"
+      "rose": "Calculus",
+      "spec": "Course code, name, then what is inside it. Context first, resources second."
     },
     "chips": {
-      "title": "Chips and icons",
-      "description": "A chip carries a state in words; the tone repeats it, so the state reads correctly in monochrome. Icons are one outline set at 20px, drawn in currentColor so they cannot introduce a colour the contrast check has not measured.",
-      "neutral": "Pending",
-      "working": "Processing 42%",
-      "ready": "Ready",
-      "due": "Due today",
-      "failed": "Failed",
-      "source": "From your sources"
+      "title": "Due states",
+      "description": "A chip carries a state in words and the tone repeats it, so the state reads correctly in monochrome. A chip is a state, never an action: a control that changes what is on screen is a button.",
+      "neutral": "New",
+      "working": "In progress",
+      "ready": "Mastered",
+      "due": "Due soon",
+      "failed": "Overdue",
+      "source": "Source",
+      "meta": "Word plus tone"
     },
-    "locked": {
-      "title": "Locked features",
-      "description": "One component, two variants, chosen by the platform. Web and desktop name the plan and link to checkout; iOS and Android state the fact with no price, no button and no link, because the stores review for exactly that."
+    "locked": {},
+    "composer": {},
+    "sync": {},
+    "eyebrow": "Design system / v1.0",
+    "foundations": {
+      "title": "Foundations"
     },
-    "composer": {
-      "title": "Composer honesty",
-      "description": "The line under every chat composer, and the grounding toggle above it. Both are part of the composer rather than a tooltip: a warning nobody has to open is one most people never read."
+    "dark": {
+      "title": "Dark core",
+      "meta": "Four supplied roles",
+      "description": "The dark theme is a designed theme, not a filter: the same tokens carry both, so a new surface works in dark mode without a variant. The primary action keeps the same indigo fill with white text.",
+      "rule": "Surface is not the background. Preserve the edge."
     },
-    "sync": {
-      "title": "Sync status",
-      "description": "The control the shell shows in both form factors: a row at the foot of the sidebar, and a chip in the tab bar's band on a phone. The state is a word plus a tone, so it reads correctly in monochrome, and the tones are the chips above. It is a link to the Devices screen, which is why Devices needs no sixth nav item."
+    "spacing": {
+      "title": "Spacing",
+      "meta": "4 px base grid",
+      "description": "Space is structure. 8 groups tightly, 12 pads a control, 16 pads a card body, 24 separates related blocks and 32 separates sections. Nothing is spaced by eye."
+    },
+    "radius": {
+      "title": "Corners",
+      "meta": "8 / 12 / 16 / 999 px",
+      "description": "Corners follow function. One pixel ruled borders, and elevation only for a layer that genuinely floats above the page.",
+      "controls": "Controls",
+      "cards": "Cards",
+      "sheets": "Sheets",
+      "chips": "Chips"
+    },
+    "a11y": {
+      "title": "Accessible by default",
+      "meta": "Keyboard / contrast / symbols",
+      "focusTitle": "Focus and hit areas",
+      "focusDescription": "A 2px focus ring that is never removed without a replacement. The shared minimum is 44px, which clears the 32px desktop floor as well as the phone's.",
+      "focusKeys": "Tab, Shift+Tab, Enter or Space",
+      "contrastTitle": "Meaning beyond colour",
+      "contrastDescription": "Body text clears 4.5:1 and control boundaries and large text clear 3:1, in both themes. Every semantic colour is accompanied by its word, so a state reads correctly in monochrome.",
+      "contrastSample": "The primary fill on its label: {{ratio}}:1",
+      "labels": "An error message says how to recover. Labels stay visible, because a placeholder is not a label.",
+      "symbolsTitle": "Outlined symbols",
+      "symbolsDescription": "20px inside a control, 24px in navigation. One outline family at one stroke weight, drawn in the current colour so an icon cannot introduce a colour the contrast check has not measured."
+    },
+    "controlsSection": {
+      "title": "UI controls",
+      "meta": "Reusable specimens"
+    },
+    "session": {
+      "title": "Study-session card",
+      "meta": "Context first",
+      "next": "Next session",
+      "name": "Respiration review",
+      "course": "Course · duration"
+    },
+    "alerts": {
+      "title": "Alerts",
+      "meta": "Actionable copy",
+      "warningTitle": "Your review is due tomorrow",
+      "warningReason": "Review these cards to keep the concepts fresh.",
+      "dangerTitle": "This review is overdue",
+      "dangerReason": "Restart the session. Your previous progress is saved.",
+      "successTitle": "Review complete",
+      "successReason": "Your answers are saved, and the next review is scheduled from them.",
+      "neutralTitle": "A source is needed",
+      "neutralReason": "Add a lecture note or a reading to verify this explanation."
+    },
+    "modal": {
+      "title": "Focused task",
+      "meta": "One task / one primary action",
+      "heading": "Start a study session",
+      "description": "Choose a clear goal. Your course materials prepare the review.",
+      "fieldLabel": "Study goal",
+      "fieldHint": "You can change this before the session begins.",
+      "optionSelected": "Focused session",
+      "optionSelectedMeta": "More questions, longer",
+      "optionDefault": "Quick review",
+      "optionDefaultMeta": "Fewer questions, shorter",
+      "cancel": "Cancel",
+      "start": "Start session",
+      "note": "A modal is for a short, self-contained decision. Move focus inside when it opens, hold it there until it closes, and return it to the control that opened it."
+    },
+    "patterns": {
+      "title": "Academic patterns",
+      "meta": "Course context, progress and evidence"
     }
   },
   "planner": {
     "rebalance": "Rebalance my week",
     "rebalanceReason": "Moves and splits study blocks when a week is overloaded.",
-    "subtitle": "Your goals, what they still need, and the study blocks proposed for the week.",
     "noun": "plans",
     "views": {
       "label": "Planner views",
       "plan": "Plan",
-      "tasks": "Tasks"
+      "tasks": "Tasks",
+      "calendar": "Calendar"
     },
     "goals": {
       "title": "Goals",
@@ -957,7 +1334,10 @@
       "noTopics": "No topics yet",
       "noQuizzes": "No quizzes yet",
       "weak": "Weak topics",
-      "noWeak": "No weak topic in your attempts so far."
+      "noWeak": "No weak topic in your attempts so far.",
+      "coverageNote": "Coverage is not mastery.",
+      "topicsReviewed": "{{done}} / {{total}} topics reviewed",
+      "window": "Last {{days}} days"
     },
     "workload": {
       "title": "Planned today",
@@ -966,10 +1346,18 @@
       "under": "Inside your daily study limit."
     },
     "proposal": {
-      "title": "This week's plan",
+      "title": "Study plan",
       "what": "plan",
-      "accept": "Add these blocks to my calendar",
-      "saving": "Saving the blocks you kept"
+      "accept": "Accept all",
+      "saving": "Saving the blocks you kept",
+      "acceptSelected": "Accept selected",
+      "selectBlock": "Keep {{subject}}, {{start}} to {{end}}",
+      "selectedCount_one": "{{count}} block kept",
+      "selectedCount_other": "{{count}} blocks kept",
+      "banner": "Suggested study plan for {{goal}}",
+      "context_one": "{{count}} proposed block · {{duration}} of study · Review before adding it to your calendar.",
+      "context_other": "{{count}} proposed blocks · {{duration}} of study · Review before adding them to your calendar.",
+      "noneKept": "Select at least one block before accepting, or dismiss the plan."
     },
     "suggest": "Suggest a plan",
     "suggestWithCost": "Suggest a plan ({{count}} credits)",
@@ -1003,6 +1391,36 @@
       "window": "That is outside your study hours.",
       "daily_max": "That would put the day over your daily study limit.",
       "pinned": "A block you already added stays where it is. The planner keeps it exactly."
+    },
+    "layout": {
+      "label": "Task layout",
+      "list": "List",
+      "board": "Board"
+    },
+    "work": {
+      "title": "Your work",
+      "courses_one": "{{count}} course",
+      "courses_other": "{{count}} courses",
+      "open": "open tasks",
+      "estimated": "estimated work",
+      "high": "high priority",
+      "completed": "completed"
+    },
+    "duration": {
+      "hm": "{{hours}}h {{minutes}}m",
+      "h": "{{hours}}h",
+      "m": "{{minutes}}m"
+    },
+    "nextExam": "Next exam: {{course}} · {{date}}. Your study plan is ready to review.",
+    "nextExamAction": "View study plan",
+    "readOnlyNote": "Imported classes are managed by your course timetable. A suggested block is a proposal; accepting adds only the study blocks you keep.",
+    "conflicts_one": "{{count}} block overlaps time you are already busy.",
+    "conflicts_other": "{{count}} blocks overlap time you are already busy.",
+    "calendar": {
+      "subtitle": "Make room for study around your classes and exams."
+    },
+    "tasks": {
+      "subtitle": "A clear next step for every course. Keep the work manageable."
     }
   },
   "reports": {
@@ -1033,7 +1451,14 @@
       "moveDown": "Move down",
       "remove": "Remove",
       "save": "Save outline",
-      "saving": "Saving"
+      "saving": "Saving",
+      "meta_one": "{{count}} SECTION · {{supported}} SOURCE-SUPPORTED",
+      "meta_other": "{{count}} SECTIONS · {{supported}} SOURCE-SUPPORTED",
+      "purposeLabel": "Purpose of section {{position}}",
+      "gap": "Evidence needed",
+      "gapMeta": "EXCLUDED FROM REPORT · Add a source to include",
+      "addSection": "Add section",
+      "incomplete": "Every section needs a heading and a purpose before you can save."
     },
     "sections": {
       "title": "Sections",
@@ -1062,6 +1487,51 @@
       "mdReason": "Saves the report as a Markdown file you can keep.",
       "pdf": "PDF export",
       "pdfReason": "Prints the report to a paginated PDF."
+    },
+    "breadcrumb": "Report path",
+    "eyebrow": "SOURCE-GROUNDED REPORT",
+    "eyebrowCourse": "{{course}} / SOURCE-GROUNDED REPORT",
+    "subtitle": "Arrange the ideas. Check the evidence. Then generate a draft.",
+    "reviewReminder": "AI can make mistakes. Review the draft and citations before using it in assessed work.",
+    "status": {
+      "draft": "Draft outline",
+      "ready": "Ready",
+      "generating": "Generating"
+    },
+    "sources": {
+      "title": "Sources",
+      "meta": "{{ready}} READY / {{unavailable}} UNAVAILABLE",
+      "metaReady": "{{ready}} READY",
+      "copy": "Copy the citation for {{title}}",
+      "copied": "COPIED",
+      "processing": "{{title}} is still processing and is not used in this outline.",
+      "failed": "{{title}} could not be indexed, so it is not used in this outline.",
+      "add": "Add source"
+    },
+    "settings": {
+      "title": "Draft settings",
+      "format": "Format",
+      "formatValue": "Study report",
+      "length": "Length",
+      "words_one": "About {{count}} word",
+      "words_other": "About {{count}} words",
+      "citations": "Citations",
+      "citationsValue": "Source + page",
+      "includeCitations": "Include source citations",
+      "citationsAlways": "Every section is written with its citation marks, so this stays on.",
+      "policy": "Only source-supported sections go into the draft. A section marked as a gap stays out until you add a source for it.",
+      "cost_one": "{{count}} section · {{credits}} credits",
+      "cost_other": "{{count}} sections · {{credits}} credits",
+      "generate": "Generate report",
+      "generating": "Generating",
+      "complete": "Every section has been written.",
+      "sections_one": "{{count}} section included",
+      "sections_other": "{{count}} sections included",
+      "gaps_one": "{{count}} gap",
+      "gaps_other": "{{count}} gaps"
+    },
+    "footer": {
+      "updated": "REPORT UPDATED · {{time}}"
     }
   },
   "cheatsheet": {
@@ -1093,7 +1563,14 @@
       "pending": "Re-rendering",
       "free": "Re-rendering uses the stored content: no model call, and no credits."
     },
-    "template": "Rendered with template {{version}}"
+    "template": "Rendered with template {{version}}",
+    "eyebrow": "{{scope}} · {{date}}",
+    "subtitle": "{{depth}} sheet, built from your sources.",
+    "depth": {
+      "brief": "Brief",
+      "normal": "Standard",
+      "thorough": "Thorough"
+    }
   },
   "sync": {
     "state": {
@@ -1143,25 +1620,40 @@
       "done": "Local data was deleted and resynced.",
       "failed": "The local data could not be reset.",
       "noneLocal": "This build keeps no local copy of your data, so there is nothing to reset."
+    },
+    "eyebrow": "Your workspace / Devices",
+    "intro": "Review your signed-in devices and their latest sync activity",
+    "heading": "Signed-in devices",
+    "count_one": "{{count}} active device",
+    "count_other": "{{count}} active devices",
+    "lastSyncedLabel": "Last synced",
+    "signOutDevice": "Sign out device",
+    "signOutNote": "Signing out ends that device's session. Your saved study work stays in your account.",
+    "sync": {
+      "title": "Pick up where you left off",
+      "body": "Saved notes, flashcards and study plans sync across your signed-in devices while they are online."
     }
   },
   "tasks": {
-    "subtitle": "Everything you have to do, across your workspaces, with subtasks you confirm before they save.",
     "noun": "tasks",
     "loading": "Loading your tasks",
     "done": "Done: {{title}}",
-    "due": "Due {{when}}",
     "markDone": "Mark done",
     "reopen": "Reopen",
-    "subtaskProgress": "{{done}} of {{total}} subtasks done",
     "new": {
       "title": "New task",
       "titleLabel": "What do you have to do?",
       "dueLabel": "Due date",
-      "submit": "Add task"
+      "submit": "Add task",
+      "action": "New task"
     },
     "list": {
-      "title": "Your tasks"
+      "all": "All tasks",
+      "meta_one": "{{count}} task · {{open}} open · due date order",
+      "meta_other": "{{count}} tasks · {{open}} open · due date order",
+      "showing_one": "Showing the only task",
+      "showing_other": "Showing all {{count}} tasks",
+      "footnote": "Estimates describe total task effort."
     },
     "empty": {
       "title": "No tasks yet",
@@ -1172,17 +1664,61 @@
       "action": "Break down",
       "what": "subtasks",
       "minutes": "Minutes",
-      "total": "{{count}} minutes across the subtasks you keep",
       "accept": "Add these subtasks",
       "warning": "The assistant could not use one item: {{detail}}",
       "run": "Suggest subtasks",
       "runWithCost": "Suggest subtasks ({{count}} credits)",
-      "lockedReason": "The assistant proposes subtasks with estimates, and you decide what to keep."
+      "lockedReason": "The assistant proposes subtasks with estimates, and you decide what to keep.",
+      "description": "A proposed plan for {{task}}. Review the steps and estimates before adding them. Nothing has been applied yet.",
+      "helper": "Proposed subtasks · Not added to your task yet.",
+      "totalEstimate": "{{duration}} total estimate",
+      "count_one": "{{count}} proposed subtask",
+      "count_other": "{{count}} proposed subtasks",
+      "due": "Due {{when}}",
+      "forTask": "Breaking down {{task}}"
+    },
+    "find": {
+      "label": "Find tasks",
+      "placeholder": "Search tasks by title",
+      "helper": "Searches the titles and notes already on this device.",
+      "none": "No task matches “{{query}}”.",
+      "clear": "Clear the search"
+    },
+    "sort": {
+      "due": "Sort: Due date"
+    },
+    "column": {
+      "task": "Task / Course",
+      "status": "Status",
+      "priority": "Priority",
+      "estimate": "Estimate",
+      "due": "Due",
+      "subtasks": "Subtasks"
+    },
+    "status": {
+      "todo": "To do",
+      "doing": "In progress",
+      "done": "Done"
+    },
+    "priority": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "subtasks": {
+      "none": "No subtasks yet",
+      "count": "{{done}} / {{total}} subtasks"
+    },
+    "board": {
+      "effortOpen": "{{duration}} · total estimated effort",
+      "effortDone": "{{duration}} · completed effort",
+      "empty": "Nothing here yet.",
+      "doneNote": "Finished work stays here.",
+      "doneNoteHint": "Completing a task tracks the work, not mastery. Keep reviewing concepts as they come due."
     }
   },
   "calendar": {
     "title": "Calendar",
-    "subtitle": "Your classes, exams, study blocks and deadlines, read in {{zone}}.",
     "loading": "Loading your calendar",
     "view": {
       "title": "View",
@@ -1262,7 +1798,11 @@
         "copy": "Copy link",
         "copied": "Link copied",
         "regenerate": "Regenerate",
-        "regenerateHint": "Regenerating replaces the link. Anything already subscribed to the old one stops updating until you give it the new link."
+        "regenerateHint": "Regenerating replaces the link. Anything already subscribed to the old one stops updating until you give it the new link.",
+        "format": "Read-only subscription",
+        "label": "Feed URL",
+        "helper": "Read-only. Your calendar app refreshes the feed on its own schedule.",
+        "private": "Keep this link private: anyone who has it can read your schedule."
       },
       "google": {
         "title": "Google Calendar",
@@ -1270,7 +1810,16 @@
         "connect": "Connect Google Calendar",
         "lockedReason": "Two-way sync with Google Calendar, so your classes and study blocks stay in step on every device.",
         "denied": "Google Calendar was not connected",
-        "failed": "Google Calendar could not be connected"
+        "failed": "Google Calendar could not be connected",
+        "account": "Connected account",
+        "lastSynced": "Last synced",
+        "noAccount": "No account address",
+        "importTitle": "Import class events into Planner",
+        "importHint": "Imported classes stay read-only. Edit them in Google Calendar.",
+        "studyTitle": "Send study blocks to Google Calendar",
+        "studyHint": "Only scheduled study blocks are shared. Suggested blocks aren't sent.",
+        "on": "On",
+        "off": "Off"
       },
       "ics": {
         "title": "Add an ICS URL",
@@ -1280,9 +1829,36 @@
         "queued": "Added. The first import is queued and runs in a moment.",
         "connected": "Subscribed: {{id}}"
       }
-    }
+    },
+    "legend": {
+      "imported": "Imported class · read-only",
+      "scheduled": "Scheduled study"
+    },
+    "allDay": "All day",
+    "state": {
+      "imported": "Imported",
+      "scheduled": "Study block",
+      "suggested": "Suggested"
+    },
+    "now": "Now"
   },
   "settings": {
+    "section": {
+      "account": "Account",
+      "study": "Study preferences",
+      "notifications": "Notifications",
+      "calendar": "Calendar connections",
+      "devices": "Devices & sync",
+      "appearance": "Appearance",
+      "data": "Data"
+    },
+    "sections": "Settings sections",
+    "account": {
+      "email": "Email address",
+      "plan": "Plan",
+      "forAccount": "Account: {{email}}",
+      "intro": "The address you signed in with, and the plan this account is on."
+    },
     "subtitle": "Study hours, notifications, language and your devices.",
     "noun": "settings",
     "loading": "Loading your settings",
@@ -1294,7 +1870,8 @@
       "endHour": "Study hours end",
       "maxMinutes": "Daily study limit (minutes)",
       "blockLength": "Focus block (minutes)",
-      "breakLength": "Break (minutes)"
+      "breakLength": "Break (minutes)",
+      "intro": "Your study hours, the daily limit, and how long one focus block runs."
     },
     "notifications": {
       "title": "Notifications",
@@ -1307,7 +1884,8 @@
       "quietTo": "To",
       "quietSameDay": "Quiet from {{from}}:00 to {{to}}:00.",
       "quietNextDay": "Quiet from {{from}}:00 to {{to}}:00 the next day.",
-      "quietNone": "No quiet hours set."
+      "quietNone": "No quiet hours set.",
+      "intro": "Where Stvdy can reach you, and when it stays quiet."
     },
     "channel": {
       "web": "In the app",
@@ -1318,14 +1896,16 @@
     },
     "language": {
       "title": "Language",
-      "label": "Interface and generated text"
+      "label": "Interface and generated text",
+      "intro": "The language of the interface and of everything Stvdy writes for you."
     },
     "appearance": {
       "title": "Appearance",
       "label": "Theme",
       "system": "Match my device",
       "light": "Light",
-      "dark": "Dark"
+      "dark": "Dark",
+      "intro": "How the app looks on this device."
     },
     "plan": {
       "title": "Plan and usage",
@@ -1333,13 +1913,6 @@
       "open": "Open plan and usage",
       "progressHint": "See what you have actually studied: minutes per course, review activity and quiz mastery.",
       "progress": "View your progress"
-    },
-    "devices": {
-      "title": "Devices and sync",
-      "hint": "See every device signed in to this account, and revoke one.",
-      "open": "Open devices and sync",
-      "resetHint": "Resetting deletes everything cached on this device, including changes you have not synced yet, and downloads it again.",
-      "reset": "Reset local data and resync"
     },
     "updates": {
       "title": "Updates",
@@ -1357,7 +1930,8 @@
     "later": {
       "title": "Not built yet",
       "byok": "Bring your own model key",
-      "byokPhase": "BYOK arrives in Phase 13."
+      "byokPhase": "BYOK arrives in Phase 13.",
+      "intro": "What this build does not have yet, and which phase brings it."
     },
     "data": {
       "title": "Your data",
@@ -1375,7 +1949,13 @@
       "deleteConfirm": "Delete my account permanently",
       "deleting": "Deleting…",
       "cancel": "Cancel",
-      "deleteFailed": "The deletion did not finish: {{message}}"
+      "deleteFailed": "The deletion did not finish: {{message}}",
+      "intro": "Take a copy of everything we hold, or close the account."
+    },
+    "admin": {
+      "title": "Operator tools",
+      "hint": "This account is an administrator, so the console that reads every account, order and provider cost is available to it.",
+      "open": "Open the admin console"
     }
   },
   "agent": {
@@ -1448,8 +2028,10 @@
     "noMastery": "No quiz attempts yet, so there is no mastery to show.",
     "weakTopics": "Weak topics",
     "weakTopicsHint": "The topics with the lowest accuracy so far. Pick a goal and the planner will propose review blocks for it.",
-    "shareLabel": "{{title}}: {{percent}} percent of your study time",
-    "lockedReason": "See which topics your quizzes are weakest in, and plan review for them."
+    "lockedReason": "See which topics your quizzes are weakest in, and plan review for them.",
+    "studyTime": "Study time",
+    "weakTopicsMeta_one": "{{count}} topic",
+    "weakTopicsMeta_other": "{{count}} topics"
   },
   "reminders": {
     "local": {

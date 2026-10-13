@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { asApiError, type ApiError } from '@/api/errors'
 import { quickCapture, saveTask, type QuickCaptureDraft, type TaskInput } from '@/api/queries/tasks'
 import { useUsage } from '@/api/queries/usage'
+import { WidgetHeading } from '@/components/layout/Section'
+import { Icon } from '@/components/ui/Icon'
 import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
@@ -152,7 +154,8 @@ export function QuickCapture() {
   }
 
   return (
-    <div className="card flex flex-col gap-3 p-4">
+    <div className="card flex flex-col gap-3 p-5">
+      <WidgetHeading title={t('today.capture.title')} />
       <label className="label" htmlFor="quick-capture-text">
         {t('today.capture.label')}
       </label>
@@ -170,15 +173,20 @@ export function QuickCapture() {
       <p id="quick-capture-hint" className="composer-hint">
         {t('honesty.composerHint')}
       </p>
+      {/* The action is a raised row rather than a filled button: this screen's one
+          primary action is the review, and a second indigo fill would make two
+          things look like the next step. The sparkle is the assistant mark, and
+          the cost is in the label so the price is read before the run. */}
       <button
         type="button"
-        className="btn btn-primary self-start"
+        className="raised flex min-h-11 w-full items-center gap-2 rounded-field px-4 text-label font-medium text-primary-text disabled:opacity-45"
         disabled={busy || text.trim().length === 0}
         onClick={() => void run()}
       >
-        {cost === null
-          ? t('today.capture.run')
-          : t('today.capture.runWithCost', { count: cost })}
+        <Icon name="sparkles" className="shrink-0" />
+        <span className="min-w-0 break-words">
+          {cost === null ? t('today.capture.run') : t('today.capture.runWithCost', { count: cost })}
+        </span>
       </button>
 
       {error !== null ? (

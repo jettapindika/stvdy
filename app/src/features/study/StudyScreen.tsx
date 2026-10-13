@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
-import { asApiError } from '@/api/errors'
-import { useDeck, useDueCards, useReviewCard, type Rating } from '@/api/queries/flashcards'
+import { asApiError, type ApiError } from '@/api/errors'
+import {
+  useDeck,
+  useDueCards,
+  useReviewCard,
+  useUndoReview,
+  type Rating,
+} from '@/api/queries/flashcards'
 import { useSources } from '@/api/queries/sources'
+import { useWorkspace } from '@/api/queries/workspaces'
+import { Icon } from '@/components/ui/Icon'
 import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
-import { dueCards, type StudyCard } from './due'
+import { dueCards, previewInterval, type StudyCard } from './due'
 
 /**
  * Study mode: one card at a time, four grades.
@@ -26,9 +34,13 @@ import { dueCards, type StudyCard } from './due'
  * would record a judgement they could not have made. Revealing moves focus onto
  * the card, so Tab from there lands on the four grades in order.
  *
- * The schedule is the server's. This screen computes due-ness and order only
- * (`./due`), never an interval: the one SM-2 implementation lives on the server,
- * and a second one here is how two devices start disagreeing.
+ * The schedule is the server's. The one SM-2 implementation lives on the server
+ * (`crates/core/src/sm2.rs`), and it is the only thing that writes `ease`,
+ * `interval_days` and `due_at`; a second writer here is how two devices start
+ * disagreeing. What `./due` computes is the queue — which cards are due, in what
+ * order — and a *preview* of the interval each grade would schedule, which is the
+ * number the design prints on the four buttons. The receipt under the card reports
+ * the interval the server answered with, so the student can see the two agree.
  */
 
 const KEY_RATING: Record<string, Rating> = {
@@ -37,6 +49,13 @@ const KEY_RATING: Record<string, Rating> = {
   '3': 'good',
   '4': 'easy',
 }
+
+/**
+ * How long the receipt under the card stays. The design's note calls it a
+ * five-second opportunity; here it is a report, and a report that outlives the
+ * next grade would be describing a card the student has already moved past.
+ */
+const RECEIPT_MS = 5000
 
 /**
  * A review that failed and is still unresolved.
@@ -49,15 +68,32 @@ interface FailedReview {
   id: string
 }
 
+/**
+ * What the server wrote for the card just graded, so the card's own outcome can be
+ * reported under the one that is on screen now.
+ */
+interface Receipt {
+  rating: Rating
+  position: number
+  days: number
+  /**
+   * The id the review was sent with — the row's own key — so the Undo control on
+   * the receipt can name exactly the review it withdraws rather than the card.
+   */
+  id: string
+}
+
 export function StudyScreen() {
   const { t } = useTranslation()
   const { deckId = '' } = useParams()
   const deck = useDeck(deckId)
   const due = useDueCards(deckId)
   const review = useReviewCard(deckId)
+  const undo = useUndoReview(deckId)
 
   const workspaceId = deck.data?.deck.workspace_id ?? ''
   const sources = useSources(workspaceId)
+  const workspace = useWorkspace(workspaceId)
 
   const [queue, setQueue] = useState<StudyCard[] | null>(null)
   const [seedNow, setSeedNow] = useState<Date | null>(null)
@@ -65,6 +101,8 @@ export function StudyScreen() {
   const [revealed, setRevealed] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [failed, setFailed] = useState<FailedReview | null>(null)
+  const [receipt, setReceipt] = useState<Receipt | null>(null)
+  const [undoError, setUndoError] = useState<ApiError | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const advanceFocus = useRef(false)
@@ -95,6 +133,19 @@ export function StudyScreen() {
     }
   }, [index])
 
+  // The receipt is about the card just left behind, so it is cleared on a timer
+  // rather than on the next grade: a student who stops after one card still gets to
+  // read what that grade did. The undo notice goes with it, because a refusal whose
+  // offer is no longer on screen is a sentence about a control that has left.
+  useEffect(() => {
+    if (receipt === null) return
+    const timer = window.setTimeout(() => {
+      setReceipt(null)
+      setUndoError(null)
+    }, RECEIPT_MS)
+    return () => window.clearTimeout(timer)
+  }, [receipt])
+
   const card = queue?.[index] ?? null
   const deckError = asApiError(deck.error)
   const dueError = asApiError(due.error)
@@ -113,6 +164,15 @@ export function StudyScreen() {
     { rating: 'good', label: t('study.grade.good'), key: '3' },
     { rating: 'easy', label: t('study.grade.easy'), key: '4' },
   ]
+  const gradeLabel = (rating: Rating): string =>
+    grades.find((option) => option.rating === rating)?.label ?? ''
+
+  const course = workspace.data
+  const courseLabel = course
+    ? course.course_code === null
+      ? course.name
+      : `${course.course_code} / ${course.name}`
+    : null
 
   function grade(rating: Rating) {
     if (card === null || review.isPending) return
@@ -123,11 +183,17 @@ export function StudyScreen() {
     // card twice for one showing. `failed` is cleared on success, so the next card
     // starts with a new id.
     const id = failed !== null ? failed.id : crypto.randomUUID()
+    const position = index + 1
     review.mutate(
       { cardId: card.id, input: { rating, id, reviewedAt: new Date().toISOString() } },
       {
-        onSuccess: () => {
+        onSuccess: (response) => {
           setFailed(null)
+          // The receipt is the undo toast: it already names the grade and lasts the
+          // spec's five seconds, so the id travels with it rather than on a second
+          // five-second block beside it.
+          setReceipt({ rating, position, days: response.card.interval_days, id })
+          setUndoError(null)
           advanceFocus.current = true
           setIndex((value) => value + 1)
           setRevealed(false)
@@ -145,17 +211,77 @@ export function StudyScreen() {
     cardRef.current?.focus()
   }
 
+  /**
+   * Take the last grade back, while its receipt is still on screen.
+   *
+   * The server replays the card's history and writes the schedule the remaining
+   * reviews produce, so the only local work is putting the card back: the queue is
+   * local state and the grade is the one step that advanced past it, so moving the
+   * index back to the position the receipt names is what makes the card the one on
+   * screen again. `revealed` is cleared rather than carried over — the card is being
+   * graded again, and a revealed answer would record a judgement about the showing
+   * that was just withdrawn.
+   *
+   * A refusal is shown as it came: the window's 409 ("too late") and the 404 for a
+   * review that is already gone are different facts, and the notice says which. The
+   * receipt's window restarts with the notice on it, so a refusal has as long to be
+   * read as the offer did — a message that appears under a toast about to expire is
+   * a message the student never gets.
+   */
+  function undoGrade() {
+    if (receipt === null || undo.isPending) return
+    const withdrawn = receipt
+    undo.mutate(withdrawn.id, {
+      onSuccess: () => {
+        setReceipt(null)
+        setUndoError(null)
+        setIndex(withdrawn.position - 1)
+        setRevealed(false)
+        setSourceOpen(false)
+        advanceFocus.current = true
+      },
+      onError: (error) => {
+        setUndoError(asApiError(error))
+        // A fresh object, so the timer effect re-runs: setting the same reference
+        // back would be a no-op to React and would leave the original deadline.
+        setReceipt({ ...withdrawn })
+      },
+    })
+  }
+
   // The keyboard is a first-class way in, not a shortcut bolted on: Space reveals
-  // and 1–4 grade, and the same actions are the buttons a pointer or a screen
-  // reader uses.
+  // and 1–4 grade, Z undoes, and the same actions are the buttons a pointer or a
+  // screen reader uses.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      // The listener is on `window`, so it sees the keys typed into a field as well
+      // as the ones aimed at the card. The screen has no field of its own yet, but
+      // `E` (edit) is a spec hotkey and will add one, and a global handler that eats
+      // a letter mid-word is the defect that only shows up once it does.
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      ) {
+        return
+      }
       if (event.key === ' ') {
         if (!revealed && card !== null) {
           event.preventDefault()
           reveal()
         }
+        return
+      }
+      // Z is offered only while the receipt is up — the five seconds the spec calls
+      // the undo opportunity — so an expired one cannot withdraw a review the server
+      // would refuse anyway.
+      if ((event.key === 'z' || event.key === 'Z') && receipt !== null && !undo.isPending) {
+        event.preventDefault()
+        undoGrade()
         return
       }
       const rating = KEY_RATING[event.key]
@@ -190,27 +316,76 @@ export function StudyScreen() {
     if (revealed) grade(dx < 0 ? 'again' : 'good')
   }
 
+  const reviewed = index
+  const total = queue?.length ?? 0
+  const progress = total > 0 ? Math.min(100, Math.round((reviewed / total) * 100)) : 0
+  // The passage is only ever in the second column when the student asked for it: the
+  // frames draw the card alone on the page, and a column reserved for a panel nobody
+  // opened is width taken from the card. So both the column count and the page's own
+  // width follow this one flag.
+  const panelOpen = revealed && sourceOpen && card !== null && card.chunk_id !== null
+
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-col gap-4 px-4 py-6">
-      <header className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
-        <h1 className="min-w-0 break-words text-base font-semibold sm:flex-1">
-          {deck.data?.deck.title ?? t('nav.study')}
-        </h1>
+    // `w-full` is load-bearing on this screen as it is on `WorkspaceListScreen`: the
+    // root's width is otherwise its fit-content, which cannot go below its content's
+    // min-content, and a card whose text is long would push the page sideways instead
+    // of wrapping inside it.
+    <div
+      className={`mx-auto flex w-full flex-col gap-6 px-5 py-6 ${
+        panelOpen ? 'max-w-5xl' : 'max-w-3xl'
+      }`}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3">
         {workspaceId.length > 0 && (
           // `min-h-11 inline-flex items-center` — the shape every other text link in the
           // app uses (`TodayScreen`, `SettingsScreen`, `States.tsx`), and the one gate 5
           // requires: a bare `link` is text-height, and this one measured **151.3x21** in
           // Chromium at 390px, the same defect Phase 7's gate found on the upgrade link
-          // (93x19). `text-sm` is kept because it is the header's own scale; the utilities
-          // are what make the box 44px rather than the line box of an inline element.
+          // (93x19). `text-label` is kept because it is the header's own scale; the
+          // utilities are what make the box 44px rather than the line box of an inline
+          // element.
           <Link
             to={`/workspaces/${workspaceId}`}
-            className="link inline-flex min-h-11 items-center self-start text-sm sm:self-auto"
+            className="link inline-flex min-h-11 items-center gap-2 text-label"
           >
+            <Icon name="arrow-left" />
             {t('study.backToWorkspace')}
           </Link>
         )}
+        {/* Ending the session is leaving the deck, not a second "back": the hub is
+            where a session is chosen, so it is where the student lands when they are
+            done with this one. Every review is already recorded when this is pressed. */}
+        <Link to="/study" className="btn btn-secondary ml-auto">
+          {t('study.endSession')}
+        </Link>
       </header>
+
+      <div className="flex flex-col gap-2">
+        {courseLabel !== null && <p className="eyebrow eyebrow-primary">{courseLabel}</p>}
+        <h1 className="min-w-0 break-words text-h2">
+          {deck.data?.deck.title ?? t('nav.study')}
+        </h1>
+        {card !== null && (
+          <>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <p className="meta" role="status">
+                {t('study.cardProgress', { current: index + 1, total })}
+              </p>
+              <p className="meta">
+                {t('study.sessionProgress', { reviewed, remaining: total - reviewed })}
+              </p>
+            </div>
+            {/* The bar repeats the position above it; the sentence is the fact, so a
+                screen reader user gets the counts rather than a percentage. */}
+            <div
+              aria-hidden="true"
+              className="h-1.5 w-full overflow-hidden rounded-pill bg-surface-raised"
+            >
+              <div className="h-full bg-primary" style={{ width: `${progress}%` }} />
+            </div>
+          </>
+        )}
+      </div>
 
       {/* A deck that never loaded blocks the session. Once the queue is seeded,
           though, the deck query refetches in the background after every review
@@ -252,11 +427,28 @@ export function StudyScreen() {
       )}
 
       {queue !== null && card !== null && (
-        <>
-          <p className="meta" role="status">
-            {t('study.cardProgress', { current: index + 1, total: queue.length })}
-          </p>
-
+        // **The grid is the "collapsible side panel", and it is collapsed by
+        // default.** `SPEC.md:678` asks for a desktop layout of a centred card with a
+        // collapsible panel beside it; the frames draw the centred card and nothing
+        // else, because a card with no citation has no panel to show. So the template
+        // is two columns only while the panel is open, and the passage the student
+        // asked for moves into the second column on a desktop rather than growing the
+        // card. The explicit `col-start`/`row-start` placements are what keep the
+        // phone in the design's order — card, then the passage, then the grades at the
+        // foot — while a desktop reads card | passage down the right and the grades
+        // under the card.
+        <div
+          className={`grid min-w-0 gap-6 lg:items-start ${
+            panelOpen ? 'lg:grid-cols-[minmax(0,1fr)_20rem]' : ''
+          }`}
+        >
+          {/* The card auto-sizes and scrolls *inside* itself: at 200% text a long
+              answer is taller than any phone, and a card that clipped it would hide
+              the thing the student revealed. `max-h` is what makes the internal
+              scroll engage before the page does, which is also what keeps the grade
+              row at the foot of the screen without a fixed band over the content —
+              the Phase 8 gate's finding was that a band painted over the content has
+              to reserve a height that is not a number. */}
           <div
             ref={cardRef}
             tabIndex={-1}
@@ -264,18 +456,24 @@ export function StudyScreen() {
             aria-label={t('study.cardLabel')}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className="panel touch-pan-y flex flex-col gap-4 px-4 py-5 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+            className="card flex max-h-[70dvh] min-w-0 touch-pan-y flex-col gap-4 overflow-y-auto p-5 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring lg:col-start-1 lg:row-start-1"
           >
-            <p className="whitespace-pre-wrap break-words text-base">{card.front}</p>
+            <p className="eyebrow">
+              {revealed ? t('study.answerLabel') : t('study.questionLabel')}
+            </p>
 
-            {revealed && (
-              <div className="flex flex-col gap-4 border-t border-border pt-4">
-                <p className="whitespace-pre-wrap break-words text-base text-muted">
-                  {card.back}
+            {revealed ? (
+              <div className="flex min-w-0 flex-col gap-4">
+                {/* Once the answer is on screen the question becomes the context for
+                    it, which is the design's own hierarchy: the thing being read is
+                    the answer. */}
+                <p className="min-w-0 break-words whitespace-pre-wrap text-label text-muted">
+                  {card.front}
                 </p>
+                <div className="flex min-w-0 flex-col gap-4 border-t border-border pt-4">
+                  <p className="min-w-0 break-words whitespace-pre-wrap text-h4">{card.back}</p>
 
-                {card.chunk_id !== null && (
-                  <div className="flex flex-col gap-2">
+                  {card.chunk_id !== null && (
                     <button
                       type="button"
                       className="btn btn-quiet self-start"
@@ -286,64 +484,171 @@ export function StudyScreen() {
                     >
                       {sourceOpen ? t('study.hideSource') : t('study.showSource')}
                     </button>
-                    {sourceOpen && (
-                      <SourcePassage
-                        chunkId={card.chunk_id}
-                        sources={sources.data ?? []}
-                      />
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex min-w-0 flex-col gap-3">
+                {/* The design's largest text on the screen: 24/32 on a phone and
+                    32/43 on a desktop. It is not a heading — the deck's title above
+                    is the page's `h1` — it is the one thing the student is reading,
+                    which is why it takes the scale rather than a heading level. */}
+                <p className="min-w-0 break-words whitespace-pre-wrap font-heading text-h2 font-semibold sm:text-h1">
+                  {card.front}
+                </p>
+                <p className="text-label text-muted">{t('study.recallHint')}</p>
               </div>
             )}
           </div>
 
-          {!revealed && (
-            <button type="button" className="btn btn-primary self-start" onClick={reveal}>
-              {t('study.showAnswer')}
-            </button>
+          {panelOpen && card.chunk_id !== null && (
+            <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+              <SourcePassage chunkId={card.chunk_id} sources={sources.data ?? []} />
+            </aside>
           )}
 
-          {revealed && (
-            <div className="flex flex-wrap gap-2">
-              {grades.map((option) => (
+          <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">
+            {!revealed && (
+              <div className="flex flex-col items-center gap-3">
                 <button
-                  key={option.rating}
                   type="button"
-                  className="btn btn-secondary"
-                  aria-keyshortcuts={option.key}
-                  disabled={review.isPending}
-                  onClick={() => {
-                    grade(option.rating)
-                  }}
+                  className="btn btn-primary w-full sm:max-w-[17.5rem]"
+                  onClick={reveal}
                 >
-                  {option.label}
-                  <span className="meta" aria-hidden="true">
-                    {option.key}
-                  </span>
+                  {t('study.showAnswer')}
                 </button>
-              ))}
-            </div>
-          )}
+                <p className="meta hidden text-center sm:block">{t('study.revealHint')}</p>
+              </div>
+            )}
 
-          {reviewError !== null && (
-            <ApiErrorNotice
-              error={reviewError}
-              noun={t('errors.nouns.review')}
-              action={
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    if (failed !== null) grade(failed.rating)
-                  }}
-                >
-                  {t('actions.retry')}
-                </button>
-              }
-            />
-          )}
-        </>
+            {revealed && (
+              <div className="flex flex-col gap-3">
+                <p className="text-label text-muted">{t('study.rateRecall')}</p>
+                {/* Two columns on a phone and four across on a desktop, which is what
+                    the design draws in each. Each grade keeps its tone *and* its word:
+                    `Again` is danger, `Hard` warning, `Good` the one primary action,
+                    `Easy` success, and the tone is never the only signal — the label
+                    says which grade it is. */}
+                {/* `auto-fit` with a **rem** floor rather than `sm:grid-cols-4`. Four
+                    fixed columns leave each grade 64px at a 32px root, and "Again"
+                    renders at 28px — 71px — so the label was clipped. A rem floor grows
+                    with the root: four grades fit at 100% (the design's row) and one
+                    fits at 200% in the study screen's narrow side-panel column, which is
+                    the reflow a fixed count cannot express. **The floor is bounded by
+                    that column** (165px at a 32px root), because a floor larger than the
+                    container makes the single remaining track wider than the grid —
+                    which is what a 6rem floor did here. */}
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(5rem,1fr))] sm:gap-3">
+                  {grades.map((option) => (
+                    <button
+                      key={option.rating}
+                      type="button"
+                      className={`${gradeClass(option.rating)} flex-wrap text-center`}
+                      aria-keyshortcuts={option.key}
+                      disabled={review.isPending}
+                      onClick={() => {
+                        grade(option.rating)
+                      }}
+                    >
+                      {option.label}
+                      {/* The interval this grade would schedule, from `./due`: the
+                          preview the design draws on the button, and the one number
+                          that tells the four grades apart. */}
+                      <span className="meta">
+                        {t('study.interval.days', {
+                          days: previewInterval(card, option.rating),
+                        })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {/* The key hint is desktop-only, which is what the design draws: the
+                    mobile frame's grade row is four buttons and nothing else, because
+                    a phone has no number row to press. The hint is not a control, so
+                    it is a sentence rather than a row of keycaps. */}
+                <p className="meta hidden sm:block">
+                  {t('study.keyHints', {
+                    again: gradeLabel('again'),
+                    hard: gradeLabel('hard'),
+                    good: gradeLabel('good'),
+                    easy: gradeLabel('easy'),
+                  })}
+                </p>
+                <p className="meta">{t('study.rateHint')}</p>
+              </div>
+            )}
+
+            {reviewError !== null && (
+              <ApiErrorNotice
+                error={reviewError}
+                noun={t('errors.nouns.review')}
+                action={
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      if (failed !== null) grade(failed.rating)
+                    }}
+                  >
+                    {t('actions.retry')}
+                  </button>
+                }
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* What the grade did, from the server's own answer — the interval here is the
+          schedule, where the number on the button was a preview of it. It is outside
+          the card block on purpose: grading the last card of a session is exactly when
+          the receipt matters, and inside the block it would unmount with the card.
+
+          It is also the undo toast (`SPEC.md:87`). The receipt already names the grade
+          and lives for the five seconds the spec calls the opportunity, so Undo belongs
+          on it rather than on a second five-second block: one element that says what
+          happened and offers to take it back. The row wraps, so the button drops to its
+          own line at a phone width in Indonesian rather than pushing the page sideways. */}
+      {receipt !== null && (
+        <div className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-4">
+          {/* The live region is the text, not the card: `role="status"` around a control
+              announces the button as part of the message (see `States.tsx`). */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1" role="status">
+            <p className="text-label">
+              {t('study.receipt.rated', { grade: gradeLabel(receipt.rating) })}
+            </p>
+            <p className="meta">
+              {t('study.receipt.next', {
+                position: receipt.position,
+                days: t('study.interval.days', { days: receipt.days }),
+              })}
+            </p>
+          </div>
+          {/* A real button, not a text-height link: undo is an action, and `.btn` carries
+              the 44px phone floor the header link needed the same utilities for. */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={undoGrade}
+            disabled={undo.isPending}
+          >
+            {t('actions.undo')}
+          </button>
+        </div>
+      )}
+
+      {/* The server's refusal, in its own words. The window's 409 and the 404 for a
+          review that is already gone are different facts, and a generic "undo failed"
+          would say neither — the 409 means the grade stands, which is the one the
+          student needs to read. The receipt stays until its timer runs out, so a
+          refusal that was only the network can be tried again. */}
+      {undoError !== null && (
+        <ApiErrorNotice
+          error={undoError}
+          noun={t('errors.nouns.review')}
+          title={undoError.code === 'conflict' ? t('study.undo.tooLate.title') : undefined}
+          reason={undoError.code === 'conflict' ? t('study.undo.tooLate.reason') : undefined}
+        />
       )}
 
       {finished && (
@@ -374,6 +679,21 @@ export function StudyScreen() {
       )}
     </div>
   )
+}
+
+/**
+ * The tone of a grade's button.
+ *
+ * `Good` is the one primary action of the four — the grade most sessions should
+ * reach for — and the other three keep the secondary surface with the token that
+ * names their meaning on the edge and the label. A fill for each tone would make
+ * four primary actions compete; the word on the button is what identifies it.
+ */
+function gradeClass(rating: Rating): string {
+  if (rating === 'good') return 'btn btn-primary'
+  if (rating === 'again') return 'btn btn-secondary border-danger text-danger'
+  if (rating === 'hard') return 'btn btn-secondary border-warning text-warning'
+  return 'btn btn-secondary border-success text-success'
 }
 
 /**

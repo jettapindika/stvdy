@@ -1,18 +1,29 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
+import { PageFooter } from '@/components/layout/Section'
 import { Wordmark } from '@/components/ui/BrandIllustration'
 
 /**
  * The chrome the auth screens share.
  *
- * The design puts the auth page on the tinted ground with a white card floating
- * on it, so that is what this is: one card, centred, with the wordmark at the top
- * as on the design's auth frame. The card is the page's only elevation, and this
- * is the one surface where the entry illustration's place is the wordmark rather
- * than the book, which belongs to the empty first-run state.
+ * The design's auth frame is a centred card on the page ground, with the wordmark
+ * in a page header above it and a metadata line at the foot. The card is the
+ * page's only surface: the ground is `--bg`, the card is `--surface` with a 1px
+ * border, and there is no shadow, because elevation is reserved for a layer that
+ * genuinely floats above the page.
+ *
+ * The heading is `text-h2` up to the `sm` breakpoint and `text-h1` from there,
+ * which is the frame's own measurement: 24/32 on a phone, 32/42 on a desktop. A
+ * 32px heading is not wrong on a phone, but the frame reduces it, and the design's
+ * values are the requirement.
  *
  * Fields come from `components/ui/Field`, so a form here is wired exactly like a
  * form anywhere else in the app.
+ *
+ * The frame's "Need help?" and "Privacy" links are deliberately not rendered:
+ * neither has a route in this app, and a link with nowhere to go is a control
+ * that lies about being one (R-26).
  */
 
 export function AuthCard({
@@ -26,15 +37,36 @@ export function AuthCard({
   children: ReactNode
   footer?: ReactNode
 }) {
+  const { t } = useTranslation()
+
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-bg px-5 py-10 pt-safe-top pb-safe-bottom">
-      <div className="card w-full max-w-md px-6 py-7">
-        <Wordmark className="mb-6" />
-        <h1>{title}</h1>
-        <p className="mt-1 text-sm text-muted">{subtitle}</p>
-        <div className="mt-6">{children}</div>
-      </div>
-      {footer && <div className="flex flex-wrap items-center justify-center gap-2">{footer}</div>}
+    <div className="flex min-h-[100dvh] flex-col bg-bg px-6 pt-safe-top pb-safe-bottom">
+      <header className="flex min-h-16 items-center sm:min-h-24">
+        <Wordmark />
+      </header>
+
+      <main className="flex flex-1 flex-col justify-center py-8">
+        <div className="card mx-auto flex w-full max-w-[27.5rem] flex-col gap-5 p-6 sm:gap-6 sm:p-8">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-h2 sm:text-h1">{title}</h1>
+            <p className="text-body text-muted">{subtitle}</p>
+          </div>
+
+          {children}
+
+          {/* The alternate account action sits inside the card, below the rule,
+              which is where the frame puts it: it is a second way into the same
+              product, not page chrome. */}
+          {footer !== undefined && (
+            <>
+              <div className="border-t border-border" />
+              <div className="flex flex-wrap items-center justify-center gap-2">{footer}</div>
+            </>
+          )}
+        </div>
+      </main>
+
+      <PageFooter left={t('auth.metadata')} />
     </div>
   )
 }

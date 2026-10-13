@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 
 import { asApiError, validationMessage } from '@/api/errors'
 import {
@@ -19,11 +19,13 @@ import {
 } from '@/api/queries/sources'
 import { useWorkspace } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
 import { QuizPanel } from '@/features/studio/QuizPanel'
 import { ReportPanel } from '@/features/studio/ReportPanel'
+import { formatInZone } from '@/lib/time'
 
 /**
  * The workspace view: Sources, Chat, and Studio.
@@ -49,9 +51,31 @@ import { ReportPanel } from '@/features/studio/ReportPanel'
  * panel Phase 2 built. Studio is the generated material: flashcards (Phase 4),
  * quizzes (Phase 5), and the report and cheatsheet this workspace's sources
  * become (Phase 6).
+ *
+ * **The heading carries the course context the design draws**: a breadcrumb back to
+ * the list, the name, and a mono line of the facts the API holds — the course code,
+ * the source count and the exam date, each present only when it exists. There is no
+ * "12 flashcards due · Supervised learning" line: a per-workspace due count is not
+ * in the API (the only due figure is the account-wide one the dashboard returns),
+ * and the last-opened source is not a fact any row carries.
  */
 
 type Panel = 'sources' | 'chat' | 'studio'
+
+/**
+ * The desktop grid's columns, left to right: the source rail, the chat, the
+ * reference panel. The design draws exactly that order, and the widths below are
+ * its proportions.
+ */
+const PANEL_ORDER: Panel[] = ['sources', 'chat', 'studio']
+
+/**
+ * The phone strip's order, which is the design's and is **not** the grid's: the
+ * segmented control reads `Chat | Sources | Studio` in every mobile frame, with the
+ * active panel filled, whichever panel is open. One array for both would put the
+ * chat in the left-hand column of a 1440px window.
+ */
+const STRIP_ORDER: Panel[] = ['chat', 'sources', 'studio']
 
 type StudioSection = 'flashcards' | 'quiz' | 'report'
 
@@ -60,6 +84,16 @@ const STATUS_CHIP: Record<SourceStatusName, string> = {
   processing: 'chip chip-working',
   ready: 'chip chip-ready',
   failed: 'chip chip-failed',
+}
+
+/** The icon a source row leads with, per kind. Same vocabulary as the kind's word. */
+const KIND_ICON: Record<SourceKind, IconName> = {
+  pdf: 'file-text',
+  docx: 'file-text',
+  pptx: 'presentation',
+  url: 'link',
+  web: 'globe',
+  text: 'file-text',
 }
 
 export function WorkspaceScreen() {
@@ -71,13 +105,34 @@ export function WorkspaceScreen() {
 
   // The strip's labels are copy, so they are resolved per render rather than
   // kept in a module-scope table that would have no language to read from.
-  const panels: { id: Panel; label: string }[] = [
-    { id: 'sources', label: t('workspaces.panel.sources') },
-    { id: 'chat', label: t('workspaces.panel.chat') },
-    { id: 'studio', label: t('workspaces.panel.studio') },
-  ]
+  const labels: Record<Panel, string> = {
+    sources: t('workspaces.panel.sources'),
+    chat: t('workspaces.panel.chat'),
+    studio: t('workspaces.panel.studio'),
+  }
+  const panels = STRIP_ORDER.map((id) => ({ id, label: labels[id] }))
 
   const workspaceError = asApiError(workspace.error)
+  const detail = workspace.data
+
+  // The facts line, assembled from what the server actually sent. An account-wide
+  // due count is deliberately not repeated here: this line is about *this*
+  // workspace, and a figure from every workspace would read as this one's.
+  const facts = [
+    detail?.course_code ?? null,
+    detail === undefined
+      ? null
+      : t('workspaces.detail.sourceCount', { count: detail.source_count }),
+    typeof detail?.exam_date !== 'string' || detail.exam_date.length === 0
+      ? null
+      : t('workspaces.detail.exam', {
+          date: formatInZone(new Date(`${detail.exam_date}T00:00:00Z`), 'UTC', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          }),
+        }),
+  ].filter((part): part is string => part !== null)
 
   // Arrow keys move between tabs and move focus with them, which is what the
   // tablist pattern expects. Without this, Tab walks all three and the arrows do
@@ -100,14 +155,21 @@ export function WorkspaceScreen() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 px-5 py-3">
-        <h1 className="break-words text-base font-semibold">
-          {workspace.data?.name ?? t('workspaces.detail.titleFallback')}
+      <header className="flex flex-col gap-2 border-b border-border bg-surface px-5 py-4">
+        {/* A link that is a control needs its own target: `inline-flex min-h-11
+            items-center` (see the `.link` rule in styles.css). */}
+        <Link to="/workspaces" className="link inline-flex min-h-11 items-center gap-2 self-start">
+          <Icon name="arrow-left" size={20} />
+          {t('nav.workspaces')}
+        </Link>
+        <h1 className="min-w-0 wrap-anywhere">
+          {detail?.name ?? t('workspaces.detail.titleFallback')}
         </h1>
+        {facts.length > 0 && <p className="meta uppercase wrap-anywhere">{facts.join(' · ')}</p>}
       </header>
 
       {workspaceError !== null && (
-        <div className="px-5 pb-3">
+        <div className="px-5 py-3">
           <ApiErrorNotice error={workspaceError} noun={t('workspaces.noun')} />
         </div>
       )}
@@ -128,7 +190,7 @@ export function WorkspaceScreen() {
             role="tablist"
             aria-label={t('workspaces.panels.label')}
             onKeyDown={onKeyDown}
-            className="mx-3 mb-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 lg:hidden"
+            className="mx-3 my-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 lg:hidden"
           >
             {panels.map((panel) => {
               const selected = active === panel.id
@@ -157,18 +219,24 @@ export function WorkspaceScreen() {
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(200px,1fr)_minmax(320px,2fr)_minmax(220px,1fr)]">
-            {panels.map((panel) => (
+            {PANEL_ORDER.map((id) => (
               <section
-                key={panel.id}
-                id={`panel-${panel.id}`}
+                key={id}
+                id={`panel-${id}`}
                 role="tabpanel"
-                aria-labelledby={`tab-${panel.id}`}
+                aria-labelledby={`tab-${id}`}
                 className={`min-h-0 flex-col border-border lg:flex lg:border-r lg:last:border-r-0 ${
-                  active === panel.id ? 'flex' : 'hidden'
+                  active === id ? 'flex' : 'hidden'
                 }`}
               >
                 <div className="border-b border-border px-4 py-2">
-                  <span className="label">{panel.label}</span>
+                  {/* Not a heading: the design draws a 20/26 panel title, and the
+                      frozen scale maps that size to `h3` — but this screen's only
+                      `h1` is the workspace's name and there is no `h2` above these,
+                      so an `h3` here would skip a level and fail the accessibility
+                      gate. The panel is named by its tab on a phone and by its
+                      column on a desktop, and the label carries the same word. */}
+                  <span className="label">{labels[id]}</span>
                 </div>
                 {/* `wrap-anywhere` (`overflow-wrap: anywhere`) on the container
                     rather than on each text box: it inherits, and it is the
@@ -188,9 +256,9 @@ export function WorkspaceScreen() {
                     a word may break mid-glyph at 200% text. At 100% nothing
                     overflows, so nothing breaks. */}
                 <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
-                  {panel.id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
-                  {panel.id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
-                  {panel.id === 'studio' && <StudioPanel workspaceId={workspaceId} />}
+                  {id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
+                  {id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
+                  {id === 'studio' && <StudioPanel workspaceId={workspaceId} />}
                 </div>
               </section>
             ))}
@@ -297,9 +365,7 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
   const listError = asApiError(sources.error)
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-4">
-      <UploadForm workspaceId={workspaceId} />
-
+    <div className="flex flex-col gap-4 px-4 py-4">
       {sources.isPending && (
         <SkeletonRows rows={2} label={t('workspaces.sources.loading')} />
       )}
@@ -327,12 +393,14 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {sources.data !== undefined && sources.data.length > 0 && (
-        <ul className="flex flex-col divide-y divide-border border-y border-border">
+        <ul className="flex flex-col gap-3">
           {sources.data.map((source) => (
             <SourceRow key={source.id} workspaceId={workspaceId} source={source} />
           ))}
         </ul>
       )}
+
+      <UploadForm workspaceId={workspaceId} />
     </div>
   )
 }
@@ -390,13 +458,20 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
   const errorText = live.data?.error ?? source.error
   const chunkCount = live.data?.chunk_count ?? null
   const removeError = asApiError(remove.error)
+  // A source can only be read in the viewer once it is indexed: before that there
+  // is no chunk for a page to point at, and the design's `Open PDF · page 12`
+  // names a page that only exists after ingestion.
+  const openable = status === 'ready' && source.url !== null
 
   return (
-    <li className="flex flex-col gap-2 py-3">
+    <li className="panel flex flex-col gap-3 p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="chip chip-source shrink-0" aria-hidden="true">
+          <Icon name={KIND_ICON[source.kind]} size={20} />
+        </span>
         {/* `w-full … @md:w-auto @md:flex-1`: the same row shape and the same
-            measurement as `DeckRow`'s title in `FlashcardsPanel` — the three siblings
-            are fixed-width, `flex-1` leaves this span the remainder, and with the
+            measurement as `DeckRow`'s title in `FlashcardsPanel` — the siblings are
+            fixed-width, `flex-1` leaves this span the remainder, and with the
             panel container's `overflow-wrap: anywhere` its min-content is one
             character, so the row squeezed it to 18px and 1452px tall. The panel's
             width is a container fact, not a window one, so the test is `@container`'s
@@ -404,7 +479,10 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
         <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
           {source.title.length > 0 ? source.title : t('workspaces.source.untitled')}
         </span>
-        <span className="meta">{sourceKindLabel(source.kind, t)}</span>
+        <span className="meta wrap-anywhere">{sourceKindLabel(source.kind, t)}</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
         {/* The word carries the state; the chip's tone repeats it. Colour is
             never the only signal, and "Ready" is readable in monochrome. */}
         <span className={STATUS_CHIP[status]} role="status">
@@ -413,10 +491,22 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
           )}
           {statusLabel[status]}
         </span>
-        {status === 'ready' && chunkCount !== null && (
+        {/* A count of what ingestion produced, beside the state that produced it.
+            Absent until the server reports it, never zero-filled. */}
+        {chunkCount !== null && (
           <span className="meta">
             {t('workspaces.source.chunkCount', { count: chunkCount })}
           </span>
+        )}
+        {openable && (
+          <a
+            href={source.url ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-secondary"
+          >
+            {t('workspaces.source.open')}
+          </a>
         )}
         {!confirming && (
           <button
@@ -432,14 +522,12 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
       </div>
 
       {errorText !== null && errorText.length > 0 && (
-        <p className="note note-danger text-sm">
-          {errorText}
-        </p>
+        <p className="note note-danger text-small">{errorText}</p>
       )}
 
       {confirming && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted">{t('workspaces.source.removeConfirm')}</span>
+          <span className="text-small text-muted">{t('workspaces.source.removeConfirm')}</span>
           <button
             type="button"
             className="btn btn-secondary"
@@ -518,7 +606,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
 
   return (
     <form
-      className="panel flex flex-col gap-3 px-3 py-3"
+      className="panel flex flex-col gap-3 p-3"
       onSubmit={(event) => {
         event.preventDefault()
         if (!ready) return
@@ -543,6 +631,8 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
         )
       }}
     >
+      <p className="eyebrow">{t('workspaces.upload.legend')}</p>
+
       {showNotice && uploadError !== null && (
         <ApiErrorNotice error={uploadError} noun={t('workspaces.upload.noun')} />
       )}
@@ -553,7 +643,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
           {UPLOAD_KINDS.map((option) => (
             <label
               key={option}
-              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-border px-3 py-2 text-small has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
             >
               <input
                 type="radio"
@@ -587,7 +677,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
             }}
           />
           {validation?.field === 'text' && (
-            <span id={textErrorId} className="text-sm text-danger">
+            <span id={textErrorId} className="text-small text-danger">
               {validation.message}
             </span>
           )}
@@ -612,7 +702,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
             }}
           />
           {(urlMalformed || validation?.field === 'url') && (
-            <span id={urlErrorId} className="text-sm text-danger">
+            <span id={urlErrorId} className="text-small text-danger">
               {urlMalformed ? t('workspaces.upload.urlInvalid') : validation?.message}
             </span>
           )}
@@ -636,7 +726,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
             }}
           />
           {validation?.field === 'file' && (
-            <span id={fileErrorId} className="text-sm text-danger">
+            <span id={fileErrorId} className="text-small text-danger">
               {validation.message}
             </span>
           )}
@@ -657,10 +747,10 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
       <button type="submit" className="btn btn-primary self-start" disabled={!ready || upload.isPending}>
         {upload.isPending ? t('workspaces.upload.uploading') : t('workspaces.upload.submit')}
       </button>
-      {/* Upload progress is the ingestion status below, not a fake percentage:
+      {/* Upload progress is the ingestion status above, not a fake percentage:
           `fetch` cannot report bytes sent, and a bar that is not measuring
           anything is worse than a word that is true. */}
-      <p className="text-xs text-muted">{t('workspaces.upload.afterStored')}</p>
+      <p className="text-caption text-muted">{t('workspaces.upload.afterStored')}</p>
     </form>
   )
 }

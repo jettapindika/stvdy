@@ -165,7 +165,16 @@ impl Entity {
     /// list starts at the setting fields.
     pub fn payload_columns(self) -> &'static [&'static str] {
         match self {
-            Entity::Workspace => &["id", "name", "created_at", "updated_at", "deleted_at"],
+            Entity::Workspace => &[
+                "id",
+                "name",
+                "course_code",
+                "color",
+                "exam_date",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+            ],
             Entity::Source => &[
                 "id",
                 "workspace_id",

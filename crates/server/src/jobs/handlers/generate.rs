@@ -257,8 +257,8 @@ async fn insert_cards(
 
     for card in &generation.cards {
         sqlx::query(
-            "insert into flashcards (user_id, deck_id, front, back, chunk_id, due_at)
-             values ($1, $2, $3, $4, $5, $6)",
+            "insert into flashcards (user_id, deck_id, front, back, chunk_id, due_at, created_at)
+             values ($1, $2, $3, $4, $5, $6, $6)",
         )
         .bind(deck.user_id)
         .bind(deck.id)
@@ -267,6 +267,14 @@ async fn insert_cards(
         .bind(card.chunk_id)
         // The injected clock, not the database's `now()`: a fresh card must be due
         // at the instant the application thinks it is, and a test can pin it.
+        //
+        // **`created_at` is bound to the same instant, and that is load-bearing.**
+        // `replay(created_at, &reviews)` derives the state of a card with *no*
+        // reviews from `created_at`, so a card whose `created_at` came from the
+        // database clock while its `due_at` came from the injected one has two
+        // different "start" instants — and replaying an emptied history would move
+        // its due date. That is reachable: undoing a card's only review replays an
+        // empty list, and it must land on exactly the state the card was created in.
         .bind(now)
         .execute(&mut *tx)
         .await

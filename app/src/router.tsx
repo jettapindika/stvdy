@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
-import { createBrowserRouter, useParams } from 'react-router'
+import { createBrowserRouter, Navigate, useParams } from 'react-router'
 
 import { App } from './App'
+import { AdminScreen } from './features/admin/AdminScreen'
 import { NotBuiltYet } from './components/ui/States'
 import { DeepLinkHandler } from './features/auth/DeepLinkHandler'
 import { NotificationRouter } from './features/notifications/NotificationRouter'
@@ -13,16 +14,15 @@ import { MobilePlanScreen } from './features/billing/MobilePlanScreen'
 import { CheckoutScreen } from './features/billing/CheckoutScreen'
 import { PlanUsageScreen } from './features/billing/PlanUsageScreen'
 import { PricingScreen } from './features/billing/PricingScreen'
-import { CalendarScreen } from './features/calendar/CalendarScreen'
 import { DevicesScreen } from './features/devices/DevicesScreen'
 import { DashboardScreen } from './features/dashboard/DashboardScreen'
 import { StyleguideScreen } from './features/styleguide/StyleguideScreen'
 import { SettingsScreen } from './features/settings/SettingsScreen'
-import { TasksScreen } from './features/tasks/TasksScreen'
 import { CheatsheetScreen } from './features/reports/CheatsheetScreen'
 import { ReportScreen } from './features/reports/ReportScreen'
 import { QuizScreen } from './features/quiz/QuizScreen'
 import { PlannerScreen } from './features/planner/PlannerScreen'
+import { StudyHubScreen } from './features/study/StudyHubScreen'
 import { StudyScreen } from './features/study/StudyScreen'
 import { SyllabusReviewScreen } from './features/syllabus/SyllabusReviewScreen'
 import { SyllabusScreen } from './features/syllabus/SyllabusPanel'
@@ -187,8 +187,20 @@ export const router = createBrowserRouter([
         element: <App />,
         children: [
           { index: true, element: <TodayScreen /> },
+          // `/today` is an alias of the index route, and it exists because
+          // `notificationPath` returns it: a `cards_due` reminder tapped on a phone
+          // resolved to `/today`, which was not a registered path, so the tap landed
+          // on the `*` NotFound screen. Two paths, one screen — the alternative was
+          // rewriting the notification target, and a URL a notification has already
+          // shipped with cannot be rewritten retroactively.
+          { path: 'today', element: <TodayScreen /> },
           { path: 'workspaces', element: <WorkspaceListScreen /> },
           { path: 'workspaces/:workspaceId', element: <WorkspaceScreen /> },
+          // The Study hub: every deck across every course, with its due count, and
+          // the one action that matters ("Review all due"). It is a real screen as
+          // of the redesign — the nav's third item needs a destination, and the spec
+          // asked for the hub before there was a route for it (`SPEC.md:568`).
+          { path: 'study', element: <StudyHubScreen /> },
           { path: 'study/:deckId', element: <StudyScreen /> },
           { path: 'quiz/:quizId', element: <QuizScreen /> },
           // The two printable documents. A report is edited in two steps and a
@@ -196,14 +208,14 @@ export const router = createBrowserRouter([
           // needs the whole width and its own URL to come back to.
           { path: 'reports/:reportId', element: <ReportScreen /> },
           { path: 'cheatsheets/:cheatsheetId', element: <CheatsheetScreen /> },
-          // The calendar: the week and month views, and the connections that feed
-          // them. It is a real screen as of Phase 10, so the `NotBuiltRoute` that
-          // named the phase is gone with its copy.
-          { path: 'calendar', element: <CalendarScreen /> },
-          {
-            path: 'tasks',
-            element: <TasksScreen />,
-          },
+          // The calendar and the task list are **views inside the planner** as of
+          // the redesign: the design's Planner frame carries a Calendar | Tasks
+          // switcher, and `SPEC.md:664-665` already specified that shape ("Planner
+          // (Calendar | Tasks)"). Both paths are kept as redirects into the planner
+          // rather than removed, because a notification tap, a bookmark and a
+          // `notificationPath` that has already shipped all name them.
+          { path: 'calendar', element: <Navigate to="/planner?view=calendar" replace /> },
+          { path: 'tasks', element: <Navigate to="/planner?view=tasks" replace /> },
           // The progress dashboard. It is reached from the plan section of Settings
           // rather than from the nav: the rail and the tab bar share five labels
           // (A189), and a sixth would take width from all of them.
@@ -227,8 +239,17 @@ export const router = createBrowserRouter([
             path: 'syllabus/:draftId',
             element: <SyllabusReviewRoute />,
           },
+          // Settings is sectioned, and the section is part of the path so a link can
+          // name it ("revoke it in Settings → Devices"). Both paths render the same
+          // screen; the bare one falls back to the first section rather than
+          // redirecting, so a Back from a section lands on the screen and not on a
+          // redirect chain.
           {
             path: 'settings',
+            element: <SettingsScreen />,
+          },
+          {
+            path: 'settings/:section',
             element: <SettingsScreen />,
           },
           {
@@ -238,10 +259,14 @@ export const router = createBrowserRouter([
           // The pricing page and the checkout screen, where the build allows
           // purchase UI at all (A322). Empty in the store build.
           ...purchaseRoutes,
-          // Reached from the sync status control rather than from the nav (A189):
-          // the sidebar and the phone tab bar are both built from the same five
-          // labels, and Settings — which the spec nests Devices under — is still a
-          // `NotBuiltRoute` because Phase 9 owns it.
+          // Two entries, and both are real as of the redesign. The sync status
+          // control links here (`A189`: the sidebar and the phone tab bar are both
+          // built from the same five labels, so Devices is not one of them), and
+          // Settings' own "Devices & sync" section links here too — that section is
+          // where the spec nests it. This comment said Settings was still a
+          // `NotBuiltRoute`; it is a real screen (`settings`/`settings/:section` above)
+          // and has been since the redesign, which is exactly the kind of claim a
+          // comment keeps making after the code has moved.
           {
             path: 'devices',
             element: <DevicesScreen />,
@@ -249,6 +274,16 @@ export const router = createBrowserRouter([
           {
             path: 'styleguide',
             element: <StyleguideScreen />,
+          },
+          // The admin console. Registered for every account on purpose: the
+          // authorization is the server's (`AdminUser`'s extractor answers 404 to a
+          // non-admin, A7), and a client-side gate would be a cosmetic one — the
+          // threat model's rule is that the client contributes intent and the server
+          // decides. A student who opens this URL gets the 404 the API gave, which is
+          // the same answer they would get for any other endpoint that is not theirs.
+          {
+            path: 'admin',
+            element: <AdminScreen />,
           },
           {
             path: '*',

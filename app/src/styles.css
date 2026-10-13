@@ -47,6 +47,12 @@
 
   /* actions and brand */
   --primary: #4f46e5;      /* white on this is 6.29:1 */
+  /* The hover fill. The design states `#4F46E5 -> #3525CD`, and that is a
+     **light-theme** pair: `--primary-text` inverts to `#A5B4FC` in the dark block, and
+     white on `#A5B4FC` is 2.0:1 — below even the 3:1 UI floor, and a regression from the
+     6.29:1 the button has at rest. So hover gets its own token, which is the only way
+     one declaration can be right in both themes. */
+  --primary-hover: #3525cd; /* white on this is 8.90:1 */
   --on-primary: #ffffff;
   --primary-text: #3525cd; /*  9.14:1 on surface, 7.07:1 on the tint */
   --primary-tint: #e2dfff;
@@ -101,6 +107,11 @@
     /* Unchanged in dark: the fill is dark enough for white text at 6.29:1, and
        the same indigo in both themes is what makes the brand recognisable. */
     --primary: #4f46e5;
+    /* Hover goes *darker* here, not lighter. The light theme's `#3525CD` is a shade
+       that reads as "pressed" against a light ground; on the dark surface the same
+       direction would lighten the fill toward the label and cost the contrast. White on
+       this is 8.14:1. */
+    --primary-hover: #3f37c9;
     --on-primary: #ffffff;
     --primary-text: #a5b4fc; /* 8.90:1 on surface */
     --primary-tint: #1e1b4b;
@@ -163,23 +174,44 @@
   --font-heading: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* The spec's scale, as utilities: text-display, text-h1, text-h2, text-h3,
-     text-body, text-small, text-caption. Nothing is defined below 12px, and
-     `text-caption` is the floor. */
-  --text-display: 2rem;
-  --text-display--line-height: 2.5rem;
-  --text-h1: 1.5rem;
-  --text-h1--line-height: 2rem;
-  --text-h2: 1.25rem;
-  --text-h2--line-height: 1.75rem;
-  --text-h3: 1rem;
-  --text-h3--line-height: 1.5rem;
-  --text-body: 0.875rem;
-  --text-body--line-height: 1.375rem;
-  --text-small: 0.8125rem;
-  --text-small--line-height: 1.125rem;
-  --text-caption: 0.75rem;
-  --text-caption--line-height: 1rem;
+  /* The scale, as utilities: text-display, text-h1, text-h2, text-h3, text-h4,
+     text-body, text-label, text-small, text-caption, text-meta.
+
+     These are the Figma design's values, which **supersede the earlier spec's
+     scale**. Two of the changes are reversals worth naming, because both were
+     previously rules rather than values:
+
+     - `text-meta` is 11/18 and the phone tab label is 10px. The earlier spec said
+       "NOTHING below 12px"; the design's metadata role is 11px monospace, and it
+       is the single most characteristic line in the redesign (eyebrows, counts,
+       timestamps, keycaps), so the floor is gone rather than approximated.
+     - `text-body` is 16/24 at *both* viewports. It used to be 14/22 on desktop,
+       which made desktop text noticeably smaller than a phone's.
+
+     `text-meta` is set in JetBrains Mono because metadata is the evidence layer:
+     a count or a page reference reads differently from prose at a glance. */
+  --text-display: 3rem;          /* 48 / 62 */
+  --text-display--line-height: 3.875rem;
+  --text-h1: 2rem;               /* 32 / 42 */
+  --text-h1--line-height: 2.625rem;
+  --text-h2: 1.5rem;             /* 24 / 32 */
+  --text-h2--line-height: 2rem;
+  --text-h3: 1.25rem;            /* 20 / 26 */
+  --text-h3--line-height: 1.625rem;
+  --text-h4: 1.125rem;           /* 18 / 23 */
+  --text-h4--line-height: 1.4375rem;
+  --text-body: 1rem;             /* 16 / 24 */
+  --text-body--line-height: 1.5rem;
+  --text-label: 0.875rem;        /* 14 / 20 */
+  --text-label--line-height: 1.25rem;
+  --text-small: 0.8125rem;       /* 13 / 20 */
+  --text-small--line-height: 1.25rem;
+  --text-caption: 0.75rem;       /* 12 / 18 */
+  --text-caption--line-height: 1.125rem;
+  --text-meta: 0.6875rem;        /* 11 / 18 */
+  --text-meta--line-height: 1.125rem;
+  --text-tab: 0.625rem;          /* 10 / 12, the phone tab-bar label only */
+  --text-tab--line-height: 0.75rem;
 
   /* Shape. 8 controls, 12 cards, 16 sheets and modals, 999 chips. */
   --radius-field: 8px;
@@ -216,24 +248,14 @@
     background-color: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    /* Body is 14/22 on desktop and 16/24 on mobile (spec § Type). The desktop
-       value is the base and the phone value is the override below, because the
-       webview reports a phone width and the desktop layout is the one the rest of
-       the scale is built against. */
-    font-size: 0.875rem;
-    line-height: 1.375rem;
+    /* Body is 16/24 at both viewports, which is the design's value and a change
+       from the earlier spec's 14/22 desktop body. The 16px floor is also the size
+       iOS will not zoom on when a field is focused, so the phone and the desktop
+       now agree instead of the desktop being a step smaller. */
+    font-size: 1rem;
+    line-height: 1.5rem;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
-  }
-
-  /* The phone body size. It is 16px for the same reason the inputs are: a smaller
-     body size is what makes a phone feel cramped on a long answer, and 16px is
-     also the size iOS will not zoom on. */
-  @media (max-width: 767px) {
-    body {
-      font-size: 1rem;
-      line-height: 1.5rem;
-    }
   }
 
   #root {
@@ -242,7 +264,12 @@
 
   /* Hierarchy comes from size and space, never from colour. Headings take Plus
      Jakarta Sans; the same size in a different weight would read as an accident
-     rather than a system. */
+     rather than a system.
+
+     `letter-spacing: 0`: the earlier revision tightened headings by -0.02em, and
+     the design measures every heading at `ls 0.0`. The design's headings are also
+     larger (h1 32/42 against the old 24/32), and tight tracking on a large size
+     reads as cramped rather than deliberate. */
   h1,
   h2,
   h3,
@@ -250,26 +277,30 @@
     color: var(--text);
     font-family: var(--font-heading);
     font-weight: 600;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     text-wrap: balance;
+    /* A heading is often a single long word, and a single word cannot wrap: at 200%
+       text "Workspaces" is 387px at the 64px h1 size, wider than a phone's content
+       column, and the page scrolled sideways. `break-word` acts *only* when the word
+       cannot fit on a line of its own, so a heading that fits is unaffected — which is
+       what makes this safe on every screen rather than a per-heading decision. */
+    overflow-wrap: break-word;
   }
   h1 {
+    font-size: 2rem;
+    line-height: 2.625rem;
+  }
+  h2 {
     font-size: 1.5rem;
     line-height: 2rem;
   }
-  h2 {
-    font-size: 1.25rem;
-    line-height: 1.75rem;
-    letter-spacing: -0.01em;
-  }
   h3 {
-    font-size: 1rem;
-    line-height: 1.5rem;
+    font-size: 1.25rem;
+    line-height: 1.625rem;
   }
   h4 {
-    font-size: 0.875rem;
-    line-height: 1.375rem;
-    letter-spacing: -0.005em;
+    font-size: 1.125rem;
+    line-height: 1.4375rem;
   }
 
   p {
@@ -335,19 +366,27 @@
     box-shadow: var(--shadow-float);
   }
 
-  /* --- Buttons: pills ----------------------------------------------------- */
+  /* --- Buttons ------------------------------------------------------------ */
 
+  /* `CONTROL RADIUS / 8 PX`, from the design's UI-controls sheet. The earlier
+     revision made every button a pill, which read as "action or count" and left
+     the 8px rectangle meaning only "field"; the design separates the two roles
+     differently — a control is a control, and the pill is for chips and counts.
+
+     Padding 10/16, gap 8 and a 44px default height are the design's measurements,
+     and 44px is also the mobile target floor (32px is the desktop one, so the
+     larger of the two is the shared default). */
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-field);
     border: 1px solid transparent;
-    padding: 0.5rem 1.1rem;
+    padding: 0.625rem 1rem;
     font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1.2;
+    font-weight: 600;
+    line-height: 1.25rem;
     /* 44px minimum touch target, which also clears the spec's 32px desktop
        floor. */
     min-height: 2.75rem;
@@ -358,6 +397,23 @@
        button instead, and `min-height` grows to fit it. Long labels are the
        layout test case, not an edge case. */
     min-width: 0;
+    /* A label is often one long word ("Rebalance", "Continue"), and `min-width: 0`
+       above only lets it wrap *between* words. At 200% text a grade button's
+       "Again" + its interval measured 68px in a 64px column and was clipped.
+
+       **`anywhere`, not `break-word`.** The label is an *anonymous* flex item, whose
+       automatic minimum size is its min-content width — and `break-word` explicitly does
+       not affect min-content sizing, so the item kept a floor of its longest word and
+       overflowed anyway. `anywhere` does affect it, which is the whole difference
+       between the two values here. */
+    overflow-wrap: anywhere;
+    /* A button is never wider than the column it is in. `self-start` — which several
+       buttons use to sit at the left of a column — sets `align-self: flex-start`, and
+       that **stops the cross-axis stretch**, so the button sizes to its content: the
+       study screen's source button measured 159px inside an 83px column at 200% text
+       and pushed the card sideways. A max-width is the bound that survives any
+       alignment. */
+    max-width: 100%;
     cursor: pointer;
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -370,21 +426,33 @@
     cursor: not-allowed;
   }
 
-  /* The action fill: the brand indigo, with white text at 6.29:1 in both
-     themes. */
+  /* The action fill: the brand indigo, with white text at 6.29:1 in both themes.
+     Hover uses `--primary-hover`, a **per-theme** token rather than `--primary-text`:
+     that token inverts between themes (it is the indigo used as *text*), so using it as
+     a fill put white on `#A5B4FC` in dark — 2.0:1. See the token's own comment. */
   .btn-primary {
     background-color: var(--primary);
     color: var(--on-primary);
     border-color: var(--primary);
   }
   .btn-primary:hover:not(:disabled) {
-    background-color: color-mix(in oklab, var(--primary) 88%, var(--bg));
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
-  /* A secondary action: surface fill with a real boundary. */
+  /* A secondary action: surface fill with a real boundary and the indigo label,
+     which is the design's treatment (`#3525CD` text on `#FFFFFF`). The label was
+     `--text` before; the design makes the supporting action visibly an action.
+
+     The boundary is `--border-strong`, not the design's `#DDE0F0`. The design's
+     own accessibility sheet states the target — "3:1 large text and control
+     boundaries" — and its Secondary specimen draws a `#DDE0F0` edge, which is
+     1.25:1 on the ground. Those two cannot both hold, and a control whose only
+     edge is a 1.25:1 hairline is a control a low-vision user cannot find. The
+     stated rule wins; the same reason moved `.field` off `--border`. */
   .btn-secondary {
     background-color: var(--surface);
-    color: var(--text);
+    color: var(--primary-text);
     border-color: var(--border-strong);
   }
   .btn-secondary:hover:not(:disabled) {
@@ -424,12 +492,21 @@
        Workspaces and Tasks screens, both themes. */
     min-width: 0;
     min-height: 2.75rem;
-    padding: 0.5rem 0.9rem;
+    padding: 0.625rem 0.75rem;
     background-color: var(--surface);
     color: var(--text);
+    /* `--border-strong`, not the design's `#DDE0F0`.
+       The design's own accessibility sheet states the target — "3:1 large text
+       and control boundaries" — and its Field specimen draws a `#DDE0F0` edge,
+       which is 1.25:1 on the ground. Those two cannot both hold, and a field whose
+       only edge is a 1.25:1 hairline is a field a low-vision user cannot find. The
+       stated rule wins, so the boundary stays `--border-strong` (3.44:1 on the
+       ground). Every other surface takes the design's `--border`. */
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-field);
-    font-size: 0.875rem;
+    /* 16px: the body size, and the size iOS will not zoom the page to reach. */
+    font-size: 1rem;
+    line-height: 1.5rem;
   }
   .field::placeholder {
     color: var(--text-subtle);
@@ -442,31 +519,28 @@
     outline-offset: 1px;
   }
 
-  /* iOS zooms the whole page when a focused input's text is under 16px, which
-     leaves the student's view scrolled sideways mid-sentence. Phones get 16px;
-     desktop keeps 14. */
-  @media (max-width: 767px) {
-    .field {
-      font-size: 1rem;
-    }
-  }
-
   /* --- Navigation --------------------------------------------------------- */
 
-  /* The active item is marked by weight plus a short primary bar
-     (`.nav-item[aria-current]::before` below). Weight plus a marker rather than
-     colour alone, so the state survives monochrome. */
+  /* The active item is an `#E2DFFF` fill with `#3525CD` text and icon, and **no
+     left bar**. The design's navigation item carries the fill and the indigo pair
+     only. Weight still goes 400 -> 500 so the state is not carried by colour
+     alone: the accessibility rule is that a state has a non-colour signal, and
+     with the bar gone the weight is that signal.
+
+     The icon is a 20px outline glyph plus a 12px gap, which is the design's
+     spacing; `gap` is on the base rule so both navs get it. */
   .nav-item {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.75rem;
     border-radius: var(--radius-field);
-    padding: 0.55rem 0.7rem;
+    padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
+    line-height: 1.25rem;
     color: var(--text-muted);
     text-decoration: none;
-    min-height: 2.5rem;
+    min-height: 2.75rem;
   }
   .nav-item:hover {
     background-color: var(--surface-raised);
@@ -477,15 +551,8 @@
     color: var(--primary-text);
     font-weight: 500;
   }
-  .nav-item[aria-current="page"]::before {
-    content: "";
-    position: absolute;
-    left: -0.6rem;
-    top: 0.4rem;
-    bottom: 0.4rem;
-    width: 3px;
-    border-radius: var(--radius-pill);
-    background-color: var(--primary);
+  .nav-item[aria-current="page"] .nav-icon {
+    color: var(--primary-text);
   }
 
   /* Tab-bar items share the base rule with `.nav-item` above but differ in
@@ -494,38 +561,28 @@
   .nav-item-tab {
     flex-direction: column;
     justify-content: center;
-    gap: 0.15rem;
+    gap: 0.25rem;
     border-radius: 0;
     padding: 0.4rem 0.25rem;
     /* 44px minimum touch target. */
     min-height: 2.75rem;
     flex: 1;
-    font-size: 0.75rem;
+    font-size: 0.625rem;
+    line-height: 0.75rem;
     text-align: center;
   }
+  /* The active tab is the design's `#F2F3FF` fill with an indigo icon and a 600
+     label. The weight is the non-colour signal; the fill is the design's. */
   .nav-item-tab:hover {
     background-color: transparent;
   }
   .nav-item-tab[aria-current="page"] {
-    background-color: transparent;
+    background-color: var(--surface-raised);
+    color: var(--primary-text);
+    font-weight: 600;
   }
-  /* The bar becomes a top rule, because the tab bar is at the bottom of the
-     screen: the marker points into the content from the edge it sits on.
-     `top: 0` rather than `-1px`: the nav is a horizontal scroll container
-     (`overflow-x-auto`, so the fifth item stays reachable at 200% text scale), and a
-     scroll container clips at its padding box. The 1px that used to sit over the
-     nav's top border was clipped away, which would have left the marker 1px tall —
-     and that marker is the tab bar's *non-colour* signal for the current page, so
-     shrinking it is exactly the state-by-shape signal the accessibility gate checks
-     for. */
-  .nav-item-tab[aria-current="page"]::before {
-    left: 25%;
-    right: 25%;
-    top: 0;
-    bottom: auto;
-    width: auto;
-    height: 2px;
-    border-radius: 0;
+  .nav-item-tab[aria-current="page"] .nav-icon {
+    color: var(--primary-text);
   }
 
   /* --- Shell -------------------------------------------------------------- */
@@ -698,13 +755,186 @@
 
   /* --- Labels and state --------------------------------------------------- */
 
-  /* Metadata: page numbers, timestamps, counts. Monospace so it reads as
-     evidence rather than prose. */
+  /* Metadata: page numbers, timestamps, counts, keycaps. Monospace so it reads as
+     evidence rather than prose. 11/18 in the design, and the uppercase form with
+     tracking is what makes an 11px mono line legible — `.eyebrow` below is that
+     form. */
   .meta {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
-    line-height: 1rem;
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
     color: var(--text-muted);
+  }
+
+  /* The eyebrow: the small uppercase mono line above a page title, a widget
+     heading or a card. Uppercase plus tracking is the design's treatment and it
+     is a real typographic role here rather than decoration — it labels the fact
+     below it (a date, a course code, a count) and is never a restatement of the
+     heading. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  /* The indigo eyebrow marks the one line that states why the block matters
+     ("Due Now", "DUE TODAY / 5 WORKSPACES"). */
+  .eyebrow-primary {
+    color: var(--primary-text);
+  }
+  /* The source pair, for the line above a grounded answer. Sky is sources only. */
+  .eyebrow-source {
+    color: var(--source);
+  }
+
+  /* A card heading: the title on the left, its count or state on the right.
+     `flex-wrap` is the 200%-text accommodation, and it is the same one `Section`'s
+     heading row makes. At a 32px root a card title and its count cannot always share
+     one line: the admin console's "Every account" beside "2 accounts" measured 290px
+     in a 212px card and the pair was **clipped**, because a flex row's items do not
+     wrap unless it is told to. Wrapping puts the count on the next line — a taller
+     card, and every figure still readable, which is the trade the alternatives do not
+     offer (shrinking the count clips it; letting it overflow scrolls the page). */
+  .widget-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  /* A page footer: the timezone on the left, the saved state on the right, above
+     a rule. 11 mono, and it is the app's one place to state where "now" is. */
+  .page-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
+    color: var(--text-muted);
+  }
+  /* The two figures are sentences, and a flex child's automatic minimum size is its
+     content — so at 200% text a footer line wider than the page pushed the page
+     sideways rather than wrapping. `min-width: 0` lets it take the width it is given,
+     and `break-word` handles the single long word inside it. */
+  .page-footer > * {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+
+  /* The global search field in the top bar: a bordered 8px box with a magnifier,
+     the placeholder, and the platform's shortcut badge. It is a button that opens
+     the command palette rather than an input, because the palette is where typing
+     happens — one place for focus to land, and one implementation of the results.
+     It therefore takes `.btn`'s target floor and none of its padding. */
+  .search-field {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    /* `min-width: 0` is load-bearing, and it is the same defect `phoneLayout.test.ts`
+       documents for `min-w-60`: a flex item's automatic minimum size is its
+       *content-based* minimum, so `width: 100%` does not lower it. Without it the
+       control's floor was icon + the whole placeholder + the `⌘K` badge — wider than
+       the column at 200% text — and the shell scrolled sideways at **both** viewports
+       (390 and 1440), with the overflow reported by an ancestor rather than by this
+       element, which is what makes it hard to attribute.
+
+       `min-width` is then raised again to a **floor of its own**, because zero is too
+       low in the other direction: with the row's other children unable to shrink, a
+       zero minimum let this control be squeezed to 71px and its own text clipped. The
+       floor is what the icon and the badge need with room for a few characters; below
+       it, the bar wraps. */
+    min-width: 12rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-field);
+    background-color: var(--surface);
+    padding: 0.625rem 0.75rem;
+    min-height: 2.75rem;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+  .search-field:hover {
+    border-color: var(--border-strong);
+  }
+
+  /* A keycap: the `⌘K` badge and the palette's shortcut hints. */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.375rem 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
+    color: var(--text-muted);
+    min-width: 1.625rem;
+  }
+
+  /* The credit meter: a pill carrying the balance and a 24x4 level bar. The bar
+     is a second reading of the same number, never the only one — the label says
+     the count in words. */
+  .credit-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background-color: var(--surface-raised);
+    padding: 0.5rem 0.75rem;
+    min-height: 2.125rem;
+  }
+
+  /* The avatar: initials in a circle. Indigo tint with the indigo text pair, and
+     the initials are the accessible name's visible half. */
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--radius-pill);
+    background-color: var(--primary-tint);
+    color: var(--primary-text);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.125rem;
+    flex-shrink: 0;
+  }
+
+  /* The desktop top bar. It carries the window drag region on a frameless
+     window, so it must not be a place a control fills edge to edge. */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border);
+    background-color: var(--surface);
+    padding: 0 2rem;
+    min-height: 5rem;
+  }
+  /* The 36px drag strip the spec requires of a desktop native window. It is only
+     painted when the shell says the window is frameless; on the web and on a
+     phone it is a zero-height element. */
+  .drag-region {
+    height: 0;
+    flex-shrink: 0;
+    -webkit-app-region: drag;
+  }
+  .window-frameless .drag-region {
+    height: 2.25rem;
   }
 
   /* A section label. Sentence case, not uppercase-with-wide-tracking: wide-tracked
@@ -780,6 +1010,11 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    /* `min-width: 0` only *permits* shrinking; nothing forces it. Without it an
+       `inline-flex` chip is an atomic inline-level box: in a narrow column it overflows
+       its container rather than letting its label wrap, which is what clipped the task
+       row's "Medium" at 200% text. */
+    min-width: 0;
     padding: 0.1rem 0.6rem;
     border-radius: var(--radius-pill);
     background-color: var(--surface-raised);
@@ -791,6 +1026,12 @@
        another language, and a pill that overflows its row clips the state it is
        there to report. */
     text-align: left;
+    /* And a single long word inside it may break: at 200% text the task row's
+       priority chip renders "Medium" at 28px in a 76px column, which is wider than the
+       column and was clipped. `anywhere` rather than `break-word` for the reason given
+       on `.btn` above — the label is an anonymous flex item, and only `anywhere` lowers
+       its min-content floor. */
+    overflow-wrap: anywhere;
   }
   .chip-working {
     background-color: var(--primary-tint);

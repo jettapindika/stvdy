@@ -12,7 +12,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -40,6 +40,18 @@ pub struct WorkspaceView {
     /// Live sources only: a tombstoned source is not part of the workspace's
     /// visible contents, and the list screen shows this number next to the name.
     pub source_count: i64,
+    /// The course code the student gave this course (`BIO 201`), or null. Optional
+    /// by design: every surface that shows it falls back to the name, so an
+    /// account that never sets one is complete rather than half-filled.
+    pub course_code: Option<String>,
+    /// The course's hue, 0-5, indexing the six categorical course colours. The
+    /// server assigns it round-robin on create so two adjacent courses differ
+    /// without the student choosing anything.
+    pub color: i16,
+    /// The next exam, as a date. A `NaiveDate` rather than an instant: an exam is
+    /// on a day in the reader's calendar, and a `timestamptz` would render "5
+    /// November" as the 4th for a Jakarta student.
+    pub exam_date: Option<NaiveDate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +71,9 @@ struct WorkspaceRow {
     created_at: Option<DateTime<Utc>>,
     updated_at: DateTime<Utc>,
     source_count: i64,
+    course_code: Option<String>,
+    color: i16,
+    exam_date: Option<NaiveDate>,
 }
 
 impl From<WorkspaceRow> for WorkspaceView {
@@ -69,14 +84,24 @@ impl From<WorkspaceRow> for WorkspaceView {
             created_at: row.created_at,
             updated_at: row.updated_at,
             source_count: row.source_count,
+            course_code: row.course_code,
+            color: row.color,
+            exam_date: row.exam_date,
         }
     }
 }
 
 /// `GET /workspaces`
+///
+/// **The column list below is repeated in `get_one`/`fetch_workspace` and in the
+/// `create` read-back, and the three must stay identical.** sqlx 0.9's `SqlSafeStr`
+/// bound accepts only literal SQL, so the list cannot be a `const` interpolated
+/// into the statement; a shared string would have to be `AssertSqlSafe`'d, which
+/// disables exactly the check that keeps a caller from reaching the query text.
+/// The three copies are the price, and they are three lines apart in this file.
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<WorkspaceList>> {
     let rows = sqlx::query_as::<_, WorkspaceRow>(
-        "select w.id, w.name, w.created_at, w.updated_at,
+        "select w.id, w.name, w.created_at, w.updated_at, w.course_code, w.color, w.exam_date,
                 (select count(*) from sources s
                   where s.workspace_id = w.id and s.deleted_at is null) as source_count
            from workspaces w
@@ -99,6 +124,12 @@ pub struct CreateRequest {
     /// it later without the server assigning a second one.
     #[serde(default)]
     pub id: Option<Uuid>,
+    /// Optional, like every other course field: a workspace created from a quick
+    /// capture has no code, and one created from a course form does.
+    #[serde(default)]
+    pub course_code: Option<String>,
+    #[serde(default)]
+    pub exam_date: Option<NaiveDate>,
 }
 
 /// `POST /workspaces`
@@ -112,25 +143,43 @@ pub async fn create(
     Json(body): Json<CreateRequest>,
 ) -> AppResult<(StatusCode, Json<WorkspaceResponse>)> {
     let name = validate_name(&body.name)?;
+    let course_code = validate_course_code(body.course_code.as_deref())?;
 
     crate::entitlements::require(&state, &user, Feature::CreateWorkspace).await?;
 
+    // The hue is assigned here rather than by the client, so two courses created
+    // by two devices do not both pick the first colour. `count(*) % 6` over the
+    // account's live workspaces is the ordinal of the row being inserted, and the
+    // subquery is evaluated in the same statement as the insert so a concurrent
+    // create cannot interleave between the count and the write.
+    //
     // `on conflict do nothing` turns a duplicate client id into an empty result
     // rather than a 500, and does it without a check-then-insert race.
-    let row = sqlx::query_as::<_, (Uuid, String, Option<DateTime<Utc>>, DateTime<Utc>)>(
-        "insert into workspaces (id, user_id, name)
-         values (coalesce($1, gen_random_uuid()), $2, $3)
-         on conflict (id) do nothing
-         returning id, name, created_at, updated_at",
+    let row = sqlx::query_as::<_, WorkspaceRow>(
+        "with hue as (
+           select (count(*) % 6)::smallint as color
+             from workspaces
+            where user_id = $2 and deleted_at is null
+         ), inserted as (
+           insert into workspaces (id, user_id, name, course_code, exam_date, color)
+           select coalesce($1, gen_random_uuid()), $2, $3, $4, $5, hue.color from hue
+           on conflict (id) do nothing
+           returning id, name, created_at, updated_at, course_code, color, exam_date
+         )
+         select i.id, i.name, i.created_at, i.updated_at, i.course_code, i.color,
+                i.exam_date, 0::bigint as source_count
+           from inserted i",
     )
     .bind(body.id)
     .bind(user.user_id)
     .bind(name)
+    .bind(course_code)
+    .bind(body.exam_date)
     .fetch_optional(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("creating a workspace: {error}")))?;
 
-    let Some((id, name, created_at, updated_at)) = row else {
+    let Some(row) = row else {
         return Err(AppError::Conflict(
             "a workspace with that id already exists".to_string(),
         ));
@@ -139,13 +188,7 @@ pub async fn create(
     Ok((
         StatusCode::CREATED,
         Json(WorkspaceResponse {
-            workspace: WorkspaceView {
-                id,
-                name,
-                created_at,
-                updated_at,
-                source_count: 0,
-            },
+            workspace: row.into(),
         }),
     ))
 }
@@ -162,9 +205,32 @@ pub async fn get_one(
     }))
 }
 
+/// The fields a `PATCH` may change.
+///
+/// Every field is `Option` and every absent field is left alone, so a caller that
+/// only renames a workspace does not silently clear its course code. `null` is
+/// therefore meaningful and distinct from absent: it clears the field.
 #[derive(Debug, Deserialize)]
 pub struct UpdateRequest {
     pub name: String,
+    #[serde(default, deserialize_with = "double_option")]
+    pub course_code: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub exam_date: Option<Option<NaiveDate>>,
+}
+
+/// Distinguishes an absent JSON field from an explicit `null`.
+///
+/// Serde maps both to `None` for `Option<T>`, which would make "clear the exam
+/// date" indistinguishable from "do not touch it" — so a rename would either wipe
+/// the date or make it impossible to remove. This wrapper is the standard fix: the
+/// outer `Option` is presence, the inner is the value.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// `PATCH /workspaces/:id`
@@ -179,6 +245,13 @@ pub async fn update(
     Json(body): Json<UpdateRequest>,
 ) -> AppResult<Json<WorkspaceResponse>> {
     let name = validate_name(&body.name)?;
+    let course_code = match &body.course_code {
+        Some(value) => validate_course_code(value.as_deref())?.map(str::to_string),
+        None => None,
+    };
+    let set_course_code = body.course_code.is_some();
+    let set_exam_date = body.exam_date.is_some();
+    let exam_date = body.exam_date.flatten();
 
     crate::entitlements::require_writable_row(
         &state,
@@ -188,13 +261,24 @@ pub async fn update(
     )
     .await?;
 
+    // `coalesce($4, course_code)` with a paired "was it sent" flag, rather than
+    // building the statement from strings: the flag is a bound boolean, so the SQL
+    // is a constant and there is no path where a caller controls the query text.
     let result = sqlx::query(
-        "update workspaces set name = $3, updated_at = now()
+        "update workspaces
+            set name = $3,
+                course_code = case when $4 then $5 else course_code end,
+                exam_date = case when $6 then $7 else exam_date end,
+                updated_at = now()
           where id = $1 and user_id = $2 and deleted_at is null",
     )
     .bind(workspace_id)
     .bind(user.user_id)
     .bind(name)
+    .bind(set_course_code)
+    .bind(course_code)
+    .bind(set_exam_date)
+    .bind(exam_date)
     .execute(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("renaming a workspace: {error}")))?;
@@ -302,10 +386,10 @@ pub async fn owned_name(state: &AppState, user_id: Uuid, workspace_id: Uuid) -> 
 }
 
 async fn fetch_workspace(state: &AppState, user_id: Uuid, id: Uuid) -> AppResult<WorkspaceRow> {
-    // The same correlated-subquery shape as `list`, so a freshly created or
-    // renamed workspace reports the same `source_count` the list does.
+    // The same column list as `list`, so a freshly created or renamed workspace
+    // reports the same numbers the list does.
     sqlx::query_as::<_, WorkspaceRow>(
-        "select w.id, w.name, w.created_at, w.updated_at,
+        "select w.id, w.name, w.created_at, w.updated_at, w.course_code, w.color, w.exam_date,
                 (select count(*) from sources s
                   where s.workspace_id = w.id and s.deleted_at is null) as source_count
            from workspaces w
@@ -327,4 +411,25 @@ fn validate_name(raw: &str) -> AppResult<&str> {
         ));
     }
     Ok(name)
+}
+
+/// A course code, trimmed and capped.
+///
+/// The cap is the column's (`workspaces_course_code_len`), and it is checked here
+/// as well so the caller gets a `validation` error naming the field rather than a
+/// database constraint violation surfaced as an internal error. An empty string is
+/// treated as absent: a form that submits an untouched optional field should clear
+/// the code, not store a blank one that renders as a gap.
+fn validate_course_code(raw: Option<&str>) -> AppResult<Option<&str>> {
+    let Some(value) = raw else { return Ok(None) };
+    let code = value.trim();
+    if code.is_empty() {
+        return Ok(None);
+    }
+    if code.chars().count() > 16 {
+        return Err(AppError::Validation(
+            "course code cannot be longer than 16 characters".to_string(),
+        ));
+    }
+    Ok(Some(code))
 }

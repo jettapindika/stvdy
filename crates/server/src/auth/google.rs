@@ -234,6 +234,7 @@ pub async fn exchange(
             user.plan_id,
             user.timezone,
             user.student_verified,
+            user.is_admin,
             user.created_at,
         ),
         access_token: pair.access_token,

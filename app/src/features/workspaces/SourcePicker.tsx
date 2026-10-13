@@ -46,9 +46,7 @@ export function SourcePicker({
   const label = legend ?? chatLegend
 
   if (sources.length === 0) {
-    return (
-      <p className="text-xs text-muted">{emptyHint ?? t('workspaces.sourcePicker.emptyHint')}</p>
-    )
+    return <p className="text-caption text-muted wrap-anywhere">{emptyHint ?? t('workspaces.sourcePicker.emptyHint')}</p>
   }
 
   return (
@@ -67,7 +65,7 @@ export function SourcePicker({
           `max-h-32` stays: at 100% the two rows fit in it and nothing scrolls. */
           <label
             key={source.id}
-            className="flex min-h-11 shrink-0 items-center gap-2 rounded-field border border-border px-3 py-2 text-sm has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+            className="flex min-h-11 shrink-0 items-center gap-2 rounded-field border border-border px-3 py-2 text-small has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
           >
             <input
               type="checkbox"
@@ -85,7 +83,7 @@ export function SourcePicker({
           </label>
         ))}
       </div>
-      <span id={id} className="text-xs text-muted">
+      <span id={id} className="text-caption text-muted wrap-anywhere">
         {selected.length === 0
           ? legend === undefined
             ? t('workspaces.sourcePicker.nothingSelectedAllReady')

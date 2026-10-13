@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, NavLink, useParams } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
 import { EXPORT_FORMATS, useDeleteAccount, useExportAccount } from '@/api/queries/account'
 import { useSaveSettings, useSettings, type ReminderChannel } from '@/api/queries/settings'
 import { useUsage } from '@/api/queries/usage'
-import { PageHeader, Section } from '@/components/layout/Section'
+import { PageFooter, PageHeader, Section } from '@/components/layout/Section'
 import { ApiErrorNotice, LoadingState } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { planForReminderChannel } from '@/features/billing/plans'
+import { ConnectionsPanel } from '@/features/calendar/ConnectionsPanel'
+import { DevicesPanel } from '@/features/devices/DevicesScreen'
 import { LANGUAGES, LANGUAGE_LABELS, type Language } from '@/i18n'
 import { saveBlob } from '@/lib/download'
-import { platform } from '@/platform'
+import { DEFAULT_TIMEZONE, zoneOffsetLabel } from '@/lib/time'
 import { UpdatesPanel } from './UpdatesPanel'
 
 /**
@@ -33,7 +35,9 @@ import { UpdatesPanel } from './UpdatesPanel'
  * fact.
  *
  * **The timezone is on the account, not on the settings row** (A203), which is why
- * it is saved through the same `PUT /settings` but read from `GET /auth/me`.
+ * it is saved through the same `PUT /settings` but read from `GET /auth/me`. The
+ * page's footer states that same zone and its offset for today, because "when is
+ * now" is the question every deadline on the other screens is answered in.
  *
  * **The sections this phase does not own are named.** BYOK (Phase 13) says which
  * phase brings it, rather than being an absent control a student would look for and
@@ -60,13 +64,40 @@ import { UpdatesPanel } from './UpdatesPanel'
 /** The channels the settings screen offers, in the order the matrix lists them. */
 const CHANNELS: ReminderChannel[] = ['web', 'push', 'email', 'telegram', 'discord']
 
+/**
+ * The screen's sections, in the order the sub-nav lists them.
+ *
+ * The design's Settings frames are a two-column screen: a vertical sub-nav on the
+ * left and one section's content on the right, which is a change from the earlier
+ * single long scroll. The section is part of the URL (`/settings/devices`) rather
+ * than component state, because a student who is told "revoke it in Settings →
+ * Devices" should be able to be sent a link to it, and because the sync control in
+ * the shell links straight to `/devices` and a browser Back from there should land
+ * somewhere sensible.
+ *
+ * The vocabulary is the design's five, and the three the earlier screen had that
+ * are not among them (Notifications, Language, Data) are folded into the section
+ * they belong to rather than dropped: notifications and language are study
+ * preferences in the sense the design uses the phrase, and the data controls are
+ * facts about the account.
+ */
+const SECTIONS = ['account', 'study', 'calendar', 'devices', 'appearance'] as const
+type SettingsSection = (typeof SECTIONS)[number]
+
+/** The section a path names, or the first one when it names nothing usable. */
+function sectionFromParam(value: string | undefined): SettingsSection {
+  const found = SECTIONS.find((section) => section === value)
+  return found ?? 'account'
+}
+
 export function SettingsScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const session = useSession()
   const settings = useSettings()
   const usage = useUsage()
+  const { section: sectionParam } = useParams()
+  const section = sectionFromParam(sectionParam)
   const [error, setError] = useState<ApiError | null>(null)
-  const [resetting, setResetting] = useState(false)
 
   const userId = session.status === 'signed-in' ? session.user.id : ''
   const save = useSaveSettings(userId)
@@ -83,33 +114,13 @@ export function SettingsScreen() {
     save.mutate(patch, { onError: (failure) => setError(asApiError(failure)) })
   }
 
-  /**
-   * "Reset local data and resync" — the cache **and** the outbox (A186).
-   *
-   * A pending offline write from this device must not be replayed by the next
-   * account that signs in on it, so the wipe is total rather than a refresh. The
-   * copy above the button says what it deletes, because a control that silently
-   * removes queued work is one a student cannot consent to.
-   */
-  const reset = async () => {
-    setResetting(true)
-    setError(null)
-    try {
-      await platform.sync.reset()
-    } catch (failure) {
-      setError(asApiError(failure))
-    } finally {
-      setResetting(false)
-    }
-  }
-
   // The session is part of what this screen needs: the settings row's mutation id
   // *is* the user's id (A200), and the timezone lives on the account (A203). So a
   // form rendered before the account is known would be a form whose saves carry an
   // empty id — a write the server would reject as another row's.
   if (settings.isPending || session.status === 'loading') {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
         <LoadingState label={t('settings.loading')} />
       </div>
@@ -118,7 +129,7 @@ export function SettingsScreen() {
 
   if (row === undefined) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
         {error !== null ? <ApiErrorNotice error={error} noun={t('settings.noun')} /> : null}
       </div>
@@ -142,313 +153,438 @@ export function SettingsScreen() {
   // would have said.
   const selectedChannels = row.reminder_channels ?? []
 
+  // The footer's two facts. The zone is the account's, and it falls back to the
+  // app's documented default only because `Intl` throws on an empty zone — a
+  // footer that took the screen down would be worse than one naming the product's
+  // own default. Both are read from one clock read, so the date and the offset
+  // cannot come from two different instants, and the date is read *in that zone*
+  // rather than on the machine (lib/time.ts's rule): a student in Jakarta at 00:30
+  // must not read yesterday's date off a laptop still set to UTC.
+  const now = new Date()
+  const footerZone = timeZone === '' ? DEFAULT_TIMEZONE : timeZone
+  const today = new Intl.DateTimeFormat(i18n.language, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: footerZone,
+  }).format(now)
+  const footerZoneLabel = `${footerZone} · ${zoneOffsetLabel(now, footerZone)}`
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
-      <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
+    <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
+      <PageHeader
+        eyebrow={t('shell.settingsEyebrow')}
+        title={t('nav.settings')}
+        subtitle={t('settings.subtitle')}
+      />
 
       {error !== null ? (
         <ApiErrorNotice error={error} noun={t('settings.noun')} action={t('actions.retry')} />
       ) : null}
 
-      <Section title={t('settings.study.title')}>
-        <div className="card flex flex-col gap-4 p-4">
-          <label className="flex flex-col gap-1">
-            <span className="label">{t('settings.study.timezone')}</span>
-            <input
-              className="field"
-              value={timeZone}
-              onChange={(event) => write({ timezone: event.target.value })}
-            />
-            <span className="meta">{t('settings.study.timezoneHint')}</span>
-          </label>
+      {/* The two-column body. `lg` rather than `md` because the sub-nav is a column
+          of words and the content beside it is a form; below that width the nav
+          wraps into a row above the content, which is what a phone gets — five
+          full-width rows would push the section the student came for off the
+          first screen. */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+        <nav
+          aria-label={t('settings.sections')}
+          className="flex shrink-0 flex-wrap gap-1 lg:w-56 lg:flex-col"
+        >
+          {SECTIONS.map((item) => (
+            <NavLink key={item} to={`/settings/${item}`} className="nav-item">
+              {t(`settings.section.${item}`)}
+            </NavLink>
+          ))}
+        </nav>
 
-          <div className="flex flex-wrap gap-4">
-            <label className="flex flex-col gap-1">
-              <span className="label">{t('settings.study.startHour')}</span>
-              <input
-                className="field max-w-24"
-                type="number"
-                min={0}
-                max={23}
-                value={row.study_start_hour}
-                onChange={(event) => write({ study_start_hour: Number(event.target.value) })}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="label">{t('settings.study.endHour')}</span>
-              <input
-                className="field max-w-24"
-                type="number"
-                min={1}
-                max={24}
-                value={row.study_end_hour}
-                onChange={(event) => write({ study_end_hour: Number(event.target.value) })}
-              />
-            </label>
-          </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {section === 'account' && (
+            <>
+              <AccountIdentity />
 
-          <label className="flex flex-col gap-1">
-            <span className="label">{t('settings.study.maxMinutes')}</span>
-            <input
-              className="field max-w-32"
-              type="number"
-              min={15}
-              max={1440}
-              value={row.max_study_min_per_day}
-              onChange={(event) => write({ max_study_min_per_day: Number(event.target.value) })}
-            />
-          </label>
-
-          <div className="flex flex-wrap gap-4">
-            <label className="flex flex-col gap-1">
-              <span className="label">{t('settings.study.blockLength')}</span>
-              <input
-                className="field max-w-24"
-                type="number"
-                min={5}
-                max={180}
-                value={row.block_len_min}
-                onChange={(event) => write({ block_len_min: Number(event.target.value) })}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="label">{t('settings.study.breakLength')}</span>
-              <input
-                className="field max-w-24"
-                type="number"
-                min={0}
-                max={60}
-                value={row.break_min}
-                onChange={(event) => write({ break_min: Number(event.target.value) })}
-              />
-            </label>
-          </div>
-        </div>
-      </Section>
-
-      <Section title={t('settings.notifications.title')}>
-        <div className="card flex flex-col gap-4 p-4">
-          <fieldset className="flex flex-col gap-2">
-            <legend className="label">{t('settings.notifications.channels')}</legend>
-            {CHANNELS.map((channel) => {
-              const granted = grantedChannels.includes(channel)
-              const available = availableChannels.includes(channel)
-              const minPlan = planForReminderChannel(channel)
-              const on = selectedChannels.includes(channel)
-              return (
-                <div key={channel} className="flex min-h-11 flex-wrap items-center gap-2">
-                  <input
-                    id={`channel-${channel}`}
-                    type="checkbox"
-                    checked={on}
-                    // A locked channel is not choosable at all, and neither is one
-                    // this deployment cannot deliver on: in both cases the remedy is
-                    // elsewhere, and a control that refuses after the fact is worse
-                    // than one that is visibly unavailable (A288).
-                    disabled={!granted || !available}
-                    onChange={(event) =>
-                      write({
-                        reminder_channels: event.target.checked
-                          ? [...selectedChannels, channel]
-                          : selectedChannels.filter((kept) => kept !== channel),
-                      })
-                    }
-                  />
-                  {/* The label is the hit area, and it carries `min-h-11` and
-                      `min-w-11` for the same reason `LockedFeature`'s link does.
-                      Measured in Chromium at 390px: the label was **65.9x22**, so
-                      a thumb aimed at the channel name and landing a few pixels
-                      high hit the row `<div>` and toggled nothing (Phase 14);
-                      and with the height fixed, `input#channel-email` was
-                      **35.3x44** at 100% text in both themes, because "Email" is a
-                      short word and the label is only as wide as its text. The
-                      width is on **every** channel label rather than the email row:
-                      the next short name ("Web", "Push") has the same defect, and a
-                      per-row fix is one that gets forgotten. It costs a 9px sliver
-                      on the narrow rows and buys the 44px target the gate requires.
-                      The checkbox itself stays 13x13 — the label is what a finger
-                      reaches. */}
-                  <label
-                    htmlFor={`channel-${channel}`}
-                    className="text-body flex min-h-11 min-w-11 items-center"
+              <Section title={t('settings.plan.title')}>
+                <p className="text-label text-muted">{t('settings.plan.hint')}</p>
+                <div className="card flex flex-col gap-4 p-4">
+                  <Link to="/billing" className="link inline-flex min-h-11 items-center self-start">
+                    {t('settings.plan.open')}
+                  </Link>
+                  <hr className="border-border" />
+                  {/* The dashboard's only route in, on every form factor. It is not
+                      a sixth nav label (A189), and this section is where a student
+                      is already looking at what their plan gives them. */}
+                  <p className="text-small text-muted">{t('settings.plan.progressHint')}</p>
+                  <Link
+                    to="/dashboard"
+                    className="link inline-flex min-h-11 items-center self-start"
                   >
-                    {t(`settings.channel.${channel}`)}
-                  </label>
-                  {!granted && minPlan !== null ? (
-                    // The word carries the state; the tone repeats it, so the row
-                    // reads in monochrome.
-                    <span className="chip chip-due">
-                      {t('settings.notifications.locked', { plan: minPlan })}
-                    </span>
-                  ) : !available ? (
-                    // Granted by the plan and not deliverable yet. The sentence names
-                    // which of the two it is, because "not available" alone reads as
-                    // a bug rather than as a channel that is coming.
-                    <span className="chip chip-due">{t('settings.notifications.notYet')}</span>
-                  ) : null}
+                    {t('settings.plan.progress')}
+                  </Link>
                 </div>
-              )
-            })}
-          </fieldset>
+              </Section>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="label">{t('settings.notifications.quiet')}</legend>
-            <p className="meta">{t('settings.notifications.quietHint')}</p>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="label">{t('settings.notifications.quietFrom')}</span>
-                <input
-                  className="field max-w-24"
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={row.quiet_start_hour ?? ''}
-                  onChange={(event) =>
-                    // The pair is both-or-neither: setting one sets both, and
-                    // clearing either clears both. A window with one end would be
-                    // a row the migration's own check constraint refuses.
-                    write({
-                      quiet_start_hour:
-                        event.target.value === '' ? null : Number(event.target.value),
-                      quiet_end_hour: row.quiet_end_hour ?? 7,
-                    })
-                  }
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="label">{t('settings.notifications.quietTo')}</span>
-                <input
-                  className="field max-w-24"
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={row.quiet_end_hour ?? ''}
-                  onChange={(event) =>
-                    write({
-                      quiet_start_hour: row.quiet_start_hour ?? 22,
-                      quiet_end_hour: event.target.value === '' ? null : Number(event.target.value),
-                    })
-                  }
-                />
-              </label>
-            </div>
-            {/* Which window it means, in words. `22 → 7` wraps midnight, and a
-                student reading two numbers has no way to know that is allowed. */}
-            {row.quiet_start_hour !== null && row.quiet_end_hour !== null ? (
-              <p className="text-small text-muted">
-                {row.quiet_start_hour < row.quiet_end_hour
-                  ? t('settings.notifications.quietSameDay', {
-                      from: row.quiet_start_hour,
-                      to: row.quiet_end_hour,
-                    })
-                  : t('settings.notifications.quietNextDay', {
-                      from: row.quiet_start_hour,
-                      to: row.quiet_end_hour,
+              {/* An update is a fact about this installation, which is what this
+                  section is about. The component renders nothing on web and mobile
+                  (A335), so the section is absent there rather than present and
+                  disabled. */}
+              <UpdatesPanel />
+
+              <DataSection />
+
+              {/* The operator console, and it is the only way in.
+                  The route is registered for every account and the *server* is the
+                  gate (`AdminUser` answers 404 to a non-admin, A7) — but a route
+                  nothing links to is a screen an operator has to be told about by
+                  hand, which is the same reason the plan section above carries the
+                  dashboard's only route in. `is_admin` is the account's own flag, so
+                  rendering it here tells a student nothing they do not already know,
+                  and it is a display fact only: opening `/admin` as a non-admin gets
+                  the API's 404, not a screen. */}
+              {session.status === 'signed-in' && session.user.is_admin && (
+                <Section title={t('settings.admin.title')}>
+                  <p className="text-label text-muted">{t('settings.admin.hint')}</p>
+                  <div className="card flex flex-col gap-4 p-4">
+                    <Link to="/admin" className="link inline-flex min-h-11 items-center self-start">
+                      {t('settings.admin.open')}
+                    </Link>
+                  </div>
+                </Section>
+              )}
+            </>
+          )}
+
+          {section === 'study' && (
+            <>
+              <Section title={t('settings.study.title')}>
+                <p className="text-label text-muted">{t('settings.study.intro')}</p>
+                <div className="card flex flex-col gap-6 p-6">
+                  <label className="flex flex-col gap-1">
+                    <span className="label">{t('settings.study.timezone')}</span>
+                    <input
+                      className="field"
+                      value={timeZone}
+                      onChange={(event) => write({ timezone: event.target.value })}
+                    />
+                    <span className="text-caption text-muted">
+                      {t('settings.study.timezoneHint')}
+                    </span>
+                  </label>
+
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.startHour')}</span>
+                      <input
+                        className="field max-w-24"
+                        type="number"
+                        min={0}
+                        max={23}
+                        value={row.study_start_hour}
+                        onChange={(event) => write({ study_start_hour: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.endHour')}</span>
+                      <input
+                        className="field max-w-24"
+                        type="number"
+                        min={1}
+                        max={24}
+                        value={row.study_end_hour}
+                        onChange={(event) => write({ study_end_hour: Number(event.target.value) })}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="label">{t('settings.study.maxMinutes')}</span>
+                    <input
+                      className="field max-w-32"
+                      type="number"
+                      min={15}
+                      max={1440}
+                      value={row.max_study_min_per_day}
+                      onChange={(event) =>
+                        write({ max_study_min_per_day: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.blockLength')}</span>
+                      <input
+                        className="field max-w-24"
+                        type="number"
+                        min={5}
+                        max={180}
+                        value={row.block_len_min}
+                        onChange={(event) => write({ block_len_min: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.breakLength')}</span>
+                      <input
+                        className="field max-w-24"
+                        type="number"
+                        min={0}
+                        max={60}
+                        value={row.break_min}
+                        onChange={(event) => write({ break_min: Number(event.target.value) })}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title={t('settings.notifications.title')}>
+                <p className="text-label text-muted">{t('settings.notifications.intro')}</p>
+                <div className="card flex flex-col gap-6 p-6">
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="label">{t('settings.notifications.channels')}</legend>
+                    {CHANNELS.map((channel) => {
+                      const granted = grantedChannels.includes(channel)
+                      const available = availableChannels.includes(channel)
+                      const minPlan = planForReminderChannel(channel)
+                      const on = selectedChannels.includes(channel)
+                      return (
+                        <div key={channel} className="flex min-h-11 flex-wrap items-center gap-2">
+                          <input
+                            id={`channel-${channel}`}
+                            type="checkbox"
+                            checked={on}
+                            // A locked channel is not choosable at all, and neither is
+                            // one this deployment cannot deliver on: in both cases the
+                            // remedy is elsewhere, and a control that refuses after the
+                            // fact is worse than one that is visibly unavailable (A288).
+                            disabled={!granted || !available}
+                            onChange={(event) =>
+                              write({
+                                reminder_channels: event.target.checked
+                                  ? [...selectedChannels, channel]
+                                  : selectedChannels.filter((kept) => kept !== channel),
+                              })
+                            }
+                          />
+                          {/* The label is the hit area, and it carries `min-h-11` and
+                              `min-w-11` for the same reason `LockedFeature`'s link
+                              does. Measured in Chromium at 390px: the label was
+                              **65.9x22**, so a thumb aimed at the channel name and
+                              landing a few pixels high hit the row `<div>` and toggled
+                              nothing (Phase 14); and with the height fixed,
+                              `input#channel-email` was **35.3x44** at 100% text in both
+                              themes, because "Email" is a short word and the label is
+                              only as wide as its text. The width is on **every**
+                              channel label rather than the email row: the next short
+                              name ("Web", "Push") has the same defect, and a per-row
+                              fix is one that gets forgotten. It costs a 9px sliver on
+                              the narrow rows and buys the 44px target the gate
+                              requires. The checkbox itself stays 13x13 — the label is
+                              what a finger reaches. */}
+                          <label
+                            htmlFor={`channel-${channel}`}
+                            className="text-body flex min-h-11 min-w-11 items-center"
+                          >
+                            {t(`settings.channel.${channel}`)}
+                          </label>
+                          {!granted && minPlan !== null ? (
+                            // The word carries the state; the tone repeats it, so the
+                            // row reads in monochrome.
+                            <span className="chip chip-due">
+                              {t('settings.notifications.locked', { plan: minPlan })}
+                            </span>
+                          ) : !available ? (
+                            // Granted by the plan and not deliverable yet. The sentence
+                            // names which of the two it is, because "not available"
+                            // alone reads as a bug rather than as a channel that is
+                            // coming.
+                            <span className="chip chip-due">
+                              {t('settings.notifications.notYet')}
+                            </span>
+                          ) : null}
+                        </div>
+                      )
                     })}
-              </p>
-            ) : (
-              <p className="text-small text-muted">{t('settings.notifications.quietNone')}</p>
-            )}
-          </fieldset>
+                  </fieldset>
+
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="label">{t('settings.notifications.quiet')}</legend>
+                    <p className="text-caption text-muted">
+                      {t('settings.notifications.quietHint')}
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex flex-col gap-1">
+                        <span className="label">{t('settings.notifications.quietFrom')}</span>
+                        <input
+                          className="field max-w-24"
+                          type="number"
+                          min={0}
+                          max={23}
+                          value={row.quiet_start_hour ?? ''}
+                          onChange={(event) =>
+                            // The pair is both-or-neither: setting one sets both, and
+                            // clearing either clears both. A window with one end would
+                            // be a row the migration's own check constraint refuses.
+                            write({
+                              quiet_start_hour:
+                                event.target.value === '' ? null : Number(event.target.value),
+                              quiet_end_hour: row.quiet_end_hour ?? 7,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="label">{t('settings.notifications.quietTo')}</span>
+                        <input
+                          className="field max-w-24"
+                          type="number"
+                          min={0}
+                          max={23}
+                          value={row.quiet_end_hour ?? ''}
+                          onChange={(event) =>
+                            write({
+                              quiet_start_hour: row.quiet_start_hour ?? 22,
+                              quiet_end_hour:
+                                event.target.value === '' ? null : Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                    {/* Which window it means, in words. `22 → 7` wraps midnight, and a
+                        student reading two numbers has no way to know that is allowed. */}
+                    {row.quiet_start_hour !== null && row.quiet_end_hour !== null ? (
+                      <p className="text-small text-muted">
+                        {row.quiet_start_hour < row.quiet_end_hour
+                          ? t('settings.notifications.quietSameDay', {
+                              from: row.quiet_start_hour,
+                              to: row.quiet_end_hour,
+                            })
+                          : t('settings.notifications.quietNextDay', {
+                              from: row.quiet_start_hour,
+                              to: row.quiet_end_hour,
+                            })}
+                      </p>
+                    ) : (
+                      <p className="text-small text-muted">{t('settings.notifications.quietNone')}</p>
+                    )}
+                  </fieldset>
+                </div>
+              </Section>
+
+              <Section title={t('settings.language.title')}>
+                <p className="text-label text-muted">{t('settings.language.intro')}</p>
+                <div className="card flex flex-col gap-2 p-4">
+                  <label className="label" htmlFor="settings-language">
+                    {t('settings.language.label')}
+                  </label>
+                  <select
+                    id="settings-language"
+                    className="field max-w-64"
+                    value={row.language}
+                    onChange={(event) => write({ language: event.target.value as Language })}
+                  >
+                    {LANGUAGES.map((language) => (
+                      <option key={language} value={language}>
+                        {LANGUAGE_LABELS[language]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Section>
+            </>
+          )}
+
+          {section === 'calendar' && <ConnectionsPanel />}
+
+          {section === 'devices' && <DevicesPanel />}
+
+          {section === 'appearance' && (
+            <>
+              <Section title={t('settings.appearance.title')}>
+                <p className="text-label text-muted">{t('settings.appearance.intro')}</p>
+                <div className="card flex flex-col gap-2 p-4">
+                  <label className="label" htmlFor="settings-theme">
+                    {t('settings.appearance.label')}
+                  </label>
+                  <select
+                    id="settings-theme"
+                    className="field max-w-64"
+                    value={row.theme}
+                    onChange={(event) =>
+                      write({ theme: event.target.value as 'system' | 'light' | 'dark' })
+                    }
+                  >
+                    <option value="system">{t('settings.appearance.system')}</option>
+                    <option value="light">{t('settings.appearance.light')}</option>
+                    <option value="dark">{t('settings.appearance.dark')}</option>
+                  </select>
+                </div>
+              </Section>
+
+              {/* The one section this build does not own. It is named rather than
+                  omitted, because a student looking for it would otherwise conclude
+                  it does not exist. */}
+              <Section title={t('settings.later.title')}>
+                <p className="text-label text-muted">{t('settings.later.intro')}</p>
+                <ul className="card flex flex-col gap-3 p-4">
+                  <li className="flex flex-col gap-1">
+                    <span className="text-body">{t('settings.later.byok')}</span>
+                    <span className="meta">{t('settings.later.byokPhase')}</span>
+                  </li>
+                </ul>
+              </Section>
+            </>
+          )}
         </div>
-      </Section>
+      </div>
 
-      <Section title={t('settings.language.title')}>
-        <div className="card flex flex-col gap-2 p-4">
-          <label className="label" htmlFor="settings-language">
-            {t('settings.language.label')}
-          </label>
-          <select
-            id="settings-language"
-            className="field max-w-64"
-            value={row.language}
-            onChange={(event) => write({ language: event.target.value as Language })}
-          >
-            {LANGUAGES.map((language) => (
-              <option key={language} value={language}>
-                {LANGUAGE_LABELS[language]}
-              </option>
-            ))}
-          </select>
-        </div>
-      </Section>
-
-      <Section title={t('settings.appearance.title')}>
-        <div className="card flex flex-col gap-2 p-4">
-          <label className="label" htmlFor="settings-theme">
-            {t('settings.appearance.label')}
-          </label>
-          <select
-            id="settings-theme"
-            className="field max-w-64"
-            value={row.theme}
-            onChange={(event) => write({ theme: event.target.value as 'system' | 'light' | 'dark' })}
-          >
-            <option value="system">{t('settings.appearance.system')}</option>
-            <option value="light">{t('settings.appearance.light')}</option>
-            <option value="dark">{t('settings.appearance.dark')}</option>
-          </select>
-        </div>
-      </Section>
-
-      <Section title={t('settings.plan.title')}>
-        <div className="card flex flex-col gap-3 p-4">
-          <p className="text-small text-muted">{t('settings.plan.hint')}</p>
-          <Link to="/billing" className="link inline-flex min-h-11 items-center self-start">
-            {t('settings.plan.open')}
-          </Link>
-          <hr className="border-border" />
-          {/* The dashboard's only route in, on every form factor. It is not a sixth
-              nav label (A189), and this section is where a student is already
-              looking at what their plan gives them. */}
-          <p className="text-small text-muted">{t('settings.plan.progressHint')}</p>
-          <Link to="/dashboard" className="link inline-flex min-h-11 items-center self-start">
-            {t('settings.plan.progress')}
-          </Link>
-        </div>
-      </Section>
-
-      <Section title={t('settings.devices.title')}>
-        <div className="card flex flex-col gap-3 p-4">
-          <p className="text-small text-muted">{t('settings.devices.hint')}</p>
-          <Link to="/devices" className="link inline-flex min-h-11 items-center self-start">
-            {t('settings.devices.open')}
-          </Link>
-          <hr className="border-border" />
-          <p className="text-small text-muted">{t('settings.devices.resetHint')}</p>
-          <button
-            type="button"
-            className="btn btn-secondary self-start"
-            disabled={resetting}
-            onClick={() => void reset()}
-          >
-            {t('settings.devices.reset')}
-          </button>
-        </div>
-      </Section>
-
-      {/* Between the account's own devices and the "not built yet" list: an update
-          is a fact about this installation, which is what the section above is
-          about too, and it is not a feature another phase owes. The component
-          renders nothing on web and mobile (A335), so the section is absent there
-          rather than present and disabled. */}
-      <UpdatesPanel />
-
-      {/* The data controls (A355). Between the account's own devices and the "not built
-          yet" list, because both are facts about this account: what we hold and how to
-          take it or leave. The section used to be a line under "Not built yet", and the
-          copy that said so is gone rather than left to contradict the code. */}
-      <DataSection />
-
-      <Section title={t('settings.later.title')}>
-        <ul className="card flex flex-col gap-3 p-4">
-          <li className="flex flex-col gap-1">
-            <span className="text-body">{t('settings.later.byok')}</span>
-            <span className="meta">{t('settings.later.byokPhase')}</span>
-          </li>
-        </ul>
-      </Section>
+      <PageFooter
+        left={<span className="uppercase">{footerZoneLabel}</span>}
+        right={<span className="uppercase">{today}</span>}
+      />
     </div>
+  )
+}
+
+/**
+ * Who this account is.
+ *
+ * The address and the plan's name, read from the session and from `GET /usage`.
+ * There is no display name to show: the product never asks for one, and deriving one
+ * from the address would be a fact the app invented. The plan is the account's own,
+ * and it is the answer to the question a student arrives at this section with.
+ *
+ * Both facts are read-only, so their labels are the mono eyebrow layer rather than
+ * `.label`: a control's label sits above a control, and a label over a value reads
+ * as a field the student can type into.
+ */
+function AccountIdentity() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const usage = useUsage()
+
+  return (
+    <Section title={t('settings.section.account')}>
+      <p className="text-label text-muted">{t('settings.account.intro')}</p>
+      <div className="card flex flex-col gap-4 p-6">
+        <div className="flex flex-col gap-1">
+          <span className="eyebrow">{t('settings.account.email')}</span>
+          <span className="text-body break-words">
+            {session.status === 'signed-in' ? session.user.email : ''}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="eyebrow">{t('settings.account.plan')}</span>
+          {/* The plan's name as the server reports it (`usage.name` is the matrix's
+              display name, e.g. "Free"), or a loading word while the answer is in
+              flight — a placeholder name would be a wrong one. */}
+          <span className="text-body">
+            {usage.data?.name ?? (usage.isPending ? t('states.loading') : '')}
+          </span>
+        </div>
+      </div>
+    </Section>
   )
 }
 
@@ -487,14 +623,15 @@ function DataSection() {
 
   return (
     <Section title={t('settings.data.title')}>
-      <div className="card flex flex-col gap-3 p-4">
+      <p className="text-label text-muted">{t('settings.data.intro')}</p>
+      <div className="card flex flex-col gap-4 p-6">
         <p className="text-small text-muted">{t('settings.data.exportHint')}</p>
         <div className="flex flex-wrap gap-2">
           {EXPORT_FORMATS.map((format) => (
             <button
               key={format}
               type="button"
-              className="btn btn-secondary min-h-11"
+              className="btn btn-secondary"
               disabled={exportAccount.isPending}
               onClick={() => {
                 setError(null)
@@ -527,7 +664,7 @@ function DataSection() {
         {!confirming ? (
           <button
             type="button"
-            className="btn btn-secondary min-h-11 self-start"
+            className="btn btn-secondary self-start"
             onClick={() => {
               setError(null)
               setConfirming(true)
@@ -536,7 +673,7 @@ function DataSection() {
             {t('settings.data.deleteStart')}
           </button>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1">
               <span className="label">{t('settings.data.deleteConfirmLabel', { email })}</span>
               <input
@@ -549,7 +686,7 @@ function DataSection() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="btn btn-danger min-h-11"
+                className="btn btn-danger"
                 // Disabled until the address matches: the confirmation has to be something a
                 // mis-tap cannot produce.
                 disabled={!matches || deleteAccount.isPending}
@@ -566,7 +703,7 @@ function DataSection() {
               </button>
               <button
                 type="button"
-                className="btn btn-secondary min-h-11"
+                className="btn btn-secondary"
                 onClick={() => {
                   setTyped('')
                   setConfirming(false)

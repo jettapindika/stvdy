@@ -4,6 +4,8 @@ import {
   NIL_GOAL_ID,
   PINNED_TOPIC,
   acceptBody,
+  conflictsWith,
+  totalMinutes,
   blockSubject,
   daysUntil,
   gridDays,
@@ -292,5 +294,61 @@ describe('the warnings', () => {
       () => undefined,
     )
     expect(unknown.goal).toBe('')
+  })
+})
+
+/**
+ * The plan banner's two figures.
+ *
+ * Both are read by the student *before* they press anything, so both have to be
+ * measurements of the blocks in hand rather than estimates about a schedule: the
+ * count is `blocks.length`, the duration is the sum of the same `blockMinutes` the
+ * workload meter uses, and the conflict count is a comparison against the busy
+ * intervals the grid was given. A second duration function would let the banner and
+ * the meter disagree about how long the same session is, which is why `totalMinutes`
+ * shares `blockMinutes` rather than restating it.
+ */
+describe('the plan banner’s figures', () => {
+  const interval = (starts: string, ends: string) => ({ starts_at: starts, ends_at: ends })
+
+  it('sums the blocks’ own minutes, not the span between the first and the last', () => {
+    // Two 50-minute sessions an hour apart is 100 minutes of study, not the 2h 50m
+    // the outer bounds would give. A banner that reported the span would tell the
+    // student they had committed to nearly twice the work they had.
+    const blocks = [
+      interval('2026-11-16T01:00:00Z', '2026-11-16T01:50:00Z'),
+      interval('2026-11-16T02:50:00Z', '2026-11-16T03:40:00Z'),
+    ]
+    expect(totalMinutes(blocks)).toBe(100)
+  })
+
+  it('is zero for no blocks, which is a real sum rather than an absence', () => {
+    expect(totalMinutes([])).toBe(0)
+  })
+
+  it('counts a block that shares an instant with busy time, and one that does not', () => {
+    const busy = [interval('2026-11-16T01:00:00Z', '2026-11-16T02:00:00Z')]
+    const blocks = [
+      // Inside the lecture.
+      interval('2026-11-16T01:30:00Z', '2026-11-16T02:00:00Z'),
+      // Later the same day, clear of it.
+      interval('2026-11-16T05:00:00Z', '2026-11-16T05:50:00Z'),
+    ]
+    expect(conflictsWith(blocks, busy)).toBe(1)
+  })
+
+  it('does not count a block that merely touches a busy interval', () => {
+    // The comparison is half-open, which is the server's own overlap predicate: a
+    // block that starts exactly when a class ends shares no instant with it, and
+    // reporting it as a conflict would send the student to move a block that is
+    // already fine.
+    const busy = [interval('2026-11-16T01:00:00Z', '2026-11-16T02:00:00Z')]
+    expect(conflictsWith([interval('2026-11-16T02:00:00Z', '2026-11-16T02:50:00Z')], busy)).toBe(0)
+  })
+
+  it('reports zero conflicts when there is nothing to conflict with', () => {
+    // Zero here is a measurement, not an absence: the app did compare every block
+    // it has against every busy interval it has, and found no overlap.
+    expect(conflictsWith([interval('2026-11-16T01:00:00Z', '2026-11-16T01:50:00Z')], [])).toBe(0)
   })
 })

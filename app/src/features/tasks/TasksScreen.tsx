@@ -4,15 +4,39 @@ import { Link } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
 import { deleteTask, saveTask, useTasks, type TaskInput } from '@/api/queries/tasks'
-import { PageHeader, Section } from '@/components/layout/Section'
+import { useWorkspaces } from '@/api/queries/workspaces'
+import { Section } from '@/components/layout/Section'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
-import { useSession } from '@/features/auth/useSession'
-import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
+import { Icon } from '@/components/ui/Icon'
+import { useFormFactor } from '@/lib/useFormFactor'
 import { BreakdownPanel } from './BreakdownPanel'
 import { orderTasks, subtasksOf, type TaskRow } from './order'
+import { DueLine, PriorityChip, StatusChip, SubtaskLines } from './parts'
+import { durationLabel, taskSummary, type TaskSummary } from './summary'
+import { TaskBoard } from './TaskBoard'
 
 /**
- * Tasks: the list, the create form, and the break-down panel.
+ * Tasks, as a **panel of the planner**.
+ *
+ * It is the `Tasks` half of the design's `Calendar | Tasks` pair, and it renders
+ * the panel only: the page heading, the view switcher and the footer belong to
+ * `PlannerScreen`, which is what keeps one screen from having two `<h1>`s. The
+ * file and the export kept their names because the tests, the accessibility walk
+ * and the phase's file list all address it by this one; the role is what changed.
+ *
+ * **The layout is the URL's, not this component's state.** `?view=tasks&layout=…`
+ * is read by the host and passed down, so the board is a place a student can link
+ * to and come back to. List is the default, because the list is the view that can
+ * show every column a row has.
+ *
+ * **Six columns are a desk layout, and the phone gets stacked cards.** A
+ * six-column table cannot survive 390px at 200% text — the calendar's
+ * `TimeGrid` measurement is the same finding, and it is the reason that grid is a
+ * table of *rows* rather than of columns. So `useFormFactor` chooses between the
+ * table and the card list, which is how the shell itself decides between the
+ * sidebar and the tab bar. One of the two renders, rather than both with one
+ * hidden by CSS: two DOMs would double every text pair the accessibility gate
+ * counts and would let a test assert on the one the student cannot see.
  *
  * **Subtasks are one level, and the parent shows its progress as a count.** The
  * tree is walked with `order.ts`'s rules — the same order the server sorts by, so
@@ -23,160 +47,86 @@ import { orderTasks, subtasksOf, type TaskRow } from './order'
  * **Deleting a parent tombstones its children on this device too.** The server's
  * cascade fires when *it* applies the parent's delete, and a device that deleted a
  * parent while offline would show orphaned subtasks until the next pull (A197), so
- * the children are queued here in the same action.
+ * the children are queued here in the same action. The control is here and *not* on
+ * the board, so a mis-tap in the denser view cannot take out a parent and its
+ * children.
  *
  * **A done task is still listed here, unlike on Today.** The Today view answers
- * "what must I do", and the Tasks screen answers "what do I have" — a completed
- * task that vanished from the screen that can un-complete it would be a row the
- * student could not reach.
+ * "what must I do", and this panel answers "what do I have" — a completed task
+ * that vanished from the view that can un-complete it would be a row the student
+ * could not reach.
+ *
+ * **The summary band is `Your work`, not `This week's work`.** The design's title
+ * is the latter and its figures are week-scoped, and one of the four cannot be:
+ * nothing in this schema records *when* a task was completed, so "completed this
+ * week" is not a number this app can compute. Every figure here is a count of the
+ * rows the device already holds — open, estimated, high priority, done — and the
+ * band says so rather than borrowing a window it cannot honour.
  */
-export function TasksScreen() {
+export function TasksScreen({
+  now,
+  timeZone,
+  layout,
+}: {
+  /** The instant the planner was opened, fixed by the host. */
+  now: Date
+  timeZone: string
+  /** `list` or `board`, from `?layout=`. */
+  layout: 'list' | 'board'
+}) {
   const { t } = useTranslation()
-  const session = useSession()
+  const isPhone = useFormFactor() === 'phone'
   const tasks = useTasks()
-  // The student's own zone, which is where a due date has to be rendered: `due_at`
-  // is a `timestamptz` and the row showed its raw UTC instant, so a task due 23:59
-  // WIB read `2026-10-16T16:59:00Z` — the same defect class as `QuickCapture`'s Due
-  // line and the study screen's header link, found by the gate's `tasks` surface
-  // capturing the literal string as a text pair.
-  const timeZone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
+  const workspaces = useWorkspaces()
   const [error, setError] = useState<ApiError | null>(null)
   const [breakdownFor, setBreakdownFor] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
   const rows = orderTasks(tasks.data ?? [])
   const roots = rows.filter((row) => row.parent_id === null)
+  const summary = taskSummary(rows)
 
-  // `w-full` is load-bearing, and it is what Phase 14's fix-round-1 measured at
-  // 200% text on a 390px phone: without it `document.scrollingElement.scrollWidth`
-  // is **493** against a 390 viewport.
-  //
-  // The width is not the due-date control's fault, which is why the control is
-  // untouched. `#task-due` is a `<input type="date">` whose *min-content* is
-  // **346.6px** at 200% text — Chromium's UA stylesheet gives the date control's
-  // shadow DOM an intrinsic width no author CSS can reach (in-browser probes:
-  // `max-width: none`, `width: auto`, `min-width: 0`, `max-width: 100%`,
-  // `flex: 0 1 auto` and `appearance: none` all leave 493; only `max-width: 0`
-  // works, and it squeezes the control to a 59.6px empty box, which is a worse
-  // defect than the scroll). That minimum propagates up: the card's min-content is
-  // 412.6px and this root's is 492.6px.
-  //
-  // This div is `width: auto` inside a column flex container, so its used width is
-  // its *fit-content* — and fit-content can never go below min-content, so the root
-  // stays 492.6px wide inside a 390px `main` and the page scrolls. `w-full` makes
-  // the width definite (the container's content box, 390px) instead of content-based,
-  // which is the property that stops any wide intrinsic child from resizing the
-  // screen. Measured after, both themes: **390/390**, and the control intact and
-  // usable at **192x44** (100% text) and **244x88** (200%).
-  //
-  // `min-w-0` alone does not do it — `min-width: auto` is already 0 in the cross
-  // axis; the width is what has to stop being automatic. `align-self: stretch` alone
-  // does not either, measured.
-  //
-  // **What this does not fix, measured rather than left implicit:** at 200% text the
-  // control's content box is 184.4px and the value is 168.2px in the control's own
-  // font, so the picker indicator no longer has room beside it and Chromium paints
-  // the indicator over the year's last digit. At 100% text there is room (84.1px of
-  // value in 161.2px). The squeeze is the screen's padding at that scale — `px-5`
-  // plus the card's `p-4` is 144px of a 390px viewport — which is house-wide and not
-  // this screen's to change; a Tasks-local padding would be a second convention for
-  // the same thing.
-  return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
-      <PageHeader title={t('nav.tasks')} subtitle={t('tasks.subtitle')} />
+  // The course label the design puts above every task title: `BIO 201 · Cell
+  // biology`. The code is optional on the workspace (`workspaces.course_code` is
+  // nullable), so a workspace without one contributes its name alone — inventing a
+  // code is the one thing this app may not do with data.
+  const courses: Record<string, string> = {}
+  for (const workspace of workspaces.data ?? []) {
+    courses[workspace.id] =
+      workspace.course_code === null
+        ? workspace.name
+        : `${workspace.course_code} · ${workspace.name}`
+  }
 
-      {/* The reciprocal half of the spec's `Plan | Tasks` control.
-       *
-       * **Without this, `/planner` and `/syllabus` were reachable only by typing a
-       * URL.** The two inbound links formed a closed cycle — `PlannerScreen` links to
-       * `/syllabus` from its empty-goals state, and `SyllabusReviewScreen` links back
-       * to `/planner` after a confirm — and neither nav has a planner item (the tab
-       * bar's five destinations are fixed, and A189 records why a sixth would take
-       * width from all of them). So a student could not open the planner, import a
-       * syllabus or reach the review screen at all, and `nav.planner` existed in both
-       * locales as `PlannerScreen`'s own page title only.
-       *
-       * `Plan` here rather than a nav item, because that is the pair the spec asks for
-       * and because the planner already renders its own half: one control, two
-       * screens, each linking to the other. It is also what makes Phase 11's gate-5
-       * leg measurable — the walk navigates by tapping, so a screen nothing links to
-       * cannot be walked at all. */}
-      <nav aria-label={t('planner.views.label')} className="flex flex-wrap gap-2">
-        <span className="btn btn-secondary" aria-current="page">
-          {t('planner.views.tasks')}
-        </span>
-        <Link to="/planner" className="btn btn-quiet">
-          {t('planner.views.plan')}
-        </Link>
-      </nav>
+  // The server's course index for each workspace, so a row on the board wears the
+  // same hue here as on its card and its calendar entry. The map is built from the
+  // list this screen already fetches; `courseHue` keeps its id hash as the fallback
+  // for a row whose workspace has not loaded.
+  const workspaceColors = new Map<string, number>()
+  for (const workspace of workspaces.data ?? []) {
+    workspaceColors.set(workspace.id, workspace.color)
+  }
+  const courseCount = new Set(
+    rows
+      .map((row) => row.workspace_id)
+      .filter((id): id is string => id !== null && id in courses),
+  ).size
 
-      {error !== null ? (
-        <ApiErrorNotice error={error} noun={t('tasks.noun')} action={t('actions.retry')} />
-      ) : null}
+  // A filter over rows the device already holds, so it is instant and it works
+  // offline. It searches the titles and the notes, which is what the helper line
+  // under the field says, and it is case-insensitive because nobody types a title
+  // the way they wrote it.
+  const needle = query.trim().toLowerCase()
+  const visible =
+    needle === ''
+      ? roots
+      : roots.filter(
+          (row) =>
+            row.title.toLowerCase().includes(needle) ||
+            (row.notes ?? '').toLowerCase().includes(needle),
+        )
 
-      <Section title={t('tasks.new.title')}>
-        <CreateForm
-          onError={setError}
-          onCreated={(id) => {
-            setError(null)
-            void id
-          }}
-        />
-      </Section>
-
-      <Section title={t('tasks.list.title')} count={roots.length > 0 ? roots.length : undefined}>
-        <div className="card p-4">
-          {tasks.isPending ? (
-            <LoadingState label={t('tasks.loading')} />
-          ) : roots.length === 0 ? (
-            <EmptyState
-              title={t('tasks.empty.title')}
-              reason={t('tasks.empty.reason')}
-              padded={false}
-            />
-          ) : (
-            <ul className="flex flex-col gap-4">
-              {roots.map((task) => (
-                <TaskItem
-                  key={task.id}
-                  task={task}
-                  all={rows}
-                  timeZone={timeZone}
-                  onBreakdown={() => setBreakdownFor(task.id)}
-                  onError={setError}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-      </Section>
-
-      {breakdownFor !== null ? (
-        <BreakdownPanel taskId={breakdownFor} onClose={() => setBreakdownFor(null)} />
-      ) : null}
-    </div>
-  )
-}
-
-/** One task, its subtasks, and the actions that belong to it. */
-function TaskItem({
-  task,
-  all,
-  timeZone,
-  onBreakdown,
-  onError,
-}: {
-  task: TaskRow
-  all: TaskRow[]
-  // Passed rather than read here: one `useSession()` for the list, not one per row.
-  timeZone: string
-  onBreakdown: () => void
-  onError: (error: ApiError | null) => void
-}) {
-  const { t } = useTranslation()
-  const children = subtasksOf(all, task.id)
-  const done = children.filter((child) => child.status === 'done').length
-
-  const toggle = async () => {
+  const toggle = async (task: TaskRow) => {
     try {
       await saveTask(
         {
@@ -194,84 +144,503 @@ function TaskItem({
         false,
       )
     } catch (failure) {
-      onError(asApiError(failure))
+      setError(asApiError(failure))
     }
   }
 
-  const remove = async () => {
+  const remove = async (task: TaskRow) => {
     try {
-      await deleteTask(task.id, children.map((child) => child.id))
+      await deleteTask(
+        task.id,
+        subtasksOf(rows, task.id).map((child) => child.id),
+      )
     } catch (failure) {
-      onError(asApiError(failure))
+      setError(asApiError(failure))
     }
   }
 
   return (
-    <li className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-body">
-          {task.status === 'done' ? t('tasks.done', { title: task.title }) : task.title}
-        </span>
-        <span className="flex flex-wrap items-center gap-2">
-          {task.due_at !== null ? (
-            <span className="meta">
-              {t('tasks.due', {
-                when: formatInZone(new Date(task.due_at), timeZone, { dateStyle: 'medium' }),
-              })}
-            </span>
-          ) : null}
-          {children.length > 0 ? (
-            // A count, not a bar: the number of done children is the fact, and a
-            // percentage would be a second number this screen computed.
-            <span className="chip">
-              {t('tasks.subtaskProgress', { done, total: children.length })}
-            </span>
-          ) : null}
-        </span>
-      </div>
-
-      {children.length > 0 ? (
-        <ul className="flex flex-col gap-1 border-l border-border pl-3">
-          {children.map((child) => (
-            <li key={child.id} className="text-small text-muted">
-              {child.status === 'done' ? t('tasks.done', { title: child.title }) : child.title}
-            </li>
-          ))}
-        </ul>
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      {error !== null ? (
+        <ApiErrorNotice error={error} noun={t('tasks.noun')} action={t('actions.retry')} />
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn btn-secondary" onClick={() => void toggle()}>
-          {task.status === 'done' ? t('tasks.reopen') : t('tasks.markDone')}
-        </button>
-        <button type="button" className="btn btn-quiet" onClick={onBreakdown}>
-          {t('tasks.breakdown.action')}
-        </button>
-        <button type="button" className="btn btn-quiet" onClick={() => void remove()}>
-          {t('actions.delete')}
-        </button>
-      </div>
-    </li>
+      <TaskSummaryBand summary={summary} courseCount={courseCount} />
+
+      <TaskFilters query={query} onQuery={setQuery} />
+
+      <Section
+        title={t('tasks.list.all')}
+        action={
+          <p className="meta min-w-0 break-words">
+            {t('tasks.list.meta', {
+              count: rows.length,
+              total: rows.length,
+              open: summary.open,
+            })}
+          </p>
+        }
+      >
+        {tasks.isPending ? (
+          <LoadingState label={t('tasks.loading')} />
+        ) : visible.length === 0 ? (
+          needle !== '' ? (
+            <EmptyState
+              title={t('tasks.find.none', { query })}
+              reason={t('tasks.find.helper')}
+              action={
+                <button type="button" className="btn btn-secondary" onClick={() => setQuery('')}>
+                  {t('tasks.find.clear')}
+                </button>
+              }
+            />
+          ) : (
+            <EmptyState title={t('tasks.empty.title')} reason={t('tasks.empty.reason')} />
+          )
+        ) : layout === 'board' && !isPhone ? (
+          <TaskBoard
+            rows={rows}
+            timeZone={timeZone}
+            now={now}
+            courses={courses}
+            courseColors={workspaceColors}
+            onToggle={(task) => void toggle(task)}
+            onBreakdown={setBreakdownFor}
+            onNewTask={() => {
+              document.getElementById('new-task')?.focus()
+            }}
+          />
+        ) : (
+          // The phone renders the card list for **both** layouts: a three-column
+          // board is three columns of cards, and one column of cards is the same
+          // information in the order a thumb reads it. Switching would be a
+          // re-layout with nothing behind it.
+          <TaskList
+            tasks={visible}
+            all={rows}
+            timeZone={timeZone}
+            now={now}
+            courses={courses}
+            table={!isPhone}
+            onToggle={(task) => void toggle(task)}
+            onRemove={(task) => void remove(task)}
+            onBreakdown={setBreakdownFor}
+          />
+        )}
+      </Section>
+
+      {/* The create form is the panel's last block, so the `+ New task` control in
+          the page heading has somewhere to land: the anchor is the section's own
+          id and `tabIndex={-1}` is what makes the browser move focus, not only
+          scroll. A heading control that scrolled nowhere would be decoration. */}
+      <section id="new-task" tabIndex={-1} className="scroll-mt-4 focus:outline-none">
+        <Section title={t('tasks.new.title')}>
+          <CreateForm onError={setError} />
+        </Section>
+      </section>
+
+      {breakdownFor !== null ? (
+        // The title and the due instant come from the row the panel was opened
+        // from, so the panel does not fetch the task list a second time to render
+        // two lines it was already handed.
+        <BreakdownPanel
+          taskId={breakdownFor}
+          taskTitle={rows.find((row) => row.id === breakdownFor)?.title ?? ''}
+          dueAt={rows.find((row) => row.id === breakdownFor)?.due_at ?? null}
+          timeZone={timeZone}
+          onClose={() => setBreakdownFor(null)}
+        />
+      ) : null}
+    </div>
   )
 }
 
-/** The create form: a title, and the two fields worth asking for up front. */
-function CreateForm({
-  onError,
-  onCreated,
+/**
+ * The four figures, and the layout switch beside them.
+ *
+ * **A figure that cannot be computed is omitted, never zero-filled.** The
+ * estimated-work figure is absent when no open task carries an estimate, because
+ * `estimate_min` is nullable and "0 minutes of estimated work" would be a claim
+ * about a set of tasks the app has not been told the effort of. The other three are
+ * counts of rows, and a count of zero is a real count.
+ */
+function TaskSummaryBand({
+  summary,
+  courseCount,
 }: {
-  onError: (error: ApiError | null) => void
-  onCreated: (id: string) => void
+  summary: TaskSummary
+  courseCount: number
 }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="raised flex flex-col gap-4 border border-border p-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="text-label text-text">{t('planner.work.title')}</p>
+        {courseCount > 0 ? (
+          <p className="meta">{t('planner.work.courses', { count: courseCount })}</p>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
+        <Metric value={String(summary.open)} label={t('planner.work.open')} />
+        {summary.estimateMin === null ? null : (
+          <Metric value={durationLabel(t, summary.estimateMin)} label={t('planner.work.estimated')} />
+        )}
+        <Metric value={String(summary.highPriority)} label={t('planner.work.high')} />
+        <Metric value={String(summary.done)} label={t('planner.work.completed')} />
+      </div>
+
+    </div>
+  )
+}
+
+/** One figure: a 24/32 number over its 14/20 label. */
+function Metric({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      <span className="text-h2 min-w-0 break-words">{value}</span>
+      <span className="text-label min-w-0 break-words text-muted">{label}</span>
+    </div>
+  )
+}
+
+/**
+ * List or board.
+ *
+ * Links rather than buttons, so each layout is an address the student can come
+ * back to and the accessibility walk can reach. `aria-current` marks the active
+ * one and the label weight goes 500 -> 600 with it, so the state is not carried by
+ * colour alone.
+ *
+ * **Exported, because the row it belongs to is the host's.** The frame draws this
+ * switch on the right of the same row as `Calendar | Tasks`, and that row is
+ * `PlannerScreen`'s — so the control is defined here, where the URL shape it writes
+ * lives, and rendered there.
+ */
+export function LayoutSwitch({ layout }: { layout: 'list' | 'board' }) {
+  const { t } = useTranslation()
+  const options: { id: 'list' | 'board'; label: string; icon: 'list-checks' | 'layers' }[] = [
+    { id: 'list', label: t('planner.layout.list'), icon: 'list-checks' },
+    { id: 'board', label: t('planner.layout.board'), icon: 'layers' },
+  ]
+
+  return (
+    <nav
+      aria-label={t('planner.layout.label')}
+      className="flex shrink-0 flex-wrap gap-1 rounded-field bg-surface-raised p-1"
+    >
+      {options.map((option) => {
+        const active = option.id === layout
+        return (
+          <Link
+            key={option.id}
+            to={`/planner?view=tasks&layout=${option.id}`}
+            aria-current={active ? 'page' : undefined}
+            className={`flex min-h-8 min-w-0 items-center gap-2 rounded-field px-4 text-label ${
+              active
+                ? 'border border-border bg-surface font-semibold text-primary-text'
+                : 'border border-transparent text-muted hover:text-text'
+            }`}
+          >
+            <Icon name={option.icon} size={16} />
+            {option.label}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
+/**
+ * The filters row: a labelled search field, its helper line, and the order.
+ *
+ * **The order is stated, not offered.** `order.ts` mirrors the server's own
+ * `order by due_at nulls last, priority, position, created_at, id`, and two orders
+ * would put the same rows in two sequences on two screens. The design draws a
+ * chevron beside `Sort: Due date`; there is no second order to choose, and a
+ * chevron that opens nothing is a control whose only outcome is nothing.
+ *
+ * The three filter dropdowns the frame draws (`All courses`, `All priorities`,
+ * `This week`) are likewise absent: each would be a chevron with no menu behind it.
+ * The search field is the filter that does something today.
+ */
+function TaskFilters({ query, onQuery }: { query: string; onQuery: (value: string) => void }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="flex flex-wrap items-start gap-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <label className="text-label text-text" htmlFor="task-search">
+          {t('tasks.find.label')}
+        </label>
+        <input
+          id="task-search"
+          className="field"
+          type="search"
+          value={query}
+          placeholder={t('tasks.find.placeholder')}
+          onChange={(event) => onQuery(event.target.value)}
+        />
+        {/* `break-words`: the helper is a sentence in a column narrower than its
+            longest word at 200% text, and without this it overflowed by 13px. */}
+        <p className="text-caption text-muted break-words">{t('tasks.find.helper')}</p>
+      </div>
+      <p className="meta flex min-h-11 items-center self-end">{t('tasks.sort.due')}</p>
+    </div>
+  )
+}
+
+/**
+ * The task list.
+ *
+ * `table` is the form factor's answer, not a style: at a desk the six columns are
+ * a comparison, and on a phone they are a stack. Both render the same facts from
+ * the same pieces, so the two cannot drift into saying different things about one
+ * row.
+ */
+function TaskList({
+  tasks,
+  all,
+  timeZone,
+  now,
+  courses,
+  table,
+  onToggle,
+  onRemove,
+  onBreakdown,
+}: {
+  tasks: TaskRow[]
+  all: TaskRow[]
+  timeZone: string
+  now: Date
+  courses: Record<string, string>
+  table: boolean
+  onToggle: (task: TaskRow) => void
+  onRemove: (task: TaskRow) => void
+  onBreakdown: (taskId: string) => void
+}) {
+  const { t } = useTranslation()
+  const columns = [
+    t('tasks.column.task'),
+    t('tasks.column.status'),
+    t('tasks.column.priority'),
+    t('tasks.column.estimate'),
+    t('tasks.column.due'),
+    t('tasks.column.subtasks'),
+  ]
+
+  if (!table) {
+    return (
+      <div className="card flex flex-col divide-y divide-border">
+        {tasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            all={all}
+            timeZone={timeZone}
+            now={now}
+            courses={courses}
+            onToggle={onToggle}
+            onRemove={onRemove}
+            onBreakdown={onBreakdown}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="card flex flex-col">
+      {/* The header row is a grid of the same six fractions the rows use, so a
+          column heading cannot drift away from the column under it. It is
+          `aria-hidden`: every cell below carries its own content, and a screen
+          reader hears the row rather than a heading it cannot associate with a
+          cell (this is not a `<table>`, deliberately — the rows hold controls and
+          nested lists, which is exactly the content a table cell cannot carry). */}
+      <div
+        aria-hidden="true"
+        className="raised grid grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))] gap-4 rounded-b-none border-b border-border px-5 py-2"
+      >
+        {columns.map((column) => (
+          <span key={column} className="eyebrow min-w-0 break-words">
+            {column}
+          </span>
+        ))}
+      </div>
+      <ul className="flex flex-col divide-y divide-border">
+        {tasks.map((task) => (
+          <li key={task.id} className="min-w-0">
+            <TaskTableRow
+              task={task}
+              all={all}
+              timeZone={timeZone}
+              now={now}
+              courses={courses}
+              onToggle={onToggle}
+              onRemove={onRemove}
+              onBreakdown={onBreakdown}
+            />
+          </li>
+        ))}
+      </ul>
+      <p className="meta border-t border-border px-5 py-3">
+        {t('tasks.list.showing', { count: tasks.length })} · {t('tasks.list.footnote')}
+      </p>
+    </div>
+  )
+}
+
+/** The six cells of one row, and the actions that belong to it. */
+function TaskTableRow({
+  task,
+  all,
+  timeZone,
+  now,
+  courses,
+  onToggle,
+  onRemove,
+  onBreakdown,
+}: {
+  task: TaskRow
+  all: TaskRow[]
+  timeZone: string
+  now: Date
+  courses: Record<string, string>
+  onToggle: (task: TaskRow) => void
+  onRemove: (task: TaskRow) => void
+  onBreakdown: (taskId: string) => void
+}) {
+  const { t } = useTranslation()
+  const children = subtasksOf(all, task.id)
+  const course = task.workspace_id === null ? undefined : courses[task.workspace_id]
+
+  return (
+    <div className="flex min-w-0 flex-col gap-3 px-5 py-4">
+      <div className="grid grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))] items-start gap-4">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="min-w-0 break-words text-label text-text">
+            {task.status === 'done' ? t('tasks.done', { title: task.title }) : task.title}
+          </span>
+          {course === undefined ? null : (
+            <span className="meta min-w-0 break-words text-primary-text">{course}</span>
+          )}
+        </div>
+        <StatusChip status={task.status} />
+        {/* `flex`: an `inline-flex` chip inside a plain block is an atomic inline box
+            that cannot be constrained, so it overflowed the column instead of wrapping
+            its label. As a flex item it can shrink (`min-width: 0` on `.chip`). */}
+        <span className="flex min-w-0">
+          <PriorityChip priority={task.priority} />
+        </span>
+        <span className="meta flex min-w-0 items-center break-words">
+          {task.estimate_min === null ? null : durationLabel(t, task.estimate_min)}
+        </span>
+        <DueLine dueAt={task.due_at} timeZone={timeZone} now={now} />
+        <SubtaskLines subtasks={children} />
+      </div>
+
+      <TaskActions
+        task={task}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onBreakdown={onBreakdown}
+      />
+    </div>
+  )
+}
+
+/** One task as a card, for a phone. The same six facts, stacked. */
+function TaskCard({
+  task,
+  all,
+  timeZone,
+  now,
+  courses,
+  onToggle,
+  onRemove,
+  onBreakdown,
+}: {
+  task: TaskRow
+  all: TaskRow[]
+  timeZone: string
+  now: Date
+  courses: Record<string, string>
+  onToggle: (task: TaskRow) => void
+  onRemove: (task: TaskRow) => void
+  onBreakdown: (taskId: string) => void
+}) {
+  const { t } = useTranslation()
+  const children = subtasksOf(all, task.id)
+  const course = task.workspace_id === null ? undefined : courses[task.workspace_id]
+
+  return (
+    <div className="flex min-w-0 flex-col gap-3 p-5">
+      {course === undefined ? null : (
+        <p className="meta min-w-0 break-words text-primary-text">{course}</p>
+      )}
+      <p className="min-w-0 break-words text-label text-text">
+        {task.status === 'done' ? t('tasks.done', { title: task.title }) : task.title}
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <StatusChip status={task.status} />
+        <PriorityChip priority={task.priority} />
+        {task.estimate_min === null ? null : (
+          <span className="meta rounded-field bg-surface-raised px-2 py-1">
+            {durationLabel(t, task.estimate_min)}
+          </span>
+        )}
+      </div>
+      <DueLine dueAt={task.due_at} timeZone={timeZone} now={now} />
+      <SubtaskLines subtasks={children} />
+      <TaskActions
+        task={task}
+        onToggle={onToggle}
+        onRemove={onRemove}
+        onBreakdown={onBreakdown}
+      />
+    </div>
+  )
+}
+
+/** Mark done / reopen, break down, delete. The row's own controls, in one place. */
+function TaskActions({
+  task,
+  onToggle,
+  onRemove,
+  onBreakdown,
+}: {
+  task: TaskRow
+  onToggle: (task: TaskRow) => void
+  onRemove: (task: TaskRow) => void
+  onBreakdown: (taskId: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className="btn btn-secondary" onClick={() => onToggle(task)}>
+        {task.status === 'done' ? t('tasks.reopen') : t('tasks.markDone')}
+      </button>
+      <button type="button" className="btn btn-quiet" onClick={() => onBreakdown(task.id)}>
+        {t('tasks.breakdown.action')}
+      </button>
+      <button type="button" className="btn btn-quiet" onClick={() => onRemove(task)}>
+        {t('actions.delete')}
+      </button>
+    </div>
+  )
+}
+
+/** The create form: a title, and the date worth asking for up front. */
+function CreateForm({ onError }: { onError: (error: ApiError | null) => void }) {
   const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [dueAt, setDueAt] = useState('')
 
   const submit = async () => {
     try {
-      const id = crypto.randomUUID()
       const input: TaskInput = {
-        id,
+        id: crypto.randomUUID(),
         workspace_id: null,
         parent_id: null,
         title: title.trim(),
@@ -288,7 +657,7 @@ function CreateForm({
       await saveTask(input, true)
       setTitle('')
       setDueAt('')
-      onCreated(id)
+      onError(null)
     } catch (failure) {
       onError(asApiError(failure))
     }
@@ -309,10 +678,12 @@ function CreateForm({
         {t('tasks.new.dueLabel')}
       </label>
       {/* `type="date"` stays: the native picker is the platform behaviour this
-          control is for, and the screen's sideways scroll is fixed at the root
-          above rather than by squeezing this box. Do not "fix" it here with
+          control is for, and the phone's sideways scroll is prevented at the
+          screen root rather than by squeezing this box. Do not "fix" it here with
           `max-width: 0` — measured, that leaves a 59.6px empty control with no
-          date and no picker. */}
+          date and no picker. The `max-w-48` is what keeps it from taking the whole
+          row at a desk; on a phone the field's own `min-width: 0` in styles.css is
+          what lets it shrink. */}
       <input
         id="task-due"
         className="field max-w-48"

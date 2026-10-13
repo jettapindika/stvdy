@@ -17,6 +17,13 @@ import { plannedMinutes, type Interval } from './plan'
  *
  * **Over the limit is a sentence as well as a tone.** Gate 5(d): a state is never
  * carried by colour alone, so an over-full day carries a word.
+ *
+ * **A limit of zero renders no proportion at all, and the sentence says why.**
+ * `max_study_min_per_day` is a real setting and `0` is a legal value meaning "no
+ * study time budgeted"; `planned / 0` is `Infinity`, and a bar drawn at `Infinity%`
+ * is a bar whose width is whatever the browser decides. The number is still shown,
+ * because it is a real measurement of the day, and the absence of a ratio is the
+ * honest reading of a ratio with no denominator.
  */
 export function WorkloadMeter({
   blocks,
@@ -31,13 +38,13 @@ export function WorkloadMeter({
 }) {
   const { t } = useTranslation()
   const planned = plannedMinutes(blocks, dayKey, timeZone)
-  const over = planned > limitMin
+  const over = limitMin > 0 && planned > limitMin
   const filled = limitMin > 0 ? Math.min(100, Math.round((planned / limitMin) * 100)) : 0
 
   return (
-    <div className="card flex flex-col gap-2 p-4">
+    <div className="card flex flex-col gap-3 p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="label">{t('planner.workload.title')}</p>
+        <h3 className="min-w-0 break-words">{t('planner.workload.title')}</h3>
         <p className="meta">
           {t('planner.workload.ofLimit', { planned, limit: limitMin })}
         </p>
@@ -45,15 +52,14 @@ export function WorkloadMeter({
 
       {/* The bar is decorative: the number above it is the fact, and a screen
           reader user gets the sentence below rather than a percentage. */}
-      <div
-        aria-hidden="true"
-        className="h-2 w-full overflow-hidden rounded-pill bg-surface-raised"
-      >
-        <div
-          className={over ? 'h-full bg-danger' : 'h-full bg-primary'}
-          style={{ width: `${filled}%` }}
-        />
-      </div>
+      {limitMin > 0 ? (
+        <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-pill bg-surface-raised">
+          <div
+            className={over ? 'h-full rounded-pill bg-danger' : 'h-full rounded-pill bg-primary'}
+            style={{ width: `${String(filled)}%` }}
+          />
+        </div>
+      ) : null}
 
       {over ? (
         <p className="note note-warning wrap-anywhere">{t('planner.workload.over')}</p>

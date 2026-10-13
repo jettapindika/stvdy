@@ -7,7 +7,7 @@ import { CheatsheetScreen } from '@/features/reports/CheatsheetScreen'
 import { ReportScreen } from '@/features/reports/ReportScreen'
 import { PlanUsageScreen } from '@/features/billing/PlanUsageScreen'
 import { DevicesScreen } from '@/features/devices/DevicesScreen'
-import { CalendarScreen } from '@/features/calendar/CalendarScreen'
+import { PlannerScreen } from '@/features/planner/PlannerScreen'
 import { StudyScreen } from '@/features/study/StudyScreen'
 import { TodayScreen } from '@/features/today/TodayScreen'
 import { WorkspaceListScreen } from '@/features/workspaces/WorkspaceListScreen'
@@ -61,6 +61,9 @@ const WORKSPACE = {
   created_at: '2026-10-11T08:00:00Z',
   updated_at: '2026-10-11T08:00:00Z',
   source_count: 1,
+  course_code: 'CS 401',
+  color: 0,
+  exam_date: '2026-10-26',
 }
 
 const SOURCE = {
@@ -227,7 +230,11 @@ describe('screen accessibility', () => {
     const { container } = renderWithProviders(<WorkspaceListScreen />, { route: '/workspaces' })
 
     expect(await screen.findByRole('heading', { name: 'Ruang belajar' })).toBeInTheDocument()
-    expect(container.textContent).toContain('Ruang belajarmu')
+    // The section heading is the list's own, and it renders with the list rather than
+    // during the load: a count of zero under it while the request is in flight would
+    // be a number the app made up. So this waits for the loaded state, which is the
+    // state the check is about.
+    expect(await screen.findByText('Ruang belajarmu')).toBeInTheDocument()
     await expectAccessible(container, () => heading(container, 'the workspace list'))
   })
 
@@ -505,7 +512,7 @@ describe('screen accessibility', () => {
     await expectAccessible(container, () => heading(container, 'the devices screen'))
   })
 
-  it('the calendar screen has no axe violations', async () => {
+  it('the planner host renders the calendar view with no axe violations', async () => {
     // The composition most likely to break a rule here is the grid: a table whose
     // cells are controls, and a panel of labelled fields beside it. The grid is a
     // table rather than positioned divs precisely so that a keyboard can enter it
@@ -546,8 +553,16 @@ describe('screen accessibility', () => {
       if (path === '/usage') return jsonResponse(200, USAGE_BODY)
       return notFound()
     })
-    const { container } = renderWithProviders(<CalendarScreen />, { route: '/calendar' })
-    await screen.findByRole('heading', { name: 'Calendar' })
-    await expectAccessible(container, () => heading(container, 'the calendar screen'))
+    // **The host, not the panel.** `CalendarScreen` is a view inside the Planner as
+    // of the redesign (the nav's fourth destination carries Calendar and Tasks), and
+    // it takes `now`/`timeZone` from the host precisely so the clock line, the
+    // `Today` cell and the board's overdue marks cannot disagree. Rendering the panel
+    // alone would need those props supplied by the test — which would be a second
+    // answer to a question the host owns — and it would walk a tree no student sees.
+    const { container } = renderWithProviders(<PlannerScreen />, {
+      route: '/planner?view=calendar',
+    })
+    await screen.findByRole('heading', { name: 'Planner' })
+    await expectAccessible(container, () => heading(container, 'the planner calendar view'))
   })
 })

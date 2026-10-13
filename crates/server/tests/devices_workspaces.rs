@@ -760,3 +760,164 @@ async fn seed_source_and_chunk(
 
     chunk_id
 }
+
+/// A workspace's course identity: the code, the hue and the exam date.
+///
+/// The three fields exist because the design's sidebar and course cards present a
+/// workspace as a course, and none of them can be derived from the name. Two
+/// behaviours here are the ones a later edit is most likely to break:
+///
+/// 1. **The hue is assigned round-robin and never repeats until the six are used.**
+///    A client that picked its own colour would give two devices the same one, and a
+///    constant would make every course in the rail identical.
+/// 2. **`PATCH` distinguishes an absent field from an explicit `null`.** Serde maps
+///    both to `None` for a plain `Option<T>`, which would make "rename this course"
+///    silently clear its exam date, and would make clearing one impossible.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_workspace_carries_its_course_identity(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let account = signup(&app, &harness, "course@example.test", "Laptop").await;
+    let token = token_of(&account);
+
+    // The hue wrap needs seven workspaces, and the free plan allows two. The plan is
+    // raised directly rather than through checkout because this test is about the
+    // colour assignment, not about billing — and it needs the subscription row as
+    // well, because `effective_plan` honours `users.plan_id` only while a period is
+    // active (A146).
+    let user_id: uuid::Uuid = sqlx::query_scalar("select id from users where email = $1")
+        .bind("course@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query("update users set plan_id = 'pro' where id = $1")
+        .bind(user_id)
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into subscriptions
+            (user_id, plan_id, status, billing_period, current_period_start, current_period_end)
+         values ($1, 'pro', 'active', 'monthly', now(), now() + interval '30 days')",
+    )
+    .bind(user_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // The code and the exam date are given at create; the hue is the server's.
+    let (status, first) = json(
+        &app,
+        "POST",
+        "/workspaces",
+        Some(&token),
+        serde_json::json!({ "name": "Cell biology", "course_code": "BIO 201", "exam_date": "2026-11-05" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let first_id = first["workspace"]["id"].as_str().unwrap().to_string();
+    assert_eq!(first["workspace"]["course_code"], "BIO 201");
+    assert_eq!(first["workspace"]["exam_date"], "2026-11-05");
+    assert_eq!(
+        first["workspace"]["color"], 0,
+        "the first course takes hue 0"
+    );
+
+    let (status, second) = json(
+        &app,
+        "POST",
+        "/workspaces",
+        Some(&token),
+        serde_json::json!({ "name": "Statistics" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let second_id = second["workspace"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        second["workspace"]["color"], 1,
+        "a second course takes the next hue, so two courses are told apart by colour"
+    );
+    assert!(
+        second["workspace"]["course_code"].is_null(),
+        "a course with no code is null, not an empty string"
+    );
+
+    // Six courses wrap, so the seventh reuses hue 0 rather than falling out of the
+    // range the client indexes with.
+    for index in 2..7 {
+        let (status, body) = json(
+            &app,
+            "POST",
+            "/workspaces",
+            Some(&token),
+            serde_json::json!({ "name": format!("Course {index}") }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let expected = index % 6;
+        assert_eq!(body["workspace"]["color"], expected, "course {index}");
+    }
+
+    // A rename that does not mention the course fields leaves them alone.
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/workspaces/{first_id}"),
+        Some(&token),
+        serde_json::json!({ "name": "Cell biology II" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["workspace"]["name"], "Cell biology II");
+    assert_eq!(
+        body["workspace"]["course_code"], "BIO 201",
+        "an absent course_code is left alone, not cleared"
+    );
+    assert_eq!(body["workspace"]["exam_date"], "2026-11-05");
+
+    // An explicit null clears it, which is what makes the field removable at all.
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/workspaces/{first_id}"),
+        Some(&token),
+        serde_json::json!({ "name": "Cell biology II", "exam_date": null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["workspace"]["exam_date"].is_null(),
+        "an explicit null clears the exam date"
+    );
+
+    // The list ships the same three fields, because the sidebar reads the list
+    // rather than one workspace at a time.
+    let (status, body) = get(&app, "/workspaces", &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == first_id.as_str())
+        .expect("the renamed course is listed");
+    assert_eq!(row["course_code"], "BIO 201");
+    assert_eq!(row["color"], 0);
+    assert!(row["exam_date"].is_null());
+
+    // A code past the column's cap is a validation error naming the field, not a
+    // constraint violation surfaced as a 500.
+    let (status, body) = json(
+        &app,
+        "POST",
+        "/workspaces",
+        Some(&token),
+        serde_json::json!({ "name": "Too long", "course_code": "ABCDEFGHIJKLMNOPQ" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "validation", "{body}");
+
+    let _ = second_id;
+}

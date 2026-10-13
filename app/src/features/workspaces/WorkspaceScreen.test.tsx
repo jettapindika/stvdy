@@ -28,6 +28,9 @@ const WORKSPACE = {
   created_at: '2026-10-11T08:00:00Z',
   updated_at: '2026-10-11T08:00:00Z',
   source_count: 1,
+  course_code: 'CS 401',
+  color: 0,
+  exam_date: '2026-10-26',
 }
 
 function source(over: Partial<Source> & { id: string }): Source {
@@ -113,6 +116,110 @@ function renderWorkspace() {
 async function sourcesPanel(): Promise<HTMLElement> {
   return await screen.findByRole('tabpanel', { name: 'Sources' })
 }
+
+describe('the workspace heading', () => {
+  it('names the course, the source count and the exam date from the workspace row', async () => {
+    serve()
+    renderWorkspace()
+
+    expect(await screen.findByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
+    // One mono line of the facts the server holds, joined: the code, the count and
+    // the exam date, in that order.
+    expect(await screen.findByText('CS 401 · 1 source · exam 26 Oct 2026')).toBeInTheDocument()
+    // And the way back to the list, which is the design's breadcrumb.
+    expect(screen.getByRole('link', { name: 'Workspaces' })).toHaveAttribute(
+      'href',
+      '/workspaces',
+    )
+  })
+
+  it('omits each fact the workspace does not have rather than filling it in', async () => {
+    // `course_code` and `exam_date` are nullable, and a heading that printed a
+    // placeholder would be stating something no row holds. The source count is
+    // always real, so it is the one fact that survives.
+    const bare = {
+      id: 'w1',
+      name: 'Data Structures',
+      created_at: '2026-10-11T08:00:00Z',
+      updated_at: '2026-10-11T08:00:00Z',
+      source_count: 3,
+      course_code: null,
+      color: 2,
+      exam_date: null,
+    }
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/workspaces/w1') return jsonResponse(200, { workspace: bare })
+      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
+      if (path === '/workspaces/w1/messages') return jsonResponse(200, { messages: [] })
+      if (path === '/workspaces/w1/decks') return jsonResponse(200, { decks: [] })
+      if (path === '/workspaces/w1/reports') return jsonResponse(200, { reports: [] })
+      return jsonResponse(404, { code: 'not_found', message: 'no such route', min_plan: null, limit: null, used: null })
+    })
+    renderWorkspace()
+
+    expect(await screen.findByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
+    expect(await screen.findByText('3 sources')).toBeInTheDocument()
+    // Neither the code nor the date, anywhere on the screen: the heading line is the
+    // only place either could appear.
+    expect(screen.queryByText(/CS 401/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/26 Oct 2026/)).not.toBeInTheDocument()
+  })
+})
+
+describe('the workspace panels', () => {
+  it('orders the phone strip and the desktop columns differently, as the design draws them', async () => {
+    // The two orders are not the same list, and that is the whole point of the test:
+    // the segmented control reads `Chat | Sources | Studio` in every mobile frame,
+    // while the desktop is a source rail, then the chat, then the reference panel.
+    // One array for both puts the chat in the left-hand column of a 1440px window.
+    serve()
+    renderWorkspace()
+
+    const strip = await screen.findByRole('tablist', { name: 'Workspace panels' })
+    const tabs = within(strip).getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chat', 'Sources', 'Studio'])
+
+    // The tabpanels are the desktop grid's columns, so their DOM order is the
+    // left-to-right order at `lg`. The Studio sub-panels are tabpanels too, hence the
+    // id prefix rather than every `role="tabpanel"` on the screen.
+    const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter((panel) =>
+      /^panel-/.test(panel.id),
+    )
+    expect(panels.map((panel) => panel.id)).toEqual([
+      'panel-sources',
+      'panel-chat',
+      'panel-studio',
+    ])
+  })
+
+  it('offers the source to open only when it is ready and has somewhere to go', async () => {
+    // The design's `Open PDF · page 12` action. A source that is still being indexed
+    // has no page for a viewer to open, and one that was uploaded has no URL at all —
+    // only the two fetched kinds carry one — so the action is rendered from those two
+    // facts rather than from the kind alone.
+    sources = [
+      source({ id: 's1', title: 'Ready and linked', status: 'ready', url: 'https://example.test/a' }),
+      source({ id: 's2', title: 'Still processing', status: 'processing', url: 'https://example.test/b' }),
+      source({ id: 's3', title: 'Uploaded, no URL', status: 'ready', url: null }),
+    ]
+    serve()
+    renderWorkspace()
+
+    const panel = await sourcesPanel()
+    await within(panel).findByText('Ready and linked')
+    const rows = within(panel).getAllByRole('listitem')
+    const openIn = (title: string) => {
+      const row = rows.find((item) => item.textContent?.includes(title))
+      expect(row, `no row for ${title}`).toBeDefined()
+      return within(row as HTMLElement).queryByRole('link', { name: 'Open source' })
+    }
+
+    expect(openIn('Ready and linked')).toHaveAttribute('href', 'https://example.test/a')
+    expect(openIn('Still processing')).toBeNull()
+    expect(openIn('Uploaded, no URL')).toBeNull()
+  })
+})
 
 describe('the sources panel', () => {
   it('lists the sources with their real status and chunk count', async () => {

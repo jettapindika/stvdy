@@ -35,16 +35,20 @@ import type { CheckoutState } from '@/features/billing/checkout'
  * The region is `role="status"` with `aria-live="polite"`, so a student using a
  * screen reader hears the change from waiting to paid without hunting for it —
  * which is the whole reason the poll exists.
+ *
+ * **The tone is per state, not one colour for the block.** The frame draws the
+ * pending state on `--warning-tint`, and that is where the shape comes from; a
+ * single tint for all six would paint a settled payment the same amber as a code
+ * waiting to expire, which is the colour-alone failure this component exists to
+ * avoid. So the block takes the state's own tone, the chip repeats it in a word,
+ * and the title and the explanation stay legible on all three.
  */
 export function CheckoutStatus({
   state,
-  countdownLabel,
   onNewCode,
   onRetry,
 }: {
   state: CheckoutState
-  /** The rendered `mm:ss`, or null when the state has no countdown to show. */
-  countdownLabel: string | null
   /** Offered on `expired` only. */
   onNewCode?: () => void
   /** Offered on `offline` only: the same request, again. */
@@ -54,40 +58,49 @@ export function CheckoutStatus({
 
   // The words, the tone and the mark for each state, in one table so a state
   // cannot be added to `CheckoutState` without the screen deciding what it says.
-  const shown: Record<CheckoutState, { icon: IconName; chip: string; title: string; detail: string }> = {
+  const shown: Record<
+    CheckoutState,
+    { icon: IconName; chip: string; block: string; title: string; detail: string }
+  > = {
     waiting: {
       icon: 'clock',
       chip: 'chip chip-working',
+      block: 'note note-warning',
       title: t('checkout.state.waiting.title'),
       detail: t('checkout.state.waiting.detail'),
     },
     paid: {
       icon: 'check',
       chip: 'chip chip-ready',
+      block: 'note note-success',
       title: t('checkout.state.paid.title'),
       detail: t('checkout.state.paid.detail'),
     },
     expired: {
       icon: 'clock',
       chip: 'chip chip-due',
+      block: 'note note-warning',
       title: t('checkout.state.expired.title'),
       detail: t('checkout.state.expired.detail'),
     },
     review: {
       icon: 'alert',
       chip: 'chip chip-due',
+      block: 'note note-warning',
       title: t('checkout.state.review.title'),
       detail: t('checkout.state.review.detail'),
     },
     failed: {
       icon: 'close',
       chip: 'chip chip-failed',
+      block: 'note note-danger',
       title: t('checkout.state.failed.title'),
       detail: t('checkout.state.failed.detail'),
     },
     offline: {
       icon: 'alert',
       chip: 'chip chip-failed',
+      block: 'note note-danger',
       title: t('checkout.state.offline.title'),
       detail: t('checkout.state.offline.detail'),
     },
@@ -96,22 +109,20 @@ export function CheckoutStatus({
   const current = shown[state]
 
   return (
-    <div className="card flex flex-col gap-3 p-4" role="status" aria-live="polite">
+    <div className={`${current.block} flex flex-col gap-3`} role="status" aria-live="polite">
       <div className="flex items-start gap-3">
-        <Icon name={current.icon} className="mt-0.5 shrink-0 text-muted" />
+        {/* The mark inherits the block's tone, so the state's signal is a colour
+            *and* a word *and* a shape rather than any one of them alone. */}
+        <Icon name={current.icon} className="mt-0.5 shrink-0" />
         <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-lg font-medium">{current.title}</p>
+          <p className="text-label font-medium">{current.title}</p>
           <span className={current.chip}>{t(`checkout.state.${state}.chip`)}</span>
-          <p className="max-w-prose text-sm text-muted">{current.detail}</p>
+          {/* Muted rather than the block's tone: the explanation is a sentence,
+              not the state, and colouring it would put the tone on the longest
+              run of text in the block. */}
+          <p className="max-w-prose text-caption text-muted">{current.detail}</p>
         </div>
       </div>
-
-      {/* The countdown is a separate line rather than part of the heading: it
-          changes every second, and a live region that re-announces the whole state
-          every second is unusable with a screen reader. */}
-      {countdownLabel !== null && state === 'waiting' && (
-        <p className="meta">{t('checkout.expiresIn', { time: countdownLabel })}</p>
-      )}
 
       {state === 'paid' && (
         <Link to="/billing" className="link inline-flex min-h-11 items-center self-start">

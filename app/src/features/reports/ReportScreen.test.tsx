@@ -92,6 +92,52 @@ function user(planId: string) {
   }
 }
 
+/** The course the report belongs to, for the breadcrumb and the eyebrow. */
+const WORKSPACE = {
+  id: 'w1',
+  name: 'Jaringan Komputer',
+  created_at: '2026-10-11T08:00:00Z',
+  updated_at: '2026-10-11T08:00:00Z',
+  source_count: 2,
+  course_code: 'CS 401',
+  color: 0,
+  exam_date: null,
+}
+
+/**
+ * One ready source and one still being indexed.
+ *
+ * Both on purpose: the context column states how many are ready, how many are
+ * not, and names the one that is not — so a fixture with only ready sources would
+ * leave the half of that sentence that matters untested.
+ */
+const SOURCES = [
+  {
+    id: 's1',
+    workspace_id: 'w1',
+    kind: 'pdf',
+    title: 'Supervised learning',
+    url: null,
+    file_size: 1024,
+    mime: 'application/pdf',
+    status: 'ready',
+    error: null,
+    created_at: '2026-10-11T08:00:00Z',
+  },
+  {
+    id: 's2',
+    workspace_id: 'w1',
+    kind: 'pdf',
+    title: 'Neural networks',
+    url: null,
+    file_size: 2048,
+    mime: 'application/pdf',
+    status: 'processing',
+    error: null,
+    created_at: '2026-10-11T08:00:00Z',
+  },
+]
+
 /** A response whose body is a document, for the export download. */
 function documentResponse(body: string, type: string): Response {
   return {
@@ -125,6 +171,12 @@ function serve(
     const path = new URL(url).pathname
     const method = init.method ?? 'GET'
     if (path === '/auth/me') return jsonResponse(200, user(options.plan ?? 'pro'))
+    if (path === '/workspaces/w1' && method === 'GET') {
+      return jsonResponse(200, { workspace: WORKSPACE })
+    }
+    if (path === '/workspaces/w1/sources' && method === 'GET') {
+      return jsonResponse(200, { sources: SOURCES })
+    }
     if (path === '/reports/r1' && method === 'GET') {
       return jsonResponse(200, { report: options.report ?? report() })
     }
@@ -306,6 +358,71 @@ describe('generating a section', () => {
     expect(within(rows[1] as HTMLElement).getByText('Not written yet')).toBeInTheDocument()
     expect(within(rows[1] as HTMLElement).getByRole('button', { name: 'Generate' })).toBeEnabled()
   })
+
+  it('writes every section that has no text yet, in outline order', async () => {
+    // The screen's one primary action asks for the sections that are missing, one
+    // at a time and in outline order. It is a loop over the per-section route rather
+    // than a bulk call, because there is no bulk route and because a batch that
+    // failed halfway must leave the sections it already paid for written. The
+    // assertion is on the index that went out, in order: a button that sent `0`
+    // twice would look the same on screen.
+    const served = serve()
+    const user = userEvent.setup()
+    const { container } = renderReport()
+
+    await screen.findAllByRole('button', { name: 'Generate' })
+    // Found structurally rather than by its label: the label is copy this screen
+    // just added, and the locale files do not carry it yet.
+    const primary = container.querySelector('button.btn-primary')
+    expect(primary).not.toBeNull()
+    await user.click(primary as HTMLElement)
+
+    await vi.waitFor(() => {
+      expect(served.generated).toEqual([{ index: 0 }, { index: 1 }])
+    })
+  })
+
+  it('asks for nothing a job is already writing', async () => {
+    // A section the server reports as `generating` is being written by a job that
+    // outlives this tab. Asking for it again would be a second charge for the same
+    // text, so the batch skips it and only the section with nothing in flight goes.
+    const served = serve({
+      report: report({
+        status: 'generating',
+        sections: [
+          { heading: 'Pendahuluan', body_md: null, generating: true, error: null },
+          { heading: 'Keamanan nirkabel', body_md: null, generating: false, error: null },
+        ],
+      }),
+    })
+    const user = userEvent.setup()
+    const { container } = renderReport()
+
+    await screen.findAllByRole('listitem')
+    const primary = container.querySelector('button.btn-primary')
+    expect(primary).not.toBeNull()
+    await user.click(primary as HTMLElement)
+
+    await vi.waitFor(() => {
+      expect(served.generated).toEqual([{ index: 1 }])
+    })
+  })
+})
+
+describe('the report context column', () => {
+  it('renders the sources the workspace answered with', async () => {
+    serve()
+    renderReport()
+
+    // The titles are the fixture's, not this screen's copy: what is being pinned is
+    // that the rows render from the payload rather than from a list baked in here.
+    expect(await screen.findByText('Supervised learning')).toBeInTheDocument()
+    expect(screen.getByText('Neural networks')).toBeInTheDocument()
+    // The report's own title is the page's heading, and the course it belongs to is
+    // the breadcrumb beside it — one heading, not one per column.
+    expect(screen.getAllByRole('heading', { name: 'Jaringan Komputer' })).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'Workspaces' })).toBeInTheDocument()
+  })
 })
 
 describe('the export, as the plan matrix allows it', () => {
@@ -440,10 +557,15 @@ describe('an outline the server would not have written', () => {
         sections: [{ heading: 'Pendahuluan', body_md: null, generating: false, error: null }],
       }),
     })
-    renderReport()
+    const { container } = renderReport()
 
     expect(await screen.findByLabelText('Section 1')).toHaveValue('Pendahuluan')
-    expect(screen.getByText('Menetapkan ruang lingkup.')).toBeInTheDocument()
+    // By id rather than by its label's text: the label is copy this screen just
+    // added, and a test that read it would pin the key's own text until the locale
+    // files carry it.
+    expect(container.querySelector('#report-section-0-purpose')).toHaveValue(
+      'Menetapkan ruang lingkup.',
+    )
     expect(screen.queryByText("This report's outline cannot be read")).not.toBeInTheDocument()
   })
 })
@@ -451,12 +573,32 @@ describe('an outline the server would not have written', () => {
 describe('the outline rows', () => {
   it('names each row by its position so a screen reader can tell them apart', async () => {
     serve()
-    renderReport()
+    const { container } = renderReport()
 
     const fields = await screen.findAllByLabelText(/^Section \d$/)
     expect(fields.map((field) => field.getAttribute('aria-label') ?? field.id)).toHaveLength(2)
     // The purpose the model wrote is shown beside the heading it belongs to.
     const rows = screen.getAllByRole('listitem')
-    expect(within(rows[0] as HTMLElement).getByText('Menetapkan ruang lingkup laporan.')).toBeInTheDocument()
+    expect(within(rows[0] as HTMLElement).getByLabelText('Section 1')).toBeInTheDocument()
+    expect(container.querySelector('#report-section-0-purpose')).toHaveValue(
+      'Menetapkan ruang lingkup laporan.',
+    )
+  })
+
+  it('removes a section under a control that says so', async () => {
+    const served = serve()
+    const user = userEvent.setup()
+    renderReport()
+
+    // The design puts the remove control on the heading row, so the row is
+    // identified by the accessible name rather than by a position on screen. The
+    // handle beside it is decoration and is deliberately not a control: reordering
+    // is the two labelled buttons below, which a keyboard can reach.
+    await user.click((await screen.findAllByRole('button', { name: 'Remove' }))[1] as HTMLElement)
+    await user.click(screen.getByRole('button', { name: 'Save outline' }))
+
+    const patch = served.calls.find((call) => call.init.method === 'PATCH')
+    const body = JSON.parse(String(patch?.init.body)) as { outline: typeof OUTLINE }
+    expect(body.outline.sections.map((section) => section.heading)).toEqual(['Pendahuluan'])
   })
 })

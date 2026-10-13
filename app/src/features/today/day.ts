@@ -64,6 +64,20 @@ export type TodayEntry =
   | { kind: 'task'; id: string; at: string; task: TaskRow }
   | { kind: 'event'; id: string; at: string; event: EventRow }
 
+/** One day of the streak strip: a local date, and whether anything happened on it. */
+export interface RecentDay {
+  /** The local calendar day, `YYYY-MM-DD`. */
+  key: string
+  /** Whether it holds any one of a review, an attempt or a session. */
+  active: boolean
+}
+
+/**
+ * How many days the streak strip draws. Five, which is the design's strip and
+ * enough to read a streak without turning the card into a calendar.
+ */
+export const RECENT_DAY_COUNT = 5
+
 export interface TodayBuckets {
   /** Today's timeline: tasks due today and the events overlapping today, earliest first. */
   today: TodayEntry[]
@@ -82,6 +96,19 @@ export interface TodayBuckets {
   setup: { workspaces: number; sources: number; decks: number }
   /** Echoed so one object holds every number the screen shows. */
   dueCards: number
+  /**
+   * The seven local days the week ahead covers, as calendar dates.
+   *
+   * The range is what the deadlines widget prints above its cards ("12–18
+   * October"), and it is the same window `thisWeek` was filtered by — computed
+   * once here rather than twice on the screen, where the two could drift.
+   */
+  week: { from: string; to: string }
+  /**
+   * The last five local days ending today, oldest first, each marked with whether
+   * it holds a review, an attempt or a session. The streak card draws these.
+   */
+  recentDays: RecentDay[]
 }
 
 /**
@@ -102,6 +129,22 @@ function addDays(key: string, days: number): string {
 /** The local date key of an instant, as `YYYY-MM-DD` in the student's zone. */
 function keyOf(instant: string, timeZone: string): string {
   return localDateKey(new Date(instant), timeZone)
+}
+
+/**
+ * How many calendar days separate two local date keys, or null when `key` is
+ * before `from` or past the end of the window.
+ *
+ * The relative label on a deadline ("Today", "In 2 days") is this number, and it
+ * has to be a difference of *calendar dates* rather than of instants: a deadline
+ * at 23:59 and one at 00:01 are a day apart although they are two minutes apart,
+ * and a millisecond division would call them the same day.
+ */
+export function dayOffset(from: string, key: string, limit: number): number | null {
+  for (let offset = 0; offset <= limit; offset += 1) {
+    if (addDays(from, offset) === key) return offset
+  }
+  return null
 }
 
 /**
@@ -199,24 +242,52 @@ export function todayBuckets(input: TodayInput): TodayBuckets {
     streakDays: streakDays(input.activity, todayKey, timeZone),
     setup: input.setup,
     dueCards: input.dueCards,
+    week: { from: todayKey, to: weekEnd },
+    recentDays: recentDays(input.activity, todayKey, timeZone),
   }
+}
+
+/**
+ * The local days that hold a review, an attempt or a session — any one of the
+ * three, which is the spec's rule.
+ *
+ * One function for both the streak count and the strip, because a strip built
+ * from its own reading of the activity would eventually fill a day the streak
+ * says is empty: two answers to one question, and the student is looking at both.
+ */
+function activeDays(activity: Activity, timeZone: string): Set<string> {
+  const active = new Set<string>()
+  for (const instant of [...activity.reviews, ...activity.attempts, ...activity.sessions]) {
+    active.add(keyOf(instant, timeZone))
+  }
+  return active
+}
+
+/**
+ * The last `RECENT_DAY_COUNT` local days, ending today, oldest first.
+ */
+function recentDays(activity: Activity, todayKey: string, timeZone: string): RecentDay[] {
+  const active = activeDays(activity, timeZone)
+
+  const days: RecentDay[] = []
+  for (let back = RECENT_DAY_COUNT - 1; back >= 0; back -= 1) {
+    const key = addDays(todayKey, -back)
+    days.push({ key, active: active.has(key) })
+  }
+  return days
 }
 
 /**
  * The streak, over local days.
  *
- * A day counts when it holds a review, an attempt or a session — any one of the
- * three, which is the spec's rule. The walk starts at today and, when today is
- * empty, at yesterday: a student who has not opened the app yet today still has
- * the streak they built, and reporting zero at 09:00 would be the app telling them
- * they lost something they did not lose. From there it stops at the first day with
- * nothing, which is what makes it a streak rather than a count of active days.
+ * The walk starts at today and, when today is empty, at yesterday: a student who
+ * has not opened the app yet today still has the streak they built, and reporting
+ * zero at 09:00 would be the app telling them they lost something they did not
+ * lose. From there it stops at the first day with nothing, which is what makes it
+ * a streak rather than a count of active days.
  */
 function streakDays(activity: Activity, todayKey: string, timeZone: string): number {
-  const active = new Set<string>()
-  for (const instant of [...activity.reviews, ...activity.attempts, ...activity.sessions]) {
-    active.add(keyOf(instant, timeZone))
-  }
+  const active = activeDays(activity, timeZone)
 
   let day = todayKey
   if (!active.has(day)) {

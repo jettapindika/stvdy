@@ -55,9 +55,12 @@ describe('the phone plan screen', () => {
     expect(screen.getByText('2 of 2')).toBeInTheDocument()
     expect(screen.getByText('1,048,576 bytes of 200 MB')).toBeInTheDocument()
     // Computed rather than written out: the app formats the instant in the
-    // account's own zone, and a literal here would pin the runner's locale.
+    // account's own zone, and a literal here would pin the runner's locale. The
+    // renewal row renders it as a `.meta` span; the credits card's reset sentence
+    // carries the same instant inside a sentence, so this exact-text match is the
+    // renewal row alone.
     const periodEnd = formatInZone(new Date(PERIOD_END), USER.timezone, { dateStyle: 'medium' })
-    expect(screen.getByText(`Current period ends ${periodEnd}`)).toBeInTheDocument()
+    expect(screen.getByText(periodEnd)).toBeInTheDocument()
 
     // The one string this screen adds: the honest statement of the store rule.
     expect(

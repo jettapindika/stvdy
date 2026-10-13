@@ -76,11 +76,12 @@ export function UpdatesPanel() {
 
   return (
     <Section title={t('settings.updates.title')}>
-      <div className="card flex flex-col gap-3 p-4">
-        {status === null ? (
-          <p className="text-small text-muted">{t('settings.updates.hint')}</p>
-        ) : null}
+      {/* The one line that says what this section is for, and it stays whether or
+          not a check has run: the section's own description rather than a card
+          paragraph that disappears the moment there is a version to report. */}
+      <p className="text-label text-muted">{t('settings.updates.hint')}</p>
 
+      <div className="card flex flex-col gap-3 p-4">
         {/* The state word first, so the state is never carried by colour alone and
             a screen reader reaches the fact before the control. */}
         {status?.kind === 'up-to-date' ? (
@@ -113,7 +114,7 @@ export function UpdatesPanel() {
         ) : null}
 
         {progress !== null ? (
-          <p className="meta" aria-live="polite">
+          <p className="text-small text-muted" aria-live="polite">
             {progress.phase === 'downloading'
               ? t('settings.updates.downloading')
               : progress.phase === 'installing'

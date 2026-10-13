@@ -17,6 +17,12 @@
 # creates `app/.vitest/json/output.json`). The rule above covers only the
 # `node_modules/.vite/vitest` directory the default invocation uses.
 /app/.vitest
+# The release artifacts: the APK, the DMG, the Windows installer and the signed
+# update manifest that `scripts/verify-release-artifacts.sh` reads. It is a build
+# output like every other rule here, and it needs its own line because it is the
+# only one at the repository root — `git add -A` would otherwise commit a 43 MB
+# APK, which is the failure the `dist-local` rule above records for a bundle.
+/dist
 # Vitest resolves its cache directory against the *current* directory, and the
 # documented invocation (`npm --prefix app test`, `justfile`) runs from the repo
 # root, so it creates `/node_modules/.vite/vitest` here. Untracked cache, ignored
@@ -36,6 +42,14 @@
 # this name has to exist there. It is generated because it is a workaround for another
 # project's template: a committed one would outlive the bug it exists for.
 /src-tauri/tauri.js
+
+# Gradle's output for the Android plugin. `build/` is what Gradle writes when the Android
+# project is built — the compiled intermediates, the generated res and the Kotlin class
+# caches (`tauri android build`, and the release workflow's APK job). None of it is source,
+# and it is a build output like the `/dist` and `/app/dist-*` rules above: `git add -A`
+# would otherwise commit the 1.5 MB of intermediates. Scoped to this plugin's own path
+# rather than a bare `build/`, which would also swallow a source directory of that name.
+/src-tauri/plugins/mobile/android/build/
 
 # Mobile signing and service credentials (A328). `google-services.json` is the
 # Android Google Services plugin's project credential; a committed one is a leaked

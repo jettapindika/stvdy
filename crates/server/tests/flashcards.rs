@@ -1539,3 +1539,185 @@ async fn a_repeated_source_id_is_deduplicated_rather_than_refused(pool: PgPool) 
         "{body}"
     );
 }
+
+/// Undo: a review deleted inside the window, with the card replayed.
+///
+/// **The assertion that matters is the equality at the end.** Undo is not "put the
+/// numbers back" — it is a delete plus a replay of the *remaining* history, so the
+/// state after an undo must equal the state the card would have had if the review
+/// had never been written. That is the property a second implementation (an inverse
+/// of SM-2) could not preserve, which is why this test compares against a card that
+/// took the other path rather than against a remembered pair of numbers.
+///
+/// The window is checked from both sides: a review older than five minutes is a 409
+/// (the review exists; it is too late), and a second undo of the same review is a
+/// 404, so a retried tap is not an error.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_review_can_be_undone_inside_the_window_and_not_after(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    // Two decks over one source, each with one card, so two cards start identical.
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        reply("Apa fungsi three-way handshake?", "Membuka koneksi TCP.", 1),
+        reply("Apa fungsi three-way handshake?", "Membuka koneksi TCP.", 1),
+    ]));
+    let harness = harness.with_llm(llm.clone());
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "undo@example.test").await;
+
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    let (_, first) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    let (_, second) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    drain_jobs(&harness).await;
+
+    let deck_of = |body: &serde_json::Value| body["deck"]["id"].as_str().unwrap().to_string();
+    let deck_a = deck_of(&first);
+    let deck_b = deck_of(&second);
+
+    // The card's state as the API reports it: the three fields `replay` writes.
+    async fn state_of(
+        app: &axum::Router,
+        token: &str,
+        deck: &str,
+    ) -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+        let (_, body) = json(
+            app,
+            "GET",
+            &format!("/decks/{deck}"),
+            token,
+            serde_json::Value::Null,
+        )
+        .await;
+        (
+            body["cards"][0]["ease"].clone(),
+            body["cards"][0]["interval_days"].clone(),
+            body["cards"][0]["due_at"].clone(),
+        )
+    }
+
+    let card_a = {
+        let (_, body) = json(
+            &app,
+            "GET",
+            &format!("/decks/{deck_a}"),
+            &token,
+            serde_json::Value::Null,
+        )
+        .await;
+        body["cards"][0]["id"].as_str().unwrap().to_string()
+    };
+    let card_b = {
+        let (_, body) = json(
+            &app,
+            "GET",
+            &format!("/decks/{deck_b}"),
+            &token,
+            serde_json::Value::Null,
+        )
+        .await;
+        body["cards"][0]["id"].as_str().unwrap().to_string()
+    };
+
+    let now = chrono::DateTime::from_timestamp(harness.clock.now().timestamp(), 0).unwrap();
+
+    // The card's state *before* any review, which is what an undo has to restore —
+    // "the state it would have had if the review had never been written". Captured
+    // rather than derived, because deriving it would need a second implementation of
+    // SM-2's initial state, which is the thing this route exists to avoid.
+    let before_review = state_of(&app, &token, &deck_a).await;
+
+    // The same rating at the same instant on both cards, so they start identical.
+    for card in [&card_a, &card_b] {
+        let (status, body) = json(
+            &app,
+            "POST",
+            &format!("/flashcards/{card}/review"),
+            &token,
+            serde_json::json!({ "rating": "easy", "reviewed_at": now.to_rfc3339() }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let review_id: Uuid =
+        sqlx::query_scalar("select id from flashcard_reviews where flashcard_id = $1")
+            .bind(Uuid::parse_str(&card_a).unwrap())
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+
+    // Older than the window: a 409 that says why, not a 404 pretending it is gone.
+    sqlx::query("update flashcard_reviews set reviewed_at = $2 where id = $1")
+        .bind(review_id)
+        .bind(now - chrono::Duration::minutes(6))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    let (status, late) = json(
+        &app,
+        "DELETE",
+        &format!("/flashcard-reviews/{review_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{late}");
+
+    // Inside the window it succeeds, and the card lands in exactly the state of the
+    // card whose review was never written — which is what replaying buys over
+    // inverting the algorithm.
+    sqlx::query("update flashcard_reviews set reviewed_at = $2 where id = $1")
+        .bind(review_id)
+        .bind(now - chrono::Duration::minutes(1))
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+    let (status, undone) = json(
+        &app,
+        "DELETE",
+        &format!("/flashcard-reviews/{review_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+    assert_eq!(undone["undone"], true, "{undone}");
+
+    assert_eq!(
+        state_of(&app, &token, &deck_a).await,
+        before_review,
+        "after an undo the card must be in the state it would have had if the review had never been written"
+    );
+    // And the card that was *not* undone still holds its review, which is what makes
+    // the assertion above about the undo rather than about reviews never landing.
+    assert_ne!(
+        state_of(&app, &token, &deck_b).await,
+        before_review,
+        "a review that was not undone must still be applied"
+    );
+
+    // A second undo is a 404: the review is gone, so a retried tap is not an error.
+    let (status, again) = json(
+        &app,
+        "DELETE",
+        &format!("/flashcard-reviews/{review_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{again}");
+
+    // And another account cannot reach it at all.
+    let other = signed_up(&app, &harness, "other@example.test").await;
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/flashcard-reviews/{review_id}"),
+        &other,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

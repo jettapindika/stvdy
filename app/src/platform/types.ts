@@ -303,4 +303,23 @@ export interface Platform {
    * focus timer's running state is the only thing that lives in it.
    */
   localState: LocalStateApi
+  /**
+   * A shortcut as this platform writes it: `⌘K` on macOS, `Ctrl K` elsewhere.
+   *
+   * The spec names "shortcut labels such as ⌘ vs Ctrl" as one of the differences
+   * this adapter exists to hide, and it is the one the command palette needs in two
+   * directions: to *show* the binding (the top bar's badge, the palette's footer)
+   * and to *match* it (`matchesShortcut`). Both live here so the label and the test
+   * cannot disagree — a badge that says `⌘K` while the handler accepts Control is a
+   * shortcut that tells the reader the wrong thing.
+   */
+  shortcutLabel(key: string): string
+  /**
+   * Whether an event is this shortcut.
+   *
+   * Control and Meta are platform facts, not user preferences: a macOS user presses
+   * Command and a Windows or Android user presses Control, and a handler that
+   * accepted only one of them would be a shortcut that works on one machine.
+   */
+  matchesShortcut(event: KeyboardEvent, key: string): boolean
 }

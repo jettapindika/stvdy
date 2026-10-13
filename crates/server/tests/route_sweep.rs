@@ -139,6 +139,14 @@ fn read_only_rows() -> Vec<Row> {
             "a review is free (R1): studying never costs credits",
         ),
         ro(
+            "DELETE",
+            "/flashcard-reviews/{id}",
+            "undoing a review is free (R1), and it is a delete plus a replay of the remaining \
+             history rather than an inverse calculation — the card's state is a pure function of \
+             the rows, so the state after an undo is the state the card would have had if the \
+             review had never happened",
+        ),
+        ro(
             "GET",
             "/workspaces/{id}/quizzes",
             "reads the caller's own quizzes",
@@ -715,6 +723,13 @@ fn exempt_rows() -> Vec<Row> {
             "GET",
             "/admin/margin",
             "AdminUser only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep",
+        ),
+        exempt(
+            "GET",
+            "/admin/users",
+            "AdminUser only: the extractor answers 404 for a non-admin (A7). A read of the rows \
+             the product already writes — `users`, `usage_events`, `sources` — with no spend and \
+             no plan decision, which is why it needs no entitlement check",
         ),
         exempt(
             "GET",

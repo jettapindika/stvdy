@@ -43,13 +43,20 @@ export function LockedFeature({
   const { t } = useTranslation()
   const policy = lockedFeaturePolicy(platform.kind())
 
+  // `min-w-0` on the root: this card sits in a wrapping row (`PlannerScreen`'s action
+  // row) and a flex item's automatic minimum size is its content, so at 200% text the
+  // card forced its container 28px wider than the column instead of shrinking into it.
+  // The `min-w-0` on the body below was not enough — the constraint has to be on the
+  // item the parent measures.
   return (
-    <div className="card flex items-start gap-3 p-4">
+    <div className="card flex min-w-0 items-start gap-3 p-4">
       <Icon name="lock" className="mt-0.5 shrink-0 text-subtle" />
       <div className="flex min-w-0 flex-col gap-1">
-        <p className="text-small font-medium text-text">{t(whatKey)}</p>
-        {reasonKey === undefined ? null : <p className="text-small text-muted">{t(reasonKey)}</p>}
-        <p className="text-small text-subtle">
+        <p className="text-small font-medium text-text break-words">{t(whatKey)}</p>
+        {reasonKey === undefined ? null : (
+          <p className="text-small text-muted break-words">{t(reasonKey)}</p>
+        )}
+        <p className="text-small text-subtle break-words">
           {policy.showUpgradeCta ? t('lock.availableOn', { plan: minPlan }) : t('lock.notOnPlan')}
         </p>
         {/* The one control on this card, and it is the control a user who has

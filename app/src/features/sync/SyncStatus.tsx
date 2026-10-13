@@ -36,7 +36,11 @@ import { platform, type SyncStatus as SyncState } from '@/platform'
  * The state is carried by a word, never by colour alone, and the word is inside the
  * link so it is part of the control's accessible name.
  */
-export function SyncStatus({ variant = 'sidebar' }: { variant?: 'sidebar' | 'chip' }) {
+export function SyncStatus({
+  variant = 'sidebar',
+}: {
+  variant?: 'sidebar' | 'chip' | 'compact'
+}) {
   const { t } = useTranslation()
   const { report, failed } = useSyncStatus()
   const session = useSession()
@@ -74,13 +78,33 @@ export function SyncStatus({ variant = 'sidebar' }: { variant?: 'sidebar' | 'chi
   const word = failed ? t('sync.unavailable') : state === null ? t('states.loading') : words[state]
   const tone = failed || state === null ? 'chip' : tones[state]
 
+
   // Rules 2 and 3. The lines are built in the order of how much they matter: a
   // pending count first, then a refusal, then when this device last synced.
   const timezone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
   const details: string[] = []
+  /**
+   * The lines the **compact** control still carries.
+   *
+   * It drops "Last synced" and never the two facts a state word cannot imply. Gate 7(d)
+   * requires a refusal to be shown *with the server's own code* — "Needs attention" is a
+   * state, not the reason — and gate 7(b) requires a pending write never to read as
+   * settled. Both are facts the reader acts on; the timestamp is context. So the top bar
+   * stays one line in the ordinary case and grows for exactly the states that have
+   * something to say.
+   */
+  const essentials: string[] = []
   if (report !== null) {
-    if (report.outbox > 0) details.push(t('sync.pending', { count: report.outbox }))
-    if (report.code !== null) details.push(t('sync.rejected', { code: report.code }))
+    if (report.outbox > 0) {
+      const line = t('sync.pending', { count: report.outbox })
+      details.push(line)
+      essentials.push(line)
+    }
+    if (report.code !== null) {
+      const line = t('sync.rejected', { code: report.code })
+      details.push(line)
+      essentials.push(line)
+    }
     if (report.lastSyncedAt !== null) {
       details.push(
         t('sync.lastSynced', {
@@ -101,15 +125,19 @@ export function SyncStatus({ variant = 'sidebar' }: { variant?: 'sidebar' | 'chi
     <Link
       to="/devices"
       className={
-        variant === 'chip'
-          ? 'flex min-h-11 max-w-64 flex-col items-end justify-center gap-0.5 rounded-card border border-border bg-surface px-2 py-1 text-right hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
-          : 'flex min-h-11 flex-col justify-center gap-1 rounded-field px-2 py-1 hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
+        variant === 'compact'
+          ? // The top bar's: the state word, plus the two lines `essentials` keeps.
+            // It is a row rather than a column so the ordinary case is one line tall.
+            'flex min-h-11 flex-wrap items-center gap-x-2 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
+          : variant === 'chip'
+            ? 'flex min-h-11 max-w-64 flex-col items-end justify-center gap-0.5 rounded-card border border-border bg-surface px-2 py-1 text-right hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
+            : 'flex min-h-11 flex-col justify-center gap-1 rounded-field px-2 py-1 hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
       }
     >
       <span className={tone} role="status">
         {word}
       </span>
-      {details.map((detail, index) => (
+      {(variant === 'compact' ? essentials : details).map((detail, index) => (
         <span key={index} className="meta">
           {detail}
         </span>

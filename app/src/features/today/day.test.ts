@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { EventRow } from '@/api/queries/events'
 import type { SessionRow } from '@/api/queries/study'
 import type { TaskRow } from '@/features/tasks/order'
-import { todayBuckets, type TodayInput } from './day'
+import { dayOffset, todayBuckets, type TodayInput } from './day'
 
 /**
  * The Today view's rules, against a fixed clock.
@@ -287,6 +287,61 @@ describe('the streak', () => {
       }),
     )
     expect(buckets.streakDays).toBe(2)
+  })
+})
+
+describe('the streak strip and the week it sits beside', () => {
+  it('draws five local days ending today, oldest first', () => {
+    // The strip and the streak have to answer one question, so the last cell is
+    // today and the days are the local ones: a UTC walk would end on the 15th for
+    // a Jakarta student at 08:00 on the 16th.
+    const buckets = todayBuckets(
+      input({ now: new Date('2026-10-16T01:00:00Z') }),
+    )
+    expect(buckets.recentDays.map((day) => day.key)).toEqual([
+      '2026-10-12',
+      '2026-10-13',
+      '2026-10-14',
+      '2026-10-15',
+      '2026-10-16',
+    ])
+  })
+
+  it('marks a day active on the same rule the streak counts with', () => {
+    // Three sources, one rule: a day counts if it holds any one of a review, an
+    // attempt or a session. The strip is filled from that same set, so it cannot
+    // show a filled day inside a streak that stopped.
+    const buckets = todayBuckets(
+      input({
+        now: new Date('2026-10-16T01:00:00Z'),
+        activity: {
+          reviews: ['2026-10-16T09:00:00+07:00'],
+          attempts: ['2026-10-14T09:00:00+07:00'],
+          sessions: ['2026-10-12T09:00:00+07:00'],
+        },
+      }),
+    )
+    expect(buckets.recentDays.filter((day) => day.active).map((day) => day.key)).toEqual([
+      '2026-10-12',
+      '2026-10-14',
+      '2026-10-16',
+    ])
+    expect(buckets.streakDays).toBe(1)
+  })
+
+  it('reports the seven local days the week ahead covers', () => {
+    const buckets = todayBuckets(input({ now: new Date('2026-10-16T01:00:00Z') }))
+    expect(buckets.week).toEqual({ from: '2026-10-16', to: '2026-10-22' })
+  })
+
+  it('measures a deadline in calendar days, not in elapsed hours', () => {
+    // 23:59 and 00:01 are two minutes apart and one calendar day apart, and the
+    // label a student reads ("In 2 days") has to be the calendar one.
+    expect(dayOffset('2026-10-16', '2026-10-18', 6)).toBe(2)
+    expect(dayOffset('2026-10-16', '2026-10-16', 6)).toBe(0)
+    // Outside the window there is no label, rather than a negative or a guess.
+    expect(dayOffset('2026-10-16', '2026-10-23', 6)).toBeNull()
+    expect(dayOffset('2026-10-16', '2026-10-15', 6)).toBeNull()
   })
 })
 

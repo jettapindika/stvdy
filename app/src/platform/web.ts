@@ -164,6 +164,19 @@ export function webPlatform(kind: PlatformKind = 'web'): Platform {
     deepLinks,
     sync,
     localState,
+    // macOS writes Command as `⌘`; every other platform this app ships on
+    // (Windows, iOS, Android, and a browser on Linux) writes Control. The iOS
+    // software keyboard has no Control key at all, which is why the palette is
+    // also reachable from the phone header's search action rather than only from
+    // the shortcut.
+    shortcutLabel: (key) => (kind === 'macos' ? `⌘${key}` : `Ctrl ${key}`),
+    matchesShortcut: (event, key) => {
+      // Shift and Alt are excluded so `⌘K` does not also fire on `⌘⇧K`, which is a
+      // different binding a screen may want.
+      if (event.shiftKey || event.altKey) return false
+      const primary = kind === 'macos' ? event.metaKey : event.ctrlKey
+      return primary && event.key.toLowerCase() === key.toLowerCase()
+    },
     async openExternal(url) {
       window.open(url, '_blank', 'noopener,noreferrer')
     },

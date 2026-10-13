@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { API_BASE_URL } from '@/api/client'
@@ -16,6 +16,7 @@ import {
 } from '@/api/queries/calendar'
 import { useUsage } from '@/api/queries/usage'
 import { Section } from '@/components/layout/Section'
+import { Icon } from '@/components/ui/Icon'
 import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { planForFeature } from '@/features/billing/plans'
@@ -62,12 +63,14 @@ export function ConnectionsPanel() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title={t('calendar.connections.feed.title')}>
-        <FeedLink />
-      </Section>
-
+      {/* The connected service first, then the two ways of feeding the calendar,
+          then the evidence list — the order the design reads in. */}
       <Section title={t('calendar.connections.google.title')}>
         <GoogleSection existing={google} />
+      </Section>
+
+      <Section title={t('calendar.connections.feed.title')}>
+        <FeedLink />
       </Section>
 
       <Section title={t('calendar.connections.ics.title')}>
@@ -86,9 +89,9 @@ export function ConnectionsPanel() {
           />
         )}
         {connections.data !== undefined && connections.data.length > 0 && (
-          <ul className="flex flex-col divide-y divide-border border-y border-border">
+          <ul className="card flex flex-col divide-y divide-border">
             {connections.data.map((connection) => (
-              <li key={connection.id} className="flex flex-col gap-2 py-3">
+              <li key={connection.id} className="flex flex-col gap-2 p-4">
                 <ConnectionRow connection={connection} />
               </li>
             ))}
@@ -100,19 +103,57 @@ export function ConnectionsPanel() {
 }
 
 /**
- * One connection's line: what it is, whether it is healthy, and when it last ran.
+ * A connection's status, as a word and the tone that repeats it.
  *
  * The status is a **word**, not a colour: `status` arrives as a string from the
  * server and is rendered as itself when this build does not recognise it, rather
  * than being mapped to a wrong label or hidden. An unrecognised value is a newer
  * server or a new provider, and showing it is more useful than showing nothing.
+ * The tone repeats the word rather than replacing it, so the state survives a
+ * monochrome screen and a screen reader.
  */
-function ConnectionRow({ connection }: { connection: Connection }) {
+function useStatusChip(status: string): { word: string; className: string } {
+  const { t } = useTranslation()
+  if (status === 'connected') {
+    return { word: t('calendar.connections.status.connected'), className: 'chip chip-ready' }
+  }
+  if (status === 'error') {
+    return { word: t('calendar.connections.status.error'), className: 'chip chip-failed' }
+  }
+  if (status === 'revoked') {
+    return { word: t('calendar.connections.status.revoked'), className: 'chip chip-due' }
+  }
+  return { word: status, className: 'chip' }
+}
+
+/**
+ * `last_synced_at` rendered in the account's own zone, or the word for never.
+ *
+ * The instant is the server's and the zone is the student's: a connection that
+ * has never run says "Never synced" rather than being given today's date, which
+ * is the difference between a fact and a guess (A247).
+ */
+function useLastSynced(connection: Connection): string {
   const { t } = useTranslation()
   const session = useSession()
   const timezone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
+  if (connection.last_synced_at === null) return t('calendar.connections.neverSynced')
+  return formatInZone(new Date(connection.last_synced_at), timezone, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+/**
+ * One connection's line: what it is, whether it is healthy, and when it last ran.
+ */
+function ConnectionRow({ connection }: { connection: Connection }) {
+  const { t } = useTranslation()
   const remove = useRemoveConnection()
   const removeError = asApiError(remove.error)
+  const status = useStatusChip(connection.status)
+  const syncedAt = useLastSynced(connection)
+  const lastSynced = t('calendar.connections.lastSynced', { when: syncedAt })
 
   const provider =
     connection.provider === 'google'
@@ -121,34 +162,15 @@ function ConnectionRow({ connection }: { connection: Connection }) {
         ? t('calendar.connections.provider.ics')
         : connection.provider
 
-  const status =
-    connection.status === 'connected'
-      ? t('calendar.connections.status.connected')
-      : connection.status === 'error'
-        ? t('calendar.connections.status.error')
-        : connection.status === 'revoked'
-          ? t('calendar.connections.status.revoked')
-          : connection.status
-
-  const lastSynced =
-    connection.last_synced_at === null
-      ? t('calendar.connections.neverSynced')
-      : t('calendar.connections.lastSynced', {
-          when: formatInZone(new Date(connection.last_synced_at), timezone, {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-          }),
-        })
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 break-words font-medium">{provider}</span>
+        <span className="min-w-0 break-words text-label font-medium">{provider}</span>
         {connection.account_email !== null && (
           <span className="meta min-w-0 break-words">{connection.account_email}</span>
         )}
-        <span className="chip">{status}</span>
-        <span className="meta">{lastSynced}</span>
+        <span className={status.className}>{status.word}</span>
+        <span className="meta min-w-0 break-words">{lastSynced}</span>
         <button
           type="button"
           className="btn btn-quiet"
@@ -181,11 +203,17 @@ function ConnectionRow({ connection }: { connection: Connection }) {
  * student's feed every time they opened this panel and break every client they had
  * already subscribed. So `null` is a real state and is rendered as one.
  *
- * The Copy button reads `navigator.clipboard` and reports what happened in words.
- * A clipboard write can be refused (an insecure context, a browser permission) and
- * a button that silently did nothing is the failure this avoids; the URL is also
- * rendered as selectable text, so the copy is a convenience rather than the only
- * way to get it.
+ * The URL is a read-only `.field` with a real `<label>` rather than a paragraph of
+ * monospace: it is the one secret this screen is required to show, and a field is
+ * what a student can select, copy and paste into a calendar client without
+ * knowing a keyboard shortcut. The Copy button reads `navigator.clipboard` and
+ * reports what happened in words — a clipboard write can be refused (an insecure
+ * context, a browser permission) and a button that silently did nothing is the
+ * failure this avoids.
+ *
+ * Copy is the panel's **one primary action**, which is the design's own
+ * assignment: its frame fills this button and outlines Regenerate, and the
+ * connect and import controls below are secondary for that reason.
  */
 function FeedLink() {
   const { t } = useTranslation()
@@ -197,7 +225,15 @@ function FeedLink() {
   const url = token.data == null ? null : feedUrl(API_BASE_URL, token.data)
 
   return (
-    <div className="card flex flex-col gap-3 p-4">
+    <div className="card flex flex-col gap-4 p-6">
+      {/* The card's mark and its format, on one line. The name itself is the
+          `Section`'s h2 directly above, so repeating it here would put two
+          headings with the same words in the outline. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Icon name="link" size={24} className="shrink-0 text-muted" />
+        <span className="eyebrow ml-auto">{t('calendar.connections.feed.format')}</span>
+      </div>
+
       <p className="max-w-prose text-small text-muted">{t('calendar.connections.feed.hint')}</p>
 
       {token.isPending && <SkeletonRows rows={1} label={t('calendar.connections.loading')} />}
@@ -209,14 +245,26 @@ function FeedLink() {
 
       {url !== null && (
         <>
-          <p className="min-w-0 break-all font-mono text-caption text-muted" id="feed-url">
-            {url}
-          </p>
+          <div className="flex flex-col gap-2">
+            <label className="label" htmlFor="feed-url">
+              {t('calendar.connections.feed.label')}
+            </label>
+            <input
+              id="feed-url"
+              className="field font-mono"
+              type="url"
+              readOnly
+              value={url}
+              aria-describedby="feed-url-helper"
+            />
+            <p className="text-caption text-muted" id="feed-url-helper">
+              {t('calendar.connections.feed.helper')}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="btn btn-secondary"
-              aria-describedby="feed-url"
+              className="btn btn-primary"
               onClick={() => {
                 void navigator.clipboard
                   .writeText(url)
@@ -232,7 +280,7 @@ function FeedLink() {
             </button>
             <button
               type="button"
-              className="btn btn-quiet"
+              className="btn btn-secondary"
               disabled={regenerate.isPending}
               onClick={() => {
                 setCopied(false)
@@ -241,13 +289,21 @@ function FeedLink() {
             >
               {t('calendar.connections.feed.regenerate')}
             </button>
-            {copied && <span role="status">{t('calendar.connections.feed.copied')}</span>}
+            {copied && (
+              <span className="meta" role="status">
+                {t('calendar.connections.feed.copied')}
+              </span>
+            )}
           </div>
-          {/* Rotation's consequence, stated where the button is: the old URL
-              stops working, so every client subscribed with it must be given the
-              new one. */}
-          <p className="max-w-prose text-caption text-subtle">
-            {t('calendar.connections.feed.regenerateHint')}
+          {/* The two consequences of the link being a secret, said once, where
+              both buttons are: it is the only key to the schedule, and rotating
+              it strands every client already subscribed to the old one. */}
+          <p className="flex items-start gap-2 border-t border-border pt-4">
+            <Icon name="lock" size={16} className="mt-0.5 shrink-0 text-subtle" />
+            <span className="min-w-0 text-caption text-muted">
+              {t('calendar.connections.feed.private')}{' '}
+              {t('calendar.connections.feed.regenerateHint')}
+            </span>
           </p>
         </>
       )}
@@ -255,7 +311,7 @@ function FeedLink() {
       {token.data === null && !token.isPending && (
         <button
           type="button"
-          className="btn btn-secondary self-start"
+          className="btn btn-primary self-start"
           disabled={regenerate.isPending}
           onClick={() => {
             regenerate.mutate()
@@ -276,6 +332,20 @@ function FeedLink() {
  * server refuses the same thing through the entitlement engine (A245). Until the
  * plan is known, nothing is offered — offering the button and then locking it
  * would be a control that changed its mind.
+ *
+ * **The connected account is stated as the server reports it, and the two sync
+ * preferences are shown rather than offered.** `GET /calendar/connections` is the
+ * only route here that carries them: it reports each connection's `status`, its
+ * `account_email`, its `last_synced_at`, and — through `study_calendar_id` —
+ * whether a Study Plan calendar is receiving the student's blocks. No route
+ * writes either preference; the study calendar is created and named by the server
+ * when the connection is made. A switch here would be a control whose only
+ * outcome is a refusal, so the rows state the facts instead, with the word beside
+ * the mark.
+ *
+ * **Every account gets its own block, and the status is not summarised across
+ * them.** `google_accounts_max` is more than one on the paid plans, so a card
+ * with a single status chip would report one account's health as all of them.
  */
 function GoogleSection({ existing }: { existing: Connection[] }) {
   const { t } = useTranslation()
@@ -299,16 +369,40 @@ function GoogleSection({ existing }: { existing: Connection[] }) {
   }
 
   const syncError = asApiError(sync.error)
+  // The heading row carries the status when there is exactly one account to have
+  // one. With more than one, a single chip in the heading would report one
+  // account's health as all of them, so each account states its own instead.
+  const soleAccount = existing.length === 1 ? existing : []
 
   return (
-    <div className="card flex flex-col gap-3 p-4">
-      <p className="max-w-prose text-small text-muted">
-        {t('calendar.connections.google.hint')}
-      </p>
+    <div className="card flex flex-col gap-4 p-6">
+      {/* The service's own mark and status beside its description. The name is the
+          `Section`'s h2 directly above, so repeating it here would put two
+          headings with the same words in the outline. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="raised flex size-10 shrink-0 items-center justify-center text-primary-text">
+          <Icon name="calendar" size={24} />
+        </span>
+        <p className="min-w-0 flex-1 text-small text-muted">
+          {t('calendar.connections.google.hint')}
+        </p>
+        {soleAccount.map((connection) => (
+          <GoogleStatus key={connection.id} connection={connection} />
+        ))}
+      </div>
+
+      {existing.map((connection) => (
+        <GoogleAccount
+          key={connection.id}
+          connection={connection}
+          showStatus={existing.length > 1}
+        />
+      ))}
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-secondary"
           disabled={opening}
           onClick={() => {
             setOpening(true)
@@ -353,6 +447,119 @@ function GoogleSection({ existing }: { existing: Connection[] }) {
 }
 
 /**
+ * The status of a Google connection, as the chip the design puts in the card's
+ * heading row when there is one account to have a status.
+ */
+function GoogleStatus({ connection }: { connection: Connection }) {
+  const status = useStatusChip(connection.status)
+  return <span className={status.className}>{status.word}</span>
+}
+
+/**
+ * One connected Google account: which address it is, whether it is healthy, when
+ * it last ran, and what it moves.
+ *
+ * An absent `account_email` is rendered as its own line rather than left blank: a
+ * connection the server reports without an address is a fact the student should
+ * see, and an empty inset would read as a rendering fault.
+ *
+ * `showStatus` is on when the card holds more than one account: the heading row
+ * can carry a single status, and with several accounts the state belongs to the
+ * account it is about.
+ */
+function GoogleAccount({
+  connection,
+  showStatus,
+}: {
+  connection: Connection
+  showStatus: boolean
+}) {
+  const { t } = useTranslation()
+  const status = useStatusChip(connection.status)
+  const syncedAt = useLastSynced(connection)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="raised flex flex-wrap items-start justify-between gap-4 rounded-field p-4">
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="eyebrow">{t('calendar.connections.google.account')}</p>
+          <p className="min-w-0 break-words text-label font-medium">
+            {connection.account_email ?? t('calendar.connections.google.noAccount')}
+          </p>
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="eyebrow">{t('calendar.connections.google.lastSynced')}</p>
+          <p className="meta min-w-0 break-words">{syncedAt}</p>
+        </div>
+        {showStatus && <span className={status.className}>{status.word}</span>}
+      </div>
+
+      {/* The connection's two preferences, as the server's own facts: a connected
+          account imports its events, and a non-null `study_calendar_id` is the
+          Study Plan calendar the server made for this account. */}
+      <SyncPreference
+        title={t('calendar.connections.google.importTitle')}
+        hint={t('calendar.connections.google.importHint')}
+        on={connection.status === 'connected'}
+      />
+      <SyncPreference
+        title={t('calendar.connections.google.studyTitle')}
+        hint={t('calendar.connections.google.studyHint')}
+        on={connection.study_calendar_id !== null}
+      />
+
+      {/* The stored reason, in the server's own words (A247) — the same rule the
+          connections list keeps, stated here because this is where the account's
+          health is read. */}
+      {connection.error !== null && (
+        <p className="note note-warning break-words">{connection.error}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One sync preference: what it does, and whether it is on.
+ *
+ * **Read-only, and that is the honest presentation.** The state is the server's
+ * and no route writes it, so the mark is a disabled checkbox rather than a
+ * switch: a control that refuses every press is worse than a state that says what
+ * it is. The word beside it is what carries the state on screen — the mark alone
+ * would be shape doing a word's job.
+ *
+ * The mark's **accessible name is the preference**, not that word: a screen
+ * reader told "On, checkbox, checked, unavailable" learns nothing about what is
+ * on, so the title is the name and the word stays visible beside the mark.
+ */
+function SyncPreference({ title, hint, on }: { title: string; hint: string; on: boolean }) {
+  const { t } = useTranslation()
+  const titleId = useId()
+  return (
+    <div className="flex min-h-11 flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-label font-medium" id={titleId}>
+          {title}
+        </p>
+        <p className="text-small text-muted">{hint}</p>
+      </div>
+      <span className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled
+          readOnly
+          tabIndex={-1}
+          aria-labelledby={titleId}
+        />
+        <span className="text-label text-muted">
+          {on ? t('calendar.connections.google.on') : t('calendar.connections.google.off')}
+        </span>
+      </span>
+    </div>
+  )
+}
+
+/**
  * "Add an ICS URL" — ungated, because every plan has the import.
  *
  * The field is a `<form>` with a `<label for>`, so the failure the server returns
@@ -375,7 +582,7 @@ function IcsSection({ connections }: { connections: Connection[] }) {
         : null
 
   return (
-    <div className="card flex flex-col gap-3 p-4">
+    <div className="card flex flex-col gap-4 p-6">
       <p className="max-w-prose text-small text-muted">{t('calendar.connections.ics.hint')}</p>
 
       {connections.length > 0 && (
@@ -421,7 +628,11 @@ function IcsSection({ connections }: { connections: Connection[] }) {
             }}
           />
         </label>
-        <button type="submit" className="btn btn-primary" disabled={add.isPending || url.trim() === ''}>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={add.isPending || url.trim() === ''}
+        >
           {t('calendar.connections.ics.add')}
         </button>
       </form>

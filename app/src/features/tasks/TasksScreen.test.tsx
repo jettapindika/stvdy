@@ -5,7 +5,7 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
+import { installFakePlatform, jsonResponse, mockFetch, stubViewport } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
 import { fakeCache } from '@/test/syncStore'
 import { TasksScreen } from './TasksScreen'
@@ -105,8 +105,26 @@ function setup(rows: Record<string, unknown[]>, granted = true) {
   return { fake, calls }
 }
 
+/**
+ * The panel, rendered the way the planner host renders it.
+ *
+ * The props are the host's: the instant the view was opened (fixed here, because
+ * the panel must not read a clock), the student's zone, and the layout the URL
+ * carries. A helper rather than nine literals, so a later prop change is one edit.
+ */
+function renderTasks(layout: 'list' | 'board' = 'list') {
+  return renderWithProviders(
+    <TasksScreen now={new Date('2026-10-12T10:00:00Z')} timeZone="Asia/Jakarta" layout={layout} />,
+    { route: '/planner?view=tasks' },
+  )
+}
+
 beforeEach(() => {
   window.localStorage.clear()
+  // jsdom has no `matchMedia` and the panel chooses its table-or-cards layout
+  // through `useFormFactor`, which subscribes to it. A desktop width, so the
+  // table is what these tests read; the phone case is a separate describe.
+  stubViewport(1280)
 })
 
 afterEach(() => {
@@ -116,12 +134,14 @@ afterEach(() => {
 describe('the task list', () => {
   it('shows subtasks under their parent, one level deep, with a done count', async () => {
     setup({ task: [PARENT, CHILD_DONE, CHILD_TODO] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
 
     expect(await screen.findByText('Selesaikan tugas kripto')).toBeInTheDocument()
     // The children are listed, and the parent carries the count rather than a
-    // percentage: the number of done children is the fact.
-    expect(screen.getByText('1 of 2 subtasks done')).toBeInTheDocument()
+    // percentage: the number of done children is the fact. The wording is the
+    // design's `2 / 3 subtasks`, which is what the frame prints in the list's
+    // SUBTASKS column.
+    expect(screen.getByText('1 / 2 subtasks')).toBeInTheDocument()
     const done = screen.getByText('Done: Baca bab 1')
     expect(done).toBeInTheDocument()
     // One level: a child is not rendered as its own parent's row with its own
@@ -145,40 +165,29 @@ describe('the task list', () => {
  * The assertion is the falsifiable pair: the formatted date is present **and** the
  * raw instant is absent, so a revert to `{task.due_at}` fails on the second half
  * rather than merely changing a string. `PARENT.due_at` is `+07:00`, so in
- * `Asia/Jakarta` the medium date is the 16th and the raw form is a different string
- * entirely — the two cannot be confused for each other.
+ * `Asia/Jakarta` the rendered line names the 16th and the raw form is a different
+ * string entirely — the two cannot be confused for each other.
+ *
+ * The *form* of the line changed with the redesign, from `Due 16 Oct 2026` to the
+ * frame's `Fri 16 Oct · 09:00`. What the test is for did not: the assertion is that
+ * a zone-aware formatter ran at all, and the hour is the half of it a machine-zone
+ * implementation gets wrong.
  */
 describe('the due date', () => {
   it('renders in the student’s zone, never as the stored instant', async () => {
     setup({ task: [PARENT] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
 
     expect(await screen.findByText('Selesaikan tugas kripto')).toBeInTheDocument()
-    expect(screen.getByText('Due 16 Oct 2026')).toBeInTheDocument()
+    // The frame's due line: the weekday, the day, the month and the time, in the
+    // student's own zone. `09:00+07:00` is 09:00 in Jakarta, so a formatter that
+    // read the machine's zone instead would print a different hour on any machine
+    // west of Jakarta.
+    expect(screen.getByText('Fri 16 Oct · 09:00')).toBeInTheDocument()
     expect(
       screen.queryByText(PARENT.due_at),
       'the raw timestamptz must not reach the screen',
     ).toBeNull()
-  })
-
-  /**
-   * The reciprocal half of the spec's `Plan | Tasks` control.
-   *
-   * `/planner` and `/syllabus` had **no entry point at all** before this: the only two
-   * inbound links formed a closed cycle (planner → syllabus from its empty state,
-   * review → planner after a confirm) and neither nav has a planner item. So the link
-   * is asserted rather than assumed — without it the screens are reachable only by
-   * typing a URL, which is also why the accessibility walk could not measure them.
-   */
-  it('links to the planner, the other half of the Plan | Tasks pair', async () => {
-    setup({ task: [PARENT] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
-
-    const plan = await screen.findByRole('link', { name: 'Plan' })
-    expect(plan).toHaveAttribute('href', '/planner')
-    // `Tasks` is this screen, so it is a current-page mark rather than a second link
-    // back to here — the pair is one control, not two links to each other.
-    expect(screen.queryByRole('link', { name: 'Tasks' })).toBeNull()
   })
 })
 
@@ -186,7 +195,7 @@ describe('the break-down proposal', () => {
   async function openPanel() {
     const user = userEvent.setup()
     const harness = setup({ task: [PARENT] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
     await screen.findByText('Selesaikan tugas kripto')
     await user.click(screen.getByRole('button', { name: 'Break down' }))
     return { user, ...harness }
@@ -241,7 +250,7 @@ describe('the break-down proposal', () => {
 
     // The total is recomputed from what is left, not read from the model's own
     // `total_estimate_min`, which described the list it proposed.
-    expect(screen.getByText('135 minutes across the subtasks you keep')).toBeInTheDocument()
+    expect(screen.getByText('2h 15m total estimate')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Add these subtasks' }))
 
@@ -269,7 +278,7 @@ describe('the break-down proposal', () => {
   it('locks the assistant on a plan that does not grant it', async () => {
     const user = userEvent.setup()
     const { fake } = setup({ task: [PARENT] }, false)
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
     await screen.findByText('Selesaikan tugas kripto')
     await user.click(screen.getByRole('button', { name: 'Break down' }))
 
@@ -283,7 +292,7 @@ describe('deleting a parent', () => {
   it('tombstones its live children in the same action', async () => {
     const user = userEvent.setup()
     const { fake } = setup({ task: [PARENT, CHILD_DONE, CHILD_TODO] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
     await screen.findByText('Selesaikan tugas kripto')
 
     await user.click(screen.getByRole('button', { name: 'Delete' }))
@@ -299,7 +308,7 @@ describe('the create form', () => {
   it('writes one task with an id minted here, so a retry cannot create a second', async () => {
     const user = userEvent.setup()
     const { fake } = setup({ task: [] })
-    renderWithProviders(<TasksScreen />, { route: '/tasks' })
+    renderTasks()
 
     const field = await screen.findByLabelText('What do you have to do?')
     await user.type(field, 'Beli buku')
@@ -341,15 +350,27 @@ describe('the create form', () => {
 describe('the phone layout the browser measured', () => {
   const source = readFileSync(join(__dirname, 'TasksScreen.tsx'), 'utf8')
 
-  it('gives the screen root a definite width, so an intrinsic child cannot widen the page', () => {
-    const root = /<div className="([^"]*\bmax-w-3xl\b[^"]*)"/.exec(source)?.[1]
-    expect(root, 'the screen root must carry its classes inline').toBeTruthy()
-    // The fix, and the only class that carries it: fit-content is what let the
-    // date control's 346.6px minimum become a 492.6px page.
+  it('gives the panel root a definite width, so an intrinsic child cannot widen the page', () => {
+    // **The property moved with the layout, and that is why this reads the panel
+    // rather than the page.** The panel is no longer the page column: the column
+    // and its `mx-auto max-w-*` belong to `PlannerScreen`, and this file renders a
+    // block inside it. What the fix is about is unchanged — a container whose width
+    // is *content-based* cannot go below its min-content, so the date control's
+    // 346.6px minimum becomes the page's width inside a 390px `main`. `w-full`
+    // makes the width definite, and `min-w-0` is the same permission for the flex
+    // child that would otherwise propagate the minimum up to it.
+    const root = /<div className="(flex w-full min-w-0[^"]*)"/.exec(source)?.[1]
+    expect(root, 'the panel root must carry its classes inline').toBeTruthy()
     expect(root).toContain('w-full')
-    // `mx-auto` stays: it is what centres the column on a desktop, where the
-    // measurement is unchanged (768px wide, centred, at a 1280px viewport).
-    expect(root).toContain('mx-auto')
+    expect(root).toContain('min-w-0')
+    // And the page column that now owns the centring keeps both halves, so the
+    // property is not merely moved out of the tree: this is where the width is
+    // made definite for the whole view.
+    const host = readFileSync(join(__dirname, '..', 'planner', 'PlannerScreen.tsx'), 'utf8')
+    const column = /<div className="([^"]*\bmax-w-5xl\b[^"]*)"/.exec(host)?.[1]
+    expect(column, 'the host column must carry its classes inline').toBeTruthy()
+    expect(column).toContain('w-full')
+    expect(column).toContain('mx-auto')
   })
 
   it('keeps the native date control, rather than squeezing it to fit', () => {

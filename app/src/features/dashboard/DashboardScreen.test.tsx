@@ -21,6 +21,12 @@ import { setAccessToken } from '@/lib/tokens'
  * `AdvancedAnalytics` there must be no figure from `/dashboard/topics` on screen
  * at all, which is why the fixture gives that route a value that would be obvious
  * if it leaked.
+ *
+ * The third pin is the redesign's outline: a section per figure group, a card
+ * heading of its own for each chart, and never a card heading that repeats the
+ * section it sits in — the same words twice reads as two figures where there is
+ * one. A bar's accessible name is pinned the same way: it states the row's figure,
+ * never its width, because the width is the row's share of the busiest row.
  */
 
 const USER = {
@@ -79,12 +85,31 @@ const notFound = () =>
     used: null,
   })
 
+/**
+ * The instant every window assertion is written against: 2026-10-16T01:00Z, which is
+ * 08:00 on the 16th in Jakarta.
+ *
+ * **The clock is pinned, and that is not tidiness.** This screen derives its window from
+ * `new Date()` in the reader's zone, so an assertion naming the window's dates is an
+ * assertion about *when the suite happens to run*: the two tests below expected
+ * `2026-09-28 to 2026-10-12` and started failing at 17:00 UTC, when Jakarta crossed
+ * midnight and the same code produced `…-09-29 to …-10-13`. The screen was right both
+ * times; the test was reading the calendar instead of a fixed instant.
+ */
+const NOW = new Date('2026-10-16T01:00:00Z')
+
 beforeEach(() => {
+  // `shouldAdvanceTime` matters: the clock is pinned so the local day is fixed, but
+  // testing-library's `findBy` polls on timers and a frozen clock would make every
+  // `await` in this file hang rather than fail.
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(NOW)
   installFakePlatform('web')
   setAccessToken('access-1')
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -115,6 +140,48 @@ describe('the dashboard', () => {
     expect(bars.length).toBe(4)
     for (const bar of bars) {
       expect(bar.getAttribute('aria-label')).toBeTruthy()
+      // The name is the row's own figure, never the bar's width. The width is
+      // this row's share of the busiest row, so a name calling that share a
+      // percentage "of your study time" would put a figure on screen that the
+      // route never returned — and the busiest row would read as 100% of a total
+      // it is only part of.
+      expect(bar.getAttribute('aria-label')).not.toMatch(/percent/i)
+    }
+  })
+
+  it('puts each figure in a section whose card heading is not the section heading', async () => {
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/usage') return jsonResponse(200, usage(true))
+      if (path === '/dashboard') return jsonResponse(200, SUMMARY)
+      if (path === '/dashboard/topics') return jsonResponse(200, TOPICS)
+      return notFound()
+    })
+    const { container } = renderWithProviders(<DashboardScreen />, { route: '/dashboard' })
+    await screen.findByText(/90 minutes studied and 5 card reviews/)
+
+    // The page outline: the screen's own title, then a section per figure. The
+    // window is the header's eyebrow, which is the one fact the title cannot
+    // carry — every figure below is a count over those local days.
+    expect(screen.getByRole('heading', { level: 1, name: 'Progress' })).toBeTruthy()
+    expect(container.querySelector('header .eyebrow')?.textContent).toBe('2026-10-02 to 2026-10-16')
+    expect(screen.getByRole('heading', { level: 2, name: 'Totals' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'Quiz mastery' })).toBeTruthy()
+
+    // The two window charts are widgets with a heading of their own, so the bars
+    // under each belong to a named figure rather than to one undifferentiated
+    // list; the weak-topic list is the same shape one level down. The last one is
+    // awaited: it comes from `/dashboard/topics`, which resolves after the summary.
+    expect(screen.getByRole('heading', { level: 3, name: 'Time per course' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 3, name: 'Review activity' })).toBeTruthy()
+    await screen.findByRole('heading', { level: 3, name: 'Weak topics' })
+
+    // And a card heading never restates the section it sits in: the same words
+    // twice reads as two figures where there is one.
+    for (const heading of container.querySelectorAll('h3')) {
+      const sectionHeading = heading.closest('section')?.querySelector('h2')
+      expect(heading.textContent).not.toBe(sectionHeading?.textContent)
     }
   })
 
@@ -139,7 +206,7 @@ describe('the dashboard', () => {
     expect(container.textContent).toContain('7')
     expect(container.textContent).toContain('4')
     // The window is stated, in local days, so the reader knows what the counts cover.
-    expect(container.textContent).toContain('2026-09-28 to 2026-10-12')
+    expect(container.textContent).toContain('2026-10-02 to 2026-10-16')
     // The mastery line is the row's own numbers: 4 of 6, 67 percent — a percentage
     // the *route* computed from `correct` and `attempts`, not one this screen made up.
     expect(container.textContent).toContain('Graf: 4 of 6 correct, 67 percent')

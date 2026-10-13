@@ -44,7 +44,7 @@ export function SignUpScreen() {
       subtitle={t('auth.signUp.subtitle')}
       footer={
         <>
-          <span className="text-sm text-muted">{t('auth.signUp.haveAccount')}</span>
+          <span className="text-label text-muted">{t('auth.signUp.haveAccount')}</span>
           <Link to="/signin" className="btn btn-quiet">
             {t('auth.signIn.title')}
           </Link>
@@ -52,7 +52,7 @@ export function SignUpScreen() {
       }
     >
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 sm:gap-5"
         onSubmit={(event) => {
           event.preventDefault()
           signUp.mutate(
@@ -99,6 +99,7 @@ export function SignUpScreen() {
           autoComplete="new-password"
           required
           value={password}
+          hint={t('auth.signUp.passwordHint')}
           error={errorFor('password')}
           onChange={(event) => {
             setPassword(event.target.value)

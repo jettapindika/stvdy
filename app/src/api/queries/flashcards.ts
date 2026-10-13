@@ -135,3 +135,25 @@ export function useReviewCard(deckId: string) {
       client.invalidateQueries({ queryKey: flashcardKeys.deck(deckId), exact: true }),
   })
 }
+
+/**
+ * `DELETE /flashcard-reviews/:id` — take a grade back, inside the server's window.
+ *
+ * The id is the one the review was sent with (the client mints it), which is the
+ * row's own primary key: the screen keeps it from the POST so the delete can name
+ * exactly the review it is withdrawing, rather than the card.
+ *
+ * The same invalidation as `useReviewCard` and for the same reason: the queue is
+ * the screen's local state, so an inexact invalidation of `['decks', id]` would
+ * also refetch `['decks', id, 'due']` and, on a failure, tear the card down
+ * mid-session. The deck's own data is what changed — the card's schedule was
+ * replayed from the reviews that remain — so it is the deck that is refetched.
+ */
+export function useUndoReview(deckId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (reviewId: string) => api.delete(`/flashcard-reviews/${reviewId}`),
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: flashcardKeys.deck(deckId), exact: true }),
+  })
+}

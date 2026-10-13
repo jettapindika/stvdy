@@ -62,10 +62,11 @@ Semantic usage: indigo = actions/brand/selection; sky = sources and citations ON
 
 ## Type, shape, motion
 - Fonts bundled locally: Plus Jakarta Sans (headings 600/700), Inter (UI/body), JetBrains Mono (page refs, timestamps, hotkeys only).
-- Scale (px/line-height): Display 32/40, H1 24/32, H2 20/28, H3 16/24, Body 16/24 on mobile and 14/22 on desktop, Small 13/18, Caption 12/16. NOTHING below 12px. Mobile inputs are 16px (prevents iOS zoom). Layouts must survive 200% text scaling and Indonesian strings (~25% longer than English).
-- 4pt spacing grid. Radius: 8 controls, 12 cards, 16 sheets/modals, 999 chips. 1px borders in both themes; shadows only for floating layers.
+- Scale (px/line-height), **from the Figma design, which supersedes the earlier scale**: Display 48/62, H1 32/42, H2 24/32, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Small 13/20, Caption 12/18, Metadata 11/18, phone tab label 10/12. The earlier rule "NOTHING below 12px" is **withdrawn**: the design's metadata role is 11px monospace (uppercase with tracking as an eyebrow), and it carries most of the redesign's character. Body is 16/24 at every viewport, not 14/22 on desktop. Mobile inputs are 16px (prevents iOS zoom). Layouts must survive 200% text scaling and Indonesian strings (~25% longer than English).
+- 4pt spacing grid: 8 tight groups, 12 control padding, 16 card body, 24 related blocks, 32 section separation. Radius: 8 controls, 12 cards, 16 sheets/modals, 999 chips. 1px borders in both themes; shadows only for floating layers.
 - Motion 120/200/300 ms ease-out. Respect prefers-reduced-motion (card flip becomes a crossfade). No looping animations except loading and active-recording states.
-- One outline icon set (Material Symbols Rounded outlined subset or an equivalent bundled SVG set), 20px (24px in tab bars). Use an icon, not an emoji, for the streak.
+- One outline icon set, drawn for this product and bundled as SVG (no CDN, no imported pack), 20px in controls and 24px in navigation. Use an icon, not an emoji, for the streak.
+- **The shell is the design's**: a 216px desktop sidebar (wordmark, five nav items with icons, a "THIS SEMESTER" course list, a help note, the account's timezone) and an 80px top bar (a global search field that opens the command palette with its `⌘K`/`Ctrl K` badge, the sync state, the credit meter, the account group). A phone gets a 72px app header and a tab bar of five items, each a 24px icon over a 10px label.
 
 ## Accessibility (WCAG 2.2 AA)
 Focus ring on every interactive element (2px primary ring + 2px offset, both themes; never remove outlines without replacing them); tap targets >= 44px on mobile and >= 32px with 8px gaps on desktop; never color-only meaning (add icon/text/pattern); labels on all inputs; aria-live for toasts and streaming answers; correct heading hierarchy; accessible names for icon buttons; charts and heatmaps have text equivalents; pinch-zoom is allowed (no `user-scalable=no`, no `maximum-scale`); keyboard-navigable everywhere on desktop. Add automated a11y checks (axe) to CI for the component gallery and key screens.
@@ -662,8 +663,8 @@ Admin: users, plan overrides, manual payment mark/refund, manual credit grants, 
 
 ## Information architecture
 - Phone (iOS/Android) bottom tab bar, 5 tabs: Today, Workspaces, Study, Planner, More. Tasks live inside Planner as a segmented control (Plan | Tasks). Flashcards and quizzes live in Study and in each workspace's Studio. "More" holds Settings, Devices and sync, Plan and usage, Help.
-- Desktop/web sidebar (248px, collapsible to a 64px icon rail below 1200px): Today, Workspaces (course list nested), Study, Planner (Calendar | Tasks), and Settings at the bottom. Top bar: ⌘K/Ctrl+K search and command palette, sync indicator, credit meter, avatar menu.
-- Tablet: two-pane layouts.
+- Desktop/web sidebar (216px): Today, Workspaces (the semester's course list nested), Study, Planner (Calendar | Tasks), and Settings at the bottom. Top bar: ⌘K/Ctrl+K search and command palette, sync indicator, credit meter, avatar menu.
+- Tablet: two-pane layouts. The 64px icon rail below 1200px is **withdrawn** — no design frame shows a collapsed rail, and the 216px rail fits at the smallest supported desktop width.
 
 ## Screens
 1. Auth: sign in, sign up, verify email, forgot password; first run (language, timezone, optional notification pre-permission); "signed out from another device".

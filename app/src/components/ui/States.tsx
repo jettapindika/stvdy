@@ -45,8 +45,8 @@ export function EmptyState({
 }) {
   return (
     <div className={`flex flex-col items-start gap-2 ${padded ? 'px-4 py-6' : ''}`}>
-      <p className="font-medium text-text">{title}</p>
-      <p className="max-w-prose text-sm text-muted">{reason}</p>
+      <p className="text-h4 text-text">{title}</p>
+      <p className="max-w-prose text-body text-muted">{reason}</p>
       {action && <div className="mt-1">{action}</div>}
     </div>
   )
@@ -65,8 +65,8 @@ export function ErrorState({
 }) {
   return (
     <div className="note note-danger flex flex-col items-start gap-2" role="alert">
-      <p className="font-medium">{title}</p>
-      <p className="text-sm">{reason}</p>
+      <p className="text-h4">{title}</p>
+      <p className="text-body">{reason}</p>
       {action && <div>{action}</div>}
     </div>
   )
@@ -81,7 +81,7 @@ export function LoadingState({
   return (
     <div className="flex items-center gap-2 px-4 py-6" role="status" aria-live="polite">
       <span className="h-2 w-2 animate-working rounded-full bg-muted" aria-hidden="true" />
-      <span className="text-sm text-muted">{label}</span>
+      <span className="text-body text-muted">{label}</span>
     </div>
   )
 }
@@ -129,7 +129,7 @@ export function NotBuiltYet({
     <section className="mx-auto flex max-w-2xl flex-col gap-3 px-5 py-10">
       {level === 1 ? <h1>{title}</h1> : level === 2 ? <h2>{title}</h2> : <h3>{title}</h3>}
       <div className="note">
-        <p className="text-sm text-muted">{t('states.notBuiltYet', { what })}</p>
+        <p className="text-body text-muted">{t('states.notBuiltYet', { what })}</p>
       </div>
     </section>
   )
@@ -185,7 +185,7 @@ export function ApiErrorNotice({
         <p className="font-medium" role="status">
           {title ?? apiErrorTitle(error, t)}
         </p>
-        <p className="text-sm text-muted">{planLimitMessage(error, t, noun)}</p>
+        <p className="text-body text-muted">{planLimitMessage(error, t, noun)}</p>
         {/* Mobile builds carry no purchase UI (SPEC § Pricing), so they get the
             statement and no route to a checkout. `feature_locked` gets none on any
             platform: A143 gives it exactly one meaning — locked, and no upgrade
@@ -193,7 +193,7 @@ export function ApiErrorNotice({
             is over its plan's device count, where the remedy is to sign another
             device out and a route to the plans page is the wrong fix. */}
         {!isMobile && error.code !== 'feature_locked' && (
-          <Link to="/billing" className="link inline-flex min-h-11 items-center text-sm">
+          <Link to="/billing" className="link inline-flex min-h-11 items-center text-label">
             {t('billing.seePlans')}
           </Link>
         )}

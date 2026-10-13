@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -154,6 +154,18 @@ describe('the preview frame', () => {
     // Six, as the renderer counted it for the print — the same number the
     // footer's `Halaman N dari M` is printed from.
     expect(await screen.findByText('6 pages')).toBeInTheDocument()
+  })
+
+  it('names the sheet by its scope alone when there is no exam date', async () => {
+    // The date is omitted rather than paired with an empty half: the header carries
+    // the scope, and a sheet with no exam on the calendar says only what it is for.
+    // Scoped to the header because the footer repeats the scope.
+    serve({ sheet: { ...SHEET, exam_date: null } })
+    renderSheet()
+
+    const header = await screen.findByRole('banner')
+    expect(within(header).getByText('UTS Jaringan Komputer')).toBeInTheDocument()
+    expect(within(header).queryByText(/·/)).not.toBeInTheDocument()
   })
 
   it('shows no page count at all when the renderer has not reported one', async () => {

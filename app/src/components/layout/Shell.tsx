@@ -5,6 +5,7 @@ import { useSyncEngine } from '@/features/sync/useSyncEngine'
 import { useFormFactor } from '@/lib/useFormFactor'
 import { Sidebar } from './Sidebar'
 import { TabBar } from './TabBar'
+import { PhoneHeader, TopBar } from './TopBar'
 
 /**
  * The app shell.
@@ -12,6 +13,12 @@ import { TabBar } from './TabBar'
  * The shell is chosen by viewport width, not by platform: a phone browser and a
  * native iOS build want the same layout. `useFormFactor` owns that decision and
  * its breakpoints match the CSS ones (768px for the sidebar/tab-bar swap).
+ *
+ * **The desktop shell gained a top bar in the redesign.** It is `Sidebar | (TopBar
+ * over main)` on a desktop and `(PhoneHeader over main) | TabBar` on a phone, which
+ * is what every frame in the design draws. The two form factors have different
+ * chrome because they have different room: a phone header holds a wordmark, one
+ * icon and an avatar, and the credit meter drops to its own row under them.
  *
  * `main` is a flex column (`.shell-main`) so a screen fills the space it is
  * *given*. A screen that sizes itself with `100dvh` instead ignores the tab bar
@@ -35,14 +42,31 @@ import { TabBar } from './TabBar'
  * right place for it: the shell only exists for a signed-in account, so the engine
  * is configured when there is a session and torn down when there is not. It is a
  * no-op on the web build, which has no local database and no outbox (A14).
+ *
+ * **The drag strip is present but inert, and that is deliberate.** `src-tauri/
+ * tauri.conf.json` sets no `decorations: false`, so the window is decorated today
+ * and the OS title bar is what moves it. `.drag-region` is therefore zero-height in
+ * every current build, and the top bar does not reserve space for it. The rule and
+ * the class are in place so that turning on a frameless window is a config change
+ * plus adding `window-frameless` to this root — not a redesign of the bar. Until
+ * then, claiming a drag region would be reserving 36px for chrome that is not
+ * there.
  */
-export function Shell({ children }: { children: ReactNode }) {
+export function Shell({
+  children,
+  onOpenPalette,
+}: {
+  children: ReactNode
+  onOpenPalette: () => void
+}) {
   const { t } = useTranslation()
   const isPhone = useFormFactor() === 'phone'
   useSyncEngine()
 
   return (
-    <div className={`flex min-h-[100dvh] bg-bg text-text${isPhone ? ' shell-phone' : ''}`}>
+    <div
+      className={`flex min-h-[100dvh] bg-bg text-text${isPhone ? ' shell-phone' : ''}`}
+    >
       <a
         href="#main"
         className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50"
@@ -52,12 +76,17 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {!isPhone && <Sidebar />}
 
-      <main
-        id="main"
-        className="shell-main pt-safe-top"
-      >
-        {children}
-      </main>
+      {/* The content column. On a desktop the top bar is inside it, so the bar
+          starts where the sidebar ends rather than spanning the window — which is
+          what the design draws, and what keeps the sidebar's own wordmark at the
+          window's top-left corner. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {isPhone ? <PhoneHeader onOpenPalette={onOpenPalette} /> : <TopBar onOpenPalette={onOpenPalette} />}
+
+        <main id="main" className="shell-main">
+          {children}
+        </main>
+      </div>
 
       {isPhone && <TabBar />}
     </div>

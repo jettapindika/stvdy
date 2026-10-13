@@ -567,6 +567,31 @@ devices converge on one schedule rather than on whichever wrote last (A82).
   queue for months.
 - 404 for another account's card.
 
+### `DELETE /flashcard-reviews/:id`
+
+Auth. Undo a grade, inside the five-minute window the spec names for it
+(`docs/SPEC.md:647`). **Undo is a delete plus a replay, not an inverse
+calculation.** `flashcard_reviews` is append-only and the card's state is a pure
+function of its rows (`replay(created_at, &reviews)`), so removing the row and
+replaying what is left produces the state the card would have had if the review
+had never happened. The alternative — subtracting one review's effect — would need
+a second implementation of SM-2's inverse, and a second implementation of a
+schedule is how two devices start disagreeing (the same reason the client never
+computes an interval).
+
+200 `{"undone": true, "card": {"id", "ease", "interval_days", "due_at"}}` — the
+card's state after the replay, so the screen renders the schedule the server now
+holds rather than a locally guessed one.
+
+- 404 for another account's review, or one that is already gone. A second call is
+  a 404 rather than an error, so the undo is idempotent from the student's side and
+  a retried tap is not a failure.
+- 409 `conflict` when the review is older than the window: the review exists, and
+  the answer is that it is too late rather than that it is missing. Undo is for a
+  mis-tap, not a change of mind — a review that has stood longer has already
+  informed the day's plan, and deleting it would silently rewrite a schedule the
+  student has seen.
+
 ## Quiz (Phase 5)
 
 Generation is asynchronous, exactly as a deck's is: `POST /workspaces/:id/quizzes`
@@ -954,10 +979,11 @@ reads the date it will actually reset on.
 
 ### Every route, and what it is
 
-The table below is the same table `crates/server/tests/route_sweep.rs` asserts,
-so the document and the test cannot disagree. **55 rows are registered** and every
-one is classified; a new route that is not in the table fails
-`every_registered_route_is_classified`.
+`crates/server/tests/route_sweep.rs` is the authority on how a route relates to the
+entitlement decision: `every_registered_route_is_classified` fails when a registered
+route is in neither its `ROUTES` nor its `EXEMPT`. The tables below carry that
+classification for the routes listed here — **62 rows**, each with its class and, for
+a swept route, the `(status, code)` an exhausted account must get.
 
 **Swept** — calls the engine for a `Feature`, and an account whose limits are all
 used gets exactly the `(status, code)` in the last column:
@@ -999,6 +1025,7 @@ exportable (A149).
 | GET | `/decks/{id}` | reads the caller's own deck |
 | GET | `/decks/{id}/due` | reads the caller's own due cards |
 | POST | `/flashcards/{id}/review` | a review is free (R1): studying never costs credits |
+| DELETE | `/flashcard-reviews/{id}` | undoing a review is free (R1): a delete plus a replay of the remaining history, not an inverse calculation |
 | GET | `/workspaces/{id}/quizzes` | reads the caller's own quizzes |
 | GET | `/quizzes/{id}` | reads the caller's own quiz |
 | POST | `/quizzes/{id}/attempts` | an attempt is free (R1), like a review |
@@ -1036,6 +1063,7 @@ exportable (A149).
 | PATCH | `/admin/users/{id}/plan` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
 | POST | `/admin/users/{id}/credits` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
 | GET | `/admin/margin` | `AdminUser` only: the extractor answers 404 for a non-admin (A7), so there is no decision to sweep |
+| GET | `/admin/users` | `AdminUser` only: the extractor answers 404 for a non-admin (A7); a read of the rows the product already writes, with no spend and no plan decision |
 
 ### The refusals
 
@@ -1058,30 +1086,61 @@ decision comes from `devices.platform`, never from the request body (A144).
 
 ## Admin (Phase 7)
 
-Three routes, all `AdminUser`-only (a non-admin gets 404, not 403 — A7). The
-admin surface is deliberately API-only until Phase 13, which adds the payment
-routes, the manual mark/refund and the completed margin report.
+Eight routes, all `AdminUser`-only (a non-admin gets 404, not 403 — A7). The admin
+surface is deliberately API-only.
 
-- `PATCH /admin/users/:id/plan` body `{ "plan": "pro" }` → 200
-  `{ "user": { "id", "plan_id" } }`. Writes the stored plan **and** a live
-  `subscriptions` row, because `users.plan_id` alone grants nothing (A146). 400
-  `validation` for an unknown plan id, 404 for an unknown user.
+- `PATCH /admin/users/:id/plan` body `{ "plan": "pro", "period_days"?: N }` → 200
+  `{ "user_id", "plan", "read_only": {"workspaces", "sources", "devices"} }`. Writes
+  the stored plan **and** a live `subscriptions` row, because `users.plan_id` alone
+  grants nothing (A146), then recomputes the read-only flags through the same
+  `recompute_read_only` the rollover uses. 400 `validation` for an unknown plan id or
+  a non-positive `period_days` (default 30), 404 for an unknown user.
 - `POST /admin/users/:id/credits` body
   `{ "credits": 100, "bucket": "monthly"|"purchased", "idempotency_key": "..." }`
-  → 200 `{ "granted": bool, "bucket", "credits" }`. `bucket` is validated rather
-  than defaulted, so a typo is a 400 and never a silent monthly grant; the row's
-  `reason` is `admin`, and `period_key = "admin:<idempotency_key>"` against the
-  ledger's partial unique index, so a second call with the same key is
+  → 200 `{ "user_id", "granted", "credits", "bucket", "period_key" }`. `bucket` is
+  validated rather than defaulted, so a typo is a 400 and never a silent monthly
+  grant; the row's `reason` is `admin`, and `period_key = "admin:<idempotency_key>"`
+  against the ledger's partial unique index, so a second call with the same key is
   `granted: false` and writes nothing.
-- `GET /admin/margin?from=&to=` → 200 `MarginReport`: `per_plan[]` with
-  `provider_cost_usd`, `byok_cost_usd` and `ceiling_usd` (the plan's
-  `provider_cost_ceiling_usd`, attached by the route through
-  `credits::ceiling_usd`, the field's one reader), a `provider_cost` split of
-  `free_usd`/`paid_usd`/`byok_usd`, and `revenue`/`conversion` — which are
-  **`null`**, not `0`: nothing in this phase can compute them, and a `0` would
-  read as a real figure. BYOK cost is its own column because a BYOK call spends
-  the user's own key, so counting it would overstate our cost (A156). Defaults to
-  the last 30 days; 400 when `from >= to`.
+- `GET /admin/margin?from=&to=` → 200 `MarginReport`: `months[]`, oldest first, each
+  with `per_plan[]` (`provider_cost_usd`, `byok_cost_usd`, `revenue_idr`,
+  `gross_margin_idr`, `ceiling_usd` — the plan's `provider_cost_ceiling_usd`, attached
+  by the route through `credits::ceiling_usd`, the field's one reader), the month's
+  `revenue_idr`/`gateway_fee_idr` and its `paying`/`free_accounts` counts with the two
+  ratios (`conversion_of_free`, `conversion_of_total`), plus `tripwires` and the
+  `idr_per_usd` rate every figure was computed with. **A figure the range cannot
+  produce is `null`, not `0`**: `free_utilization` is unanswerable when nothing was
+  granted, and each tripwire is `Option` so "not measured" never reads as "safe"
+  (A46/A304). BYOK cost is its own column because a BYOK call spends the user's own
+  key, so counting it would overstate our cost (A156). Defaults to the last 30 days;
+  400 when `from >= to`.
+- `GET /admin/users?from=&to=` → 200 `{ "from", "to", "users": [AdminUserRow] }`, the
+  activity table. Each row carries the window's `requests` and `sources_added` counts
+  and the account's ever-`last_active_at`, and the window travels with the response
+  rather than being implied by a heading; nothing is invented — no engagement score,
+  no churn prediction. Defaults to the last 30 days; 400 when `from >= to`.
+- `GET /admin/payments?status=&limit=` → 200 `{ "payments": [PaymentRow], "count" }`.
+  The queue A294/A301 feed: a mismatched amount and an unexplained gateway transaction
+  both land as `review` rows carrying their reason. `status` filters to one of
+  `pending`, `paid`, `review`, `refunded`, `expired`, `failed`; omitted lists every
+  row. `limit` defaults to 100 and is clamped to 1–500.
+- `POST /admin/payments/:id/mark-paid` → 200 `{ "payment_id", "applied" }`. Runs **the
+  same `apply_paid` the webhook runs** (A308/A301), so a manual confirmation and a
+  gateway one cannot activate differently, and records `provider = 'manual'` so the
+  margin report can tell a comp from money. Idempotent: a second call finds the payment
+  already `paid` and changes nothing. 404 for an unknown payment.
+- `POST /admin/payments/:id/refund` → 200
+  `{ "payment_id", "status": "refunded", "changed" }`. Records the refund and **leaves
+  the subscription alone** (A308): a refund is a money fact, and revoking a plan the
+  student may be using is a human decision, not a side effect of a row update. The
+  gateway fee is zeroed rather than deleted. 404 for an unknown payment, 409 `conflict`
+  when it is not `paid`; a second refund of a refunded payment is `changed: false`.
+- `PATCH /admin/subscriptions/:user_id` body `{ "extend_days": N }` → 200
+  `{ "user_id", "current_period_end", "read_only": {"workspaces", "sources",
+  "devices"} }`. Extends the live subscription and recomputes the read-only flags
+  through the same `recompute_read_only` the rollover uses, so a manual extension
+  clears a flag the account was carrying (A149). Positive only, at most 3650; 404 when
+  there is no live subscription.
 
 ## Tasks (Phase 9)
 

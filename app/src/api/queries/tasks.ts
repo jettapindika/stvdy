@@ -81,8 +81,16 @@ async function fetchTasks(): Promise<TaskRow[]> {
   return body.tasks
 }
 
-export function useTasks() {
-  return useQuery({ queryKey: taskKeys.all, queryFn: fetchTasks })
+/**
+ * The task list.
+ *
+ * `enabled` exists for the command palette, which is mounted for the whole session
+ * but reads tasks only while it is open: an unconditional read there would be a
+ * request on every signed-in page load for a list most sessions never search. The
+ * Tasks view calls this with no options.
+ */
+export function useTasks({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: taskKeys.all, queryFn: fetchTasks, enabled })
 }
 
 /**

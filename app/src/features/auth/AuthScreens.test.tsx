@@ -16,6 +16,10 @@ import type { FakeSecureStore } from '@/test/harness'
  * proposed rather than left blank, the request carries the fields the contract
  * names, a validation failure lands on the field it is about, and a refusal is
  * reported instead of swallowed.
+ *
+ * The email field is matched on the word "email" rather than on the whole label:
+ * the design names it "University email", and matching the prefix would make this
+ * file fail the moment the copy is translated into Indonesian ("Email kampus").
  */
 
 const SESSION = {
@@ -63,7 +67,7 @@ describe('signing up', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignUpScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'correct horse battery staple')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
@@ -97,7 +101,7 @@ describe('signing up', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignUpScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'short')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
@@ -105,7 +109,10 @@ describe('signing up', () => {
     expect(await screen.findByText('password must be at least 12 characters')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByLabelText('Password')).toHaveAccessibleDescription(
-      'password must be at least 12 characters',
+      // The description also carries the field's hint, so the assertion is that
+      // the server's sentence is announced with the field, not that it is the
+      // only thing announced.
+      /password must be at least 12 characters/,
     )
     // And it is not also announced as a form-level failure.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -124,12 +131,12 @@ describe('signing up', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignUpScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'long enough to pass')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('request rejected')
-    expect(screen.getByLabelText('Email')).not.toHaveAttribute('aria-invalid')
+    expect(screen.getByLabelText(/email/i)).not.toHaveAttribute('aria-invalid')
   })
 
   it('reports a taken email address without pretending it succeeded', async () => {
@@ -145,7 +152,7 @@ describe('signing up', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignUpScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'correct horse battery staple')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
@@ -160,7 +167,7 @@ describe('signing in', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignInScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'correct horse battery staple')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
@@ -188,7 +195,7 @@ describe('signing in', () => {
     const user = userEvent.setup()
     renderWithProviders(<SignInScreen />)
 
-    await user.type(screen.getByLabelText('Email'), 'student@example.com')
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
     await user.type(screen.getByLabelText('Password'), 'wrong')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 

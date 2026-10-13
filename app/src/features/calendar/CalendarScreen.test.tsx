@@ -3,8 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CalendarScreen } from './CalendarScreen'
+import { API_BASE_URL } from '@/api/client'
+import { feedUrl, type Connection } from '@/api/queries/calendar'
 import { installFakePlatform, jsonResponse, mockFetch } from '@/test/harness'
 import { renderWithProviders } from '@/test/render'
+import { formatInZone, localDateKey } from '@/lib/time'
 import { setAccessToken } from '@/lib/tokens'
 
 /**
@@ -22,6 +25,12 @@ import { setAccessToken } from '@/lib/tokens'
  *    plan, and only the Google connection is gated. Getting this backwards would
  *    refuse a feature the free matrix grants, which is the defect the brief names
  *    first.
+ *
+ *  - **the panel states the API's own facts** — the connected account's address,
+ *    its status word and its two sync preferences are what
+ *    `GET /calendar/connections` answered, and the feed field holds the URL the
+ *    returned token makes. A panel that invented any of them, or that filled an
+ *    absent one with a plausible value, fails here.
  */
 
 const WORKSPACE = {
@@ -74,20 +83,55 @@ const notFound = () =>
   jsonResponse(404, { code: 'not_found', message: 'no', min_plan: null, limit: null, used: null })
 
 /**
+ * The screen under test, with the clock and the zone its host supplies.
+ *
+ * `CalendarScreen` takes `now` and `timeZone` as props rather than reading either
+ * itself — `PlannerScreen` captures the instant once, so the heading, the grid,
+ * the `Today` cell and the current-time line cannot disagree about which day it
+ * is. A test therefore has to pass both.
+ *
+ * `new Date()` is deliberate rather than a fixed clock: `serve` anchors the
+ * fixture events to the **real** local today, so a hardcoded `now` would place
+ * them outside the window the screen renders. The zone is the account's own,
+ * which is what `GET /auth/me` answered.
+ */
+function renderCalendar() {
+  return renderWithProviders(<CalendarScreen now={new Date()} timeZone={USER.timezone} />, {
+    route: '/calendar',
+  })
+}
+
+/**
  * The API as the screen reads it, with the plan switchable.
+ *
+ * `served` is what the account's own state is: the connections the panel renders
+ * rows for, and the feed token it renders a field for. Both default to the empty
+ * answer, so a test that is about the plan split does not have to state them.
  *
  * The screen takes its "today" from `new Date()` on mount, so the fixture events
  * are placed relative to the real clock rather than at fixed instants: a test
  * with a hardcoded June date would pass in June and render an empty grid in
  * December. That is the one place a screen test cannot be a pure function of a
  * fixed clock, and it is why the window maths lives in its own file.
+ *
+ * "Relative to the real clock" is anchored to the student's **local today**, not
+ * to `Date.now() + n hours`: run after 23:00 the old form put the second event
+ * across local midnight, and `placeEvents` places an event on every local day it
+ * overlaps — deliberately, so a conference that began yesterday is not dropped —
+ * so the grid rendered two buttons with one id and the query below found two
+ * matches. `T12:00:00Z` is inside the same local date as `localDateKey(now)` for
+ * any zone the app supports, and the pair of one-hour events ends long before the
+ * day does.
  */
-function serve(plan: { googleCalendar: boolean; googleAccountsMax: number | null }) {
-  const now = Date.now()
+function serve(
+  plan: { googleCalendar: boolean; googleAccountsMax: number | null },
+  served: { connections?: Connection[]; feedToken?: string | null } = {},
+) {
+  const today = Date.parse(`${localDateKey(new Date(), USER.timezone)}T12:00:00Z`)
   const events = [OWN_EVENT, EXTERNAL_EVENT].map((event, index) => ({
     ...event,
-    starts_at: new Date(now + index * 3600_000).toISOString(),
-    ends_at: new Date(now + (index + 1) * 3600_000).toISOString(),
+    starts_at: new Date(today + index * 3600_000).toISOString(),
+    ends_at: new Date(today + (index + 1) * 3600_000).toISOString(),
   }))
 
   mockFetch((url) => {
@@ -95,8 +139,12 @@ function serve(plan: { googleCalendar: boolean; googleAccountsMax: number | null
     if (path === '/auth/me') return jsonResponse(200, USER)
     if (path === '/events') return jsonResponse(200, { events })
     if (path === '/workspaces') return jsonResponse(200, { workspaces: [WORKSPACE] })
-    if (path === '/calendar/connections') return jsonResponse(200, { connections: [] })
-    if (path === '/calendar/ics-token') return jsonResponse(200, { ics_feed_token: null })
+    if (path === '/calendar/connections') {
+      return jsonResponse(200, { connections: served.connections ?? [] })
+    }
+    if (path === '/calendar/ics-token') {
+      return jsonResponse(200, { ics_feed_token: served.feedToken ?? null })
+    }
     if (path === '/usage') {
       return jsonResponse(200, {
         plan: 'free',
@@ -167,7 +215,7 @@ afterEach(() => {
 describe('an external event', () => {
   it('renders a lock and no edit affordance', async () => {
     serve({ googleCalendar: false, googleAccountsMax: 0 })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
     // The event is rendered as a control that opens its detail; it is not a link
     // to an editor and there is no editor on this screen at all.
@@ -188,7 +236,7 @@ describe('an external event', () => {
 
   it('is announced as read-only to a screen reader', async () => {
     serve({ googleCalendar: false, googleAccountsMax: 0 })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
     // The accessible name carries the state, so a screen-reader user hears it
     // without opening anything: the lock icon is `aria-hidden`, so this name is
@@ -206,7 +254,7 @@ describe('an external event', () => {
 
   it('closes its detail on Escape and returns focus to the cell', async () => {
     serve({ googleCalendar: false, googleAccountsMax: 0 })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
     const cell = await screen.findByRole('button', { name: /Rapat himpunan/ })
     await userEvent.click(cell)
@@ -222,7 +270,7 @@ describe('an external event', () => {
 describe('the plan split on the connections panel', () => {
   it('offers the feed and the ICS field on free, and locks only Google', async () => {
     serve({ googleCalendar: false, googleAccountsMax: 0 })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
     // The free matrix has the ICS feed and the import, so both are present and
     // neither is locked. A `LockedFeature` around either would refuse a feature
@@ -234,19 +282,24 @@ describe('the plan split on the connections panel', () => {
     expect(await screen.findByLabelText('ICS URL')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add' })).toBeInTheDocument()
 
-    // Google is the one gated thing, and the lock names the plan that has it.
-    expect(screen.getByText('Available on Pro')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Connect Google Calendar' })).toBeNull()
+    // Google is the one gated thing on **this panel**, and the lock names the
+    // plan that has it. The queries are scoped to the panel's own section rather
+    // than to the whole screen: the planner's own locks are on the same page and
+    // carry the same sentence, and an unscoped `getByText` finds all of them.
+    const google = await screen.findByRole('region', { name: 'Google Calendar' })
+    expect(within(google).getByText('Available on Pro')).toBeInTheDocument()
+    expect(within(google).queryByRole('button', { name: 'Connect Google Calendar' })).toBeNull()
   })
 
   it('offers the Google connection on pro', async () => {
     serve({ googleCalendar: true, googleAccountsMax: 1 })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
+    const google = await screen.findByRole('region', { name: 'Google Calendar' })
     expect(
-      await screen.findByRole('button', { name: 'Connect Google Calendar' }),
+      within(google).getByRole('button', { name: 'Connect Google Calendar' }),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Available on Pro')).toBeNull()
+    expect(within(google).queryByText('Available on Pro')).toBeNull()
   })
 
   it('reports a connection that holds an error, in words', async () => {
@@ -277,11 +330,122 @@ describe('the plan split on the connections panel', () => {
       }
       return notFound()
     })
-    renderWithProviders(<CalendarScreen />, { route: '/calendar' })
+    renderCalendar()
 
     expect(await screen.findByText('recurrence_truncated')).toBeInTheDocument()
     expect(screen.getByText('Needs attention')).toBeInTheDocument()
     // "Last synced" is the stored instant rendered, never a client-side guess.
     expect(screen.getByText(/Last synced/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * The connection the server reports for a signed-in Google account, as
+ * `GET /calendar/connections` answers it (A249).
+ *
+ * The instant is fixed rather than relative to the clock: the account block
+ * states a stored timestamp, not a countdown, so nothing about it should move
+ * with the run.
+ */
+const SYNCED_AT = '2026-10-12T03:30:00Z'
+
+const GOOGLE_CONNECTION: Connection = {
+  id: 'c-google',
+  provider: 'google',
+  account_email: 'rani.study@gmail.com',
+  status: 'connected',
+  error: null,
+  last_synced_at: SYNCED_AT,
+  study_calendar_id: null,
+}
+
+describe('the connected Google account', () => {
+  it('is stated as the API reports it, with its preferences as marks rather than controls', async () => {
+    serve({ googleCalendar: true, googleAccountsMax: 1 }, { connections: [GOOGLE_CONNECTION] })
+    renderCalendar()
+
+    const card = await screen.findByRole('region', { name: 'Google Calendar' })
+
+    // The address is `account_email`, and the state is the server's own `status`
+    // word with the tone repeating it rather than carrying it alone.
+    expect(await within(card).findByText('rani.study@gmail.com')).toBeInTheDocument()
+    expect(within(card).getByText('Connected').className).toContain('chip-ready')
+    // "Last synced" is the stored instant in the account's own zone.
+    expect(
+      within(card).getByText(
+        formatInZone(new Date(SYNCED_AT), 'Asia/Jakarta', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+      ),
+    ).toBeInTheDocument()
+
+    // Two preferences, both of them the server's facts: a connected account
+    // imports its events, and `study_calendar_id: null` says no Study Plan
+    // calendar is receiving blocks yet. Neither is a control, because no route
+    // writes either one.
+    const marks = within(card).getAllByRole('checkbox')
+    expect(marks).toHaveLength(2)
+    expect(marks[0]).toBeChecked()
+    expect(marks[1]).not.toBeChecked()
+    expect(marks[0]).toBeDisabled()
+    expect(marks[1]).toBeDisabled()
+    // The mark's name is the preference it belongs to, not the word beside it:
+    // "On, checkbox, checked, unavailable" tells a screen-reader user nothing
+    // about what is on. The title's text is a new key, so the name itself is not
+    // asserted here — the reference to it is.
+    expect(marks[0]?.getAttribute('aria-labelledby')).not.toBeNull()
+  })
+
+  it('shows the Study Plan calendar as receiving blocks once the server reports one', async () => {
+    serve(
+      { googleCalendar: true, googleAccountsMax: 1 },
+      { connections: [{ ...GOOGLE_CONNECTION, study_calendar_id: 'sp-9' }] },
+    )
+    renderCalendar()
+
+    const card = await screen.findByRole('region', { name: 'Google Calendar' })
+    const marks = await within(card).findAllByRole('checkbox')
+    expect(marks[1]).toBeChecked()
+  })
+
+  it('states the status of each account when there is more than one', async () => {
+    serve(
+      { googleCalendar: true, googleAccountsMax: 2 },
+      {
+        connections: [
+          GOOGLE_CONNECTION,
+          {
+            ...GOOGLE_CONNECTION,
+            id: 'c-work',
+            account_email: 'rani@work.example',
+            status: 'revoked',
+          },
+        ],
+      },
+    )
+    renderCalendar()
+
+    const card = await screen.findByRole('region', { name: 'Google Calendar' })
+    expect(await within(card).findByText('rani@work.example')).toBeInTheDocument()
+    // One chip per account: a single chip in the card's heading row would report
+    // one account's health as all of them.
+    expect(within(card).getAllByText('Connected')).toHaveLength(1)
+    expect(within(card).getAllByText('Access revoked')).toHaveLength(1)
+  })
+})
+
+describe('the calendar feed link', () => {
+  it('is a labelled, read-only field holding the token the API returned', async () => {
+    serve({ googleCalendar: false, googleAccountsMax: 0 }, { feedToken: 'tok' })
+    renderCalendar()
+
+    const card = await screen.findByRole('region', { name: 'Your calendar feed' })
+    // The subscription URL is the API's token, not a value this build can make
+    // up, and the field is read-only: Regenerate rotates the link and nothing
+    // else does.
+    const field = await within(card).findByRole('textbox')
+    expect(field).toHaveValue(feedUrl(API_BASE_URL, 'tok'))
+    expect(field).toHaveAttribute('readonly')
   })
 })

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
+import { Icon } from '@/components/ui/Icon'
 import { useUsage } from '@/api/queries/usage'
 import { INTL_LOCALE, isLanguage } from '@/i18n'
 
@@ -22,6 +23,11 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * the plan screen, and a control is what makes it reachable by keyboard. It
  * carries no colour of its own — the state is in the words ("No credits left"),
  * so nothing is conveyed by colour alone.
+ *
+ * **Two variants, one reading.** `pill` is the top bar's, where the balance sits
+ * in a bordered capsule beside the avatar and has to stay on one line; `plain` is
+ * the phone header's row, where there is width to spare. Both render the same
+ * string from the same formatter, so the number cannot differ between them.
  */
 
 /**
@@ -36,7 +42,13 @@ export function formatCount(value: number, language: string): string {
   return new Intl.NumberFormat(tag).format(value)
 }
 
-export function CreditMeter({ className = '' }: { className?: string }) {
+export function CreditMeter({
+  className = '',
+  variant = 'plain',
+}: {
+  className?: string
+  variant?: 'plain' | 'pill'
+}) {
   const { t, i18n } = useTranslation()
   const usage = useUsage()
   // `credits` is reached with optional chaining even though the contract types it
@@ -45,24 +57,39 @@ export function CreditMeter({ className = '' }: { className?: string }) {
   // rather than take the whole shell down with it.
   const total = usage.data?.credits?.total
 
+  const label = usage.isPending
+    ? t('meter.loading')
+    : total === undefined
+      ? // The request failed, has not answered, or answered something that is
+        // not the contract. No number is shown, because a balance this component
+        // does not have is worse than none: the plan screen carries the failure
+        // and its remedy.
+        t('meter.unavailable')
+      : total === 0
+        ? t('meter.none')
+        : t('meter.total', { credits: formatCount(total, i18n.language) })
+
+  if (variant === 'pill') {
+    return (
+      <Link
+        to="/billing"
+        className={`credit-pill hover:border-border-strong focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
+      >
+        <Icon name="sparkles" size={16} className="shrink-0 text-primary-text" />
+        {/* `whitespace-nowrap`: the balance is two words at most in either
+            language, and a capsule that wrapped "60 credits left" onto two lines
+            made the whole top bar twice its height. */}
+        <span className="meta whitespace-nowrap text-text">{label}</span>
+      </Link>
+    )
+  }
+
   return (
     <Link
       to="/billing"
       className={`flex min-h-11 flex-col justify-center rounded-field px-2 py-1 hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
     >
-      <span className="meta">
-        {usage.isPending
-          ? t('meter.loading')
-          : total === undefined
-            ? // The request failed, has not answered, or answered something that is
-              // not the contract. No number is shown, because a balance this
-              // component does not have is worse than none: the plan screen carries
-              // the failure and its remedy.
-              t('meter.unavailable')
-            : total === 0
-              ? t('meter.none')
-              : t('meter.total', { credits: formatCount(total, i18n.language) })}
-      </span>
+      <span className="meta">{label}</span>
     </Link>
   )
 }

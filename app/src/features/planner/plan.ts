@@ -302,6 +302,48 @@ export function blockMinutes(block: Interval): number {
   return Math.max(0, Math.round((Date.parse(block.ends_at) - Date.parse(block.starts_at)) / 60_000))
 }
 
+/**
+ * The minutes a whole set of blocks covers, for the plan banner's "8h of study".
+ *
+ * Not `plannedMinutes` summed over days: that function takes a `dayKey` because
+ * the *meter* is about one day, and this is about a proposal that spans several.
+ * They share `blockMinutes`, so the two can never disagree about how long a block
+ * is.
+ */
+export function totalMinutes(blocks: readonly Interval[]): number {
+  return blocks.reduce((total, block) => total + blockMinutes(block), 0)
+}
+
+/**
+ * How many proposed blocks overlap time the student is already busy.
+ *
+ * **This is the courtesy count, not a guarantee** — the same standing as
+ * `refusalFor`, and for the same reason: whether a proposal actually fits is
+ * decided by `stvdy_core::planner` on the server, and the server re-validates the
+ * whole merged batch on accept (A264). What this gives the student is the honest
+ * answer to "did the planner put a block on top of my lecture" without a round
+ * trip, and a count of zero is a real measurement of the rows in hand rather than
+ * a claim about a schedule the app has not seen.
+ *
+ * A block that merely touches a busy interval (`ends_at === busy.starts_at`) is
+ * not a conflict: the two do not share an instant, and the server's own overlap
+ * predicate is the same half-open comparison.
+ */
+export function conflictsWith(blocks: readonly Interval[], busy: readonly Interval[]): number {
+  let count = 0
+  for (const block of blocks) {
+    const from = Date.parse(block.starts_at)
+    const to = Date.parse(block.ends_at)
+    const overlaps = busy.some((interval) => {
+      const busyFrom = Date.parse(interval.starts_at)
+      const busyTo = Date.parse(interval.ends_at)
+      return from < busyTo && busyFrom < to
+    })
+    if (overlaps) count += 1
+  }
+  return count
+}
+
 /** What the workload meter shows for one day. */
 export interface Workload {
   planned_min: number

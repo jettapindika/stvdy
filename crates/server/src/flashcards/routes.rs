@@ -10,7 +10,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 // `Row` is required for `row.get::<T, _>("column")`; a trait object's methods resolve
@@ -56,6 +56,153 @@ pub fn routes() -> Router<AppState> {
         .route("/decks/{id}", get(get_deck))
         .route("/decks/{id}/due", get(due_cards))
         .route("/flashcards/{id}/review", post(review_card))
+        .route("/flashcard-reviews/{id}", delete(undo_review))
+}
+
+/// How long after a review the student may take it back.
+///
+/// The spec names the window (`SPEC.md:646`, "undo, 5-minute window") and it exists
+/// because undo is for a mis-tap, not for a change of mind about the schedule: a
+/// review that has stood for longer than this has already informed the day's plan,
+/// and deleting it would silently rewrite a schedule the student has seen.
+const UNDO_WINDOW_MINUTES: i64 = 5;
+
+/// `DELETE /flashcard-reviews/:id` — undo a grade, inside the window.
+///
+/// **Undo is a delete plus a replay, not an inverse calculation.** `flashcard_reviews`
+/// is append-only and the card's state is a pure function of the rows
+/// (`replay(created_at, &reviews)`), so removing the row and replaying the remaining
+/// history produces exactly the state the card would have had if the review had never
+/// happened. The alternative — subtracting one review's effect — needs a second
+/// implementation of SM-2's inverse, and a second implementation of a schedule is how
+/// two devices start disagreeing (the same reason the client never computes an
+/// interval).
+///
+/// Three refusals, and each is a fact the student needs rather than a generic 400:
+///
+///  * **Not this account's review** is a 404, like every other scoped read.
+///  * **Outside the window** is a 409: the review exists, and the answer is that it is
+///    too late rather than that it is missing.
+///  * **Already deleted** is a 404 on the second call, which makes the operation
+///    idempotent from the student's side — a retried tap is not an error.
+pub async fn undo_review(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(review_id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let now = state.clock.now();
+
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("beginning an undo: {error}")))?;
+
+    // The same lock `review_card` takes, and for the same reason: an undo racing a
+    // review on the same account would have one replay a history the other is
+    // still writing.
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(user.user_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("taking the review lock: {error}")))?;
+
+    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>)>(
+        "select flashcard_id, reviewed_at from flashcard_reviews
+          where id = $1 and user_id = $2",
+    )
+    .bind(review_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the review: {error}")))?
+    .ok_or(AppError::NotFound)?;
+
+    let (card_id, reviewed_at) = row;
+    if reviewed_at < now - chrono::Duration::minutes(UNDO_WINDOW_MINUTES) {
+        return Err(AppError::Conflict(format!(
+            "this review is older than {UNDO_WINDOW_MINUTES} minutes and cannot be undone"
+        )));
+    }
+
+    sqlx::query("delete from flashcard_reviews where id = $1 and user_id = $2")
+        .bind(review_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the review: {error}")))?;
+
+    // The card's `created_at`, which the replay needs as its starting instant.
+    let created_at: DateTime<Utc> = sqlx::query_scalar(
+        "select f.created_at from flashcards f
+           join decks d on d.id = f.deck_id
+          where f.id = $1 and d.user_id = $2",
+    )
+    .bind(card_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the card: {error}")))?
+    .ok_or(AppError::NotFound)?;
+
+    let remaining = sqlx::query(
+        "select id, rating, reviewed_at from flashcard_reviews
+          where flashcard_id = $1 order by reviewed_at asc, id asc",
+    )
+    .bind(card_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the reviews: {error}")))?;
+
+    let mut reviews = Vec::with_capacity(remaining.len());
+    for row in &remaining {
+        let raw: String = row.get("rating");
+        let rating = Rating::parse(&raw).map_err(|_| {
+            AppError::Internal(anyhow::anyhow!(
+                "stored review rating {raw:?} is not one of again/hard/good/easy"
+            ))
+        })?;
+        reviews.push(Review {
+            id: row.get("id"),
+            rating,
+            reviewed_at: row.get("reviewed_at"),
+        });
+    }
+
+    let CardState {
+        ease,
+        interval_days,
+        due_at,
+    } = replay(created_at, &reviews);
+
+    sqlx::query(
+        "update flashcards
+            set ease = $2, interval_days = $3, due_at = $4, updated_at = now()
+          where id = $1",
+    )
+    .bind(card_id)
+    .bind(ease)
+    .bind(interval_days)
+    .bind(due_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("updating the card: {error}")))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing an undo: {error}")))?;
+
+    // The card's state after the replay, so the screen renders the schedule the
+    // server now holds rather than a locally guessed one.
+    Ok(Json(serde_json::json!({
+        "undone": true,
+        "card": {
+            "id": card_id,
+            "ease": ease,
+            "interval_days": interval_days,
+            "due_at": due_at,
+        }
+    })))
 }
 
 #[derive(Debug, Deserialize)]

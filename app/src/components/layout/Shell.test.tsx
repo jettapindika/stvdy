@@ -77,7 +77,7 @@ function renderShell(usage?: unknown) {
     })
   })
   return renderWithProviders(
-    <Shell>
+    <Shell onOpenPalette={() => {}}>
       <p>content</p>
     </Shell>,
   )
@@ -95,13 +95,17 @@ describe('the shell always offers navigation', () => {
     // Exactly one nav, so neither zero (no navigation, the bug) nor two.
     expect(screen.getAllByRole('navigation', { name: 'Main' })).toHaveLength(1)
 
-    // The tab bar is identified by its short labels rather than by a CSS class or
-    // a computed style: jsdom does not process Tailwind, so `position: fixed` is
+    // The tab bar is identified by its labels rather than by a CSS class or a
+    // computed style: jsdom does not process Tailwind, so `position: fixed` is
     // invisible here, and a class assertion would pin the implementation.
-    for (const label of ['Today', 'Work', 'Calendar', 'Tasks', 'More']) {
+    //
+    // The five destinations are the spec's (`SPEC.md:664`) and the redesign's:
+    // Today, Workspaces, Study, Planner, More. Calendar and Tasks are views inside
+    // Planner and have no tab; Study has one and previously had none.
+    for (const label of ['Today', 'Work', 'Study', 'Planner', 'More']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
-    // The sidebar's long labels must be absent, which is what proves this is the
+    // The sidebar's long label must be absent, which is what proves this is the
     // phone shell rather than the sidebar.
     expect(screen.queryByRole('link', { name: 'Workspaces' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument()
@@ -113,12 +117,12 @@ describe('the shell always offers navigation', () => {
 
     const navs = screen.getAllByRole('navigation', { name: 'Main' })
     expect(navs).toHaveLength(1)
-    for (const label of ['Today', 'Workspaces', 'Calendar', 'Tasks', 'Settings']) {
+    for (const label of ['Today', 'Workspaces', 'Study', 'Planner', 'Settings']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
   })
 
-  it('carries the credit meter in the sidebar, with the balance the server sent', async () => {
+  it('carries the credit meter in the top bar, with the balance the server sent', async () => {
     mockViewport(1280)
     renderShell(USAGE)
 
@@ -178,7 +182,7 @@ describe('the shell always offers navigation', () => {
    * route to the device list; and it must not be one of the tab bar's links, or the
    * five labels lose the widths they were measured at (5 x 78px on a 390px phone).
    */
-  it('carries the sync status control in the sidebar, on desktop', () => {
+  it('carries the sync status control in the top bar, on desktop', () => {
     mockViewport(1280)
     renderShell()
 

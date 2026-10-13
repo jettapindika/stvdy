@@ -5,9 +5,11 @@ import { useNavigate } from 'react-router'
 import { asApiError } from '@/api/errors'
 import { useCheckout, usePayment } from '@/api/queries/billing'
 import { PageHeader } from '@/components/layout/Section'
+import { Icon } from '@/components/ui/Icon'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
 import { checkoutState, clock, countdown, orderLines, type CheckoutState } from '@/features/billing/checkout'
 import { CheckoutStatus } from '@/features/billing/CheckoutStatus'
+import { PLAN_CURRENCY } from '@/features/billing/plans'
 import { policyFor } from '@/features/billing/policy'
 import { qrModules } from '@/features/billing/qrcode'
 import { platform } from '@/platform'
@@ -15,24 +17,29 @@ import { platform } from '@/platform'
 /**
  * The QRIS checkout screen: the amount, the code, and what the server says.
  *
- * Four rules live here, and each is a rule rather than a step.
+ * Five rules live here, and each is a rule rather than a step.
  *
- *  * **The total is the server's.** The order summary is `orderLines(view)`, which
- *    reads `amount_idr`, `amount_before_discount_idr`, `discount_percent` and
- *    `discount_code` off the payment row. Nothing here adds or subtracts: A298
- *    makes the student promo and a discount code one decision, made once by
- *    `billing::price`, and a client that re-derived it would be a second
- *    implementation of the money rule.
+ *  * **The total is the server's.** The order summary's amount is `orderLines(view)`'s
+ *    own total, which reads `amount_idr`, `amount_before_discount_idr`,
+ *    `discount_percent` and `discount_code` off the payment row. Nothing here adds
+ *    or subtracts: A298 makes the student promo and a discount code one decision,
+ *    made once by `billing::price`, and a client that re-derived it would be a
+ *    second implementation of the money rule.
  *  * **The countdown is the server's `expires_at` against this client's clock.**
- *    `checkout.ts` takes `now` as a parameter and reads no clock, so the ticking
- *    is here and the arithmetic is there. The server re-checks expiry on every
- *    poll, so a client whose clock is wrong cannot extend its own invoice.
+ *    `checkout.ts` takes `now` as a parameter and reads no clock, so the ticking is
+ *    here and the arithmetic is there. The server re-checks expiry on every poll,
+ *    so a client whose clock is wrong cannot extend its own invoice. The window's
+ *    own *length* is not carried by the payload, so the row names the window and
+ *    shows the server's remaining time rather than printing a 15 the app assumed.
  *  * **The QR is rendered only while the code is live.** A paid payment never
  *    shows a code again — a second scan of a dead code is how a student pays
  *    twice — and the state machine decides that, not this component.
  *  * **A request that did not reach the server is `offline`, not `failed`.** The
  *    code may still be valid, and telling a student their payment failed because
  *    their Wi-Fi dropped is a lie they might act on.
+ *  * **The screen is a route, not a modal.** The frame draws a 640px dialog, but
+ *    this is `/billing/checkout/:paymentId`, so it takes the modal's content idiom
+ *    at `max-w-2xl` — a screen that owns its width says so itself.
  *
  * The screen polls through `usePayment`, which is what recovers a lost webhook
  * (A301): the server applies the same handler the webhook calls when the gateway
@@ -116,12 +123,32 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
   // component-level one there.
   if (!policy.allowPurchaseUi) {
     return (
-      <div className="flex flex-col gap-6 px-5 py-6">
+      <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 py-8">
         <PageHeader title={t('checkout.title')} subtitle={t('plan.subtitle')} />
-        <p className="max-w-prose text-sm text-muted">{t('plan.mobile.noPurchase')}</p>
+        <p className="max-w-prose text-body text-muted">{t('plan.mobile.noPurchase')}</p>
       </div>
     )
   }
+
+  // The order summary's own total, taken from `orderLines` rather than summed
+  // here. `orderLines` always ends with the total, and finding it by its label key
+  // is what keeps this screen from being a second place that decides what "total"
+  // means.
+  const lines = view === undefined ? [] : orderLines(view, i18n.language)
+  const total = lines.find((line) => line.labelKey === 'total')
+
+  // What was bought, from the row's own fields: a pack by its credits, a
+  // subscription by its plan and period. The same two keys the payment history
+  // uses, so the two screens cannot name the same purchase differently.
+  const planLine =
+    view === undefined
+      ? ''
+      : view.kind === 'credit_pack' && view.credits !== null
+        ? t('billing.historyPack', { count: view.credits })
+        : t('billing.historyPlan', {
+            plan: view.plan_id ?? '—',
+            period: t(`billing.period.${view.billing_period ?? 'monthly'}`),
+          })
 
   // **The wrapping rule, in one place, because it inherits.** `wrap-anywhere` is
   // `overflow-wrap: anywhere`, and on this container it reaches every box the 200%
@@ -143,40 +170,45 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
   // than an exception to this one: `break-normal` on the value and the `<wbr />`
   // inside `LineValue`, below.
   return (
-    <div className="flex flex-col gap-6 px-5 py-6 wrap-anywhere">
+    <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 py-8 wrap-anywhere">
       <PageHeader title={t('checkout.title')} subtitle={t('checkout.subtitle')} />
 
       {payment.isPending && <SkeletonRows rows={3} label={t('checkout.loading')} />}
       {notice !== null && <ApiErrorNotice error={notice} />}
       {checkoutError !== null && <ApiErrorNotice error={checkoutError} />}
 
-      {/* The state renders whenever there is one to report — including `offline`,
-          which by definition has no `view`: the request never arrived. Gating this
-          on the payload would render an empty screen for exactly the failure the
-          state exists to describe, which is the defect `CheckoutScreen.test.tsx`'s
-          offline case found. */}
-      {(view !== undefined || state === 'offline') && (
-        <CheckoutStatus
-          state={state}
-          countdownLabel={remaining === null ? null : clock(remaining.mm, remaining.ss)}
-          onNewCode={startOver}
-          onRetry={() => void payment.refetch()}
-        />
-      )}
-
       {view !== undefined && (
         <>
-          {/* The code, while it is live. `state === 'waiting'` and not "has a
-              `qr_string`": a row whose code has expired still carries the string,
-              and rendering it would invite a scan of a dead code. */}
-          {state === 'waiting' && view.qr_string !== null && (
-            <QrCode payload={view.qr_string} label={t('checkout.qrLabel')} />
-          )}
+          {/* The order summary: the amount the student is about to pay, its
+              itemisation, and the reference a student quotes to support. The
+              amount is `orderLines`' own total — the same number the webhook
+              checks the gateway's claim against (A294). */}
+          <div className="raised flex flex-col gap-4 rounded-field p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="eyebrow">{t('checkout.orderSummary')}</p>
+                <p className="text-label font-medium">{planLine}</p>
+                <p className="meta">{t('checkout.reference', { orderId: view.order_id })}</p>
+              </div>
+              {total !== undefined && (
+                <div className="flex min-w-0 flex-col items-end gap-1">
+                  <p className="text-h2 font-semibold break-normal">
+                    <LineValue value={total.value} />
+                  </p>
+                  {/* The currency is the matrix's, from the same config the server
+                      prices in. A build whose config could not be read omits the
+                      label rather than printing a bare "TOTAL ·". */}
+                  {PLAN_CURRENCY !== null && (
+                    <p className="meta uppercase">
+                      {t('checkout.totalCurrency', { currency: PLAN_CURRENCY })}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
 
-          <section className="card flex flex-col gap-2 p-4">
-            <h2 className="text-h3">{t('checkout.order')}</h2>
-            <dl className="flex flex-col divide-y divide-border text-sm">
-              {orderLines(view, i18n.language).map((line) => {
+            <dl className="flex flex-col divide-y divide-border text-label">
+              {lines.map((line) => {
                 // A money value is the one string on this screen the container's
                 // `anywhere` must not reach, so it takes `break-normal` back — and
                 // that is a second mechanism, not an exception to the first. See
@@ -197,13 +229,47 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
                 )
               })}
             </dl>
-            {/* The reference a student quotes to support, and the one the webhook
-                logs when an amount does not match (A294). */}
-            <p className="text-xs text-subtle">
-              {t('checkout.reference', { orderId: view.order_id })}
-            </p>
-          </section>
+          </div>
+
+          {/* The code, while it is live. `state === 'waiting'` and not "has a
+              `qr_string`": a row whose code has expired still carries the string,
+              and rendering it would invite a scan of a dead code. */}
+          {state === 'waiting' && view.qr_string !== null && (
+            <QrCode payload={view.qr_string} label={t('checkout.qrLabel')} />
+          )}
+
+          {/* How long is left, from the server's own `expires_at`. The window's
+              length is not a field the payload carries, so the right-hand label
+              names the window rather than printing a 15 this app assumed — a
+              duration the server never sent is exactly the invented number the
+              honesty rule forbids. */}
+          {state === 'waiting' && remaining !== null && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-center gap-2 text-body text-warning">
+                <Icon name="clock" className="shrink-0" />
+                {t('checkout.expiresIn', { time: clock(remaining.mm, remaining.ss) })}
+              </p>
+              <p className="meta uppercase">{t('checkout.windowLabel')}</p>
+            </div>
+          )}
         </>
+      )}
+
+      {/* The state renders whenever there is one to report — including `offline`,
+          which by definition has no `view`: the request never arrived. Gating this
+          on the payload would render an empty screen for exactly the failure the
+          state exists to describe, which is the defect `CheckoutScreen.test.tsx`'s
+          offline case found. */}
+      {(view !== undefined || state === 'offline') && (
+        <CheckoutStatus
+          state={state}
+          onNewCode={startOver}
+          onRetry={() => void payment.refetch()}
+        />
+      )}
+
+      {view !== undefined && (
+        <p className="text-caption text-muted">{t('checkout.guidance')}</p>
       )}
     </div>
   )
@@ -272,6 +338,11 @@ function LineValue({ value }: { value: string }) {
  * The whole code is one `<path>` rather than a rect per module: a version-10 QR is
  * a few thousand modules, and a few thousand DOM nodes is a screen that stutters
  * while its countdown ticks.
+ *
+ * The frame's provider wordmarks (`Gopay`, `OVO`, `ShopeePay`, `BCA`) are **not
+ * rendered**: they are brand names the design drew, and nothing in the payload
+ * says which e-wallet the student will scan with. A list of names this app put
+ * there would be a claim about a payment the gateway has not seen.
  */
 function QrCode({ payload, label }: { payload: string; label: string }) {
   const modules = qrModules(payload)
@@ -303,7 +374,7 @@ function QrCode({ payload, label }: { payload: string; label: string }) {
           <path d={path} fill="currentColor" />
         </svg>
       </div>
-      <p className="max-w-prose text-center text-sm text-muted">{label}</p>
+      <p className="max-w-prose text-center text-small text-muted">{label}</p>
     </div>
   )
 }

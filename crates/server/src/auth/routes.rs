@@ -70,6 +70,14 @@ pub struct UserView {
     pub plan_id: String,
     pub timezone: String,
     pub student_verified: bool,
+    /// Whether this account is an administrator.
+    ///
+    /// On the wire so the console is *findable*: `/admin` is registered for every
+    /// account and its authorization is the server's (A7), but a screen reachable
+    /// only by typing a URL is a screen an operator has to be told about. This is
+    /// the account's own flag, so nothing leaks — and it is a display fact only,
+    /// never a gate: every admin route re-reads it from the row.
+    pub is_admin: bool,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -204,6 +212,7 @@ pub(crate) fn user_view(
     plan_id: String,
     timezone: String,
     student_verified: bool,
+    is_admin: bool,
     created_at: Option<DateTime<Utc>>,
 ) -> UserView {
     UserView {
@@ -214,6 +223,7 @@ pub(crate) fn user_view(
         plan_id,
         timezone,
         student_verified,
+        is_admin,
         created_at,
     }
 }
@@ -328,6 +338,9 @@ pub async fn signup(
                 None,
                 "free".to_string(),
                 "Asia/Jakarta".to_string(),
+                // A new account is never an administrator: nothing in the product
+                // grants the flag, and an operator sets it on the row (A7).
+                false,
                 false,
                 Some(Utc::now()),
             ),
@@ -358,7 +371,7 @@ pub async fn login(
     //    proved they are.
     let row = sqlx::query_as::<_, LoginRow>(
         "select id, email, password_hash, email_verified, email_verified_at, plan_id,
-                timezone, student_verified, created_at, deleted_at
+                timezone, student_verified, is_admin, created_at, deleted_at
            from users
           where email = $1",
     )
@@ -404,6 +417,7 @@ pub async fn login(
             row.plan_id,
             row.timezone,
             row.student_verified,
+            row.is_admin,
             row.created_at,
         ),
         access_token: pair.access_token,
@@ -423,6 +437,9 @@ pub(crate) struct LoginRow {
     pub(crate) plan_id: String,
     pub(crate) timezone: String,
     pub(crate) student_verified: bool,
+    /// Whether this account is an administrator. On the row rather than taken from
+    /// the caller, because `login` builds its response before an `AuthUser` exists.
+    pub(crate) is_admin: bool,
     pub(crate) created_at: Option<DateTime<Utc>>,
     /// `Some` for an account the student asked to delete (A355). Selected rather than filtered
     /// so the refusal can say so instead of pretending the address is unknown.
@@ -514,7 +531,7 @@ pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json
     // that drift.
     let row = sqlx::query_as::<_, LoginRow>(
         "select id, email, password_hash, email_verified, email_verified_at, plan_id,
-                timezone, student_verified, created_at, deleted_at
+                timezone, student_verified, is_admin, created_at, deleted_at
            from users where id = $1",
     )
     .bind(user.user_id)
@@ -530,6 +547,7 @@ pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json
         row.plan_id,
         row.timezone,
         row.student_verified,
+        row.is_admin,
         row.created_at,
     )))
 }

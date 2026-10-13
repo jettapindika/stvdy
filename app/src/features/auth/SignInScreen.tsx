@@ -33,11 +33,11 @@ export function SignInScreen() {
 
   return (
     <AuthCard
-      title={t('auth.signIn.title')}
+      title={t('auth.signIn.welcome')}
       subtitle={t('auth.signIn.subtitle')}
       footer={
         <>
-          <span className="text-sm text-muted">{t('auth.signIn.newHere')}</span>
+          <span className="text-label text-muted">{t('auth.signIn.newHere')}</span>
           <Link to="/signup" className="btn btn-quiet">
             {t('auth.signIn.createAccount')}
           </Link>
@@ -45,7 +45,7 @@ export function SignInScreen() {
       }
     >
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 sm:gap-5"
         onSubmit={(event) => {
           event.preventDefault()
           signIn.mutate({ email, password }, { onSuccess: () => void navigate('/workspaces') })

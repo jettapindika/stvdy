@@ -9,6 +9,7 @@ import {
   useExportCheatsheetPdf,
   useRerenderCheatsheet,
 } from '@/api/queries/cheatsheets'
+import { PageFooter, PageHeader, Section } from '@/components/layout/Section'
 import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
@@ -33,11 +34,18 @@ import { saveBlob } from '@/lib/download'
  * because the footer's `Halaman N dari M` is printed from that same number: a
  * count this screen computed, or guessed from the depth, would be a different
  * number from the one on the page. It is null until a PDF exists, and it is not
- * estimated in the meantime.
+ * estimated in the meantime — the preview's heading carries it when it is there
+ * and carries nothing when it is not.
  *
  * **Re-rendering is free and that is the point.** The blocks are the document, so
  * a template fix reaches a cheatsheet the student already has without a model
  * call, without credits, and without changing a word of the content.
+ *
+ * The screen is the design's reading column: a page header, the preview card, and
+ * the actions. The one primary action is the PDF download, and it is the only
+ * filled button here; re-rendering is a secondary action beside it because it is
+ * free by contract, and the line under them says so rather than leaving a student
+ * to guess which of the two costs credits.
  */
 
 export function CheatsheetScreen() {
@@ -46,11 +54,17 @@ export function CheatsheetScreen() {
   const cheatsheet = useCheatsheet(cheatsheetId)
   const error = asApiError(cheatsheet.error)
 
-  if (cheatsheet.isPending) return <LoadingState label={t('cheatsheet.loading')} />
+  if (cheatsheet.isPending) {
+    return (
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+        <LoadingState label={t('cheatsheet.loading')} />
+      </div>
+    )
+  }
 
   if (error !== null) {
     return (
-      <div className="px-4 py-4">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
         <ApiErrorNotice
           error={error}
           noun={t('errors.nouns.cheatsheet')}
@@ -69,7 +83,7 @@ export function CheatsheetScreen() {
 
   if (sheet.status === 'failed') {
     return (
-      <div className="px-4 py-4">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
         <EmptyState
           title={t('cheatsheet.failed.title')}
           reason={sheet.error ?? t('cheatsheet.failed.reason')}
@@ -81,30 +95,36 @@ export function CheatsheetScreen() {
   const generating = sheet.status === 'pending' || sheet.status === 'generating'
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="break-words">{sheet.title}</h1>
-        <p className="meta">
-          {sheet.scope}
-          {sheet.exam_date !== null && ` · ${sheet.exam_date}`}
-        </p>
-      </div>
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+      <PageHeader
+        // The scope and the date the student is revising for, which is the context
+        // the title cannot carry. The date is omitted rather than filled with a
+        // placeholder when the sheet has none.
+        eyebrow={
+          sheet.exam_date === null
+            ? sheet.scope
+            : t('cheatsheet.eyebrow', { scope: sheet.scope, date: sheet.exam_date })
+        }
+        title={sheet.title}
+        subtitle={t('cheatsheet.subtitle', {
+          depth: t(`cheatsheet.depth.${sheet.depth}`),
+        })}
+      />
 
       {generating && <LoadingState label={t('cheatsheet.generating')} />}
 
       {!generating && <CheatsheetPreview cheatsheetId={sheet.id} pageCount={sheet.page_count} />}
 
-      <div className="flex flex-col gap-1">
-        <h2 className="font-medium">{t('cheatsheet.actions.title')}</h2>
-        <p className="text-sm text-muted">{t('cheatsheet.actions.hint')}</p>
-      </div>
-
-      <CheatsheetActions cheatsheetId={sheet.id} pageCount={sheet.page_count} />
+      <Section title={t('cheatsheet.actions.title')}>
+        <p className="text-label text-muted">{t('cheatsheet.actions.hint')}</p>
+        <CheatsheetActions cheatsheetId={sheet.id} pageCount={sheet.page_count} />
+      </Section>
 
       {sheet.template_version !== null && (
-        <p className="meta">
-          {t('cheatsheet.template', { version: sheet.template_version })}
-        </p>
+        <PageFooter
+          left={t('cheatsheet.template', { version: sheet.template_version })}
+          right={sheet.scope}
+        />
       )}
     </div>
   )
@@ -118,6 +138,10 @@ export function CheatsheetScreen() {
  * sized to its content: the document is a print layout with its own page breaks,
  * so the frame scrolls inside a fixed height rather than stretching the app's
  * page around a document that is meant to be printed, not read in a window.
+ *
+ * The count the renderer reported sits in the section's heading, in the mono
+ * metadata slot the design puts a count in — not under the button, where it was a
+ * second reading of the same number.
  */
 function CheatsheetPreview({
   cheatsheetId,
@@ -164,53 +188,55 @@ function CheatsheetPreview({
   }, [])
 
   return (
-    <section aria-labelledby="cheatsheet-preview-heading" className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 id="cheatsheet-preview-heading" className="font-medium">
-          {t('cheatsheet.preview.title')}
-        </h2>
-        {/* The renderer's own count, or nothing. Never an estimate. */}
-        {pageCount !== null && (
-          <span className="meta">{t('cheatsheet.preview.pages', { count: pageCount })}</span>
+    <Section
+      title={t('cheatsheet.preview.title')}
+      action={
+        // The renderer's own count, or nothing. Never an estimate.
+        pageCount === null ? undefined : (
+          <span className="meta min-w-0 break-words">
+            {t('cheatsheet.preview.pages', { count: pageCount })}
+          </span>
+        )
+      }
+    >
+      <div className="card flex flex-col gap-3 p-4">
+        {html.isPending && <LoadingState label={t('cheatsheet.preview.loading')} />}
+
+        {error !== null && (
+          <ApiErrorNotice
+            error={error}
+            noun={t('errors.nouns.cheatsheet')}
+            action={
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void html.refetch()}
+              >
+                {t('actions.retry')}
+              </button>
+            }
+          />
+        )}
+
+        {html.data !== undefined && (
+          <iframe
+            ref={frame}
+            title={t('cheatsheet.preview.title')}
+            // Empty, so the document gets an opaque origin and none of the
+            // capabilities sandbox can withhold: no scripts, no forms, no
+            // top-level navigation, no same-origin access to this app.
+            sandbox=""
+            srcDoc={html.data}
+            // The ring is the same 2px `--ring` treatment the global rule applies to
+            // every other control; only the way it is switched on differs (see the
+            // effect above).
+            className={`h-[32rem] w-full rounded-card border border-border bg-surface ${
+              frameFocused ? 'outline outline-2 outline-offset-2 outline-ring' : ''
+            }`}
+          />
         )}
       </div>
-
-      {html.isPending && <LoadingState label={t('cheatsheet.preview.loading')} />}
-
-      {error !== null && (
-        <ApiErrorNotice
-          error={error}
-          noun={t('errors.nouns.cheatsheet')}
-          action={
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void html.refetch()}
-            >
-              {t('actions.retry')}
-            </button>
-          }
-        />
-      )}
-
-      {html.data !== undefined && (
-        <iframe
-          ref={frame}
-          title={t('cheatsheet.preview.title')}
-          // Empty, so the document gets an opaque origin and none of the
-          // capabilities sandbox can withhold: no scripts, no forms, no
-          // top-level navigation, no same-origin access to this app.
-          sandbox=""
-          srcDoc={html.data}
-          // The ring is the same 2px `--ring` treatment the global rule applies to
-          // every other control; only the way it is switched on differs (see the
-          // effect above).
-          className={`h-[32rem] w-full rounded-card border border-border bg-surface ${
-            frameFocused ? 'outline outline-2 outline-offset-2 outline-ring' : ''
-          }`}
-        />
-      )}
-    </section>
+    </Section>
   )
 }
 
@@ -221,7 +247,9 @@ function CheatsheetPreview({
  * `pdf` gets no button and no price — on a phone, nothing but the statement that
  * it is not on the plan. Re-rendering is offered to everyone, because it is free
  * by contract: it reads the stored blocks and runs the renderer again, so it can
- * neither cost credits nor change the document's content.
+ * neither cost credits nor change the document's content. The line under the two
+ * buttons says that in words, because a free button beside a paid one is exactly
+ * where a student would otherwise assume the worst.
  */
 function CheatsheetActions({
   cheatsheetId,
@@ -244,7 +272,7 @@ function CheatsheetActions({
   const rerenderError = asApiError(rerender.error)
 
   return (
-    <div className="flex flex-col gap-3">
+    <>
       <div className="flex flex-wrap gap-2">
         {pdfAllowed && (
           <button
@@ -274,8 +302,11 @@ function CheatsheetActions({
         </button>
       </div>
 
+      {/* The renderer's own count again, here where the file it describes is
+          downloaded: the same number the preview's heading carries, because it is
+          the same server figure and neither is an estimate. */}
       {pdfAllowed && pageCount !== null && (
-        <p className="text-xs text-muted">{t('cheatsheet.pdf.pages', { count: pageCount })}</p>
+        <p className="text-caption text-muted">{t('cheatsheet.pdf.pages', { pages: pageCount })}</p>
       )}
 
       {allowed !== null && !pdfAllowed && (
@@ -288,7 +319,7 @@ function CheatsheetActions({
 
       {/* Re-rendering is free, and saying so is the honesty rule applied to a
           button that would otherwise look like the paid one beside it. */}
-      <p className="text-xs text-muted">{t('cheatsheet.rerender.free')}</p>
+      <p className="text-caption text-muted">{t('cheatsheet.rerender.free')}</p>
 
       {exportError !== null && (
         <ApiErrorNotice error={exportError} noun={t('errors.nouns.export')} />
@@ -296,6 +327,6 @@ function CheatsheetActions({
       {rerenderError !== null && (
         <ApiErrorNotice error={rerenderError} noun={t('errors.nouns.cheatsheet')} />
       )}
-    </div>
+    </>
   )
 }

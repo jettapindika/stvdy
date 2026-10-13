@@ -240,6 +240,11 @@ const USER = {
   plan_id: 'free',
   timezone: 'Asia/Jakarta',
   student_verified: false,
+  // An administrator, because the admin console has no other way in: its only link is
+  // the Settings section that renders for an operator, and the walk reaches a screen by
+  // tapping it rather than by URL. So this flag is what makes the console *reachable*,
+  // which is the precondition for measuring it at all.
+  is_admin: true,
   created_at: '2026-10-11T08:00:00Z',
 }
 
@@ -892,6 +897,17 @@ const STUDY_STEPS = [
 ]
 
 /**
+ * The way an operator reaches the admin console: Settings, then the link the account
+ * section renders for an administrator.
+ *
+ * **Two taps, and both are asserted by the walk rather than assumed.** Settings is where
+ * the console's only route in lives, so if that link stops rendering — a renamed i18n key,
+ * a `is_admin` that stops arriving on `/auth/me` — this surface fails with "no link Open
+ * the admin console" rather than measuring a screen nobody can get to.
+ */
+const ADMIN_STEPS = [{ nav: 'More' }, { link: 'Open the admin console' }]
+
+/**
  * The phone surfaces this walks, by the taps a phone takes to reach them.
  *
  * The tab bar's five labels are the five destinations, and `/billing` is reached
@@ -926,12 +942,12 @@ const SURFACES = [
   {
     name: 'calendar',
     expect: '1 event in this view',
-    steps: [{ nav: 'Planner' }, { tab: 'Calendar' }],
+    steps: [{ nav: 'Planner' }, { link: 'Calendar' }],
   },
   {
     name: 'tasks',
     expect: 'Selesaikan tugas kriptografi untuk kuliah hari Jumat',
-    steps: [{ nav: 'Planner' }, { tab: 'Tasks' }],
+    steps: [{ nav: 'Planner' }, { link: 'Tasks' }],
   },
   { name: 'settings', steps: [{ nav: 'More' }] },
   { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
@@ -952,7 +968,7 @@ const SURFACES = [
   {
     name: 'planner',
     expect: 'UTS Kriptografi',
-    steps: [{ nav: 'Planner' }, { tab: 'Plan' }],
+    steps: [{ nav: 'Planner' }, { link: 'Calendar' }],
   },
   {
     name: 'syllabus',
@@ -965,7 +981,7 @@ const SURFACES = [
     expect: 'What to call it',
     steps: [
       { nav: 'Planner' },
-      { tab: 'Plan' },
+      { link: 'Calendar' },
       { link: 'Import another syllabus' },
     ],
   },
@@ -978,7 +994,7 @@ const SURFACES = [
     expect: 'Ujian Tengah Semester',
     steps: [
       { nav: 'Planner' },
-      { tab: 'Plan' },
+      { link: 'Calendar' },
       { link: 'Import another syllabus' },
       { fill: '#syllabus-text', value: 'UAS Kriptografi 15 Desember. Tugas 4 minggu depan.' },
       // The upload's button label carries the plan's credit cost, so it is clicked by
@@ -1160,6 +1176,20 @@ const SURFACES = [
     words: ['Not connected', 'We could not reach Stvdy'],
     steps: CHECKOUT_STEPS,
   },
+  // --- The admin console, which the redesign added and nothing walked ---------------
+  //
+  // Reached by **tapping the link Settings renders for an operator**, not by URL, and
+  // that is the point of the surface existing: the console is registered for every
+  // account and the *server* is the gate (`AdminUser` answers 404 to a non-admin, A7),
+  // so before this link there was no path to it at all and a walk by URL would have
+  // passed while the screen was unreachable — the same failure Phase 11's planner
+  // surfaces were added to close.
+  //
+  // The guard is a figure from the fixture rather than one of the screen's own labels:
+  // a deck title, a course code or a table heading would also be satisfied by the
+  // screen's loading state if the copy happened to match, while an account's address is
+  // only on the page when the users table resolved.
+  { name: 'admin', expect: 'rani.putri@example.test', steps: ADMIN_STEPS },
 ]
 
 /**
@@ -1301,6 +1331,93 @@ const ROUTES = {
   // id. `PAYMENT_ID` is kept for the fixture's own default.
   '/billing/checkout': () => paymentRow(),
   [`/billing/payments/${PAYMENT_ID}`]: () => paymentRow(),
+  // The admin console's three reads. Every figure is a row count or a sum, and the two
+  // tripwire values are deliberately one of each kind: `plan_loss_two_months_running` is
+  // `null` (the range holds one month, so the question cannot be answered) while
+  // `free_spend_over_quarter_of_revenue` is `true`. A walk that measured only the `false`
+  // rows would not see the three-valued rendering the screen exists to get right.
+  '/admin/users': () => ({
+    from: '2026-09-12T00:00:00Z',
+    to: '2026-10-12T00:00:00Z',
+    users: [
+      {
+        id: 'u1',
+        email: 'rani.putri@example.test',
+        plan_id: 'pro',
+        created_at: '2026-09-01T08:00:00Z',
+        requests: 42,
+        sources_added: 3,
+        last_active_at: '2026-10-12T09:30:00Z',
+        is_admin: true,
+      },
+      {
+        id: 'u2',
+        email: 'budi@example.test',
+        plan_id: 'free',
+        created_at: '2026-10-01T08:00:00Z',
+        requests: 0,
+        sources_added: 0,
+        last_active_at: null,
+        is_admin: false,
+      },
+    ],
+  }),
+  '/admin/payments': () => ({
+    count: 1,
+    payments: [
+      {
+        id: 'p1',
+        user_id: 'u1',
+        kind: 'subscription',
+        plan_id: 'pro',
+        billing_period: 'monthly',
+        credits: null,
+        provider: 'qris',
+        order_id: 'ORD-2026-0001',
+        amount_idr: 45000,
+        gateway_fee_idr: 3150,
+        status: 'review',
+        review_reason: 'amount 44000 does not match 45000',
+        expires_at: '2026-10-12T05:50:00Z',
+        paid_at: null,
+        created_at: '2026-10-12T05:35:00Z',
+      },
+    ],
+  }),
+  '/admin/margin': () => ({
+    from: '2026-09-12T00:00:00Z',
+    to: '2026-10-12T00:00:00Z',
+    idr_per_usd: 16000,
+    months: [
+      {
+        month: '2026-10',
+        per_plan: [
+          {
+            plan_id: 'pro',
+            provider_cost_usd: 0.5625,
+            byok_cost_usd: 0,
+            revenue_idr: 45000,
+            gross_margin_idr: 36000,
+            ceiling_usd: 10,
+          },
+        ],
+        revenue_idr: 45000,
+        gateway_fee_idr: 3150,
+        free_utilization: 0.28,
+        paying: 3,
+        free_accounts: 4,
+        conversion_of_free: 0.75,
+        conversion_of_total: 0.43,
+        as_of: '2026-10-12T00:00:00Z',
+      },
+    ],
+    tripwires: {
+      free_utilization_over_30: false,
+      conversion_under_3: false,
+      free_spend_over_quarter_of_revenue: true,
+      plan_loss_two_months_running: null,
+    },
+  }),
 }
 
 /**
@@ -2045,9 +2162,23 @@ async function openSurface(page, surface) {
     const click = (label) =>
       page.evaluate(
         (selector, text) => {
-          const link = [...document.querySelectorAll(selector)].find(
-            (a) => a.textContent.trim() === text,
-          )
+          const all = [...document.querySelectorAll(selector)]
+          // **A link the screen renders wins over one in the shell's navigation.** The
+          // two can carry the same word: `nav.study` labels both the sidebar's Study
+          // item and the flashcards panel's "study this deck" action, and at desktop
+          // width the sidebar comes first in the DOM — so a plain first-match walked to
+          // the Study *hub* and then failed to find a card on it, which reads as a
+          // missing control rather than as an ambiguous label. Reordering rather than
+          // excluding keeps every step a label: `{ link: 'Calendar' }` still resolves to
+          // the planner's switcher, which lives inside a `nav` of its own.
+          const ordered =
+            selector === 'a'
+              ? [
+                  ...all.filter((a) => a.closest('nav') === null),
+                  ...all.filter((a) => a.closest('nav') !== null),
+                ]
+              : all
+          const link = ordered.find((a) => a.textContent.trim() === text)
           if (link === undefined) return false
           link.click()
           return true
@@ -2070,8 +2201,23 @@ async function openSurface(page, surface) {
     // The alias table below is unchanged and still needed: the phone writes `Work` and
     // `More` where the sidebar writes `Workspaces` and `Settings`, and one `SURFACES`
     // table is walked at both viewports. The phone labels stay exactly as written.
-    const aliases = { Work: 'Workspaces', More: 'Settings' }
-    const found = (await click(wanted)) || (await click(aliases[wanted] ?? wanted))
+    // `Calendar` is the desktop's label for the planner's first view and `Plan` is
+    // the phone's (`PlannerScreen.tsx` picks it by form factor, following
+    // `SPEC.md:665`'s "Plan | Tasks" for the phone and the design's frame label for
+    // the desktop). One `SURFACES` table is walked at both widths, so the pair is an
+    // alias like `Work`/`Workspaces` rather than two rows.
+    const aliases = { Work: 'Workspaces', More: 'Settings', Calendar: 'Plan' }
+    // The two attempts are separated by a wait, and that is load-bearing for a step
+    // that follows a navigation: `{ nav: 'Planner' }, { link: 'Calendar' }` clicks the
+    // tab, and the retry then has to look for the alias **in the planner's own DOM**,
+    // which does not exist until React has re-rendered. Retrying immediately found
+    // neither label and failed with "no a labelled Calendar" — a failure that reads as
+    // a missing control rather than as a race.
+    let found = await click(wanted)
+    if (!found && aliases[wanted] !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      found = await click(aliases[wanted])
+    }
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
     await new Promise((resolve) => setTimeout(resolve, 400))
   }

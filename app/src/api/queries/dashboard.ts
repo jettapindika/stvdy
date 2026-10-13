@@ -76,14 +76,21 @@ export const dashboardKeys = {
  *
  * `from` and `to` are the local-day bounds the caller computed, sent as
  * `YYYY-MM-DD` because the window is a *local* day rather than an instant (A6).
+ *
+ * `enabled` is the caller's, the same option `useWorkspaces` carries and for the
+ * same reason: a screen that has one figure of this response to draw — the
+ * workspace list's due band, which is not rendered at all until there is a
+ * workspace to describe — should not fetch the whole summary for a state it
+ * cannot use. The screen computes the flag; this module does not guess it.
  */
-export function useDashboard(from: string, to: string) {
+export function useDashboard(from: string, to: string, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: dashboardKeys.summary(from, to),
     queryFn: async (): Promise<DashboardResponse> =>
       await api.get<DashboardResponse>(
         `/dashboard?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
       ),
+    enabled,
   })
 }
 

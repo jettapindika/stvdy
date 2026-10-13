@@ -57,6 +57,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/**
+ * The sign-in screen, identified by its submit button rather than its heading.
+ * The heading is "Welcome back", which is design copy a translation may reword;
+ * the button's label is the contract.
+ */
+function signInScreen() {
+  return screen.findByRole('button', { name: 'Sign in' })
+}
+
 function renderRoute(path: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -75,7 +84,7 @@ describe('the auth routes are reachable without a session', () => {
 
     renderRoute('/signin')
 
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(await signInScreen()).toBeInTheDocument()
   })
 
   it('opens the sign-up screen at /signup', async () => {
@@ -113,7 +122,7 @@ describe('the signed-in routes are behind the gate', () => {
 
     renderRoute('/')
 
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(await signInScreen()).toBeInTheDocument()
     // Nothing was requested for the workspace, because the screen never mounted.
     expect(calls.some((call) => call.url.includes('/workspaces'))).toBe(false)
   })
@@ -123,7 +132,7 @@ describe('the signed-in routes are behind the gate', () => {
 
     renderRoute('/workspaces')
 
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(await signInScreen()).toBeInTheDocument()
   })
 
   it('renders the workspace list for a restored session', async () => {

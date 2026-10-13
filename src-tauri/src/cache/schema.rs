@@ -18,7 +18,11 @@ use stvdy_sync::proto::Entity;
 /// **dropped and rebuilt** rather than migrated, because everything in it can be pulled
 /// again and a half-applied migration on a device is a launch crash with no recovery.
 /// Bump this whenever a table's shape changes.
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// Bumped to 2 when `workspaces` gained `course_code`, `color` and `exam_date`: the DDL is
+/// generated from `Entity::payload_columns`, so the table's shape follows the payload and a
+/// cache written before that change has the wrong columns.
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The app's own key-value table, which is **not** synced data.
 ///

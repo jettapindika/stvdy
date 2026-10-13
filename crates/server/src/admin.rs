@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/users/{id}/plan", patch(switch_plan))
         .route("/admin/users/{id}/credits", post(grant_credits))
         .route("/admin/margin", get(margin))
+        .route("/admin/users", get(users))
         // The payment tools (A308). `mark-paid` runs the webhook's own apply rather than a
         // second implementation, and `refund` records the row and leaves the subscription
         // alone — neither deletes anything.
@@ -281,6 +282,130 @@ fn parse_instant(raw: Option<&str>) -> AppResult<Option<DateTime<Utc>>> {
     DateTime::parse_from_rfc3339(raw.trim())
         .map(|instant| Some(instant.with_timezone(&Utc)))
         .map_err(|_| AppError::Validation(format!("{raw:?} is not an RFC 3339 timestamp")))
+}
+
+/// One account, as the admin console lists it.
+///
+/// **Every count is a count of rows in the window, and the window is printed with the
+/// response.** The design's own admin frame carries the note "ILLUSTRATIVE DATA / NOT A LIVE
+/// ACCOUNT" and "ALL TABLES AND METRICS USE THIS SAME SAMPLE" — the point of both is that a
+/// reader must be able to tell which rows a figure came from. So the period travels with the
+/// data rather than being implied by a heading, and a figure the query cannot produce is
+/// `null` rather than `0`: a student who has never used the product and one whose activity
+/// predates the window are different facts.
+#[derive(Debug, Serialize)]
+pub struct AdminUserRow {
+    pub id: Uuid,
+    pub email: String,
+    pub plan_id: String,
+    /// When the account was created, which is what "new this period" would be counted from.
+    pub created_at: Option<DateTime<Utc>>,
+    /// `usage_events` rows in the window: every billed action, including a search-cache hit
+    /// (`migrations/0020` writes one), because a served request is a request.
+    pub requests: i64,
+    /// Live sources created in the window.
+    pub sources_added: i64,
+    /// The newest `usage_events` row's timestamp, ever — not windowed. "Last active" that
+    /// silently meant "last active in the last 30 days" would read as an account that had
+    /// stopped, and `null` means this account has never taken an action.
+    pub last_active_at: Option<DateTime<Utc>>,
+    pub is_admin: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminUserList {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    pub users: Vec<AdminUserRow>,
+}
+
+/// `GET /admin/users?from=&to=`
+///
+/// The console's user-activity table. It is a *read of the rows the product already writes* —
+/// `users`, `usage_events`, `sources` — and it invents nothing: no engagement score, no
+/// "health", no churn prediction. An account with no rows in the window reports zero requests
+/// and zero sources, which is what it has.
+///
+/// `AdminUser`, whose extractor answers 404 for a non-admin (A7).
+pub async fn users(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<MarginQuery>,
+) -> AppResult<Json<AdminUserList>> {
+    let to = parse_instant(query.to.as_deref())?.unwrap_or_else(|| state.clock.now());
+    let from = parse_instant(query.from.as_deref())?.unwrap_or_else(|| to - Duration::days(30));
+    if from >= to {
+        return Err(AppError::Validation(
+            "from must be earlier than to".to_string(),
+        ));
+    }
+
+    // Two correlated subqueries rather than two joins: joining both `usage_events` and
+    // `sources` multiplies the rows (a user with three sources and four events becomes
+    // twelve), and each count would then be wrong by the other's factor. A subquery per
+    // count keeps each one a count of its own table.
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            Option<DateTime<Utc>>,
+            i64,
+            i64,
+            Option<DateTime<Utc>>,
+            bool,
+        ),
+    >(
+        "select u.id, u.email, u.plan_id, u.created_at,
+                (select count(*) from usage_events e
+                  where e.user_id = u.id and e.created_at >= $1 and e.created_at < $2)
+                  as requests,
+                (select count(*) from sources s
+                  where s.user_id = u.id and s.deleted_at is null
+                    and s.created_at >= $1 and s.created_at < $2)
+                  as sources_added,
+                (select max(e.created_at) from usage_events e where e.user_id = u.id)
+                  as last_active_at,
+                u.is_admin
+           from users u
+          where u.deleted_at is null
+          order by last_active_at desc nulls last, u.created_at desc, u.id",
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("listing accounts: {error}")))?;
+
+    let users = rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                email,
+                plan_id,
+                created_at,
+                requests,
+                sources_added,
+                last_active_at,
+                is_admin,
+            )| {
+                AdminUserRow {
+                    id,
+                    email,
+                    plan_id,
+                    created_at,
+                    requests,
+                    sources_added,
+                    last_active_at,
+                    is_admin,
+                }
+            },
+        )
+        .collect();
+
+    Ok(Json(AdminUserList { from, to, users }))
 }
 
 /// The margin report: what the free tier costs against what paying customers cost, per month.

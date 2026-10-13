@@ -84,8 +84,11 @@ describe('the plan and usage screen', () => {
     expect(within(row('Workspaces')).getByText('At the limit')).toBeInTheDocument()
 
     // The period end, as a date in the account's own zone rather than an instant.
+    // The plan's renewal row renders it in a `.meta` span; the credits card's reset
+    // sentence carries the same instant inside a sentence, so this exact-text match
+    // is the renewal row alone.
     const periodEnd = formatInZone(new Date(PERIOD_END), USER.timezone, { dateStyle: 'medium' })
-    expect(screen.getByText(`Current period ends ${periodEnd}`)).toBeInTheDocument()
+    expect(screen.getByText(periodEnd)).toBeInTheDocument()
 
     // **The other half: no number the fixture does not contain.** Every digit run
     // on the screen has to trace to a number the endpoint sent (formatted the way
@@ -157,9 +160,13 @@ describe('the plan and usage screen', () => {
     renderWithProviders(<PlanUsageScreen />)
 
     // The plan that includes PDF comes from `config/plans.toml` through the same
-    // reader the export menu uses, rather than being written into the screen.
-    expect(await screen.findByText('Available on Pro')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Upgrade to Pro' })).toHaveAttribute(
+    // reader the export menu uses, rather than being written into the screen. The
+    // assertion is scoped to the PDF row because the Free plan's boolean features
+    // are locked too and name their own plans in their own rows.
+    const pdf = (await screen.findByText('PDF')).closest('div')
+    if (pdf === null) throw new Error('the PDF row must exist')
+    expect(within(pdf).getByText('Available on Pro')).toBeInTheDocument()
+    expect(within(pdf).getByRole('link', { name: 'Upgrade to Pro' })).toHaveAttribute(
       'href',
       '/billing',
     )

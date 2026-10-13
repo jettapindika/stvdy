@@ -5,6 +5,98 @@
       "restoring": "Memulihkan sesimu"
     }
   },
+  "admin": {
+    "title": "Ringkasan operasional",
+    "eyebrow": "Konsol admin / ringkasan",
+    "subtitle": "Aktivitas pengguna, pembayaran QRIS, dan margin kontribusi penyedia.",
+    "noun": "konsol admin",
+    "loading": "Memuat konsol",
+    "scope": "Akses terbatas · hanya web",
+    "webOnly": "Konsol admin berjalan di peramban pada desktop.",
+    "webOnlyTitle": "Tidak tersedia di perangkat ini",
+    "webOnlyReason": "Konsol ini menampilkan data akun, jadi hanya tersedia di web. Buka Stvdy di peramban desktop.",
+    "returnToApp": "Kembali ke aplikasi mahasiswa",
+    "footer": "Semua angka dihitung pada rentang di atas · {{zone}}",
+    "window": "{{from}} – {{to}}",
+    "summary": {
+      "title": "Ringkasan",
+      "month": "Bulan terbaru di laporan: {{month}} (UTC)",
+      "activeUsers": "Akun",
+      "activeUsersNote": "{{paying}} berbayar · {{free}} gratis, pada tanggal laporan",
+      "revenue": "Pendapatan tertahan",
+      "revenueNote": "Hanya pesanan lunas · refund tidak dihitung",
+      "cost": "Biaya penyedia",
+      "costNote": "Dikonversi pada {{rate}} per USD",
+      "margin": "Margin kontribusi",
+      "marginNote": "Kontribusi {{contribution}} · belum termasuk biaya gateway dan opex",
+      "noRevenue": "Belum ada pendapatan",
+      "asOf": "Laporan dihitung {{when}}"
+    },
+    "users": {
+      "title": "Aktivitas pengguna",
+      "loading": "Memuat akun",
+      "count_one": "{{count}} akun",
+      "count_other": "{{count}} akun",
+      "emptyTitle": "Belum ada akun",
+      "emptyReason": "Akun muncul di sini begitu ada yang mendaftar.",
+      "columnUser": "Akun",
+      "columnPlan": "Paket",
+      "columnRequests": "Permintaan",
+      "columnSources": "Sumber ditambah",
+      "columnLastActive": "Terakhir aktif",
+      "admin": "Administrator",
+      "neverActive": "Belum pernah aktif",
+      "cardTitle": "Setiap akun"
+    },
+    "payments": {
+      "title": "Log audit pembayaran QRIS",
+      "loading": "Memuat pembayaran",
+      "count_one": "{{count}} pesanan",
+      "count_other": "{{count}} pesanan",
+      "emptyTitle": "Belum ada pesanan",
+      "emptyReason": "Pesanan muncul di sini saat mahasiswa memulai checkout.",
+      "columnOrder": "Pesanan / referensi",
+      "columnPlan": "Paket",
+      "columnAmount": "Jumlah · IDR",
+      "columnStatus": "Status QRIS",
+      "columnUpdated": "Diperbarui",
+      "credits": "{{count}} kredit",
+      "cardTitle": "Setiap pesanan"
+    },
+    "margin": {
+      "title": "Laporan biaya penyedia & margin",
+      "loading": "Memuat laporan margin",
+      "months_one": "{{count}} bulan",
+      "months_other": "{{count}} bulan",
+      "emptyTitle": "Tidak ada bulan di rentang ini",
+      "emptyReason": "Laporan tidak punya apa pun untuk dihitung di rentang ini.",
+      "rate": "Kurs yang dipakai semua konversi di atas: {{rate}} per USD, dari konfigurasi.",
+      "columnPlan": "Paket",
+      "columnCost": "Biaya penyedia · USD",
+      "columnByok": "Kunci sendiri · USD",
+      "columnRevenue": "Pendapatan · IDR",
+      "columnMargin": "Margin bruto · IDR",
+      "columnCeiling": "Batas · USD",
+      "monthLine": "{{paying}} berbayar · {{free}} gratis · Rp {{revenue}} terkumpul · Rp {{fee}} biaya gateway",
+      "conversion": "Konversi dari gratis {{ofFree}} · dari semua akun {{ofTotal}} · kredit gratis terpakai {{utilization}}",
+      "unknown": "Tidak bisa dihitung",
+      "noCeiling": "Tanpa batas",
+      "usd": "USD {{amount}}",
+      "monthEmpty": "Tidak ada baris di bulan ini.",
+      "cardTitle": "Per bulan"
+    },
+    "tripwire": {
+      "title": "Ambang batas",
+      "eyebrow": "Dipantau · tiga nilai",
+      "freeUtilization": "Pemakaian kredit gratis di atas 30%",
+      "conversion": "Konversi akun gratis di bawah 3%",
+      "freeSpend": "Biaya gratis di atas seperempat pendapatan",
+      "twoMonths": "Dua bulan berturut-turut merugi",
+      "triggered": "Terpicu",
+      "clear": "Tidak terpicu",
+      "notMeasured": "Belum diukur"
+    }
+  },
   "nav": {
     "today": "Hari ini",
     "workspaces": "Ruang belajar",
@@ -70,7 +162,10 @@
     "nav": {
       "main": "Utama"
     },
-    "skipToContent": "Lewati ke konten"
+    "skipToContent": "Lewati ke konten",
+    "semester": "Semester ini",
+    "railNote": "Semua kerjaanmu, di satu tempat. Satu langkah setiap kali.",
+    "settingsEyebrow": "Ruang kerjamu / Pengaturan"
   },
   "routes": {
     "notFound": {
@@ -121,7 +216,6 @@
     "free": "Gratis",
     "current": "Paketmu",
     "choose": "Pilih {{plan}}",
-    "creditsIncluded_other": "{{count, number}} kredit per bulan",
     "studentBanner": "Alamat kampusmu sudah diverifikasi, jadi semua paket diskon {{percent}}%.",
     "comparison": "Isi setiap paket",
     "comparisonCaption": "Setiap paket dan batas yang ditetapkannya pada tiap sumbu.",
@@ -144,13 +238,17 @@
         "q": "Bagaimana mendapatkan harga pelajar?",
         "a": "Verifikasi alamat kampus Indonesia di Pengaturan. Diskonnya berlaku saat pembayaran, untuk paket yang kamu pilih."
       }
-    }
+    },
+    "accountPlan": "Di paket {{plan}}",
+    "priceHidden": "Harga tidak ditampilkan",
+    "noPaymentRequired": "Tanpa pembayaran",
+    "billedInterval": "Ditagih {{period}} · {{currency}}",
+    "currencyNote": "Semua jumlah dalam {{currency}}"
   },
   "checkout": {
     "title": "Pembayaran",
     "subtitle": "Pindai kodenya dengan aplikasi QRIS apa pun. Halaman ini memperbarui sendiri.",
     "loading": "Memuat tagihanmu",
-    "order": "Yang kamu bayar",
     "qrLabel": "Kode QRIS untuk pembayaran ini",
     "reference": "Pesanan {{orderId}}",
     "expiresIn": "Kode kedaluwarsa dalam {{time}}",
@@ -195,7 +293,11 @@
         "title": "Kami tidak bisa menghubungi Stvdy",
         "detail": "Kodemu mungkin masih berlaku, jadi tidak ada yang hilang. Periksa koneksimu dan coba lagi."
       }
-    }
+    },
+    "orderSummary": "Ringkasan pesanan",
+    "totalCurrency": "Total · {{currency}}",
+    "windowLabel": "Jendela pembayaran",
+    "guidance": "Biarkan halaman ini terbuka selama kamu menyelesaikan pembayaran."
   },
   "plan": {
     "subtitle": "Isi paketmu, pemakaianmu bulan ini, dan biaya setiap tindakan.",
@@ -208,7 +310,6 @@
       "expired": "Kedaluwarsa",
       "canceled": "Dibatalkan"
     },
-    "periodEnd": "Periode saat ini berakhir {{date}}",
     "credits": "Kredit",
     "creditsMonthly": "Jatah bulanan",
     "creditsPurchased": "Dibeli",
@@ -257,6 +358,32 @@
       "included": "Termasuk di paketmu: {{formats}}",
       "md": "Markdown",
       "pdf": "PDF"
+    },
+    "currentPlan": "Paket saat ini",
+    "statusLabel": "Status",
+    "renewalDate": "Tanggal perpanjangan",
+    "creditsCard": {
+      "title": "Kredit AI bulanan",
+      "left": "tersisa",
+      "remainingOfTotal": "{{remaining}} dari {{total}}",
+      "reset": "Kredit direset pada {{date}}."
+    },
+    "features": {
+      "title": "Akses fitur",
+      "policy": "Fitur dikunci sesuai paketmu.",
+      "included": "Termasuk",
+      "locked": "Terkunci"
+    },
+    "feature": {
+      "advanced_analytics": "Laporan belajar lanjutan",
+      "task_ai_breakdown": "Pecahan tugas AI",
+      "quick_capture": "Catat cepat",
+      "google_calendar": "Google Calendar",
+      "agent_actions": "Tindakan asisten",
+      "byok": "Kunci API sendiri"
+    },
+    "footer": {
+      "timezone": "Tanggal dalam zona {{zone}}"
     }
   },
   "meter": {
@@ -264,6 +391,25 @@
     "none": "Kredit habis",
     "loading": "Memeriksa kredit",
     "unavailable": "Kredit tidak tersedia"
+  },
+  "palette": {
+    "title": "Cari dan perintah",
+    "open": "Buka pencarian",
+    "searchPlaceholder": "Cari mata kuliah, catatan, atau sumber",
+    "escape": "Esc",
+    "move": "untuk pindah",
+    "shortcut": "Dibuka dengan {{shortcut}}",
+    "noResults": "Tidak ada yang cocok dengan “{{query}}”. Yang dicari adalah judul; isi teks di dalam sumber tidak.",
+    "noCourse": "Tanpa mata kuliah",
+    "sourceCount_one": "{{count}} sumber",
+    "sourceCount_other": "{{count}} sumber",
+    "group": {
+      "go": "Buka",
+      "workspaces": "Mata kuliah",
+      "sources": "Sumber",
+      "decks": "Dek",
+      "tasks": "Tugas"
+    }
   },
   "brand": {
     "illustration": {
@@ -295,28 +441,30 @@
   },
   "auth": {
     "field": {
-      "email": "Email",
+      "email": "Email kampus",
       "password": "Password"
     },
     "signIn": {
       "title": "Masuk",
-      "subtitle": "Ruang belajar, sumber, dan materi belajarmu, di setiap perangkat yang kamu pakai masuk.",
+      "subtitle": "Masuk ke ruang belajar kamu.",
       "newHere": "Baru di Stvdy?",
       "createAccount": "Buat akun",
       "mismatchTitle": "Itu tidak cocok",
       "mismatchReason": "Periksa email dan password lalu coba lagi. Keduanya tidak ditampilkan ke siapa pun.",
-      "pending": "Sedang masuk"
+      "pending": "Sedang masuk",
+      "welcome": "Selamat datang kembali"
     },
     "signUp": {
       "title": "Buat akunmu",
-      "subtitle": "Satu ruang belajar per mata kuliah, dan semua isinya bisa dibaca bersama.",
+      "subtitle": "Pakai email kampusmu untuk mulai ruang belajar.",
       "haveAccount": "Sudah punya akun?",
       "takenTitle": "Alamat itu sudah terdaftar",
       "takenReason": "Masuk saja dengan alamat itu, atau pakai email lain untuk akun ini.",
       "deviceLabel": "Perangkat ini",
       "deviceHint": "Nama perangkat ini di daftar perangkatmu. Bisa kamu ganti nanti.",
       "pending": "Sedang membuat akunmu",
-      "submit": "Buat akun"
+      "submit": "Buat akun",
+      "passwordHint": "Minimal 8 karakter."
     },
     "verify": {
       "awaitingTitle": "Cek emailmu",
@@ -354,7 +502,8 @@
       "pendingTitle": "Sedang memasukkanmu",
       "pendingSubtitle": "Menyelesaikan proses masuk Google yang baru kamu mulai.",
       "loading": "Menyelesaikan proses masuk"
-    }
+    },
+    "metadata": "STVDY / AKUN"
   },
   "today": {
     "subtitle": "Blok belajar, kartu yang jatuh tempo, dan tenggat, disusun sesuai waktu yang kamu punya.",
@@ -372,13 +521,13 @@
       "review": "Ulangi {{count}} kartu"
     },
     "tasks": {
-      "emptyTitle": "Tidak ada yang jatuh tempo",
-      "emptyReason": "Tugas dari ruang belajar, impor silabus, atau catatan cepat masuk ke sini, diurutkan berdasarkan tenggat."
+      "emptyTitle": "Belum ada jadwal hari ini",
+      "emptyReason": "Kuliah, tenggat, dan tugas yang jatuh tempo hari ini masuk ke jadwal ini, dari yang paling awal."
     },
     "exams": {
-      "title": "Ujian mendatang",
-      "emptyTitle": "Belum ada ujian yang dicatat",
-      "emptyReason": "Tambahkan ujian sebagai target, dan itu jadi patokan penjadwalan."
+      "title": "Tenggat minggu ini",
+      "emptyTitle": "Belum ada tenggat minggu ini",
+      "emptyReason": "Tenggat dan ujian dalam tujuh hari ke depan muncul di sini. Tambahkan ujian sebagai target, dan itu jadi patokan penjadwalan."
     },
     "timer": {
       "running": "Berjalan",
@@ -390,11 +539,18 @@
       "minutesLabel": "Menit belajar",
       "save": "Simpan sesi",
       "discard": "Buang",
-      "title": "Timer fokus"
+      "title": "Timer fokus",
+      "sessionLength": "{{focus}} menit fokus / {{rest}} menit istirahat"
     },
     "timeline": {
-      "title": "Hari ini",
-      "at": "pukul {{when}}"
+      "title": "Jadwal Hari Ini",
+      "at": "pukul {{when}}",
+      "summaryEvents_other": "{{count}} acara",
+      "summaryTasks_other": "{{count}} tugas",
+      "summaryMinutes_other": "{{count}} menit tercatat",
+      "kindTask": "Tugas",
+      "finished": "Selesai",
+      "now": "Sekarang"
     },
     "overdue": {
       "title": "Terlambat",
@@ -416,7 +572,8 @@
     "activity": {
       "title": "Belajarmu",
       "minutes": "{{count}} menit tercatat hari ini",
-      "streak": "{{count}} hari berturut-turut"
+      "streak": "{{count}} hari beruntun belajar",
+      "loading": "Memeriksa aktivitas belajarmu"
     },
     "capture": {
       "title": "Catatan cepat",
@@ -431,14 +588,44 @@
       "due": "Jatuh tempo {{when}}",
       "estimate": "Sekitar {{count}} menit",
       "warning": "Asisten tidak bisa memakai satu kolom: {{detail}}",
-      "lockedReason": "Tulis satu baris dan dapatkan draf tugas yang kamu konfirmasi sebelum apa pun disimpan."
+      "lockedReason": "Tulis satu baris dan dapatkan draf tugas yang kamu konfirmasi sebelum apa pun disimpan.",
+      "offline": "Fitur AI butuh koneksi."
+    },
+    "greeting": {
+      "morning": "Selamat pagi, {{name}}.",
+      "afternoon": "Selamat siang, {{name}}.",
+      "evening": "Selamat malam, {{name}}."
+    },
+    "openDay": "Buka kalender untuk {{date}}",
+    "due": {
+      "eyebrow": "Jatuh tempo sekarang",
+      "count_other": "{{count}} kartu perlu diulang"
+    },
+    "streak": {
+      "encouragement": "Belajar sedikit-sedikit juga tidak apa-apa.",
+      "emptyTitle": "Belum ada hari belajar",
+      "emptyReason": "Satu hari dihitung kalau kamu mengulang kartu, mengerjakan kuis, atau mencatat sesi. Sekali sesi hari ini sudah cukup untuk mulai.",
+      "emptyAction": "Buka Belajar",
+      "dayActive": "Hari kamu belajar",
+      "dayIdle": "Hari tanpa belajar"
+    },
+    "deadlines": {
+      "weekRange": "{{from}}–{{to}}",
+      "today": "Hari ini",
+      "inDays_other": "{{count}} hari lagi",
+      "openPlanner": "Buka Jadwal"
+    },
+    "footer": {
+      "savedOnDevice": "Tersimpan di perangkat ini · Menunggu sinkron"
     }
   },
   "workspaces": {
     "noun": "ruang belajar",
     "keepIt": "Biarkan saja",
     "detail": {
-      "titleFallback": "Ruang belajar"
+      "titleFallback": "Ruang belajar",
+      "sourceCount_other": "{{count}} sumber",
+      "exam": "ujian {{date}}"
     },
     "panels": {
       "label": "Panel ruang belajar"
@@ -478,7 +665,8 @@
       "removing": "Membuang",
       "removeIt": "Buang",
       "noun": "sumber",
-      "kindOther": "Sumber"
+      "kindOther": "Sumber",
+      "open": "Buka sumber"
     },
     "upload": {
       "legend": "Tambah materi",
@@ -523,7 +711,24 @@
       "deleteNoSources": "Belum ada sumber di dalamnya, jadi tidak ada yang hilang. Ini tidak bisa dibatalkan.",
       "deleteSources_other": "{{count}} sumber ikut terhapus. Ini tidak bisa dibatalkan.",
       "deleting": "Menghapus",
-      "deleteConfirm": "Hapus ruang belajar"
+      "deleteConfirm": "Hapus ruang belajar",
+      "eyebrow": "Matakuliahmu",
+      "courseCodeLabel": "Kode matakuliah",
+      "courseCodePlaceholder": "BIO 201",
+      "courseCodeHint": "Opsional. Maksimal 16 karakter. Muncul di kartu dan di bilah samping.",
+      "examDateLabel": "Ujian berikutnya",
+      "examDateHint": "Opsional. Muncul di kartu sesuai tanggal yang kamu isi.",
+      "examLine": "Ujian berikutnya · {{date}}",
+      "open": "Buka ruang belajar →",
+      "sortLabel": "Urutkan",
+      "sortRecent": "Terbaru diubah",
+      "sortName": "Nama",
+      "reviewEyebrow": "Jatuh tempo hari ini / {{count}} ruang belajar",
+      "reviewTitle_other": "{{count}} kartu untuk diulang",
+      "reviewNone": "Hari ini tidak ada yang jatuh tempo",
+      "reviewReason": "Mulai dari matakuliah di bawah, atau ulang semua sekaligus.",
+      "reviewAction": "Ulangi kartu jatuh tempo",
+      "footerCounts_other": "{{workspaces}} ruang belajar · {{sources}} sumber"
     }
   },
   "chat": {
@@ -651,6 +856,25 @@
     }
   },
   "study": {
+    "hub": {
+      "eyebrow": "Semua mata kuliah / satu antrean",
+      "subtitle": "Semua dek dan kuis dari setiap mata kuliah, di satu tempat.",
+      "loading": "Memuat dek kamu",
+      "reviewAll": "Ulas satu dek",
+      "decks": "Dek",
+      "quizzes": "Kuis",
+      "cardCount_one": "{{count}} kartu",
+      "cardCount_other": "{{count}} kartu",
+      "generating": "Sedang dibuat",
+      "totals": "{{decks}} dek · {{quizzes}} kuis",
+      "empty": {
+        "title": "Belum ada dek",
+        "reason": "Dek dibuat dari mata kuliah. Buka workspace, pilih sumber, lalu buat flashcard dari situ."
+      },
+      "dueNow_other": "{{count}} kartu jatuh tempo di semua mata kuliahmu",
+      "nothingDue": "Tidak ada yang jatuh tempo sekarang.",
+      "reviewOpens": "Membuka {{deck}}, dek dengan kartu paling banyak."
+    },
     "backToWorkspace": "Kembali ke ruang belajar",
     "refreshFailed": "Gagal menyegarkan dek ini. Sesi kamu tidak terganggu.",
     "loadingDue": "Memuat kartu yang jatuh tempo di dek ini",
@@ -669,6 +893,28 @@
       "title": "Tidak ada yang jatuh tempo di dek ini",
       "scheduled": "Semua kartu di dek ini sudah dijadwalkan. Kembali setelah kartu berikutnya jatuh tempo.",
       "next": "Semua kartu di sini sudah dijadwalkan. Kartu berikutnya jatuh tempo {{when}}."
+    },
+    "endSession": "Akhiri sesi",
+    "questionLabel": "Pertanyaan",
+    "answerLabel": "Jawaban",
+    "recallHint": "Coba ingat dulu sebelum dibuka.",
+    "revealHint": "Tekan Spasi untuk membuka",
+    "rateRecall": "Seberapa lancar kamu mengingatnya?",
+    "rateHint": "Nilai ingatanmu, bukan kartunya.",
+    "keyHints": "1 {{again}} · 2 {{hard}} · 3 {{good}} · 4 {{easy}}",
+    "interval": {
+      "days": "{{days}}h"
+    },
+    "sessionProgress": "{{reviewed}} selesai · {{remaining}} tersisa",
+    "receipt": {
+      "rated": "Kartu sebelumnya dinilai {{grade}}",
+      "next": "Kartu {{position}} · ulangan berikutnya {{days}} lagi"
+    },
+    "undo": {
+      "tooLate": {
+        "title": "Sudah tidak bisa dibatalkan",
+        "reason": "Waktu untuk membatalkan sudah lewat, jadi nilai ini tetap tersimpan."
+      }
     }
   },
   "quiz": {
@@ -710,7 +956,38 @@
       "answeredOfWaiting": "{{answered}} dari {{total}} terjawab, {{waiting}} menunggu dinilai",
       "topics": "Yang perlu dibaca lagi",
       "sourceUnavailable": "Sumber tidak tersedia",
-      "everyQuestion": "Semua pertanyaan"
+      "everyQuestion": "Semua pertanyaan",
+      "title": "Hasil kuis",
+      "subtitle": "Gambaran jelas tentang yang sudah kamu kuasai dan yang perlu diulang.",
+      "reflection_other": "{{count}} pertanyaan perlu ditinjau lagi.",
+      "backToStudy": "Kembali ke Belajar"
+    },
+    "breadcrumbLabel": "Navigasi halaman",
+    "endQuiz": "Akhiri kuis",
+    "fromSources": "Dibuat dari {{sources}}",
+    "oneCorrect": "Satu jawaban benar",
+    "writeYourAnswer": "Tulis jawabanmu",
+    "selected": "Dipilih",
+    "correctAnswer": "Jawaban benar",
+    "correctYourAnswer": "Benar · jawabanmu",
+    "generatedNote": "Latihan buatan AI · Periksa halaman yang dikutip saat membaca penjelasan.",
+    "guidance": {
+      "choose": "Pilih satu jawaban untuk lanjut.",
+      "write": "Tulis jawabanmu untuk lanjut.",
+      "selected": "Jawaban sudah dipilih. Siap diperiksa.",
+      "written": "Jawaban sudah ditulis. Siap diperiksa.",
+      "recorded": "Jawaban tersimpan. Baca dulu penjelasannya sebelum lanjut.",
+      "markIt": "Bandingkan jawabanmu, lalu tandai sendiri."
+    },
+    "session": {
+      "title": "Sesi kamu",
+      "navigatorLabel": "Progres pertanyaan",
+      "legend": "Pertanyaan aktif bergaris tepi. Kotak yang terisi sudah dijawab.",
+      "focus": "Fokus kuis ini",
+      "noTimeLimit": "Tanpa batas waktu",
+      "hint": "Pakai kesalahanmu untuk tahu apa yang perlu diulang.",
+      "noSourcesTitle": "Kuis ini tanpa sumber",
+      "noSourcesReason": "Kuis ini dibuat tanpa sumber, jadi tidak ada halaman untuk memeriksa penjelasan."
     }
   },
   "studio": {
@@ -803,11 +1080,14 @@
   },
   "styleguide": {
     "title": "Referensi desain",
-    "subtitle": "Bukan layar produk. Token dan komponen dalam satu tempat, dengan konten placeholder, bukan data contoh.",
+    "subtitle": "Sistem desain dalam satu halaman: palet, skala huruf, kontrol, dan pola akademik, dirender dari token yang hidup, bukan disalin dari lembar desain.",
     "palette": {
       "title": "Palet",
-      "description": "Indigo adalah aksi: mengisi tombol utama, menandai pilihan, dan membawa merek. Sky hanya untuk sumber dan kutipan, tidak untuk hal lain — chip sky di layar berarti teks di sebelahnya berasal dari materimu sendiri. Emerald berarti selesai, amber berarti segera jatuh tempo, rose berarti ulangi, terlambat, atau merusak. Setiap pasangan teks/latar di bawah diperiksa di kedua tema oleh uji kontras, jadi daftar ini tidak bisa menyimpang dari yang benar-benar tampil.",
-      "contrastNote": "Pasangan teks lolos 4.5:1 dan garis, ikon, serta cincin fokus lolos 3:1, di tema terang maupun gelap. Pemeriksaannya jalan di CI dan menggagalkan build kalau ada yang gagal."
+      "description": "Palet ini peran, bukan contoh warna. Indigo adalah aksi, sky menandai sitasi dan tidak yang lain, emerald berarti selesai, amber segera jatuh tempo, dan rose berarti terlambat atau merusak. Setiap pasangan di bawah diukur di kedua tema oleh uji kontras, jadi daftar ini tidak bisa melenceng dari yang benar-benar tampil.",
+      "contrastNote": "Pasangan teks lolos 4.5:1 dan garis, ikon, serta cincin fokus lolos 3:1, di tema terang maupun gelap. Pemeriksaannya jalan di CI dan menggagalkan build kalau ada yang gagal.",
+      "meta": "Terang dan gelap",
+      "light": "Terang",
+      "dark": "Gelap"
     },
     "swatch": {
       "success": "selesai dan sudah dikuasai",
@@ -829,18 +1109,32 @@
       "warningTint": "chip jatuh tempo",
       "dangerTint": "catatan galat",
       "ring": "cincin fokus",
-      "danger": "galat"
+      "danger": "galat",
+      "onPrimary": "teks di atas tombol utama"
     },
     "type": {
-      "title": "Tipografi",
+      "title": "Keluarga huruf",
       "headingOne": "Judul satu",
       "headingTwo": "Judul dua",
       "headingThree": "Judul tiga",
-      "body": "Teks utama 14px di desktop dan 16px di ponsel. Inter untuk antarmuka, Plus Jakarta Sans untuk judul, JetBrains Mono untuk rujukan halaman dan waktu. Ketiganya dibundel, jadi aplikasi tetap tampil tanpa jaringan.",
+      "body": "Pahami satu konsep setiap kali.",
       "meta": "Metadata monospace: halaman 12, 24 menit, 2026-10-11",
       "linkBefore": "Sebuah",
       "linkText": "tautan di teks isi",
-      "linkAfter": "memakai indigo untuk teks, karena indigo isian dipakai untuk permukaan yang berisi teks putih."
+      "linkAfter": "memakai indigo untuk teks, karena indigo isian dipakai untuk permukaan yang berisi teks putih.",
+      "familyHeadings": "Judul",
+      "familyHeadingsNote": "Tenang dan tegas / 600",
+      "familyBody": "Isi dan antarmuka",
+      "familyBodyNote": "Mudah dibaca dulu / 400 sampai 600",
+      "familyMono": "Metadata dan kode",
+      "familyMonoNote": "Waktu, sitasi, jumlah / 400",
+      "scale": "Skala huruf",
+      "scaleMeta": "Sepuluh langkah",
+      "display": "Jalan yang jelas menuju paham.",
+      "h4": "Judul kartu di dalam kartu",
+      "label": "Mulai sesi review",
+      "small": "Baris kedua di dalam kartu",
+      "caption": "Teks bantuan di bawah kolom"
     },
     "citations": {
       "title": "Tanda kutipan",
@@ -863,60 +1157,134 @@
       "secondary": "Sekunder",
       "quiet": "Senyap",
       "disabled": "Nonaktif",
-      "fieldLabel": "Label kolom",
-      "placeholder": "Teks placeholder"
+      "fieldLabel": "Nama sesi",
+      "placeholder": "Teks placeholder",
+      "danger": "Hapus sesi",
+      "inputTitle": "Kolom teks dan validasi",
+      "inputMeta": "Label terlihat / teks pemulihan",
+      "inputHint": "Beri nama yang jelas dan spesifik untuk sesimu.",
+      "inputError": "Isi nama sesi dulu untuk lanjut.",
+      "inputManaged": "Nama ini diatur oleh matakuliahmu.",
+      "targets": "Ukuran target",
+      "targetsMeta": "32 / 44 px",
+      "targetsDescription": "44px adalah default bersama dan minimum di ponsel; 32px dengan jarak 8px adalah batas di desktop. Kolom isian juga 44px karena alasan yang sama: di ponsel, kontrol yang sulit disentuh adalah kontrol yang terlewat.",
+      "liveStates": "Hover dan fokus adalah keadaan hidup dari stylesheet pada kontrol sungguhan: hover menggelapkan isian dan cincin fokusnya digambar oleh :focus-visible."
     },
-    "states": {
-      "title": "Status",
-      "emptyTitle": "Status kosong",
-      "emptyReason": "Menyebut kenapa kosong dan apa yang mengisinya. Alasannya prop wajib, jadi status kosong tidak bisa lolos karena lupa.",
-      "errorTitle": "Status galat",
-      "errorReason": "Menyebut apa yang gagal dan apa yang harus dilakukan.",
-      "loading": "Memuat sesuatu yang disebut namanya, bukan sekadar memuat",
-      "loadingRows": "Memuat baris"
-    },
+    "states": {},
     "course": {
-      "title": "Warna mata kuliah",
+      "title": "Kartu matakuliah",
       "description": "Enam warna kategori. Masing-masing jadi penanda 4px plus chip bertint plus inisial atau ikon, dan tidak pernah jadi satu-satunya tanda: dua mata kuliah berwarna sama dibedakan dari namanya, dan warna mata kuliah bukan warna status.",
       "indigo": "Algoritma",
       "sky": "Statistika",
       "emerald": "Biologi",
       "amber": "Ekonomi",
       "violet": "Sastra",
-      "rose": "Kalkulus"
+      "rose": "Kalkulus",
+      "spec": "Kode matakuliah, nama, lalu isinya. Konteks dulu, sumber menyusul."
     },
     "chips": {
-      "title": "Chip dan ikon",
-      "description": "Chip membawa status dalam kata; warnanya mengulang kata itu, jadi statusnya tetap terbaca tanpa warna. Ikonnya satu set outline di 20px, digambar dengan currentColor supaya tidak bisa memunculkan warna yang belum diukur uji kontras.",
-      "neutral": "Menunggu",
-      "working": "Memproses 42%",
-      "ready": "Siap",
-      "due": "Jatuh tempo hari ini",
-      "failed": "Gagal",
-      "source": "Dari sumbermu"
+      "title": "Status jatuh tempo",
+      "description": "Chip membawa status dalam kata dan warnanya mengulang kata itu, jadi status tetap terbaca dalam hitam putih. Chip adalah status, bukan aksi: kontrol yang mengubah isi layar adalah tombol.",
+      "neutral": "Baru",
+      "working": "Sedang dipelajari",
+      "ready": "Sudah dikuasai",
+      "due": "Segera jatuh tempo",
+      "failed": "Terlambat",
+      "source": "Sumber",
+      "meta": "Kata plus warna"
     },
-    "locked": {
-      "title": "Fitur terkunci",
-      "description": "Satu komponen, dua varian, dipilih menurut platform. Web dan desktop menyebut paketnya dan menautkan ke checkout; iOS dan Android menyatakan faktanya tanpa harga, tanpa tombol, dan tanpa tautan, karena itulah yang diperiksa toko aplikasi."
+    "locked": {},
+    "composer": {},
+    "sync": {},
+    "eyebrow": "Sistem desain / v1.0",
+    "foundations": {
+      "title": "Fondasi"
     },
-    "composer": {
-      "title": "Kejujuran composer",
-      "description": "Baris di bawah setiap composer chat, dan tombol dasar di atasnya. Keduanya bagian dari composer, bukan tooltip: peringatan yang tidak wajib dibuka adalah peringatan yang jarang dibaca."
+    "dark": {
+      "title": "Inti tema gelap",
+      "meta": "Empat peran bawaan",
+      "description": "Tema gelap dirancang, bukan filter: token yang sama membawa keduanya, jadi permukaan baru langsung bekerja di mode gelap tanpa varian. Tombol utama tetap memakai indigo yang sama dengan teks putih.",
+      "rule": "Permukaan bukan latar. Pertahankan tepinya."
     },
-    "sync": {
-      "title": "Status sinkron",
-      "description": "Kontrol yang ditampilkan shell di kedua bentuk: satu baris di kaki bilah samping, dan chip di pita bilah tab pada ponsel. Statusnya berupa kata ditambah warna, jadi tetap terbaca tanpa warna, dan warnanya adalah chip di atas. Kontrol ini tautan ke layar Perangkat, karena itu Perangkat tidak perlu jadi item navigasi keenam."
+    "spacing": {
+      "title": "Jarak",
+      "meta": "Grid dasar 4 px",
+      "description": "Jarak itu struktur. 8 mengikat erat, 12 memberi ruang kontrol, 16 memberi ruang isi kartu, 24 memisahkan blok yang berhubungan dan 32 memisahkan bagian. Tidak ada jarak yang dikira-kira."
+    },
+    "radius": {
+      "title": "Sudut",
+      "meta": "8 / 12 / 16 / 999 px",
+      "description": "Sudut mengikuti fungsi. Garis tepi satu piksel, dan bayangan hanya untuk lapisan yang benar-benar mengambang di atas halaman.",
+      "controls": "Kontrol",
+      "cards": "Kartu",
+      "sheets": "Lembar",
+      "chips": "Chip"
+    },
+    "a11y": {
+      "title": "Aksesibel sejak awal",
+      "meta": "Papan tombol / kontras / simbol",
+      "focusTitle": "Fokus dan area sentuh",
+      "focusDescription": "Cincin fokus 2px yang tidak pernah dihapus tanpa pengganti. Minimum bersama 44px, yang sudah melewati batas 32px di desktop maupun batas ponsel.",
+      "focusKeys": "Tab, Shift+Tab, Enter atau Spasi",
+      "contrastTitle": "Makna di luar warna",
+      "contrastDescription": "Teks isi melewati 4.5:1 dan batas kontrol serta teks besar melewati 3:1, di kedua tema. Setiap warna semantik disertai katanya, jadi status tetap terbaca dalam hitam putih.",
+      "contrastSample": "Isi utama di atas labelnya: {{ratio}}:1",
+      "labels": "Pesan galat menyebut cara memperbaikinya. Label tetap terlihat, karena placeholder bukan label.",
+      "symbolsTitle": "Simbol garis",
+      "symbolsDescription": "20px di dalam kontrol, 24px di navigasi. Satu keluarga garis dengan satu ketebalan, digambar dengan warna saat ini supaya ikon tidak membawa warna yang belum diukur uji kontras."
+    },
+    "controlsSection": {
+      "title": "Kontrol antarmuka",
+      "meta": "Contoh yang bisa dipakai"
+    },
+    "session": {
+      "title": "Kartu sesi belajar",
+      "meta": "Konteks dulu",
+      "next": "Sesi berikutnya",
+      "name": "Review respirasi",
+      "course": "Matakuliah · durasi"
+    },
+    "alerts": {
+      "title": "Peringatan",
+      "meta": "Teks yang bisa ditindak",
+      "warningTitle": "Review kamu jatuh tempo besok",
+      "warningReason": "Review kartu ini supaya konsepnya tetap segar.",
+      "dangerTitle": "Review ini sudah terlambat",
+      "dangerReason": "Mulai sesinya lagi. Progres kamu sebelumnya tetap tersimpan.",
+      "successTitle": "Review selesai",
+      "successReason": "Jawabanmu tersimpan, dan review berikutnya dijadwalkan dari situ.",
+      "neutralTitle": "Perlu satu sumber",
+      "neutralReason": "Tambahkan catatan kuliah atau bacaan untuk memverifikasi penjelasan ini."
+    },
+    "modal": {
+      "title": "Tugas terfokus",
+      "meta": "Satu tugas / satu aksi utama",
+      "heading": "Mulai sesi belajar",
+      "description": "Pilih tujuan yang jelas. Materi matakuliahmu yang menyiapkan reviewnya.",
+      "fieldLabel": "Tujuan belajar",
+      "fieldHint": "Kamu bisa mengubahnya sebelum sesi dimulai.",
+      "optionSelected": "Sesi terfokus",
+      "optionSelectedMeta": "Lebih banyak soal, lebih lama",
+      "optionDefault": "Review singkat",
+      "optionDefaultMeta": "Lebih sedikit soal, lebih cepat",
+      "cancel": "Batal",
+      "start": "Mulai sesi",
+      "note": "Modal untuk keputusan singkat dan berdiri sendiri. Pindahkan fokus ke dalam saat dibuka, tahan di sana sampai ditutup, lalu kembalikan ke kontrol yang membukanya."
+    },
+    "patterns": {
+      "title": "Pola akademik",
+      "meta": "Konteks matakuliah, progres, dan bukti"
     }
   },
   "planner": {
     "rebalance": "Seimbangkan ulang mingguku",
     "rebalanceReason": "Memindahkan dan memecah blok belajar saat satu minggu terlalu padat.",
-    "subtitle": "Tujuanmu, apa yang masih perlu dipelajari, dan blok belajar yang diusulkan untuk minggu ini.",
     "noun": "rencana",
     "views": {
-      "label": "Tampilan penjadwal",
+      "label": "Tampilan Planner",
       "plan": "Rencana",
-      "tasks": "Tugas"
+      "tasks": "Tugas",
+      "calendar": "Kalender"
     },
     "goals": {
       "title": "Tujuan",
@@ -941,7 +1309,10 @@
       "noTopics": "Belum ada topik",
       "noQuizzes": "Belum ada kuis",
       "weak": "Topik lemah",
-      "noWeak": "Belum ada topik lemah dari percobaanmu sejauh ini."
+      "noWeak": "Belum ada topik lemah dari percobaanmu sejauh ini.",
+      "coverageNote": "Cakupan bukan penguasaan.",
+      "topicsReviewed": "{{done}} / {{total}} topik ditinjau",
+      "window": "{{days}} hari terakhir"
     },
     "workload": {
       "title": "Direncanakan hari ini",
@@ -950,10 +1321,18 @@
       "under": "Masih di dalam batas belajar harianmu."
     },
     "proposal": {
-      "title": "Rencana minggu ini",
+      "title": "Rencana belajar",
       "what": "rencana",
-      "accept": "Tambahkan blok ini ke kalenderku",
-      "saving": "Menyimpan blok yang kamu simpan"
+      "accept": "Terima semua",
+      "saving": "Menyimpan blok yang kamu simpan",
+      "acceptSelected": "Terima yang dipilih",
+      "selectBlock": "Simpan {{subject}}, {{start}} sampai {{end}}",
+      "selectedCount_one": "{{count}} blok disimpan",
+      "selectedCount_other": "{{count}} blok disimpan",
+      "banner": "Usulan rencana belajar untuk {{goal}}",
+      "context_one": "{{count}} blok usulan · {{duration}} belajar · Tinjau dulu sebelum masuk kalender.",
+      "context_other": "{{count}} blok usulan · {{duration}} belajar · Tinjau dulu sebelum masuk kalender.",
+      "noneKept": "Pilih minimal satu blok sebelum menerima, atau buang rencananya."
     },
     "suggest": "Usulkan rencana",
     "suggestWithCost": "Usulkan rencana ({{count}} kredit)",
@@ -986,6 +1365,36 @@
       "window": "Itu di luar jam belajarmu.",
       "daily_max": "Itu akan membuat harimu melebihi batas belajar harian.",
       "pinned": "Blok yang sudah kamu tambahkan tetap di tempatnya. Penjadwal menyimpannya persis."
+    },
+    "layout": {
+      "label": "Tata letak tugas",
+      "list": "Daftar",
+      "board": "Papan"
+    },
+    "work": {
+      "title": "Pekerjaanmu",
+      "courses_one": "{{count}} mata kuliah",
+      "courses_other": "{{count}} mata kuliah",
+      "open": "tugas terbuka",
+      "estimated": "perkiraan waktu",
+      "high": "prioritas tinggi",
+      "completed": "selesai"
+    },
+    "duration": {
+      "hm": "{{hours}}j {{minutes}}m",
+      "h": "{{hours}}j",
+      "m": "{{minutes}}m"
+    },
+    "nextExam": "Ujian berikutnya: {{course}} · {{date}}. Rencana belajarmu siap ditinjau.",
+    "nextExamAction": "Lihat rencana belajar",
+    "readOnlyNote": "Kelas impor diatur dari jadwal kuliahmu. Blok usulan masih usulan; yang tersimpan hanya blok yang kamu setujui.",
+    "conflicts_one": "{{count}} blok bertabrakan dengan waktu yang sudah terisi.",
+    "conflicts_other": "{{count}} blok bertabrakan dengan waktu yang sudah terisi.",
+    "calendar": {
+      "subtitle": "Cari waktu belajar di sela kelas dan ujianmu."
+    },
+    "tasks": {
+      "subtitle": "Satu langkah jelas untuk tiap mata kuliah. Jaga bebannya tetap masuk akal."
     }
   },
   "reports": {
@@ -1015,7 +1424,13 @@
       "moveDown": "Turunkan",
       "remove": "Hapus",
       "save": "Simpan kerangka",
-      "saving": "Menyimpan"
+      "saving": "Menyimpan",
+      "meta_other": "{{count}} BAGIAN · {{supported}} DIDUKUNG SUMBER",
+      "purposeLabel": "Tujuan bagian {{position}}",
+      "gap": "Butuh bukti",
+      "gapMeta": "DI LUAR LAPORAN · Tambah sumber untuk memasukkannya",
+      "addSection": "Tambah bagian",
+      "incomplete": "Setiap bagian butuh judul dan tujuan sebelum bisa disimpan."
     },
     "sections": {
       "title": "Bagian",
@@ -1044,6 +1459,47 @@
       "mdReason": "Menyimpan laporan sebagai berkas Markdown yang bisa kamu simpan.",
       "pdf": "Ekspor PDF",
       "pdfReason": "Mencetak laporan jadi PDF berhalaman."
+    },
+    "breadcrumb": "Jalur laporan",
+    "eyebrow": "LAPORAN BERBASIS SUMBER",
+    "eyebrowCourse": "{{course}} / LAPORAN BERBASIS SUMBER",
+    "subtitle": "Susun idenya. Periksa buktinya. Baru buat drafnya.",
+    "reviewReminder": "AI bisa salah. Periksa draf dan kutipannya sebelum kamu pakai untuk tugas yang dinilai.",
+    "status": {
+      "draft": "Kerangka draf",
+      "ready": "Siap",
+      "generating": "Sedang dibuat"
+    },
+    "sources": {
+      "title": "Sumber",
+      "meta": "{{ready}} SIAP / {{unavailable}} BELUM SIAP",
+      "metaReady": "{{ready}} SIAP",
+      "copy": "Salin kutipan {{title}}",
+      "copied": "TERSALIN",
+      "processing": "{{title}} masih diproses dan tidak dipakai di kerangka ini.",
+      "failed": "{{title}} gagal diindeks, jadi tidak dipakai di kerangka ini.",
+      "add": "Tambah sumber"
+    },
+    "settings": {
+      "title": "Setelan draf",
+      "format": "Format",
+      "formatValue": "Laporan belajar",
+      "length": "Panjang",
+      "words_other": "Sekitar {{count}} kata",
+      "citations": "Kutipan",
+      "citationsValue": "Sumber + halaman",
+      "includeCitations": "Sertakan kutipan sumber",
+      "citationsAlways": "Setiap bagian ditulis dengan penanda kutipannya, jadi ini selalu menyala.",
+      "policy": "Hanya bagian yang didukung sumber yang masuk draf. Bagian yang ditandai butuh bukti tetap di luar sampai kamu menambah sumbernya.",
+      "cost_other": "{{count}} bagian · {{credits}} kredit",
+      "generate": "Buat laporan",
+      "generating": "Sedang dibuat",
+      "complete": "Semua bagian sudah ditulis.",
+      "sections_other": "{{count}} bagian masuk",
+      "gaps_other": "{{count}} celah"
+    },
+    "footer": {
+      "updated": "LAPORAN DIPERBARUI · {{time}}"
     }
   },
   "cheatsheet": {
@@ -1074,7 +1530,14 @@
       "pending": "Merender ulang",
       "free": "Render ulang memakai isi yang tersimpan: tanpa panggilan model, dan tanpa kredit."
     },
-    "template": "Dirender dengan template {{version}}"
+    "template": "Dirender dengan template {{version}}",
+    "eyebrow": "{{scope}} · {{date}}",
+    "subtitle": "Contekan {{depth}}, dibangun dari sumbermu.",
+    "depth": {
+      "brief": "Ringkas",
+      "normal": "Standar",
+      "thorough": "Mendalam"
+    }
   },
   "sync": {
     "state": {
@@ -1123,25 +1586,39 @@
       "done": "Data lokal sudah dihapus dan disinkronkan ulang.",
       "failed": "Data lokal tidak bisa dihapus.",
       "noneLocal": "Versi ini tidak menyimpan salinan lokal datamu, jadi tidak ada yang perlu dihapus."
+    },
+    "eyebrow": "Ruang kerjamu / Perangkat",
+    "intro": "Lihat perangkat yang masuk dan kapan terakhir masing-masing sinkron",
+    "heading": "Perangkat yang masuk",
+    "count_other": "{{count}} perangkat aktif",
+    "lastSyncedLabel": "Terakhir sinkron",
+    "signOutDevice": "Keluarkan perangkat",
+    "signOutNote": "Keluar akan mengakhiri sesi perangkat itu. Catatan dan kartu belajarmu tetap ada di akun.",
+    "sync": {
+      "title": "Lanjut di perangkat lain",
+      "body": "Catatan, kartu, dan rencana belajar tersinkron di semua perangkat yang masuk selama tersambung."
     }
   },
   "tasks": {
-    "subtitle": "Semua yang harus kamu kerjakan, di seluruh ruang belajarmu, dengan sub-tugas yang kamu konfirmasi sebelum disimpan.",
     "noun": "tugas",
     "loading": "Memuat tugasmu",
     "done": "Selesai: {{title}}",
-    "due": "Jatuh tempo {{when}}",
     "markDone": "Tandai selesai",
     "reopen": "Buka lagi",
-    "subtaskProgress": "{{done}} dari {{total}} sub-tugas selesai",
     "new": {
       "title": "Tugas baru",
       "titleLabel": "Apa yang harus kamu kerjakan?",
       "dueLabel": "Tanggal jatuh tempo",
-      "submit": "Tambah tugas"
+      "submit": "Tambah tugas",
+      "action": "Tugas baru"
     },
     "list": {
-      "title": "Tugasmu"
+      "all": "Semua tugas",
+      "meta_one": "{{count}} tugas · {{open}} terbuka · urut tenggat",
+      "meta_other": "{{count}} tugas · {{open}} terbuka · urut tenggat",
+      "showing_one": "Menampilkan satu-satunya tugas",
+      "showing_other": "Menampilkan {{count}} tugas",
+      "footnote": "Perkiraan waktu menggambarkan seluruh usaha satu tugas."
     },
     "empty": {
       "title": "Belum ada tugas",
@@ -1152,17 +1629,61 @@
       "action": "Pecah",
       "what": "sub-tugas",
       "minutes": "Menit",
-      "total": "{{count}} menit untuk sub-tugas yang kamu simpan",
       "accept": "Tambahkan sub-tugas ini",
       "warning": "Asisten tidak bisa memakai satu bagian: {{detail}}",
       "run": "Usulkan sub-tugas",
       "runWithCost": "Usulkan sub-tugas ({{count}} kredit)",
-      "lockedReason": "Asisten mengusulkan sub-tugas beserta perkiraannya, dan kamu yang memutuskan mana yang disimpan."
+      "lockedReason": "Asisten mengusulkan sub-tugas beserta perkiraannya, dan kamu yang memutuskan mana yang disimpan.",
+      "description": "Usulan rencana untuk {{task}}. Tinjau langkah dan perkiraannya sebelum ditambahkan. Belum ada yang tersimpan.",
+      "helper": "Usulan sub-tugas · Belum masuk ke tugasmu.",
+      "totalEstimate": "{{duration}} total perkiraan",
+      "count_one": "{{count}} usulan sub-tugas",
+      "count_other": "{{count}} usulan sub-tugas",
+      "due": "Tenggat {{when}}",
+      "forTask": "Memecah {{task}}"
+    },
+    "find": {
+      "label": "Cari tugas",
+      "placeholder": "Cari dari judul tugas",
+      "helper": "Mencari di judul dan catatan yang sudah ada di perangkat ini.",
+      "none": "Tidak ada tugas yang cocok dengan “{{query}}”.",
+      "clear": "Hapus pencarian"
+    },
+    "sort": {
+      "due": "Urut: tenggat"
+    },
+    "column": {
+      "task": "Tugas / Mata kuliah",
+      "status": "Status",
+      "priority": "Prioritas",
+      "estimate": "Perkiraan",
+      "due": "Tenggat",
+      "subtasks": "Sub-tugas"
+    },
+    "status": {
+      "todo": "Belum",
+      "doing": "Dikerjakan",
+      "done": "Selesai"
+    },
+    "priority": {
+      "high": "Tinggi",
+      "medium": "Sedang",
+      "low": "Rendah"
+    },
+    "subtasks": {
+      "none": "Belum ada sub-tugas",
+      "count": "{{done}} / {{total}} sub-tugas"
+    },
+    "board": {
+      "effortOpen": "{{duration}} · total perkiraan",
+      "effortDone": "{{duration}} · waktu terpakai",
+      "empty": "Belum ada apa-apa di sini.",
+      "doneNote": "Yang sudah selesai tetap di sini.",
+      "doneNoteHint": "Tandai selesai itu soal pekerjaan, bukan penguasaan. Ulangi konsepnya begitu sudah waktunya."
     }
   },
   "calendar": {
     "title": "Kalender",
-    "subtitle": "Kelas, ujian, blok belajar, dan tenggatmu, dibaca dalam {{zone}}.",
     "loading": "Memuat kalendermu",
     "view": {
       "title": "Tampilan",
@@ -1238,7 +1759,11 @@
         "copy": "Salin tautan",
         "copied": "Tautan disalin",
         "regenerate": "Buat ulang",
-        "regenerateHint": "Membuat ulang akan mengganti tautannya. Apa pun yang sudah berlangganan tautan lama berhenti diperbarui sampai kamu memberinya tautan baru."
+        "regenerateHint": "Membuat ulang akan mengganti tautannya. Apa pun yang sudah berlangganan tautan lama berhenti diperbarui sampai kamu memberinya tautan baru.",
+        "format": "Langganan hanya baca",
+        "label": "URL feed",
+        "helper": "Hanya baca. Aplikasi kalendermu menyegarkan feed ini sesuai jadwalnya sendiri.",
+        "private": "Jaga tautan ini tetap privat: siapa pun yang punya tautannya bisa membaca jadwalmu."
       },
       "google": {
         "title": "Google Calendar",
@@ -1246,7 +1771,16 @@
         "connect": "Sambungkan Google Calendar",
         "lockedReason": "Sinkronisasi dua arah dengan Google Calendar, supaya kelas dan blok belajarmu tetap sama di setiap perangkat.",
         "denied": "Google Calendar tidak disambungkan",
-        "failed": "Google Calendar tidak bisa disambungkan"
+        "failed": "Google Calendar tidak bisa disambungkan",
+        "account": "Akun yang terhubung",
+        "lastSynced": "Sinkron terakhir",
+        "noAccount": "Alamat akun belum ada",
+        "importTitle": "Impor kelas ke Planner",
+        "importHint": "Kelas yang diimpor tetap hanya baca. Ubah di Google Calendar.",
+        "studyTitle": "Kirim blok belajar ke Google Calendar",
+        "studyHint": "Hanya blok belajar yang sudah dijadwalkan yang dikirim. Blok usulan tidak dikirim.",
+        "on": "Aktif",
+        "off": "Nonaktif"
       },
       "ics": {
         "title": "Tambahkan URL ICS",
@@ -1256,9 +1790,36 @@
         "queued": "Ditambahkan. Impor pertama masuk antrean dan sebentar lagi jalan.",
         "connected": "Berlangganan: {{id}}"
       }
-    }
+    },
+    "legend": {
+      "imported": "Kelas impor · hanya baca",
+      "scheduled": "Belajar terjadwal"
+    },
+    "allDay": "Sepanjang hari",
+    "state": {
+      "imported": "Impor",
+      "scheduled": "Blok belajar",
+      "suggested": "Usulan"
+    },
+    "now": "Sekarang"
   },
   "settings": {
+    "section": {
+      "account": "Akun",
+      "study": "Preferensi belajar",
+      "notifications": "Notifikasi",
+      "calendar": "Koneksi kalender",
+      "devices": "Perangkat & sinkronisasi",
+      "appearance": "Tampilan",
+      "data": "Data"
+    },
+    "sections": "Bagian pengaturan",
+    "account": {
+      "email": "Alamat email",
+      "plan": "Paket",
+      "forAccount": "Akun: {{email}}",
+      "intro": "Alamat yang kamu pakai untuk masuk, dan paket akun ini."
+    },
     "subtitle": "Jam belajar, notifikasi, bahasa, dan perangkatmu.",
     "noun": "pengaturan",
     "loading": "Memuat pengaturanmu",
@@ -1270,7 +1831,8 @@
       "endHour": "Jam belajar berakhir",
       "maxMinutes": "Batas belajar harian (menit)",
       "blockLength": "Blok fokus (menit)",
-      "breakLength": "Istirahat (menit)"
+      "breakLength": "Istirahat (menit)",
+      "intro": "Jam belajarmu, batas harian, dan berapa lama satu blok fokus."
     },
     "notifications": {
       "title": "Notifikasi",
@@ -1283,7 +1845,8 @@
       "quietTo": "Sampai",
       "quietSameDay": "Tenang dari {{from}}:00 sampai {{to}}:00.",
       "quietNextDay": "Tenang dari {{from}}:00 sampai {{to}}:00 keesokan harinya.",
-      "quietNone": "Belum ada jam tenang."
+      "quietNone": "Belum ada jam tenang.",
+      "intro": "Stvdy boleh menghubungimu lewat mana, dan kapan ia diam."
     },
     "channel": {
       "web": "Di aplikasi",
@@ -1294,14 +1857,16 @@
     },
     "language": {
       "title": "Bahasa",
-      "label": "Tampilan dan teks yang dihasilkan"
+      "label": "Tampilan dan teks yang dihasilkan",
+      "intro": "Bahasa antarmuka dan semua tulisan Stvdy untukmu."
     },
     "appearance": {
       "title": "Tampilan",
       "label": "Tema",
       "system": "Ikuti perangkatku",
       "light": "Terang",
-      "dark": "Gelap"
+      "dark": "Gelap",
+      "intro": "Tampilan aplikasi di perangkat ini."
     },
     "plan": {
       "title": "Paket dan pemakaian",
@@ -1309,13 +1874,6 @@
       "open": "Buka paket dan pemakaian",
       "progressHint": "Lihat apa yang benar-benar sudah kamu pelajari: menit per mata kuliah, aktivitas ulangan dan penguasaan kuis.",
       "progress": "Lihat kemajuanmu"
-    },
-    "devices": {
-      "title": "Perangkat dan sinkronisasi",
-      "hint": "Lihat setiap perangkat yang masuk ke akun ini, dan cabut aksesnya.",
-      "open": "Buka perangkat dan sinkronisasi",
-      "resetHint": "Reset menghapus semua yang tersimpan di perangkat ini, termasuk perubahan yang belum tersinkron, lalu mengunduhnya lagi.",
-      "reset": "Reset data lokal dan sinkronkan ulang"
     },
     "updates": {
       "title": "Pembaruan",
@@ -1333,7 +1891,8 @@
     "later": {
       "title": "Belum dibuat",
       "byok": "Pakai kunci model sendiri",
-      "byokPhase": "BYOK datang di Fase 13."
+      "byokPhase": "BYOK datang di Fase 13.",
+      "intro": "Yang belum ada di versi ini, dan kapan datangnya."
     },
     "data": {
       "title": "Data Anda",
@@ -1351,7 +1910,13 @@
       "deleteConfirm": "Hapus akun saya secara permanen",
       "deleting": "Menghapus…",
       "cancel": "Batal",
-      "deleteFailed": "Penghapusan tidak selesai: {{message}}"
+      "deleteFailed": "Penghapusan tidak selesai: {{message}}",
+      "intro": "Ambil salinan semua datamu, atau tutup akun."
+    },
+    "admin": {
+      "title": "Alat operator",
+      "hint": "Akun ini adalah administrator, jadi konsol yang membaca seluruh akun, pesanan, dan biaya penyedia tersedia untuknya.",
+      "open": "Buka konsol admin"
     }
   },
   "agent": {
@@ -1424,8 +1989,9 @@
     "noMastery": "Belum ada percobaan kuis, jadi belum ada penguasaan yang bisa ditampilkan.",
     "weakTopics": "Topik lemah",
     "weakTopicsHint": "Topik dengan akurasi paling rendah sejauh ini. Pilih tujuan dan perencana akan mengusulkan blok ulangan untuknya.",
-    "shareLabel": "{{title}}: {{percent}} persen dari waktu belajarmu",
-    "lockedReason": "Lihat topik mana yang paling lemah dari kuismu, dan rencanakan ulangannya."
+    "lockedReason": "Lihat topik mana yang paling lemah dari kuismu, dan rencanakan ulangannya.",
+    "studyTime": "Waktu belajar",
+    "weakTopicsMeta_other": "{{count}} topik"
   },
   "reminders": {
     "local": {

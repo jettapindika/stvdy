@@ -194,7 +194,7 @@ describe('the Today view offline', () => {
     expect(await screen.findByText('Review 2 cards')).toBeInTheDocument()
   })
 
-  it('shows zero minutes and no streak when nothing was logged, rather than a placeholder', async () => {
+  it('renders the streak empty state when nothing was logged, never a zero', async () => {
     const cache = fakeCache({
       task: [],
       event: [],
@@ -215,8 +215,106 @@ describe('the Today view offline', () => {
 
     renderWithProviders(<TodayScreen />, { route: '/' })
 
-    expect(await screen.findByText('0 minutes logged today')).toBeInTheDocument()
-    expect(screen.getByText('0 day streak')).toBeInTheDocument()
+    // No streak is not a streak of zero: the card states the cause and where to
+    // start. "0 day streak" would be the app using a number to say "you have
+    // nothing", and a student who has not studied yet has lost nothing.
+    expect(await screen.findByText('No study days yet')).toBeInTheDocument()
+    expect(
+      screen.getByText(/A day counts when you review a card, take a quiz, or log a session/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('0 day streak')).toBeNull()
+  })
+
+  it('keeps every control on screen while offline, and says what still works', async () => {
+    // The offline state is a screen, not a hidden one. The band names the cause
+    // and the two things that still work, and the review button — the one action
+    // that genuinely works with no signal — stays exactly where it is. A screen
+    // that hid its controls when the network dropped would take away the student's
+    // only offline move.
+    const cache = fakeCache({
+      task: [TASK],
+      event: [EVENT],
+      flashcard: [DUE_CARD, { ...DUE_CARD, id: 'c2' }],
+      workspace: [
+        { id: 'w1', name: 'Biologi Sel', course_code: 'BIO 201', color: 0, deleted_at: null },
+      ],
+      source: [],
+      deck: [{ id: 'd1', workspace_id: 'w1', title: 'Membran', deleted_at: null }],
+      study_session: [],
+      flashcard_review: [],
+      quiz_attempt: [],
+    })
+    installFakePlatform('macos', {
+      sync: {
+        read: cache.read,
+        status: async () => ({ state: 'offline', code: null, lastSyncedAt: null, outbox: 2 }),
+      },
+    })
+    offlineFetch((path) => {
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/usage') return jsonResponse(200, USAGE)
+      return null
+    })
+
+    renderWithProviders(<TodayScreen />, { route: '/' })
+
+    expect(await screen.findByText('Review 2 cards')).toBeInTheDocument()
+    expect(screen.getByText(/You are offline/)).toBeInTheDocument()
+    // The capture field is still rendered, and the one thing that needs the
+    // network says so under its own control rather than being removed.
+    expect(screen.getByLabelText('What do you have to do?')).toBeInTheDocument()
+    expect(screen.getByText('AI actions need a connection.')).toBeInTheDocument()
+    // The footer states where the day is saved, which is the fact an offline
+    // student needs: on this device, waiting.
+    expect(screen.getByText(/Saved on this device/)).toBeInTheDocument()
+  })
+
+  it('places the current time on the timeline and labels a deadline in calendar days', async () => {
+    const DEADLINE = {
+      ...EVENT,
+      id: 'e2',
+      kind: 'deadline',
+      title: 'Laporan praktikum',
+      // 17:00 on the 18th in Jakarta: two calendar days after the 16th.
+      starts_at: '2026-10-18T17:00:00+07:00',
+      ends_at: '2026-10-18T17:00:00+07:00',
+      workspace_id: 'w1',
+    }
+    const cache = fakeCache({
+      task: [],
+      event: [EVENT, DEADLINE],
+      flashcard: [],
+      workspace: [
+        { id: 'w1', name: 'Biologi Sel', course_code: 'BIO 201', color: 0, deleted_at: null },
+      ],
+      source: [],
+      deck: [],
+      study_session: [],
+      flashcard_review: [],
+      quiz_attempt: [],
+    })
+    installFakePlatform('macos', { sync: { read: cache.read } })
+    offlineFetch((path) => {
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/usage') return jsonResponse(200, USAGE)
+      return null
+    })
+
+    renderWithProviders(<TodayScreen />, { route: '/' })
+
+    // The class starts at 09:00 and the view was opened at 08:00, so the indigo
+    // rule is drawn above it — a rule pinned to the top of the list would be a
+    // clock, not a position on the day.
+    expect(await screen.findByText('Now')).toBeInTheDocument()
+    expect(screen.getByText('Kuliah Kriptografi')).toBeInTheDocument()
+
+    // The deadline is tagged with the course the student gave it, and its label is
+    // a count of calendar days rather than of elapsed hours.
+    expect(screen.getByText('Laporan praktikum')).toBeInTheDocument()
+    expect(screen.getByText('BIO 201')).toBeInTheDocument()
+    expect(screen.getByText('In 2 days')).toBeInTheDocument()
+    // The due line is the student's own day and time, never the raw UTC instant.
+    expect(screen.getByText(/Sun 18 Oct/)).toBeInTheDocument()
   })
 })
 

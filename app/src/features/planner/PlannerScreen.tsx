@@ -1,326 +1,165 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
-import { asApiError, type ApiError } from '@/api/errors'
-import { useEvents } from '@/api/queries/events'
-import { useGoals, type GoalRow } from '@/api/queries/goals'
-import { acceptPlan, requestPlan, requestReplan, useProposal } from '@/api/queries/planner'
 import { useSettings } from '@/api/queries/settings'
 import { useUsage } from '@/api/queries/usage'
-import { PageHeader, Section } from '@/components/layout/Section'
-import { LockedFeature } from '@/components/ui/LockedFeature'
-import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
-import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
-import { PLANNER_CREDITS, planForPlanner } from '@/features/billing/plans'
-import { PrepProgress } from './PrepProgress'
-import { ProposalPreview } from './ProposalPreview'
-import { WorkloadMeter } from './WorkloadMeter'
-import { acceptBody, daysUntil, todayKey, type Interval, type Proposal } from './plan'
+import { PageFooter, PageHeader } from '@/components/layout/Section'
+import { Icon, type IconName } from '@/components/ui/Icon'
+import { DEFAULT_TIMEZONE, formatInZone, zoneOffsetLabel } from '@/lib/time'
+import { useFormFactor } from '@/lib/useFormFactor'
+import { CalendarScreen } from '@/features/calendar/CalendarScreen'
+import { LayoutSwitch, TasksScreen } from '@/features/tasks/TasksScreen'
 
 /**
- * The planner: the goals, the workload, and the proposal.
+ * The planner, as a **host with two views**.
  *
- * **The screen asks; it does not schedule.** Every invariant — no overlap with a
- * class, the daily maximum, the study window, the buffer before the deadline — is
- * decided by `stvdy_core::planner`, which reads no clock and no database, and the
- * server is what turns a proposal into rows. What this screen does is show the
- * numbers the server computed and let the student adjust a block, and its own
- * arithmetic (`plan.ts`) is a pure module with its own tests because a second
- * implementation of the server's invariant in a component would be a second
- * schedule.
+ * The navigation was already changed to `Today · Workspaces · Study · Planner ·
+ * Settings`, and `/calendar` and `/tasks` are redirects into this screen. That is
+ * what `SPEC.md:664-665` asked for and what the design draws: *"Planner (Calendar
+ * | Tasks)"* on a desktop, and *"Tasks live inside Planner as a segmented control
+ * (Plan | Tasks)"* on a phone. So the two former screens are panels this host
+ * renders, and the switcher is the segmented control.
  *
- * **Nothing is written until Accept.** `POST /goals/:id/plan` reserves the two
- * credits and answers 202 with a proposal id; the proposal is polled, previewed,
- * adjustable, and only `POST /plans/accept` writes events. The cost is on the
- * button before the action runs (honesty gate 7(d)) and it is the matrix's number
- * from `PLANNER_CREDITS`, never a literal.
+ * **The view is in the URL, not in component state.** `?view=calendar|tasks`. A
+ * view held in `useState` cannot be deep-linked, cannot be bookmarked, and cannot
+ * be measured — the accessibility walk and `scripts/measure-mobile.mjs` navigate
+ * by URL, and a screen that only changes on a click is a screen no harness can
+ * reach. It is also what keeps the two redirects meaningful: `/tasks` resolves to
+ * `/planner?view=tasks`, which is a real address rather than a hint.
  *
- * **The free plan's refusal is structural and is shown as an upgrade.** Whether a
- * plan may be generated is `planner != "manual"` (A257), so the locked card is
- * chosen from `GET /usage`'s own `features.planner` and names the plan the matrix
- * grants it on — the same fact the server decides the refusal from.
+ * **`?view=plan` is an alias for the calendar view, and that is the design's own
+ * structure rather than a shortcut.** Every Planner frame draws the plan *on the
+ * calendar*: the `Suggested study plan` banner sits above the week grid, the
+ * proposed blocks are drawn in the grid as `Suggested · not accepted`, and the
+ * prep-progress card is the sidebar beside them. There is no separate plan screen
+ * in the design, so `plan` and `calendar` name one view — and the older URL keeps
+ * working instead of becoming a 404. `SPEC.md:665`'s phone label for that view is
+ * `Plan`, which is a label difference by form factor exactly like `nav.work`
+ * ("Work" on a phone, "Workspaces" on a desktop), not a second view.
  *
- * **Rebalance is Power-only**, and it is the balancer (A268): it moves the latest
- * movable block to the least-loaded day, bounded, and it never moves a pinned block
- * or a review-reserved one. A replan keeps the pinned blocks exactly (contract § 6
- * step 7), which is what makes the drag on the preview safe to use.
+ * **`?layout=list|board` applies to the tasks view only** and is ignored
+ * elsewhere, so switching to the calendar and back does not lose the student's
+ * board. It is in the URL for the same reason `view` is: the board is a real
+ * place to come back to, and a link to it has to be a link.
+ *
+ * `now` is captured once, here, and passed down. The calendar's current-time line,
+ * the grid's "Today" cell, the board's overdue marks and the plan's day counts all
+ * read it, so they cannot disagree about which day it is or drift under the
+ * student's hands while they look at the screen.
+ *
+ * **The eyebrow carries the date and nothing else.** The design's eyebrow is
+ * `MONDAY, 12 OCTOBER 2026 / AUTUMN 2026`, and `AUTUMN 2026` has no data source —
+ * no migration carries a semester or a term, and inventing one is the one thing
+ * this app may not do with data (design record § 7). The account's real timezone
+ * is the honest replacement for that half and it already appears in the page
+ * footer, so the eyebrow keeps the half that is real: the student's own date.
  */
 export function PlannerScreen() {
   const { t } = useTranslation()
-  const goals = useGoals()
+  const [params] = useSearchParams()
   const usage = useUsage()
   const settings = useSettings()
-  const [selected, setSelected] = useState<string | null>(null)
-  const [proposalId, setProposalId] = useState<string | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
-  const [saving, setSaving] = useState(false)
+  const isPhone = useFormFactor() === 'phone'
 
-  // The instant this view was opened, fixed for the life of the mount: the grid's
-  // "today", the current-time line and the days-until figure all come from it, so
-  // they cannot disagree with each other or change under the student's hands.
   const [now] = useState(() => new Date())
 
-  const timeZone = usage.data === undefined ? DEFAULT_TIMEZONE : (settings.data?.timezone || DEFAULT_TIMEZONE)
-  const rows = goals.data ?? []
-  const active = rows.find((goal) => goal.id === selected) ?? rows[0] ?? null
+  // Anything that is not `tasks` is the plan, including an absent parameter and the
+  // older `plan` value. One comparison rather than a switch, so a URL a
+  // notification or a bookmark already carries cannot land on nothing.
+  const view = params.get('view') === 'tasks' ? 'tasks' : 'plan'
+  const layout = params.get('layout') === 'board' ? 'board' : 'list'
 
-  const plannerMode = usage.data?.features.planner
-  const canPlan = plannerMode !== undefined && plannerMode !== 'manual'
-  const canRebalance = plannerMode === 'auto+balancer+weakness_blocks'
-  const minPlan = planForPlanner()
+  const timeZone =
+    usage.data === undefined ? DEFAULT_TIMEZONE : (settings.data?.timezone || DEFAULT_TIMEZONE)
 
-  const cost = PLANNER_CREDITS.planGeneration
+  const views: { id: 'plan' | 'tasks'; to: string; label: string; icon: IconName }[] = [
+    {
+      id: 'plan',
+      to: '/planner?view=plan',
+      // The phone's label for this view is the spec's own word (`SPEC.md:665`,
+      // "Plan | Tasks"); the desktop's is the design's frame label.
+      label: isPhone ? t('planner.views.plan') : t('planner.views.calendar'),
+      icon: 'calendar',
+    },
+    { id: 'tasks', to: '/planner?view=tasks', label: t('planner.views.tasks'), icon: 'list-checks' },
+  ]
 
-  // The day's accepted study blocks, for the meter. The window is a superset of
-  // the local day, so the *server* sends everything the local bucketing might
-  // need and `plan.ts` decides which day each row is on — the same split the
-  // Today view uses, and for the same reason: a window computed from local
-  // instants needs offset arithmetic, and a bug in it silently asks for a window
-  // the rows are not in.
-  const window = {
-    from: new Date(now.getTime() - 36 * 3_600_000).toISOString(),
-    to: new Date(now.getTime() + 36 * 3_600_000).toISOString(),
-  }
-  const events = useEvents(window.from, window.to)
-  const today = todayKey(now, timeZone)
-  const accepted: Interval[] = (events.data ?? []).filter((event) => event.kind === 'study_block')
-  const busy: Interval[] = (events.data ?? [])
-    .filter((event) => event.kind !== 'study_block')
-    .map((event) => ({ starts_at: event.starts_at, ends_at: event.ends_at }))
-
-  const limitMin = settings.data?.settings.max_study_min_per_day ?? 0
-  const studyWindow = {
-    start_hour: settings.data?.settings.study_start_hour ?? 8,
-    end_hour: settings.data?.settings.study_end_hour ?? 22,
-    max_study_min_per_day: limitMin,
-  }
-
-  const proposal = useProposal(proposalId ?? '')
-
-  const ask = async (replan: boolean) => {
-    if (active === null) return
-    setError(null)
-    setSaving(true)
-    try {
-      const id = replan ? await requestReplan(active.id) : await requestPlan(active.id)
-      setProposalId(id)
-    } catch (thrown) {
-      setError(asApiError(thrown))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const accept = async (blocks: Proposal['blocks']) => {
-    if (proposalId === null) return
-    setError(null)
-    setSaving(true)
-    try {
-      await acceptPlan({ proposal_id: proposalId, ...acceptBody(blocks) })
-      setProposalId(null)
-    } catch (thrown) {
-      setError(asApiError(thrown))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const view = proposal.data?.proposal
-  const titleOf = (goalId: string) => rows.find((goal) => goal.id === goalId)?.title
+  const subtitle =
+    view === 'tasks' ? t('planner.tasks.subtitle') : t('planner.calendar.subtitle')
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-8">
-      <PageHeader title={t('nav.planner')} subtitle={t('planner.subtitle')} />
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8">
+      <PageHeader
+        eyebrow={formatInZone(now, timeZone, { dateStyle: 'full' })}
+        title={t('nav.planner')}
+        subtitle={subtitle}
+        action={
+          view === 'tasks' ? (
+            // A real destination rather than a decorative button: the tasks view's
+            // create form carries `id="new-task"`, and `tabIndex={-1}` on that
+            // section makes the browser move focus there, so this both scrolls and
+            // lands the keyboard where the work starts. No sheet exists in this
+            // app, and a `+ New task` that opened nothing would be a control whose
+            // only outcome is nothing.
+            <a href="#new-task" className="btn btn-primary">
+              <Icon name="plus" size={20} />
+              {t('tasks.new.action')}
+            </a>
+          ) : undefined
+        }
+      />
 
-      {/* The spec's `Plan | Tasks` control: Tasks is Phase 9's screen, linked
-          rather than copied, so there is one task list and not two. */}
-      <nav aria-label={t('planner.views.label')} className="flex flex-wrap gap-2">
-        <span className="btn btn-secondary" aria-current="page">
-          {t('planner.views.plan')}
-        </span>
-        <Link to="/tasks" className="btn btn-quiet">
-          {t('planner.views.tasks')}
-        </Link>
+      {/* The view switcher: the design's segmented control, as two links so each
+          view is an address. `aria-current` marks the active one and the label
+          weight goes 500 -> 600 as well, so the state is not carried by colour
+          alone (gate 5d). */}
+      <nav
+        aria-label={t('planner.views.label')}
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-border"
+      >
+        <div className="flex flex-wrap gap-7">
+          {views.map((item) => {
+            const active = item.id === view
+            return (
+              <Link
+                key={item.id}
+                to={item.to}
+                aria-current={active ? 'page' : undefined}
+                className={`flex min-h-12 min-w-0 items-center gap-2 border-b-2 px-1 text-label ${
+                  active
+                    ? 'border-primary font-semibold text-primary-text'
+                    : 'border-transparent text-muted hover:text-text'
+                }`}
+              >
+                <Icon name={item.icon} size={20} />
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* The tasks view's own List | Board switch, in this row rather than inside
+            the panel, which is where the frame draws it. It is absent on a phone
+            because both layouts render the same card list there, and a switch
+            between two identical views is a control whose only outcome is nothing. */}
+        {view === 'tasks' && !isPhone ? <LayoutSwitch layout={layout} /> : null}
       </nav>
 
-      {error !== null ? (
-        <ApiErrorNotice error={error} noun={t('planner.noun')} action={t('actions.retry')} />
-      ) : null}
+      {view === 'tasks' ? (
+        <TasksScreen now={now} timeZone={timeZone} layout={layout} />
+      ) : (
+        <CalendarScreen now={now} timeZone={timeZone} />
+      )}
 
-      <Section title={t('planner.goals.title')} count={rows.length > 0 ? rows.length : undefined}>
-        <div className="card p-4">
-          {goals.isPending ? (
-            <LoadingState label={t('planner.goals.loading')} />
-          ) : rows.length === 0 ? (
-            <EmptyState
-              title={t('planner.goals.empty.title')}
-              reason={t('planner.goals.empty.reason')}
-              padded={false}
-              action={
-                <Link to="/syllabus" className="link inline-flex min-h-11 items-center">
-                  {t('planner.goals.empty.action')}
-                </Link>
-              }
-            />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {rows.map((goal) => (
-                <GoalRowItem
-                  key={goal.id}
-                  goal={goal}
-                  selected={active?.id === goal.id}
-                  now={now}
-                  timeZone={timeZone}
-                  onSelect={() => {
-                    setSelected(goal.id)
-                    setProposalId(null)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-
-          {/* **The import link lives here, not only in the empty state, and that was a
-              real defect.** It used to exist *only* inside the `rows.length === 0`
-              branch above, and it is the app's **only** link to `/syllabus` — so a
-              student with any goal at all could not reach the syllabus import, and
-              every student who had used the planner had one. The same class as the
-              planner itself having no nav entry: a screen reachable only by typing a
-              URL, which no phase's file list owned. Rendering it whenever the list
-              renders is what makes the import reachable in both states. */}
-          {rows.length > 0 ? (
-            <div className="mt-3">
-              <Link to="/syllabus" className="link inline-flex min-h-11 items-center">
-                {t('planner.goals.importAnother')}
-              </Link>
-            </div>
-          ) : null}
-        </div>
-      </Section>
-
-      {active !== null ? <PrepProgress goalId={active.id} title={active.title} /> : null}
-
-      {settings.data !== undefined ? (
-        <WorkloadMeter
-          blocks={accepted}
-          dayKey={today}
-          timeZone={timeZone}
-          limitMin={limitMin}
-        />
-      ) : null}
-
-      <Section title={t('planner.proposal.title')}>
-        {usage.data !== undefined && !canPlan && minPlan !== null ? (
-          <LockedFeature
-            whatKey="planner.suggest"
-            minPlan={minPlan}
-            reasonKey="planner.lockedReason"
-          />
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={active === null || saving}
-                onClick={() => void ask(false)}
-              >
-                {cost === null ? t('planner.suggest') : t('planner.suggestWithCost', { count: cost })}
-              </button>
-              {canRebalance ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={active === null || saving}
-                  onClick={() => void ask(true)}
-                >
-                  {t('planner.rebalance')}
-                </button>
-              ) : (
-                <LockedFeature
-                  whatKey="planner.rebalance"
-                  minPlan="Power"
-                  reasonKey="planner.rebalanceReason"
-                />
-              )}
-            </div>
-
-            {proposalId !== null && view === undefined ? (
-              <LoadingState label={t('planner.planning')} />
-            ) : null}
-            {view?.status === 'planning' ? <LoadingState label={t('planner.planning')} /> : null}
-            {view?.status === 'failed' ? (
-              <p className="note note-danger wrap-anywhere">
-                {t('planner.failed', { message: view.error ?? '' })}
-              </p>
-            ) : null}
-            {view?.status === 'superseded' ? (
-              <p className="text-small text-muted">{t('planner.superseded')}</p>
-            ) : null}
-
-            {view !== null && view !== undefined && view.proposal !== null && view.status === 'ready' ? (
-              <ProposalPreview
-                // Keyed by the proposal, so a new plan does not inherit the previous
-                // one's adjustments: the blocks are the server's, and a stale drag
-                // would be a block the student never moved.
-                key={view.id}
-                proposal={view.proposal}
-                now={now}
-                timeZone={timeZone}
-                settings={studyWindow}
-                busy={busy}
-                goalTitles={titleOf}
-                saving={saving}
-                error={error}
-                onAccept={(blocks) => void accept(blocks)}
-                onDismiss={() => setProposalId(null)}
-              />
-            ) : null}
-          </div>
-        )}
-      </Section>
+      {/* The footer's left half only. The design puts a saved state on the right
+          (`All changes saved · 10:38`), and that line is two claims this screen
+          cannot make: the clock is a render-time read, and "all changes saved" is
+          the sync control's answer rather than this screen's. The shell's
+          `SyncStatus` already states it, with the real code when a write was
+          refused, so a second copy here would be a second live region announcing
+          the same fact — and a worse one, because it would have no source. */}
+      <PageFooter left={`${timeZone.toUpperCase()} · ${zoneOffsetLabel(now, timeZone)}`} />
     </div>
-  )
-}
-
-/** One goal: its title, the date it is for, and how long there is. */
-function GoalRowItem({
-  goal,
-  selected,
-  now,
-  timeZone,
-  onSelect,
-}: {
-  goal: GoalRow
-  selected: boolean
-  now: Date
-  timeZone: string
-  onSelect: () => void
-}) {
-  const { t } = useTranslation()
-  const days = daysUntil(goal.target_date, now, timeZone)
-
-  return (
-    <li className="flex min-w-0">
-      <button
-        type="button"
-        aria-pressed={selected}
-        onClick={onSelect}
-        className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-field px-2 py-2 text-left hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
-      >
-        <span className="min-w-0 break-words text-body text-text wrap-anywhere">{goal.title}</span>
-        <span className="meta shrink-0">
-          {formatInZone(new Date(goal.target_date), timeZone, { dateStyle: 'medium' })}
-        </span>
-        {/* Days rather than a countdown in hours: the planner works in local days,
-            and the exam's own local day is what the student counts to. */}
-        <span className="meta shrink-0">
-          {days < 0
-            ? t('planner.goals.past')
-            : t('planner.goals.daysLeft', { count: days })}
-        </span>
-      </button>
-    </li>
   )
 }

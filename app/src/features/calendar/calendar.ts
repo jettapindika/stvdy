@@ -186,18 +186,32 @@ export function dayHeading(key: string, zone: string): string {
 /**
  * A workspace's course hue, or null when the event belongs to no workspace.
  *
- * **No table stores a course colour.** The spec's six hues are a categorical
- * palette, and the mapping from a workspace to one is derived here from the id so
- * that it is the same hue on every device, in every render, with no column to
- * keep in step. A `color` column on `workspaces` would be a second source of truth
- * for a value nobody edits, and it would have to be synced.
+ * **The server's index wins, and the hash is only the fallback.** `workspaces.color`
+ * (`migrations/0038`) is assigned round-robin by the server and is what the course card
+ * and the sidebar render, so a hue derived here from the id would put one colour on a
+ * course's card and another on its row in this grid — two sources of truth for one
+ * concept, which is the defect this signature exists to close. The hash survives for an
+ * event whose workspace the client has not fetched (a stale cache, a page that has not
+ * resolved yet), where *some* stable colour is better than none.
  *
- * The hue is never the only signal: the marker is a 4px bar **plus** a tinted chip
- * **plus** the workspace's initial and its name, which is the spec's rule and the
- * reason a monochrome print of the grid still says which course is which.
+ * The earlier revision of this comment argued the opposite — that no table should store
+ * a course colour because it "would have to be synced". That is still true, and it is
+ * why `color` is a synced payload column rather than a client-side derivation: the
+ * alternative was two devices disagreeing about which course is which. The hue is never
+ * the only signal either way: the marker is a 4px bar **plus** a tinted chip **plus** the
+ * workspace's initial and its name, so a monochrome print still says which course is
+ * which.
  */
-export function courseHue(workspaceId: string | null): CourseName | null {
+export function courseHue(
+  workspaceId: string | null,
+  /** `workspace id -> the server's 0-5 index`, from the list the screen already holds. */
+  colorById?: ReadonlyMap<string, number>,
+): CourseName | null {
   if (workspaceId === null || workspaceId === '') return null
+  const assigned = colorById?.get(workspaceId)
+  if (assigned !== undefined) {
+    return COURSE_NAMES[assigned % COURSE_NAMES.length] ?? 'indigo'
+  }
   // FNV-1a over the id: a cheap, stable hash with no crypto dependency. All that
   // is asked of it is that it does not change between builds and that neighbouring
   // ids do not all land on the same hue, which the avalanche of the multiply by

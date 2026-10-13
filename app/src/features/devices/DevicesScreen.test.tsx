@@ -107,11 +107,22 @@ describe('the devices screen', () => {
     expect(screen.getByText('Android')).toBeInTheDocument()
 
     // "Last synced" is the stored `last_sync_at`, rendered in the user's own zone.
+    // The design splits the label from the instant — the label in the reading face,
+    // the instant in mono, because the instant is the evidence — so the assertion is
+    // on the row's two halves rather than on one concatenated string. The label's
+    // own words ("Last synced") are a **new key**, which renders as its own key text
+    // until the locale files carry it, so they are asserted nowhere; the split
+    // itself is asserted by class. Scoped to the laptop's row: both rows carry a
+    // label, and an unscoped lookup would pass on either one.
     const expected = formatInZone(new Date(LAPTOP.last_sync_at), USER.timezone, {
       dateStyle: 'medium',
       timeStyle: 'short',
     })
-    expect(screen.getByText(`Last synced ${expected}`)).toBeInTheDocument()
+    const laptop = screen.getByText("Jetta's MacBook").closest('li')
+    if (!laptop) throw new Error('the laptop must have its own row')
+    const inLaptop = within(laptop)
+    expect(laptop.querySelector('.text-label')).not.toBeNull()
+    expect(inLaptop.getByText(expected).className).toContain('meta')
 
     // A device that has never pulled says so. It must not borrow `last_seen_at`,
     // which would read as "synced just now" for a device that never synced.
@@ -139,7 +150,17 @@ describe('the devices screen', () => {
 
     // Nothing is sent until the confirmation is answered: a one-click revoke of a
     // device the user is not holding is how a laptop gets signed out by accident.
-    await user.click(inRow.getByRole('button', { name: 'Sign out' }))
+    // The row's control is found by its tone rather than by its label: the design
+    // words it "Sign out device", which is a new key, and until the locale files
+    // carry it `t()` renders the key itself — so a name-based lookup here would
+    // assert on the merge rather than on the behaviour. `.btn-danger` is the row's
+    // one destructive control, and the button inside the confirmation keeps the bare
+    // verb ("Sign out"), which is what the second click below asserts.
+    const signOut = inRow
+      .getAllByRole('button')
+      .find((button) => button.classList.contains('btn-danger'))
+    if (!signOut) throw new Error('the device row must offer a sign-out control')
+    await user.click(signOut)
     expect(calls.some((call) => call.init.method === 'DELETE')).toBe(false)
     expect(
       inRow.getByText("Sign out Pixel 8? Its local copy is deleted the next time it connects."),

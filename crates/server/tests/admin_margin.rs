@@ -837,6 +837,14 @@ async fn a_non_admin_sees_not_found(pool: PgPool) {
         ("POST", format!("/admin/payments/{payment}/mark-paid")),
         ("POST", format!("/admin/payments/{payment}/refund")),
         ("GET", "/admin/margin".to_string()),
+        // The payment tools' last route, and the one that had no non-admin test at all
+        // until it was looked for: `admin.rs`'s own list holds the users, plan, credits,
+        // margin and account-list routes, and this file holds the payments ones. The two
+        // lists together cover every route `admin::routes()` registers, which is what
+        // makes "every admin route is 404 for a non-admin" a fact rather than a claim —
+        // a route added to that function has to be added to one of them, and a reader
+        // comparing the two finds the gap rather than trusting the sentence.
+        ("PATCH", format!("/admin/subscriptions/{student}")),
     ] {
         let (status, body) = request(&app, method, &path, &token, json!(null)).await;
         assert_eq!(

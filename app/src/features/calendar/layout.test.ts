@@ -105,8 +105,12 @@ describe('the calendar screen can shrink to a phone at 200% text', () => {
     //
     // Re-measured after the change: `scrollWidth === clientWidth === 390` at both
     // scales, both themes, 0 clipped and 0 overlapped.
-    const grid = readFileSync(join(here, 'WeekGrid.tsx'), 'utf8')
-    expect(grid, 'the week table must be table-fixed').toContain('table-fixed')
+    //
+    // The measurements above were taken on `WeekGrid.tsx`, which the time grid
+    // replaced; the assertions are the same three properties, read from the file
+    // that now renders the week.
+    const grid = readFileSync(join(here, 'TimeGrid.tsx'), 'utf8')
+    expect(grid, 'the week grid must be table-fixed').toContain('table-fixed')
     // `[^-]` before the `w` so `min-w-0` is not read as a width, and `(?!\/)` so a
     // fraction (`w-1/3`) is not either: the rem scale is the integer form only.
     expect(grid, 'a rem column width doubles with the text scale').not.toMatch(

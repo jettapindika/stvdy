@@ -1,16 +1,28 @@
 # Stvdy — Design Direction
 
-> **Source of the values: `docs/SPEC.md` § Design system and UI rules.** That
-> section is the requirement; this document is the implementation record: what the
-> tokens are, what each one means, what was measured, and which earlier decisions
-> it replaces.
+> **Source of the values: the Figma design.** This document is the implementation
+> record: what the tokens are, what each one means, what was measured, and which
+> earlier decisions it replaces.
 >
-> The app's design is no longer sampled from a Figma frame. An earlier revision of
-> this file transcribed a landing/auth mock (`Figma file Random`, node `392-691`)
-> and built the palette from it. The current spec fixes its own palette, so that
-> one is superseded wholesale; the parts of the mock worth keeping — the
-> illustration, the air, the refusal to invent data — are noted under
-> **Superseded** below, and everything else here is new.
+> **The design is the Figma file again, and this is the second reversal.** The
+> history matters because both directions are recorded below and a later reader
+> will find traces of each:
+>
+> 1. The first revision transcribed a landing/auth mock (`Figma file Random`, node
+>    `392-691`) and sampled a palette from it.
+> 2. The second revision replaced that wholesale with a palette and type scale the
+>    spec fixed for itself, and this file then said the design was "no longer
+>    sampled from a Figma frame".
+> 3. **This revision returns to the design.** The Figma file's `Stvdy` page
+>    (section `424:2487`, 54 frames) now covers the design system and every
+>    screen in both viewports, and it is the requirement. `docs/SPEC.md` § Design
+>    system and UI rules was rewritten in the same change; the decision record is
+>    `docs/superpowers/specs/2026-10-12-figma-redesign-design.md`.
+>
+> What is genuinely new in the design, and what it overturns, is under
+> **What the design changed** below. What it confirms — the palette, the three
+> typefaces, the 4pt grid, the radius scale, the 12px-floor's *spirit* — is not
+> restated here.
 
 ## Identity
 
@@ -103,22 +115,40 @@ files and `app/src/fonts.css`):
 names carry characters outside basic latin, and dropping the subset renders them
 in a fallback face mid-sentence.
 
-Scale, from the spec, as Tailwind utilities (`text-display` … `text-caption`):
+Scale, **from the design**, as Tailwind utilities:
 
 | Utility | Size / line-height | Use |
 |---|---|---|
-| `text-display` | 32 / 40 | Display |
-| `text-h1` | 24 / 32 | Page title |
-| `text-h2` | 20 / 28 | Section |
-| `text-h3` | 16 / 24 | Subsection |
-| `text-body` | 14 / 22 desktop, 16 / 24 mobile | Body |
-| `text-small` | 13 / 18 | Secondary |
-| `text-caption` | 12 / 16 | Caption — **the floor** |
+| `text-display` | 48 / 62 | The design system's own sheets; marketing |
+| `text-h1` | 32 / 42 | Page title |
+| `text-h2` | 24 / 32 | Section |
+| `text-h3` | 20 / 26 | Widget heading |
+| `text-h4` | 18 / 23 | Card title |
+| `text-body` | 16 / 24 | Body, **at every viewport** |
+| `text-label` | 14 / 20 | A control's label, a row's primary line |
+| `text-small` | 13 / 20 | Secondary |
+| `text-caption` | 12 / 18 | Helper text |
+| `text-meta` | 11 / 18 | Eyebrows, counts, timestamps — JetBrains Mono |
+| `text-tab` | 10 / 12 | The phone tab-bar label only |
 
-Nothing renders below 12px. Mobile inputs are 16px, because iOS zooms the whole
-page when a focused field's text is smaller, leaving the student's view scrolled
-sideways mid-sentence. Every layout must survive 200% text scaling and Indonesian
-strings (~25% longer than English).
+Two changes are reversals, and both were rules rather than values:
+
+- **The 12px floor is withdrawn.** The design's metadata role is 11px monospace,
+  and it is the most characteristic line in the redesign — every eyebrow, count,
+  timestamp and keycap. It is uppercase with `letter-spacing: 0.04em` when it
+  labels something (`.eyebrow`), which is what makes an 11px mono line legible.
+  The spirit of the old rule survives: nothing is small *and* low-contrast, and
+  every one of these pairs is measured by `contrast.test.ts`.
+- **Body is 16/24 on desktop too**, up from 14/22. The old desktop body was a step
+  smaller than a phone's for no reason other than that a desktop has more room,
+  which is the wrong direction for a reading surface.
+
+Heading `letter-spacing` is `0`, not the old `-0.02em`: the design measures every
+heading at `ls 0.0`, and tight tracking on a 32px heading reads as cramped rather
+than deliberate. Mobile inputs are 16px, because iOS zooms the whole page when a
+focused field's text is smaller, leaving the student's view scrolled sideways
+mid-sentence. Every layout must survive 200% text scaling and Indonesian strings
+(~25% longer than English).
 
 ## Shape, elevation, motion
 
@@ -143,8 +173,9 @@ WCAG 2.2 AA, checked in CI rather than asserted:
 - **Targets**: ≥ 44px on mobile (`.btn`, `.nav-item-tab`, and the interactive
   citation chip all carry a `min-height`), ≥ 32px with 8px gaps on desktop.
 - **Never colour-only.** Every chip carries its word; the active nav item carries
-  weight and a marker; the course colour is always accompanied by a name or an
-  initial.
+  an indigo fill *and* a weight change (the design's item has no marker bar, so the
+  weight is the non-colour signal); the course colour is always accompanied by a
+  name or an initial.
 - **Labels on all inputs**, accessible names on icon buttons, `aria-live` for
   toasts and streaming answers, one `h1` per screen.
 - **Charts have text equivalents**; a heatmap is never the only place a fact lives.
@@ -181,6 +212,53 @@ The spec's § Honesty rules are a copy contract, and they constrain the design:
   implements both variants and is tested against both.
 - **Empty states name the cause and the next action**, and never fake a feed.
 
+## What the design changed
+
+Beyond the palette, which the design already matched exactly, this revision
+changed five things and confirmed the rest. Each was a decision the app had made
+deliberately in an earlier revision, so each is a reversal rather than an update:
+
+| The app had | The design has | Why it moved |
+|---|---|---|
+| No icons in the navigation, "deliberately" — five short labels were judged unambiguous and a thin-stroke set was judged to be the tell of a generated interface | A 20px outline glyph on every nav item, from one bundled set drawn for this product | The design's navigation item is an icon plus a label, and the design is the requirement. What survives from the earlier reasoning is the discipline: one family, drawn on a 24px grid, never an imported pack and never an emoji standing in for a state |
+| No top bar at all; credits lived at the foot of the sidebar | An 80px top bar: a global search field that opens the command palette with its shortcut badge, the sync state, the credit pill, the account group | Every desktop frame carries it, and `SPEC.md:664` had required it all along — the app was the deviation |
+| A 240px text-only rail | A 216px rail with the wordmark, five items, a "THIS SEMESTER" course list, a help note and the account's timezone | The course list is the design's; the term label ("AUTUMN 2026") has no data source and is not invented — that line shows the real timezone instead |
+| Buttons were pills (`999`), so "pill" meant action-or-count and only the 8px rectangle meant "field" | Buttons are 8px (`CONTROL RADIUS / 8 PX`), and the pill is for chips and counts | The design separates the two roles differently: a control is a control. Hover darkens `#4F46E5` → `#3525CD` rather than mixing toward the page ground |
+| Calendar and Tasks were two of the five nav destinations | Planner is one destination, and Calendar and Tasks are views inside it | `SPEC.md:664-665` had specified exactly this ("Planner (Calendar | Tasks)"). `/calendar` and `/tasks` survive as redirects, because notifications and bookmarks already name them |
+
+**One rule in the design is not adopted, and the reason is the design's own.** Its
+UI-controls sheet draws an input edge in `#DDE0F0`, which is 1.25:1 on the page
+ground, while the same sheet states the target as "3:1 large text and control
+boundaries". Those cannot both hold, and an input whose only edge is a 1.25:1
+hairline is one a low-vision user cannot find. The stated rule wins, and it wins
+for **both** controls the sheet draws that way: `.field` and `.btn-secondary` take
+`--border-strong` (3.44:1 on the ground, 3.63:1 on a card). Every other surface
+takes the design's `--border`.
+
+The secondary button is the case worth stating, because its fill is `--surface` —
+the same ground as the card it usually sits on — so the hairline was its *only*
+boundary, and a low-vision user could not find the button. `contrast.test.ts`'s
+`PAIRS` carries the pair for both, at the 3:1 UI floor, so the next person who
+reaches for `--border` on a control fails the build rather than shipping it.
+
+## What the design does not cover
+
+- **Dark mode.** 53 of the 54 frames are light. Every surface is therefore
+  expressed in the existing tokens, which follow the theme on their own, so a new
+  screen works in dark without a `dark:` variant. There is no `dark:` in this
+  codebase and there must not be one.
+- **The loading, empty, error and offline states** the spec requires are in four
+  frames (Today offline, Empty workspace, Missing citations, Scanned PDF error).
+  The rest are built from `components/ui/States.tsx` in the same idiom.
+- **The printed cheatsheet** (see below).
+- **The window chrome.** The design's top bar sits at y=0 because it assumes a
+  frameless window. `src-tauri/tauri.conf.json` sets no `decorations: false`, so
+  the window is decorated and the OS title bar moves it. `.drag-region` exists and
+  is zero-height; turning on a frameless window is a config change plus one class
+  on the shell root, not a redesign of the bar.
+- **A server-side search.** The command palette searches what the client already
+  holds, and its empty state says so rather than implying a full-text index.
+
 ## Superseded
 
 Recorded because the earlier revision committed to them and a later reader will
@@ -196,9 +274,15 @@ find traces:
 | "Copy is English for the MVP" | English **and** Bahasa Indonesia from day one, with a pseudo-locale test. |
 | The styleguide page as a hand-maintained palette list | The same page, but its values are asserted by the contrast test rather than written in prose. |
 
-Kept from the earlier direction, unchanged in spirit: the illustration as the only
-decorative element, air over density, dark mode derived rather than inverted, and
-the refusal to invent data.
+| The spec's own type scale (Display 32/40 … Caption 12/16, "NOTHING below 12px") | The design's scale: Display 48/62, H1 32/42, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Metadata 11/18 | Recorded above under **What the design changed**; the floor is withdrawn and desktop body rises to 16 |
+| Desktop body 14/22 | 16/24 | The design has one body size for every viewport |
+| Heading tracking `-0.02em` | `0` | The design measures every heading at `ls 0.0` |
+| The Figma file as a source to be *rejected* ("the app's design is no longer sampled from a Figma frame") | The Figma file as the requirement of record | The file now covers the design system and every screen; the earlier judgement was about a landing mock, not about this |
+
+Kept from every earlier direction, unchanged in spirit: the illustration as the only
+decorative element, air over density, dark mode derived rather than inverted, the
+refusal to invent data, and the palette — which the design already matched exactly,
+token for token.
 
 ## Not yet unified: the printed cheatsheet
 
