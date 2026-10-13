@@ -1451,9 +1451,10 @@ async fn an_unverified_account_reaches_only_its_own_surface(pool: PgPool) {
     );
 
     // The two routes that end the session or the account, run last: `logout-all` revokes the
-    // token every later row would need, and `DELETE /account` marks the account, which would
-    // make the rest of the table answer `account_deleted` instead of what it is being asked
-    // about. Both are still exercised, and both are the two a trapped student most needs.
+    // token every later row would need, and `DELETE /account` revokes it too — along with the
+    // account's identity, which is what makes it unfindable rather than merely refused (A362).
+    // Either way a later row would answer 401 instead of what it is being asked about. Both are
+    // still exercised, and both are the two a trapped student most needs.
     const ENDS_THE_SESSION: [(&str, &str); 2] =
         [("POST", "/auth/logout-all"), ("DELETE", "/account")];
 

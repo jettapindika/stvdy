@@ -13,20 +13,19 @@ are JSON unless noted.
   `min_plan`, `limit` and `used`, so the UI can render "3 of 3 devices" rather
   than only "upgrade".
 - **Status codes**: 401 unauthorized/expired token, 402 insufficient credits,
-  403 `plan_required`, `feature_locked`, `email_not_verified`, `account_deleted`
-  or `forbidden`, 404 not found, 409 conflict, 410 `resync_required` or
+  403 `plan_required`, `feature_locked`, `email_not_verified` or `forbidden`,
+  404 not found, 409 conflict, 410 `resync_required` or
   `link_expired`, 422 limit reached (`limit_reached`), 429 rate limited, 502
   provider error.
   **403 is the one status that carries several facts, so `code` is the only
   thing that distinguishes them** — a plan gate can be lifted by paying, a
-  deleted account cannot, and a client that guesses from the status offers the
+  tampered signature cannot, and a client that guesses from the status offers the
   wrong remedy. A client must therefore have an arm for every code it can be
   sent, including the ones it cannot act on.
-- **`message` is rendered, not just logged, for two codes.** It is normally a log
-  line the client replaces with its own copy in the reader's language. Two
-  exceptions: `validation`, where it is the only statement of what was rejected,
-  and `account_deleted`, where it is the only carrier of the purge date — the
-  envelope's fixed five keys have no field for it.
+- **`message` is rendered, not just logged, for `validation` only.** It is
+  otherwise a log line the client replaces with its own copy in the reader's
+  language; `validation` is the exception because it is the only statement of what
+  was rejected.
 - **Expired versus tampered links**: a signed URL past its expiry is 410
   `link_expired`, because the remedy is to fetch a fresh one; a signature that
   does not match is 403. They are separated so a client can tell a retryable
@@ -110,9 +109,10 @@ take their data out and leave (A43, A359). The table under *The routes this docu
 classifies* lists both columns.
 
 201 `AuthResponse`. 400 `validation` for a malformed email, a short password or
-an unknown platform. 409 `conflict` when the email already exists. 429
-`rate_limited`. 403 `account_deleted` when the address belongs to an account inside its
-deletion window (A355), with the purge date in `message`.
+an unknown platform. 409 `conflict` when the email already exists — **a deleted
+account does not hold its address**: the deletion request releases it (A362), so
+the same address registers again immediately rather than meeting a refusal for the
+length of the deletion window. 429 `rate_limited`.
 
 ### `POST /auth/login`
 
@@ -1995,11 +1995,19 @@ pending `email_verification_tokens` and `login_tickets` deleted, and every `queu
 job for the account marked `failed` with `error = 'account deleted'`. A window in which a
 signed-in device still worked would make the confirmation a lie.
 
-**Login, signup and Google sign-in refuse a marked account** with `403 account_deleted` and the
-purge date, after the password check rather than before (A355c). The sentence also says the purge
-releases the address, because signup is where a student meets it and "can I register again" is
-the question that brought them there. Signing up again with the same address meets the same
-refusal until the purge anonymizes the row and releases the address.
+**The identity goes with the request too, not with the purge** (A362). The same statement that
+sets `deleted_at` releases the address, the password hash, the Google subject and the student
+email, and rewrites `users.email` to `deleted-<id>@deleted.invalid` — the value the purge's
+anonymization already derives from the row's own id. Every lookup by identity keys on one of
+those columns, so a marked account is **unfindable** rather than merely refused: login finds
+nothing and answers the same 401 an address that never had an account gets, Google sign-in
+matches neither the subject nor the email and creates a fresh account, and signup with the same
+address succeeds immediately. A student who deletes an account and changes their mind registers
+again with their own address instead of waiting out the window for a row they cannot see.
+
+The row itself survives until the purge, still holding the content the window exists for; only
+its identity is gone. `ACCOUNT_DELETION_GRACE_DAYS` therefore schedules the *data* removal, and
+nothing in the product waits on it.
 
 ### `GET /account/export?format=json|md|ics`
 

@@ -438,11 +438,14 @@ settings screen's data section; and `app/src/api/queries/account.ts`.
 
 **The window is 7 days (`ACCOUNT_DELETION_GRACE_DAYS`, A355), and it is the purge's scheduling
 rather than a recoverable state.** The deletion is effective at the request: sessions, devices,
-the ICS feed token and pending credentials are revoked immediately, jobs are cancelled, and login
-is refused with `403 account_deleted` naming the purge date. What the purge deletes and what it
-keeps is A355a's per-table-group mapping — the student's content goes, and `payments`,
-`credit_ledger`, `subscriptions` (cancelled), `usage_events` and `change_log` survive attached to
-an anonymized `users` row, which is what keeps the margin report and the tax position intact.
+the ICS feed token and pending credentials are revoked immediately, jobs are cancelled, and the
+account's **identity is released** — the address, password hash, Google subject and student email
+are cleared and `users.email` is rewritten to `deleted-<id>@deleted.invalid`, so the account is
+unfindable rather than merely refused and the same address registers again immediately (A362).
+What the purge deletes and what it keeps is A355a's per-table-group mapping — the student's
+content goes, and `payments`, `credit_ledger`, `subscriptions` (cancelled), `usage_events` and
+`change_log` survive attached to an anonymized `users` row, which is what keeps the margin report
+and the tax position intact.
 
 **Apple's in-app row is `code` (A2) and Play's public deletion URL is `user` (G2).** The URL is a
 deployment artefact rather than code and it needs the production host (launch checklist row 12);

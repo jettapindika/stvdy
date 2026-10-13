@@ -601,9 +601,11 @@ function AccountIdentity() {
  *    address, which is the one string that cannot be produced by a mis-tap, and the final
  *    button stays disabled until it matches. The consequences are stated *above* that field,
  *    because `docs/EULA.md` § 5 promises the forfeiture is said before confirmation (A350).
- *  * **What happens next is the server's answer, not this screen's.** The response carries
- *    the purge date; the copy below renders it rather than computing one, so the sentence on
- *    screen cannot disagree with the row in the database.
+ *  * **What happens next is the server's, not this screen's.** The request is the deletion:
+ *    the server revokes every session including this one and releases the account's identity,
+ *    so the screen clears the local token store rather than announcing a window it would then
+ *    have to keep track of. Nothing here computes a date or describes a state the server has
+ *    not already entered (A362).
  */
 function DataSection() {
   const { t } = useTranslation()

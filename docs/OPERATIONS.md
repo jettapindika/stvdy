@@ -929,7 +929,7 @@ mechanism is a sentence, so every row names the thing that actually does the del
 | Data class | Window | Enforced by |
 |---|---|---|
 | `change_log` (the sync history) | **90 days** | the `compact_change_log` job, which trims below the watermark (A19, A165) |
-| Deleted accounts and their rows | **immediately for access; the rows are purged 7 days after the request** | `purge_deleted_accounts`, scheduled by `DELETE /account` at `deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (A355), with the scheduler's `pass` as the backstop for a marked account whose job was lost. Access ends at the request — sessions, devices, the ICS feed token and pending credentials are revoked then — so the window is the purge's scheduling rather than a recoverable state |
+| Deleted accounts and their rows | **immediately for access and identity; the rows are purged 7 days after the request** | `purge_deleted_accounts`, scheduled by `DELETE /account` at `deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (A355), with the scheduler's `pass` as the backstop for a marked account whose job was lost. Access **and identity** end at the request — sessions, devices, the ICS feed token and pending credentials are revoked then, and the address, password hash, Google subject and student email are released with them so the account cannot be found or signed into (A362) — so the window is the purge's scheduling of the *data* rather than a recoverable state |
 | Generated documents (`reports/`, `cheatsheets/` in R2) | `<the operator's choice>` | an R2 **lifecycle rule** on those prefixes, which is the only thing that deletes an object nobody asked about again |
 | Uploaded sources and their previews | until the student deletes them, or the account is deleted | the deletion paths (`DELETE /sources/:id`, account deletion), plus the R2 lifecycle rule above as the backstop |
 | The object-storage bytes an account-deletion purge could not remove | the R2 lifecycle rule's window | the purge collects `sources.file_key` and the `cheatsheets` keys and calls `delete_objects`, which **logs and continues** rather than failing — a purge that refused to complete because R2 was briefly unavailable would leave the account half-deleted, which is worse than an orphaned object. So an object whose delete failed is the accepted residual, and the lifecycle rule on those prefixes is what eventually removes it |
@@ -942,8 +942,11 @@ mechanism is a sentence, so every row names the thing that actually does the del
 **The row that had no mechanism, and now does.** Deleted accounts were *specified* to be purged
 by `purge_deleted_accounts` — the job kind named in `migrations/0015_jobs.sql` — and until A355 no
 handler dispatched it: `DELETE /account` and `GET /account/export` did not exist either. **That is
-now shipped.** `DELETE /account` marks the account, revokes every credential at once, cancels its
-jobs and schedules the purge at `deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (default 7 days); the
+now shipped.** `DELETE /account` marks the account, revokes every credential at once,
+releases the account's identity (A362) — the address, password hash, Google subject and student
+email go with the request, so the row can no longer be found or signed into and the address
+registers again immediately — cancels its jobs and schedules the purge at
+`deleted_at + ACCOUNT_DELETION_GRACE_DAYS` (default 7 days); the
 scheduler's `pass` enqueues the same job for any marked account whose own job was lost, so the
 window is the `run_at` and the two producers cannot disagree about it. The job is idempotent —
 `purged_at` is written with `coalesce` and every delete matches nothing on a second pass — which

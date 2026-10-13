@@ -11,10 +11,10 @@ import { clearSession } from '@/lib/tokens'
  * entitlements matrix's `ExportFormat` governs the *report* and *cheatsheet* documents, not
  * the right to your own data.
  *
- * **The deletion is a request, not a hard delete.** The server marks the account, revokes
- * every session immediately and schedules the purge at the end of the window; the response
- * carries both dates, and this module models them rather than inventing copy about them. What
- * the screen shows is what the server said, which is the only way the two can agree.
+ * **The deletion is a request, not a hard delete.** The server marks the account, revokes every
+ * session immediately, releases the account's identity so the address registers again right away,
+ * and schedules the purge of its data at the end of the window (A362). The response carries the
+ * two dates, and this module models them rather than inventing copy about them.
  *
  * **Deleting signs this device out, because the server already did.** The request revokes
  * every session family including this one, so the very next request from here is a 401. The
@@ -31,7 +31,7 @@ export type ExportFormat = (typeof EXPORT_FORMATS)[number]
 export interface DeletionResult {
   /** When the request was recorded. */
   deleted_at: string
-  /** When `purge_deleted_accounts` removes the data. */
+  /** When `purge_deleted_accounts` removes the data. The account's identity is already gone. */
   purges_at: string
   /**
    * The end of the paid period the account was inside, if any. Forfeited, and stated by the

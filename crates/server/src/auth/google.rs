@@ -22,7 +22,6 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sqlx::Row;
@@ -402,12 +401,11 @@ async fn verify_id_token(
 async fn resolve_user(state: &AppState, claims: &IdTokenClaims) -> AppResult<Uuid> {
     let email = super::routes::normalize_email(&claims.email)?;
 
-    // The lookup deliberately does **not** filter `deleted_at` (A355). Filtering it out would
-    // take the two paths below to their insert, and the insert would fail on the unique index
-    // over `users.email` — a 500 for a student who deleted their account, which is the worst
-    // possible answer to a deliberate act. Selecting the column instead lets the refusal name
-    // what happened, and it costs one comparison.
-    let by_sub = sqlx::query("select id, deleted_at from users where google_sub = $1")
+    // Neither lookup can match a deleted account: the deletion request releases the address and
+    // the subject it would be matched by (A362), so both miss and the sign-in below creates a
+    // fresh account — which is what a student who deleted an account and signs in with Google
+    // again should get.
+    let by_sub = sqlx::query("select id from users where google_sub = $1")
         .bind(&claims.sub)
         .fetch_optional(&state.pool)
         .await
@@ -417,29 +415,19 @@ async fn resolve_user(state: &AppState, claims: &IdTokenClaims) -> AppResult<Uui
 
     if let Some(row) = by_sub {
         let user_id: Uuid = row.get("id");
-        if let Some(deleted_at) = row.get::<Option<DateTime<Utc>>, _>("deleted_at") {
-            return Err(super::routes::deletion_refusal(state, deleted_at));
-        }
         return Ok(user_id);
     }
 
-    let by_email =
-        sqlx::query("select id, password_hash, google_sub, deleted_at from users where email = $1")
-            .bind(&email)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|error| {
-                AppError::Internal(anyhow::anyhow!("looking up an account: {error}"))
-            })?;
+    let by_email = sqlx::query("select id, password_hash, google_sub from users where email = $1")
+        .bind(&email)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("looking up an account: {error}")))?;
 
     if let Some(row) = by_email {
         let user_id: Uuid = row.get("id");
         let password_hash: Option<String> = row.get("password_hash");
         let google_sub: Option<String> = row.get("google_sub");
-
-        if let Some(deleted_at) = row.get::<Option<DateTime<Utc>>, _>("deleted_at") {
-            return Err(super::routes::deletion_refusal(state, deleted_at));
-        }
 
         if google_sub.is_none() && password_hash.is_some() {
             // Account-takeover refusal. A signed-in linking step is the way in,
@@ -702,70 +690,93 @@ mod tests {
                 .expect("reading the row back");
         assert!(written.is_some(), "the verified path must actually write");
     }
-    /// **The deleted-account arm of `resolve_user`, which is the reason the two lookups
-    /// select `deleted_at` instead of filtering it out.**
+    /// **A deleted account is not matched by either lookup, so signing in with Google again
+    /// creates a new account instead of finding the old one (A362).**
     ///
-    /// The function's own comment states the mechanism: filtering `deleted_at` would take
-    /// both paths to their insert, and the insert would fail on the unique index over
-    /// `users.email` — a 500 for a student who deleted their account, which is the worst
-    /// possible answer to a deliberate act. So the arm exists to answer `403 account_deleted`
-    /// with the date the purge runs.
+    /// Both arms are exercised because `resolve_user` has two ways in: the subject match and
+    /// the email match. The deletion request releases both columns (that is what
+    /// `account::mark_deleted` writes), so neither can match the tombstone — and the failure
+    /// this test exists for is the *opposite* of the one it replaced: an implementation that
+    /// still matched the row would sign the student into an account that is on its way to the
+    /// purge, and an implementation that matched it and then tried to insert would fail on the
+    /// unique index over `users.email`.
     ///
-    /// **Two arms, and the second is the one a single test would miss.** A Google login can
-    /// match by `google_sub` *or* by email; both queries select `deleted_at`, so both refuse,
-    /// and a fix applied to one and not the other would look correct against whichever case
-    /// was written. The assertions are on the variant and on `purges_at` being in the future
-    /// (the grace window), because a refusal that named a date already past would be a
-    /// different bug.
+    /// `mark_deleted` is called rather than the row being seeded by hand, so the test asserts
+    /// against the state the product actually produces: a hand-written tombstone would pass
+    /// while the real one held a live subject.
     #[sqlx::test(migrations = "../../migrations")]
-    async fn a_deleted_account_cannot_sign_in_through_google(pool: PgPool) {
+    async fn a_deleted_account_is_not_matched_by_a_google_sign_in(pool: PgPool) {
         let harness = TestState::new(pool);
         let state = &harness.state;
-        let deleted_at = Utc::now() - chrono::Duration::hours(1);
 
-        // (a) matched by `google_sub`.
+        // (a) an account that signed in through Google, so it has a subject to be matched by.
         let by_sub = Uuid::now_v7();
         sqlx::query(
-            "insert into users (id, email, google_sub, email_verified, email_verified_at, timezone, deleted_at)
-             values ($1, 'gone-sub@example.test', 'sub-gone', true, now(), 'Asia/Jakarta', $2)",
+            "insert into users (id, email, google_sub, email_verified, email_verified_at, timezone)
+             values ($1, 'gone-sub@example.test', 'sub-gone', true, now(), 'Asia/Jakarta')",
         )
         .bind(by_sub)
-        .bind(deleted_at)
         .execute(&state.pool)
         .await
-        .expect("seeding a deleted Google account");
+        .expect("seeding a Google account");
 
-        // (b) matched by email, with no `google_sub` — the second arm, reached only when the
-        // subject lookup misses.
+        // (b) a passwordless account with no subject: reached only when the subject lookup
+        // misses, which is the second arm.
         let by_email = Uuid::now_v7();
         sqlx::query(
-            "insert into users (id, email, google_sub, email_verified, email_verified_at, timezone, deleted_at)
-             values ($1, 'gone-email@example.test', null, true, now(), 'Asia/Jakarta', $2)",
+            "insert into users (id, email, email_verified, email_verified_at, timezone)
+             values ($1, 'gone-email@example.test', true, now(), 'Asia/Jakarta')",
         )
         .bind(by_email)
-        .bind(deleted_at)
         .execute(&state.pool)
         .await
-        .expect("seeding a deleted passwordless account");
+        .expect("seeding a passwordless account");
 
-        for (sub, email, label) in [
-            ("sub-gone", "gone-sub@example.test", "by google_sub"),
-            ("sub-new", "gone-email@example.test", "by email"),
+        for id in [by_sub, by_email] {
+            crate::account::mark_deleted(state, id)
+                .await
+                .expect("deleting the account");
+        }
+
+        for (sub, email, old_id, label) in [
+            ("sub-gone", "gone-sub@example.test", by_sub, "by google_sub"),
+            ("sub-new", "gone-email@example.test", by_email, "by email"),
         ] {
-            match resolve_user(state, &claims(sub, email)).await {
-                Err(AppError::AccountDeleted { purges_at }) => {
-                    // The refusal names when the purge runs, and it is the grace window from
-                    // `deleted_at` — a date already past would be a different bug.
-                    assert!(
-                        purges_at > Utc::now(),
-                        "{label}: purges_at must be in the future, got {purges_at}"
-                    );
-                }
-                // `Ok` is the failure this test exists for: it means a deleted account was
-                // signed in. A different error would mean the arm fired for the wrong reason.
-                Ok(user_id) => panic!("{label}: a deleted account was signed in as {user_id}"),
-                Err(other) => panic!("{label}: expected AccountDeleted, got {other:?}"),
-            }
+            let signed_in = resolve_user(state, &claims(sub, email))
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("{label}: a fresh account should be created: {error:?}")
+                });
+            assert_ne!(
+                signed_in, old_id,
+                "{label}: the deleted account must not be signed into"
+            );
+
+            // The new row is live and carries the subject, so the *next* sign-in resolves to it
+            // — the account the student just re-created, not the tombstone.
+            let live: bool = sqlx::query_scalar(
+                "select deleted_at is null from users where id = $1 and google_sub = $2",
+            )
+            .bind(signed_in)
+            .bind(sub)
+            .fetch_one(&state.pool)
+            .await
+            .expect("reading the new account back");
+            assert!(live, "{label}: the new account must be live and linked");
+
+            // And the tombstone is untouched: still marked, still holding the derived address.
+            let (deleted, released): (bool, String) =
+                sqlx::query_as("select deleted_at is not null, email from users where id = $1")
+                    .bind(old_id)
+                    .fetch_one(&state.pool)
+                    .await
+                    .expect("reading the tombstone back");
+            assert!(deleted, "{label}: the old account must still be marked");
+            assert_eq!(
+                released,
+                format!("deleted-{old_id}@deleted.invalid"),
+                "{label}: the address must have been released"
+            );
         }
     }
 }

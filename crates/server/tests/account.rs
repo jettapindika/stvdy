@@ -14,6 +14,10 @@
 //!    worst possible version of that bug, so the cross-tenant case is not optional.
 //!  * **A second pass is a no-op.** The job is enqueued by the request and by the scheduler's
 //!    backstop, so a double run is a normal occurrence rather than an edge case.
+//!  * **The identity is released at the request, not at the purge.** A marked account cannot be
+//!    found by anything a student can type — its address, password and Google subject are gone
+//!    with the request — so deleting and registering again with the same address works
+//!    immediately, and the tombstone the purge eventually rewrites is already anonymous.
 
 // Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
 // relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
@@ -95,13 +99,13 @@ async fn workspace(app: &axum::Router, token: &str, name: &str) -> String {
     body["workspace"]["id"].as_str().expect("an id").to_string()
 }
 
-/// A deletion request marks the account, kills every credential, cancels the jobs, and refuses
-/// the next login.
+/// A deletion request marks the account, kills every credential, cancels the jobs, releases the
+/// identity, and leaves the address free for a new registration.
 ///
 /// The session assertion is the one that matters and it is deliberately made **before** the
 /// purge: `GET /auth/me` with the token the deletion was made with must already be refused.
 #[sqlx::test(migrations = "../../migrations")]
-async fn a_deletion_request_marks_revokes_cancels_and_refuses_login(pool: PgPool) {
+async fn a_deletion_request_marks_revokes_cancels_and_frees_the_address(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.expect("the plans");
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
@@ -190,7 +194,10 @@ async fn a_deletion_request_marks_revokes_cancels_and_refuses_login(pool: PgPool
             .expect("the job row");
     assert_eq!(job_status, "failed");
 
-    // And the next sign-in is refused with a distinguishable code, not a generic 401.
+    // **And the identity is gone with the request, not with the purge (A362).** The address the
+    // account was registered with is no longer on the row, so the next sign-in finds nothing:
+    // the same 401 an address that never had an account gets. This is the assertion that makes
+    // "login is refused" true in the strongest sense — there is no account to refuse.
     let (status, body) = json(
         &app,
         "POST",
@@ -203,44 +210,22 @@ async fn a_deletion_request_marks_revokes_cancels_and_refuses_login(pool: PgPool
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["code"], "account_deleted", "{body}");
-    assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("deleted at your request")),
-        "the refusal must say the student asked for this: {body}"
-    );
-    // And it must say what the purge date does to the address. This is the sentence a student
-    // reads on the *signup* form after trying to register again, and "removed on <date>" alone
-    // leaves the one question they have — whether they can come back with this address —
-    // unanswered. The purge anonymizes the row, which is what releases it
-    // (`purge_accounts`), so the promise is the mechanism's own.
-    assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("releases this address")),
-        "the refusal must say the address is released at the purge: {body}"
-    );
-    // The sentence is rendered to the student rather than replaced by the client, so it has to
-    // read as one: capitalised, and the date at minute precision. `chrono`'s `Display` would
-    // have put sub-second noise in the middle of it, which is what a reader notices first.
-    let message = body["message"].as_str().unwrap_or_default();
-    assert!(
-        message.starts_with("This account was deleted"),
-        "the rendered sentence must be capitalised: {message}"
-    );
-    assert!(
-        message.contains(" UTC"),
-        "the purge date must carry its zone: {message}"
-    );
-    assert!(
-        !message.contains(".787348") && !message.contains(".0 "),
-        "the purge date must not carry sub-second precision: {message}"
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "the address must no longer resolve to the marked account: {body}"
     );
 
-    // Signing up again with the same address meets the same refusal rather than a 409 claiming
-    // the account is taken — the address is held by the tombstone until the purge releases it.
+    // The row is still there and still marked — it is the purge that removes the data, and the
+    // student's records are what the window is for. Only the identity moved.
+    let (deleted, purged) = deletion_state(&harness.state.pool, user_id).await;
+    assert!(deleted, "the row survives its identity");
+    assert!(!purged, "and the purge has not run");
+
+    // Registering again with the same address works, immediately. This is the half the
+    // `account_deleted` refusal used to stand in the way of: a student who deleted an account
+    // and changed their mind had to wait out the window to use their own address, for a row
+    // they could not see and had already asked us to erase.
     let (status, body) = json(
         &app,
         "POST",
@@ -248,13 +233,40 @@ async fn a_deletion_request_marks_revokes_cancels_and_refuses_login(pool: PgPool
         "",
         serde_json::json!({
             "email": email,
-            "password": "correct horse battery",
+            "password": "a different passphrase",
             "device": { "name": "Laptop", "platform": "macos" }
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["code"], "account_deleted", "{body}");
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let registered_again = body["user"]["id"].as_str().expect("an id").to_string();
+    assert_ne!(
+        registered_again,
+        user_id.to_string(),
+        "the new account is a new row, not the tombstone"
+    );
+    assert_eq!(
+        body["user"]["email"], email,
+        "and it holds the address the student typed"
+    );
+
+    // The tombstone keeps the address the purge's anonymization derives from the row's own id,
+    // which is what makes the release collision-free: a second account cannot be handed a
+    // `deleted-…@deleted.invalid` address by anything but its own id.
+    let tombstone: String = sqlx::query_scalar("select email from users where id = $1")
+        .bind(user_id)
+        .fetch_one(&harness.state.pool)
+        .await
+        .expect("the tombstone");
+    assert_eq!(tombstone, format!("deleted-{user_id}@deleted.invalid"));
+
+    // The two rows are distinct, and the new one is the live account for this address.
+    let live: i64 = sqlx::query_scalar("select count(*) from users where email = $1")
+        .bind(email)
+        .fetch_one(&harness.state.pool)
+        .await
+        .expect("counting the accounts at this address");
+    assert_eq!(live, 1, "exactly one row holds the address, and it is live");
 }
 
 /// A deletion request schedules exactly one purge, at the end of the window, and the scheduler's

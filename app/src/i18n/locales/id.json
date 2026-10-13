@@ -783,10 +783,6 @@
       "title": "Tidak tersedia di paket atau perangkat ini",
       "reason": "Ini tidak termasuk paketmu, atau perangkat ini sudah melewati batas paket."
     },
-    "account_deleted": {
-      "title": "Akun dihapus",
-      "reason": "Akun ini dihapus atas permintaanmu. Datanya dihapus di akhir masa tenggat, dan alamat ini bisa didaftarkan lagi setelah itu."
-    },
     "forbidden": {
       "title": "Tidak diizinkan",
       "reason": "Kamu tidak punya akses ke ini. Kalau kamu sudah masuk, ini mungkin milik akun lain."

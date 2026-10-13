@@ -18,10 +18,13 @@
 //!    the moment of the request. A window in which a signed-in device still works would make
 //!    the confirmation a lie, and the feed token is a capability URL with no session at all —
 //!    leaving it live would keep serving the student's calendar after they deleted it.
-//!  * **Login is refused for a marked account**, distinguishably (`account_deleted`), so the
-//!    student is told they asked for this and when it ends rather than being shown a wrong
-//!    password. `auth::routes::login`, `auth::routes::signup` and `auth::google::resolve_user`
-//!    each carry that refusal.
+//!  * **The identity goes with the request, not with the purge.** The statement that marks the
+//!    account also releases the address, the password hash, the Google subject and the student
+//!    email, so a marked account is not merely unreachable — it cannot be *found* by anything a
+//!    student can type, and someone who deletes an account and changes their mind registers
+//!    again with the same address immediately rather than meeting a refusal for the length of
+//!    the window (A362). What the purge still owes them is their data, which is the half a
+//!    re-registration cannot produce.
 //!
 //! The export is **bounded, not streamed**: `EXPORT_MAX_ROWS` per collection, with the
 //! truncated collections named in the document. Bounding is the honest choice here because
@@ -128,8 +131,28 @@ pub async fn mark_deleted(state: &AppState, user_id: Uuid) -> AppResult<Deletion
     // `and deleted_at is null` is what makes the second call a no-op *and* leaves the first
     // date alone: a retry must not push the purge window forward, or a client that retried
     // would extend its own account's life.
+    //
+    // The same statement releases the identity, and that is deliberate rather than incidental
+    // (A362). Every lookup by identity — signup's "is this address taken", login's "is this the
+    // account", Google's subject-then-email match — reads one of these columns, so clearing
+    // them here is what makes the account unfindable the moment it is deleted. Without it the
+    // address stays held until the purge, and a student who deleted an account and came back
+    // to register again would be refused for up to `ACCOUNT_DELETION_GRACE_DAYS` — a refusal
+    // about a row they cannot see, for data they already asked us to remove.
+    //
+    // `ics_feed_token` belongs in this statement for the neighbouring reason: it is a
+    // **capability URL with no session behind it** (A242), so revoking sessions does not touch
+    // it, and `GET /cal/{token}` would keep serving this account's calendar to anyone holding
+    // the link. The tombstone address is derived from the row's own id, so two tombstones
+    // cannot collide and a second pass rewrites the same value.
     let marked: Option<DateTime<Utc>> = sqlx::query_scalar(
-        "update users set deleted_at = $2
+        "update users
+            set deleted_at = $2,
+                email = 'deleted-' || id::text || '@deleted.invalid',
+                password_hash = null,
+                google_sub = null,
+                student_email = null,
+                ics_feed_token = null
           where id = $1 and deleted_at is null
       returning deleted_at",
     )
@@ -188,16 +211,6 @@ pub async fn mark_deleted(state: &AppState, user_id: Uuid) -> AppResult<Deletion
         .execute(&mut *tx)
         .await
         .map_err(|error| AppError::Internal(anyhow::anyhow!("revoking the devices: {error}")))?;
-
-    // The feed token is a **capability URL with no session behind it** (A242): revoking
-    // sessions does not touch it, and `GET /cal/{token}` would keep serving this account's
-    // calendar to anyone holding the link until the purge. Clearing it here is what makes the
-    // deletion effective immediately for the one route that carries no credential.
-    sqlx::query("update users set ics_feed_token = null where id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("clearing the feed token: {error}")))?;
 
     // Credentials that are not sessions: a verification link and a login ticket both mint
     // access to the account, and both outlive the request that created them.

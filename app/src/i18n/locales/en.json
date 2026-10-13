@@ -800,10 +800,6 @@
       "title": "Not available on this plan or device",
       "reason": "This is not included in your current plan, or this device is over the plan's limit."
     },
-    "account_deleted": {
-      "title": "Account deleted",
-      "reason": "This account was deleted at your request. Its data is removed at the end of the deletion window, and this address can be registered again after that."
-    },
     "forbidden": {
       "title": "Not allowed",
       "reason": "You do not have access to this. If you are signed in, it may belong to another account."

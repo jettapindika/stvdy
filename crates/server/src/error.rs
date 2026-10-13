@@ -3,7 +3,6 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Utc};
 use serde_json::json;
 
 pub type AppResult<T> = Result<T, AppError>;
@@ -48,32 +47,6 @@ pub enum AppError {
     #[error("this link has expired")]
     LinkExpired,
 
-    /// The account was deleted at the student's own request (A355).
-    ///
-    /// A distinct variant rather than `Unauthorized` for the reason the spec's deletion rule
-    /// is a *promise*: a generic 401 tells a student their password is wrong, and the remedy
-    /// they reach for — reset it, try again — cannot work, because the account they are
-    /// typing at is going away. The message names the purge date, which is the only fact the
-    /// student needs and the one thing a 401 could not carry, and it says what that date does
-    /// to the address, because "my address is refused" is what brings them to signup and the
-    /// purge is what gives it back (`purge_accounts` anonymizes the row, which releases it).
-    ///
-    /// **This is one of the two messages the client renders rather than replaces** (the other
-    /// is `Validation`), so it is written as a sentence a student reads: capitalised, and the
-    /// date at minute precision rather than `chrono`'s sub-second `Display`. The purge date
-    /// exists nowhere else — the envelope's fixed five keys have no field for it — so a
-    /// composed client sentence could only say "after a while" about the one date the student
-    /// is waiting for.
-    #[error(
-        "This account was deleted at your request; its data is removed on {}, \
-         which releases this address for a new account",
-        .purges_at.format("%Y-%m-%d %H:%M UTC")
-    )]
-    AccountDeleted {
-        /// When `purge_deleted_accounts` will remove the data.
-        purges_at: DateTime<Utc>,
-    },
-
     #[error("rate limited")]
     RateLimited,
 
@@ -110,10 +83,6 @@ impl AppError {
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::ResyncRequired | AppError::LinkExpired => StatusCode::GONE,
-            // 403, not 410: the account is not a resource the client can re-fetch, and a
-            // client that branched on 410 for a sync cursor would misread this as one. What
-            // distinguishes it is the code, which is what the client branches on anyway.
-            AppError::AccountDeleted { .. } => StatusCode::FORBIDDEN,
             // A limit the user can raise by paying is 422; a feature the plan
             // does not include at all is 403. Both are documented in the roadmap
             // § HTTP error mapping.
@@ -140,7 +109,6 @@ impl AppError {
             AppError::Conflict(_) => "conflict",
             AppError::ResyncRequired => "resync_required",
             AppError::LinkExpired => "link_expired",
-            AppError::AccountDeleted { .. } => "account_deleted",
             AppError::RateLimited => "rate_limited",
             AppError::Entitlement { code, .. } => code,
             AppError::EmailNotVerified => "email_not_verified",

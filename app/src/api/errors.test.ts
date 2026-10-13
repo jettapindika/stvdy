@@ -176,7 +176,6 @@ describe('mapping a response body', () => {
       token_expired: 401,
       plan_required: 403,
       feature_locked: 403,
-      account_deleted: 403,
       forbidden: 403,
       email_not_verified: 403,
       not_found: 404,
@@ -211,12 +210,10 @@ describe('mapping a response body', () => {
 
   it('does not read a 403 with no usable code as a plan gate', () => {
     // The defect this pins: `codeForStatus(403)` used to answer `plan_required`,
-    // and `account_deleted` was not in `API_ERROR_CODES` at all, so the refusal a
-    // deleted account meets — 403, with the purge date in `message` — arrived as a
-    // plan gate and the signup screen rendered "Not on your plan / This is not
-    // included in your current plan" beside a link to the plans page. Nothing a
-    // plan can fix. Both halves are asserted: an unknown code must not become a
-    // plan limit, and the real code must be recognised rather than fallen back to.
+    // so any 403 whose code this build did not recognise was rendered as "Not on
+    // your plan / This is not included in your current plan" beside a link to the
+    // plans page. Nothing a plan can fix. Both halves are asserted: an unknown
+    // code must not become a plan limit, and the fallback must claim nothing.
     const unknown = apiErrorFromBody(403, { code: 'account_deleted_v2', message: 'gone' })
     expect(unknown.code).toBe('forbidden')
     expect(unknown.isPlanLimit).toBe(false)
@@ -225,31 +222,6 @@ describe('mapping a response body', () => {
     const bodiless = apiErrorFromBody(403, null)
     expect(bodiless.code).toBe('forbidden')
     expect(bodiless.isPlanLimit).toBe(false)
-  })
-
-  it('shows the purge date a deleted account is refused with', () => {
-    // The date exists only in the server's sentence, so `apiErrorReason` returns
-    // it verbatim for this code. Composing one from the envelope is not possible:
-    // no field carries it.
-    const deleted = apiErrorFromBody(403, {
-      code: 'account_deleted',
-      message:
-        'This account was deleted at your request; its data is removed on 2026-10-20 12:13 UTC, which releases this address for a new account',
-      min_plan: null,
-      limit: null,
-      used: null,
-    })
-
-    expect(deleted.code).toBe('account_deleted')
-    expect(deleted.isPlanLimit).toBe(false)
-    expect(apiErrorTitle(deleted, t)).toBe('Account deleted')
-    expect(apiErrorReason(deleted, t)).toContain('2026-10-20')
-    expect(apiErrorReason(deleted, t)).not.toContain('error.')
-
-    // A refusal with no sentence still reads as something rather than as a key.
-    const silent = apiErrorFromBody(403, { code: 'account_deleted', message: '' })
-    expect(apiErrorReason(silent, t)).toContain('deleted')
-    expect(apiErrorReason(silent, t)).not.toContain('error.')
   })
 
   it('reads a 410 as an expired link rather than a validation failure', () => {
