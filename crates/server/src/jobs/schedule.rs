@@ -169,10 +169,21 @@ pub fn reminder_window(state: &AppState) -> i64 {
 /// One payment pass: enqueue the poller and the sweep, idempotent by their windows.
 ///
 /// Public because it is the unit the tests drive — waiting five minutes for a tick would
-/// be a timing test. Both kinds are **singletons**: `dedupe_key = "poll_payment"` and
-/// `"reconcile_payments"` with no window, because there is one of each per deployment and
-/// a second enqueue must be a no-op rather than a second scan of the same table. The
-/// cadence comes from this ticker, not from the key.
+/// be a timing test.
+///
+/// **The keys are windowed, and a constant key was a defect rather than a tidier key.** The
+/// unique index on `jobs.dedupe_key` has no status filter and a finished job keeps its row, so a
+/// key that never changes is taken forever: the first pass enqueued two jobs, they ran, and every
+/// later pass was a no-op. The five-minute backstop therefore ran **once, at boot** — a student
+/// who paid and closed the tab was never recovered, and a settlement with no row behind it was
+/// never noticed. The comment that used to stand here ("the cadence comes from this ticker, not
+/// from the key") was the defect written down: a key that is never freed means the cadence comes
+/// from nothing.
+///
+/// Every other recurring pass in this tree windows its key for the same reason
+/// (`send_reminder:<user>:<window>`, `sync_calendar:<id>:<window>`), and the window buys the
+/// idempotency the constant key was reaching for: two ticks inside one window are one pass, so a
+/// double tick or a second instance cannot run the same scan twice.
 pub async fn payment_pass(state: &AppState) -> AppResult<u64> {
     // Nothing to poll when no gateway is configured: a deployment with no gateway has no
     // payments to reconcile, and enqueuing a job that would answer `provider_error` every
@@ -181,12 +192,14 @@ pub async fn payment_pass(state: &AppState) -> AppResult<u64> {
         return Ok(0);
     }
 
+    let window = payment_window(state);
+
     jobs::enqueue(
         &state.pool,
         &state.jobs,
         "poll_payment",
         serde_json::json!({}),
-        Some("poll_payment"),
+        Some(&format!("poll_payment:{window}")),
     )
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("enqueuing poll_payment: {error}")))?;
@@ -196,7 +209,7 @@ pub async fn payment_pass(state: &AppState) -> AppResult<u64> {
         &state.jobs,
         "reconcile_payments",
         serde_json::json!({}),
-        Some("reconcile_payments"),
+        Some(&format!("reconcile_payments:{window}")),
     )
     .await
     .map_err(|error| {
@@ -204,6 +217,15 @@ pub async fn payment_pass(state: &AppState) -> AppResult<u64> {
     })?;
 
     Ok(2)
+}
+
+/// `floor(now / PAYMENT_TICK)`, the payment passes' dedupe window.
+///
+/// The same shape as [`reminder_window`] and [`calendar_window`], and for the same reason: a
+/// windowed key is what lets a recurring pass enqueue again on the next tick while a duplicate
+/// inside one window stays a no-op.
+pub fn payment_window(state: &AppState) -> i64 {
+    state.clock.now().timestamp() / PAYMENT_TICK.as_secs().max(1) as i64
 }
 
 /// One pass: enqueue the next boundary jobs for the accounts that do not have them.

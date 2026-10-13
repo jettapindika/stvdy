@@ -463,7 +463,7 @@ bridge's own endpoints answer 500 with that message inside.
 **The symptom, and it looks like a server fault rather than a login expiry.** Checkout still mints a
 row and answers 502 `provider_error`; a pending payment's status read answers 500 from the bridge and
 the server logs it at `debug`; and `reconcile_payments` logs `the reconciliation sweep could not list
-transactions` hourly. The row that names it is in the bridge's log:
+transactions` every five minutes. The row that names it is in the bridge's log:
 
 ```sh
 docker compose -f docker-compose.staging.yml logs --tail=50 gopay-bridge
@@ -518,7 +518,7 @@ property of the gateway that this server cannot verify away:
 
 **This is A360, and `QRIS_RECONCILE_HOURS` is what keeps the unrelated sales out of the sweep.** The default 48
 hours currently excludes those 2026-10-10 settlements; a window long enough to include them
-makes the sweep report them hourly as *money the gateway took with no row behind it*, which is
+makes the sweep report them on every pass as *money the gateway took with no row behind it*, which is
 the correct verdict and useless noise. Raise it only alongside a way to tell the merchant's
 other business apart — and note the bridge clamps its own feed window to a week, so a value
 above 168 hours silently reads as **one hour**, not as a week (`minutes` outside 1..10080 falls
@@ -530,7 +530,7 @@ one answers with data).
 | Signal | Where | What it means |
 |---|---|---|
 | `payment flagged for review` (error) | `server` log | A mismatch: money with no row, a row with no transaction, an amount that is not the payable, or a refund. `GET /admin/payments?status=review` is the queue, and `review_reason` names both numbers |
-| `the reconciliation sweep could not list transactions` (warn) | `server` log, hourly | The bridge did not answer — usually the expired session above, sometimes the host's egress to GoPay |
+| `the reconciliation sweep could not list transactions` (warn) | `server` log, every five minutes | The bridge did not answer — usually the expired session above, sometimes the host's egress to GoPay |
 | `the gateway refused to mint an invoice` (error) | `server` log | Checkout rolled back, so there is no row: the student can retry immediately |
 | The bridge's own log | `docker compose … logs gopay-bridge` | Session restores, payment creation, and the `AUTH_REQUIRED` line |
 

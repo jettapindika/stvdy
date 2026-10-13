@@ -416,7 +416,7 @@ documented settlement API for this account, and building against one whose shape
 guess this phase is designed to avoid (A291). The compensations that *are* in place are the ones that
 make the risk measurable rather than invisible: every answer we acted on is stored in
 `gateway_events` with its raw payload, `payments.provider_status` records what the gateway said, the
-hourly reconciliation sweep compares the gateway's own settled transactions against our rows in
+five-minute reconciliation sweep compares the gateway's own settled transactions against our rows in
 **both** directions (money we have no row for, and a payment the gateway has no transaction for),
 and both mismatches land as `review` rows with a `review_reason` a human reads. `QRIS_FEE_PERCENT`
 defaults to `0`/`0` — "unknown, record nothing" — rather than a plausible-looking rate, so the margin

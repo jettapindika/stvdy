@@ -18,7 +18,8 @@
 //! recovered by the sweep must not be able to differ, and the only way to guarantee that
 //! is one code path.
 //!
-//!  * [`reconcile`] runs hourly and compares the gateway's settled transactions against
+//!  * [`reconcile`] runs on the same five-minute tick and compares the gateway's settled
+//!    transactions against
 //!    our rows, flagging both mismatch kinds: money that arrived with no payment row, and
 //!    one of ours the gateway has no transaction for. Both are `review` rows with a
 //!    `review_reason`, never silent edits.

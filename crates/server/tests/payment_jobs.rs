@@ -9,9 +9,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::sync::Arc;
+
 use axum::http::StatusCode;
 use sqlx::PgPool;
 use stvdy_core::traits::payment::GatewayStatus;
+use stvdy_core::traits::testing::FixedClock;
 use stvdy_server::integrations::payment::GatewayTransaction;
 use stvdy_server::testing::TestState;
 use uuid::Uuid;
@@ -519,6 +522,76 @@ async fn the_payment_tick_is_idempotent(pool: PgPool) {
         .unwrap();
         assert_eq!(queued, 1, "{kind} was enqueued twice");
     }
+}
+
+/// **A second tick enqueues a second pass, and the deployed code never did.**
+///
+/// `payment_pass` enqueued both kinds with a **constant** `dedupe_key` and no window. The unique
+/// index on `jobs.dedupe_key` has no status filter, and a finished job keeps its row — so after
+/// the first pass the key was taken forever and every later pass was a no-op. The observable
+/// consequence is that the five-minute backstop **ran exactly once, at boot**: a student who paid
+/// and closed the tab was never recovered, and a settlement the gateway took with no row behind it
+/// was never noticed.
+///
+/// Every other recurring pass in this tree windows its key (`send_reminder:<user>:<window>`,
+/// `sync_calendar:<id>:<window>`); the payment pass was the only one that did not, which is why
+/// only it was affected. The comment that justified the constant key — "the cadence comes from
+/// this ticker, not from the key" — was the defect written down: a key that is never freed means
+/// the cadence comes from nothing.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_second_tick_enqueues_a_second_payment_pass(pool: PgPool) {
+    let mut harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+
+    let first = stvdy_server::jobs::schedule::payment_pass(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(first, 2, "the first tick enqueues the poller and the sweep");
+
+    // The first pass finishes. Its rows stay in the table — which is exactly the state the
+    // deployed code could never get past.
+    sqlx::query("update jobs set status = 'done' where dedupe_key like 'poll_payment%' or dedupe_key like 'reconcile_payments%'")
+        .execute(&harness.state.pool)
+        .await
+        .unwrap();
+
+    // One tick later.
+    harness.state.clock = Arc::new(FixedClock::at(
+        harness.state.clock.now() + chrono::Duration::seconds(300),
+    ));
+
+    let second = stvdy_server::jobs::schedule::payment_pass(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(second, 2, "the second tick enqueued nothing");
+
+    for kind in ["poll_payment", "reconcile_payments"] {
+        let total: i64 = sqlx::query_scalar("select count(*) from jobs where kind = $1")
+            .bind(kind)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            total, 2,
+            "{kind} has {total} row(s) after two ticks; the backstop never runs again"
+        );
+    }
+
+    // And the same tick twice is still one pass — the idempotency the windowed key buys, and the
+    // reason the fix is a window rather than dropping the key.
+    let third = stvdy_server::jobs::schedule::payment_pass(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(third, 2);
+    let poll_rows: i64 =
+        sqlx::query_scalar("select count(*) from jobs where kind = 'poll_payment'")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        poll_rows, 2,
+        "a double tick inside one window enqueued a third pass"
+    );
 }
 
 /// A deployment with no gateway enqueues nothing: a job that would answer
