@@ -2068,3 +2068,17 @@ git commit -am "Phase 14 Task 11: store channels, mobile checklist, gates, docs"
   than working around it, and the iOS half still runs.
 - Run `just check-shell` (the `src-tauri` trio) after every shell task; the shell is
   excluded from the workspace, so `cargo test --workspace` never sees it.
+- **`src-tauri/gen/schemas/acl-manifests.json` is a per-target build output, and the
+  committed copy is the *mobile* one — do not commit a desktop build's rewrite of it.**
+  Found while landing the redesign's plugin split (`8d2bcf1`): the committed manifest
+  lists `haptics`, `notifications` and `stvdy-mobile`, which is the set a mobile target
+  resolves, while `src-tauri/Cargo.toml` now has `notification` (singular),
+  `global-shortcut` and `updater` and declares the mobile plugin as a **target-specific**
+  dependency. Running `just check-shell` on a laptop therefore rewrites the file with the
+  *desktop* set — `notification`/`global-shortcut`/`updater` in, `stvdy-mobile` out — and
+  committing that would ship a manifest missing the permission set
+  `capabilities/mobile.json` names. Nothing in the repository reads either file (no
+  `*.rs`, `*.mjs`, `*.sh` or workflow mentions `gen/schemas`), so the fix is not urgent;
+  the rule is to leave it at the mobile build's content and let `git checkout` clean up
+  after a desktop `cargo build`. The generator is `tauri_build::build()`, and it is why
+  the file appears in `git status` after any shell build.
