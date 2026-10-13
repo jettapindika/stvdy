@@ -1201,10 +1201,7 @@ enum Gate {
 /// keeps its five behind `async fn`), and requiring `pub` would report them as unreadable.
 fn handler_gate(handler: &str, in_file: &Path) -> Option<Gate> {
     let leaf = handler.rsplit("::").next().unwrap_or(handler);
-    let needles = [
-        format!("pub async fn {leaf}("),
-        format!("async fn {leaf}("),
-    ];
+    let needles = [format!("pub async fn {leaf}("), format!("async fn {leaf}(")];
 
     let read = |text: &str| -> Option<Gate> {
         for needle in &needles {
@@ -1244,7 +1241,11 @@ fn handler_gate(handler: &str, in_file: &Path) -> Option<Gate> {
 
     if let Some(gate) = resolve_module_file(handler, in_file)
         .into_iter()
-        .find_map(|path| std::fs::read_to_string(&path).ok().and_then(|text| read(&text)))
+        .find_map(|path| {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| read(&text))
+        })
     {
         return Some(gate);
     }
@@ -1453,7 +1454,8 @@ async fn an_unverified_account_reaches_only_its_own_surface(pool: PgPool) {
     // token every later row would need, and `DELETE /account` marks the account, which would
     // make the rest of the table answer `account_deleted` instead of what it is being asked
     // about. Both are still exercised, and both are the two a trapped student most needs.
-    const ENDS_THE_SESSION: [(&str, &str); 2] = [("POST", "/auth/logout-all"), ("DELETE", "/account")];
+    const ENDS_THE_SESSION: [(&str, &str); 2] =
+        [("POST", "/auth/logout-all"), ("DELETE", "/account")];
 
     let rows = table();
     let ordered = rows
@@ -1491,8 +1493,7 @@ async fn an_unverified_account_reaches_only_its_own_surface(pool: PgPool) {
                 body["code"], "email_not_verified",
                 "{} {} must stay reachable for an unverified account, or a student whose mail \
                  never arrives cannot get out: {status} {body}",
-                row.method,
-                row.path
+                row.method, row.path
             );
         }
     }

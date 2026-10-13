@@ -99,7 +99,10 @@ impl From<WorkspaceRow> for WorkspaceView {
 /// into the statement; a shared string would have to be `AssertSqlSafe`'d, which
 /// disables exactly the check that keeps a caller from reaching the query text.
 /// The three copies are the price, and they are three lines apart in this file.
-pub async fn list(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<WorkspaceList>> {
+pub async fn list(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+) -> AppResult<Json<WorkspaceList>> {
     let rows = sqlx::query_as::<_, WorkspaceRow>(
         "select w.id, w.name, w.created_at, w.updated_at, w.course_code, w.color, w.exam_date,
                 (select count(*) from sources s
