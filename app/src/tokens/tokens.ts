@@ -141,6 +141,7 @@ export const PAIRS: Pair[] = [
   // State.
   { fg: 'success', bg: 'success-tint', min: MIN.text, where: 'a "ready" chip' },
   { fg: 'warning', bg: 'warning-tint', min: MIN.text, where: 'a "due" chip' },
+  { fg: 'warning', bg: 'surface', min: MIN.text, where: 'a "due today" label on a card' },
   { fg: 'danger', bg: 'danger-tint', min: MIN.text, where: 'an error note' },
   { fg: 'danger', bg: 'surface', min: MIN.text, where: 'an error message on a card' },
   { fg: 'bg', bg: 'danger', min: MIN.text, where: 'the label on a destructive button' },

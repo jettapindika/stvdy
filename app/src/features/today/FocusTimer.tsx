@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { useSettings } from '@/api/queries/settings'
 import { WidgetHeading } from '@/components/layout/Section'
+import { Icon } from '@/components/ui/Icon'
 import { useFocusTimer } from './useFocusTimer'
 
 /**
@@ -11,9 +12,9 @@ import { useFocusTimer } from './useFocusTimer'
  * Four things this component is careful about, and each is a gate rather than a
  * preference.
  *
- * **The state is a word, never a colour.** "Running", "Stopped" and the stale
- * warning are text beside the clock, so the state survives monochrome and reaches
- * a screen reader (gate 5d).
+ * **The state is a word, never a colour.** "Ready", "Running" and "Needs your
+ * call" are text, so the state survives monochrome and reaches a screen reader
+ * (gate 5d).
  *
  * **The number that gets logged is on the button.** "Stop and log 12 min" is the
  * same `elapsedMin` the hook writes, so a student is never surprised by what the
@@ -30,6 +31,19 @@ import { useFocusTimer } from './useFocusTimer'
  * line reads the preference the planner also plans against. A session the student
  * stops after three minutes still logs three: the setting is a plan, and the
  * readout is what happened.
+ *
+ * **The frame's arrangement is a row**: the readout, the block it was started
+ * against, and the one control at the right end. The state word rides in the
+ * heading rather than beside the readout, because a card heading's row is where
+ * the frame puts a status and the readout's row has no room for a second string
+ * at 200% text.
+ *
+ * **The frame's "what you are working on" line is not built, and that is the
+ * honesty rule rather than an omission.** The design names a study block there;
+ * nothing in this app knows what the student intends to work on next. A timer
+ * started from this screen carries no `taskId`, so the only source for that line
+ * would be a guess about the next row on the timeline — and a label naming a
+ * different task than the session logs is worse than a shorter card.
  */
 export function FocusTimer() {
   const { t } = useTranslation()
@@ -37,6 +51,14 @@ export function FocusTimer() {
   const settings = useSettings()
   const [edited, setEdited] = useState('')
 
+  const block = settings.data?.settings
+
+  // The readout is **elapsed time**, and it stays elapsed when nothing is running.
+  // The frame shows its block length here at `READY` (`25:00`), which is a countdown
+  // position; this timer counts up, so the same number would mean two different things
+  // within one second of pressing Start, and a student would read the jump from
+  // `50:00` to `00:01` as the timer resetting. The plan is stated beside it instead,
+  // in the block-length line, and `Ready` is the heading's word.
   const clock =
     state.kind === 'idle'
       ? '00:00'
@@ -44,66 +66,54 @@ export function FocusTimer() {
           state.elapsedSec % 60,
         ).padStart(2, '0')}`
 
-  // The tone repeats what the word already says, so the state reads correctly in
-  // monochrome and never depends on colour (gate 5d).
-  const stateTone =
-    state.kind === 'running'
-      ? 'chip chip-working'
-      : state.kind === 'stale'
-        ? 'chip chip-due'
-        : 'chip'
+  // The state word is short on purpose: it sits in the card's heading, and a
+  // sentence there would wrap the heading at 200% text.
   const stateWord =
     state.kind === 'running'
       ? t('today.timer.running')
       : state.kind === 'stale'
         ? t('today.timer.stale')
-        : t('today.timer.stopped')
-
-  const block = settings.data?.settings
+        : t('today.timer.ready')
 
   return (
     <div className="card flex flex-col gap-4 p-6">
-      <WidgetHeading title={t('today.timer.title')} />
+      <WidgetHeading title={t('today.timer.title')} meta={stateWord} />
 
-      {/* The state word sits with the readout rather than inside the heading's
-          flex row: at a 32px root the pair measured **233px inside a 212px
-          column**, and a state that is clipped is a state that is not read. In a
-          wrapping row it moves to its own line instead. */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <span className={stateTone}>{stateWord}</span>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         {/* The design's readout is 36/47.5 mono, and the scale's nearest step is
             `text-h1` at 32/42 — the size utilities are a closed set and a new one
             is a change to the frozen stylesheet, so the readout takes the closest
             step rather than an inline pixel value nothing else can share. */}
         <p className="font-mono text-h1 tabular-nums">{clock}</p>
+
         {/* The readout is the measurement; the block length is the plan it was
-            started against. Two lines, because "25 min" beside a running clock
-            would read as the time elapsed. */}
+            started against, and it is mono because it is metadata. */}
         {block !== undefined ? (
-          <p className="meta">
+          <p className="eyebrow">
             {t('today.timer.sessionLength', {
               focus: block.block_len_min,
               rest: block.break_min,
             })}
           </p>
         ) : null}
+
+        {/* One control, at the right end of the row, which is the frame's
+            placement. `ml-auto` rather than `justify-between` because the row has
+            to wrap: at 200% text the readout and the button take separate lines,
+            and the button then sits at the row's start. */}
+        {state.kind === 'idle' ? (
+          <button type="button" className="btn btn-secondary ml-auto" onClick={() => void start()}>
+            <Icon name="play" size={16} />
+            {t('today.timer.start')}
+          </button>
+        ) : null}
+
+        {state.kind === 'running' ? (
+          <button type="button" className="btn btn-secondary ml-auto" onClick={() => void stop()}>
+            {t('today.timer.stopAndLog', { count: state.elapsedMin })}
+          </button>
+        ) : null}
       </div>
-
-      {state.kind === 'idle' ? (
-        <button type="button" className="btn btn-secondary self-start" onClick={() => void start()}>
-          {t('today.timer.start')}
-        </button>
-      ) : null}
-
-      {state.kind === 'running' ? (
-        <button
-          type="button"
-          className="btn btn-secondary self-start"
-          onClick={() => void stop()}
-        >
-          {t('today.timer.stopAndLog', { count: state.elapsedMin })}
-        </button>
-      ) : null}
 
       {state.kind === 'stale' ? (
         <div className="flex flex-col gap-3">

@@ -24,10 +24,11 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * carries no colour of its own — the state is in the words ("No credits left"),
  * so nothing is conveyed by colour alone.
  *
- * **Two variants, one reading.** `pill` is the top bar's, where the balance sits
- * in a bordered capsule beside the avatar and has to stay on one line; `plain` is
- * the phone header's row, where there is width to spare. Both render the same
- * string from the same formatter, so the number cannot differ between them.
+ * **Two variants, one reading.** `pill` is the shell's, in both form factors: the
+ * desktop top bar's account group and the phone header's own row under it, which is
+ * where the frames draw a bordered capsule beside the avatar. `plain` remains for a
+ * caller that wants the bare label. Both render the same string from the same
+ * formatter, so the number cannot differ between them.
  */
 
 /**
@@ -56,6 +57,17 @@ export function CreditMeter({
   // a body that is not the documented envelope has to degrade to "unavailable"
   // rather than take the whole shell down with it.
   const total = usage.data?.credits?.total
+  // The plan's monthly allowance and the unspent part of it, which is the pair the
+  // level bar draws. Both are the payload's own numbers; a percentage is not, and
+  // `limits.credits_per_month.used` is `null` by design, so the spent count is
+  // deliberately not derived here either (the same reasoning `PlanUsageSections`
+  // records for its card).
+  const allowance = usage.data?.limits?.credits_per_month?.limit
+  const remaining = usage.data?.credits?.monthly
+  const share =
+    typeof allowance === 'number' && allowance > 0 && typeof remaining === 'number'
+      ? Math.min(remaining / allowance, 1) * 100
+      : null
 
   const label = usage.isPending
     ? t('meter.loading')
@@ -80,6 +92,21 @@ export function CreditMeter({
             language, and a capsule that wrapped "60 credits left" onto two lines
             made the whole top bar twice its height. */}
         <span className="meta whitespace-nowrap text-text">{label}</span>
+        {/* The frame's 24x4 level bar: a second reading of the same balance, never
+            the only one — the label above says the count in words, so nothing here
+            depends on the bar. `aria-hidden` for the same reason the plan screen's
+            monthly bar is: the sentence is the fact, and a bar carrying a fact no
+            text carries would be unreadable to a screen reader.
+            The ratio is the payload's own two numbers (`limits.credits_per_month`
+            is the plan's monthly allowance, `credits.monthly` the unspent part of
+            it), which is the same pair `PlanUsageSections` draws — deliberately not
+            a percentage, which is a figure the server never computes. Omitted, not
+            zero-filled, when either number is absent. */}
+        {share !== null ? (
+          <span className="credit-level" aria-hidden="true">
+            <span className="credit-level-fill" style={{ width: `${String(share)}%` }} />
+          </span>
+        ) : null}
       </Link>
     )
   }

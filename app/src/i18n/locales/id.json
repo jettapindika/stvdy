@@ -511,12 +511,6 @@
   },
   "today": {
     "subtitle": "Blok belajar, kartu yang jatuh tempo, dan tenggat, disusun sesuai waktu yang kamu punya.",
-    "studyBlocks": {
-      "title": "Blok belajar",
-      "emptyTitle": "Belum ada blok belajar terjadwal",
-      "emptyReason": "Blok muncul setelah kamu menetapkan tanggal ujian dan menambahkan materi yang harus dikuasai. Penjadwal bekerja mundur dari ujian, menyesuaikan sesi dengan jam belajarmu, dan tidak pernah menabrak jadwal kuliah.",
-      "planner": "Blok belajar diusulkan oleh penjadwal, yang datang di fase berikutnya. Tidak ada yang dikarang sementara ini."
-    },
     "dueCards": {
       "title": "Flashcard jatuh tempo",
       "emptyTitle": "Tidak ada kartu jatuh tempo",
@@ -535,9 +529,9 @@
     },
     "timer": {
       "running": "Berjalan",
-      "stopped": "Berhenti",
+      "ready": "Siap",
       "stale": "Perlu keputusanmu",
-      "start": "Mulai",
+      "start": "Mulai fokus",
       "stopAndLog_other": "Hentikan dan catat {{count}} menit",
       "staleReason": "Timer ini sudah berjalan lebih dari empat jam, jadi tidak dicatat otomatis. Simpan menit yang benar-benar kamu pakai untuk belajar, atau buang.",
       "minutesLabel": "Menit belajar",
@@ -549,7 +543,13 @@
     "timeline": {
       "title": "Jadwal Hari Ini",
       "at": "pukul {{when}}",
-      "summaryEvents_other": "{{count}} acara",
+      "kindCount": {
+        "class_other": "{{count}} kelas",
+        "exam_other": "{{count}} ujian",
+        "study_block_other": "{{count}} blok belajar",
+        "deadline_other": "{{count}} tenggat",
+        "external_other": "{{count}} dari kalender"
+      },
       "summaryTasks_other": "{{count}} tugas",
       "summaryMinutes_other": "{{count}} menit tercatat",
       "kindTask": "Tugas",
@@ -568,23 +568,17 @@
       "hint": "Tambahkan materi kuliahmu dan Stvdy menyusun alat belajarnya dari materi itu.",
       "start": "Tambah ruang belajar pertama"
     },
-    "continue": {
-      "title": "Lanjutkan yang tadi",
-      "open": "Buka {{name}}",
-      "lastTouched": "Terakhir diubah {{when}}"
-    },
     "activity": {
-      "title": "Belajarmu",
-      "minutes": "{{count}} menit tercatat hari ini",
       "streak": "{{count}} hari beruntun belajar",
       "loading": "Memeriksa aktivitas belajarmu"
     },
     "capture": {
       "title": "Catatan cepat",
       "label": "Apa yang harus kamu kerjakan?",
-      "placeholder": "selesaikan tugas kripto hari Jumat",
-      "run": "Buat draf tugas",
-      "runWithCost": "Buat draf tugas ({{count}} kredit)",
+      "placeholder": "mis. selesaikan tugas kripto hari Jumat",
+      "hint": "Satu baris, lalu draf tugas yang kamu konfirmasi. Baris itu dikirim ke asisten.",
+      "run": "Pecahan otomatis AI",
+      "runWithCost": "Pecahan otomatis AI ({{count}} kredit)",
       "noun": "tugas hasil catatan cepat",
       "draft": "tugas",
       "fieldTitle": "Judul",
@@ -596,9 +590,9 @@
       "offline": "Fitur AI butuh koneksi."
     },
     "greeting": {
-      "morning": "Selamat pagi, {{name}}.",
-      "afternoon": "Selamat siang, {{name}}.",
-      "evening": "Selamat malam, {{name}}."
+      "morning": "Selamat pagi, {{name}}. Ini yang menantimu hari ini.",
+      "afternoon": "Selamat siang, {{name}}. Ini yang menantimu hari ini.",
+      "evening": "Selamat malam, {{name}}. Ini yang menantimu hari ini."
     },
     "openDay": "Buka kalender untuk {{date}}",
     "due": {
@@ -615,6 +609,7 @@
     },
     "deadlines": {
       "weekRange": "{{from}}–{{to}}",
+      "count_other": "{{count}} tenggat",
       "today": "Hari ini",
       "inDays_other": "{{count}} hari lagi",
       "openPlanner": "Buka Jadwal"

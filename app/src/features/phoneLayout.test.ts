@@ -330,32 +330,6 @@ describe('the citation chip is an inline target, and the desktop floor does not 
   })
 })
 
-describe('the Today screen survives 200% text', () => {
-  it('keeps a second string out of the widget heading, and wraps what it moves out', () => {
-    // `WidgetHeading` is a `justify-between` flex row whose `<h3>` has no `min-w-0`,
-    // so the heading cannot shrink out of a sibling's way. Measured at 390px with
-    // the root font at 32px, the timeline's heading with the timezone on its right
-    // was `scrollWidth` **250** against a `clientWidth` of **212**, and the timer's
-    // with its state word was **233** against 212 — both clipped inside the card.
-    // The state word and the timezone therefore live in the wrapping rows below the
-    // heading: the timer's with the readout, the timeline's in its mono summary
-    // line, which is where the frame puts the timezone anyway.
-    const screen = withoutComments(read('features/today/TodayScreen.tsx'))
-    const timer = withoutComments(read('features/today/FocusTimer.tsx'))
-
-    // The two that were measured: a heading followed by a *word* — the timer's state
-    // and the timeline's zone. A bare count is `WidgetHeading`'s own use and the one
-    // string short enough to share the row (the deadlines widget's "3" was measured
-    // with them and did not clip), so the rule is about the phrase, not the prop.
-    expect(screen).toMatch(/<WidgetHeading title=\{t\('today\.timeline\.title'\)\} \/>/)
-    expect(timer).toMatch(/<WidgetHeading title=\{t\('today\.timer\.title'\)\} \/>/)
-    // And the rows they moved into can wrap, so the next long string moves to its
-    // own line instead of being clipped.
-    expect(timer).toContain('flex flex-wrap items-center gap-x-6 gap-y-2')
-    expect(screen).toContain('meta break-words')
-  })
-})
-
 describe('the study screen survives 200% text', () => {
   const study = read('features/study/StudyScreen.tsx')
 

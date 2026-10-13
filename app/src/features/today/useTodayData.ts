@@ -63,10 +63,9 @@ export interface CourseRef {
   color: number
 }
 
-/** The checklist's counts, plus the workspace "continue where you left off" opens. */
+/** The checklist's counts and the live courses, as the setup reads report them. */
 interface SetupRead {
   counts: SetupCounts
-  lastWorkspace: { id: string; name: string; updatedAt: string | null } | null
   courses: CourseRef[]
 }
 
@@ -147,18 +146,6 @@ async function readSetup(): Promise<SetupRead> {
         sources: live(sources).length,
         decks: live(decks).length,
       },
-      // The most recently touched workspace, which is what "continue" means. An
-      // unknown `updated_at` sorts last rather than first: a row this build cannot
-      // date is not evidence of recent work.
-      lastWorkspace:
-        [...liveWorkspaces]
-          .sort(
-            (left, right) =>
-              Date.parse(right.updated_at ?? '') - Date.parse(left.updated_at ?? '') ||
-              left.id.localeCompare(right.id),
-          )
-          .map((row) => ({ id: row.id, name: row.name, updatedAt: row.updated_at ?? null }))[0] ??
-        null,
       courses: liveWorkspaces.map((row) => ({
         id: row.id,
         name: row.name,
@@ -175,7 +162,6 @@ async function readSetup(): Promise<SetupRead> {
     workspaces: {
       id: string
       name: string
-      updated_at: string
       source_count: number
       course_code: string | null
       color: number
@@ -192,14 +178,6 @@ async function readSetup(): Promise<SetupRead> {
       sources: workspaces.reduce((total, row) => total + row.source_count, 0),
       decks,
     },
-    lastWorkspace:
-      [...workspaces]
-        .sort(
-          (left, right) =>
-            Date.parse(right.updated_at) - Date.parse(left.updated_at) ||
-            left.id.localeCompare(right.id),
-        )
-        .map((row) => ({ id: row.id, name: row.name, updatedAt: row.updated_at }))[0] ?? null,
     courses: workspaces.map((row) => ({
       id: row.id,
       name: row.name,
@@ -222,8 +200,6 @@ export interface TodayData {
   /** The live courses, so a timeline row or a deadline can be tagged with one. */
   courses: CourseRef[]
   setup: SetupCounts
-  /** The most recently touched workspace, for "continue where you left off". */
-  lastWorkspace: { id: string; name: string; updatedAt: string | null } | null
   /** The window the reads used, so the screen can say what "today" covers. */
   window: { from: string; to: string }
   loading: boolean
@@ -254,7 +230,6 @@ export function useTodayData(window: { from: string; to: string }): TodayData {
     reviewDeck: { title: queue.data?.deckTitle ?? null, course: queue.data?.courseName ?? null },
     courses: setup.data?.courses ?? [],
     setup: setup.data?.counts ?? { workspaces: 0, sources: 0, decks: 0 },
-    lastWorkspace: setup.data?.lastWorkspace ?? null,
     window,
     loading: queries.some((query) => query.isPending),
     failed: queries.some((query) => query.isError),

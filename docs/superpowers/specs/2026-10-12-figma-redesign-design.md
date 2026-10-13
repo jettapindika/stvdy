@@ -409,3 +409,67 @@ give it one. Every other screen in the app that reaches for `overflow-x-auto` wa
 checked against this at the same time; the ones that were already correct carried
 `w-full` on the container, which is why this is a missing class rather than a wrong
 pattern.
+
+---
+
+## Today, brought to the frame (`411:26794`)
+
+Today was the screen the redesign pass left furthest from its frame: it carried two
+sections the frame does not draw, stated the day's minutes twice, and arranged its
+priority block, timer and capture card differently. This round is a **fidelity pass
+against the frame's own node tree**, read through the Figma Dev Mode MCP server
+(`get_metadata` for every box's `x`/`y`/`width`/`height`, `get_variable_defs` for the
+variables each block binds). Every change below is a number or a placement the frame
+states.
+
+| Frame says | Was | Now |
+|---|---|---|
+| Priority block: eyebrow with the `layers` glyph, the count at **H2 24/32**, the deck line under it, and the action column **at the right** with the queue's name in mono under the button | h3 eyebrow, the count at 20/26, the action stacked under the text | `Icon name="layers" size={20}` + `.eyebrow-primary`, the count in an `<h2>`, and the action column beside the text on a desktop (`lg:flex-row lg:justify-between`), stacked on a phone — the frame's own phone arrangement |
+| Streak card: `flame` + the streak as the card's **heading**, the five days spread across the card, then the encouragement. **No eyebrow, and no minutes line** | an `eyebrow` above it, the days left-aligned in a tight row, and a second minutes count below | heading with the 24px flame, `justify-between` strip, encouragement. The duplicate minutes line is gone: the timeline's summary already states `{{count}} min logged`, and two statements of one number on one screen is two answers to one question |
+| Timeline rows: `CLASS · FINISHED` and the deadline's `DEADLINE` word at the row's **right end**, a **deadline row on the warning tint**, a 16px gap between rows | the kind word left-aligned beside the course tag, every row on the raised tint, a 12px gap | `justify-between` on the category row, `.eyebrow` for the word, `bg-warning-tint` for `kind === 'deadline'`, `gap-4` |
+| Timeline summary: counts **by kind** (`2 CLASSES · 2 STUDY BLOCKS`) on the left, the zone on the right | `N events · N tasks`, with the zone appended to the same string | `today.timeline.kindCount.*` per kind plus the task count, as a wrapping row with the zone as its own `<p>`. The zone moved out of the string because at a 32px root the pair measured 250px inside a 212px column |
+| Deadlines: the week range **and the count** in mono caps above the cards; each card's due line as `TUE 13 OCT · 17:00` | the range alone; the due line as one `medium`-style string | `.eyebrow` for both, the due line built from a date part and a time part |
+| Focus timer: the state word in the card heading, the readout, the block length in mono caps, and **one control at the right end of that row** | a chip beside the readout and the control on its own line below | `WidgetHeading`'s `meta` carries the state word (`Ready` / `Running` / `Needs your call`), the block length is `.eyebrow`, and the control is `ml-auto` in the same wrapping row |
+| Quick capture: the action is a **centred** raised row | left-aligned mark and label | `justify-center` with `flex-wrap` |
+| The frame's Today has **no** "Continue where you left off" section and **no** study-blocks placeholder | both rendered, the second with a note that the planner "arrives in a later phase" | both removed. `docs/SPEC.md` § Today is amended in the same change, and the read that existed only for the continue card (`lastWorkspace`) is gone from `useTodayData` rather than left as an unused field |
+
+**What the frame shows and this screen deliberately does not build**, so the omission
+is a decision rather than a discovery:
+
+- The frame's priority block carries an **"Estimated duration"** line under its action
+  ("About 12 minutes"). Nothing in the app estimates how long a review takes, and a
+  number there would be the one figure on this screen the API never returned. The line
+  under the action names the queue instead ("Due flashcards").
+- The frame's timer carries a **"what you are working on"** line. A timer started from
+  this card passes no `taskId`, so the only source for that line would be a guess about
+  the next row on the timeline — and a label naming a different task than the session
+  logs is worse than a shorter card.
+- The frame's deadline cards carry a **progress line** under the due date ("Draft
+  ready · Final check remaining", "3 of 8 questions complete"). Nothing in the app
+  carries it: a `task` has a `status` and an `estimate_min`, and an event of kind
+  `deadline` has no progress field at all, so the line would be invented. The card
+  shows the four facts it has — the course, the day offset, the title and the due
+  instant.
+- The frame's date control is a dropdown. The app's control is a link to the Planner's
+  calendar view, which is the one destination the app has; a control that looked like a
+  picker and opened a page would be a control that lied about what it does.
+
+**Two defects the walk found in this pass**, both only visible at 200% text on the
+desktop leg:
+
+| Defect | Mechanism | Why nothing else caught it |
+|---|---|---|
+| The priority block's deck line was **clipped**: `Kriptografi dan Keamanan Informasi Terapan` measured `scrollWidth` 140px against a `clientWidth` of **75px**, both themes | The block became a flex row, so the text column was `flex-1 min-w-0` beside a `max-w-56` action column. `min-w-0` lets the column shrink to *nothing*, and at a 32px root the action column's 14rem left the text column 75px. The remedy is the same one `.search-field` carries: a **floor** (`lg:min-w-56`), after which the row's own `flex-wrap` puts the action on the next line instead of squeezing the text | The phone leg passes the same markup, because a phone stacks the block; the desktop leg is the only one that renders the row |
+| The clipped string was a **course name** — the student's own text, with no break opportunity at 200% | `break-words` (`overflow-wrap: break-word`) does not lower a box's min-content size, so a long unbroken word keeps overflowing. `wrap-anywhere` (`anywhere`) does, and that is the utility the capture draft card already uses for the same class of string | The string is a fixture course name that fits at 100%; only the 32px root makes one word wider than the column |
+
+**Verification.** `ONLY_SURFACES=today` at both viewports, both themes, 100% and 200%:
+390×844 → 15 targets, 0 under 44px, 47 text pairs, lowest 5.28:1, 0 clipped, 0
+overlapped, page 390/390; 1365×900 → 16 targets, 0 under 32px, 54 text pairs, lowest
+5.28:1, 0 clipped, 0 overlapped, page 1365/1365. Both legs PASS with 0 unreached Tab
+stops and 0 without a ring. `scripts/screenshot-frames.mjs today-desktop` and
+`today-mobile` capture the frame's own viewports at its own width; the harness's own
+fixtures put the task four days out and the event on the week's Wednesday, so the
+timeline's populated state was photographed separately (a throwaway that overrides
+`/tasks`, `/events`, `/activity` and `/sessions` to today-anchored rows) and its
+summary line then reads `1 CLASS · 1 EXAM · 1 STUDY BLOCK · 1 DEADLINE · 1 TASK · 50 MIN
+LOGGED`.

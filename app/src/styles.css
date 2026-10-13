@@ -940,6 +940,37 @@
     min-height: 2.125rem;
   }
 
+  /* The phone's touch floor. The frame draws this capsule 34px tall, and 34px is a
+     target a thumb misses; the app's floor is 44px, and the design's own accessibility
+     sheet states the same intent ("3:1 large text and control boundaries", with the
+     target sizes on the UI-controls sheet). So the value that gives way is the
+     specimen's height, not the rule. The desktop keeps the frame's 34px, which clears
+     the 32px desktop floor. */
+  @media (max-width: 767px) {
+    .credit-pill {
+      min-height: 2.75rem;
+    }
+  }
+
+  /* The frame's `Credit level`: 24x4, pill radius, the spent part in the track and
+     the remaining part in the indigo fill. Decorative by construction — the pill's
+     label carries the balance in words — so it is `aria-hidden` at its call site. */
+  .credit-level {
+    display: block;
+    width: 1.5rem;
+    height: 0.25rem;
+    flex-shrink: 0;
+    border-radius: var(--radius-pill);
+    background-color: var(--border);
+    overflow: hidden;
+  }
+  .credit-level-fill {
+    display: block;
+    height: 100%;
+    border-radius: var(--radius-pill);
+    background-color: var(--primary);
+  }
+
   /* The avatar: initials in a circle. Indigo tint with the indigo text pair, and
      the initials are the accessible name's visible half. */
   .avatar {

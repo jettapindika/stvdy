@@ -169,17 +169,23 @@ export function QuickCapture() {
         aria-describedby="quick-capture-hint"
         onChange={(event) => setText(event.target.value)}
       />
-      {/* The composer hint, under the field, because this text reaches a model. */}
-      <p id="quick-capture-hint" className="composer-hint">
-        {t('honesty.composerHint')}
+      {/* The hint under the field, because this text reaches a model and the
+          draft is not saved until the student confirms it. It is this card's own
+          line rather than the chat composer's: a captured task has no citations
+          to check, and the frame's "Add a task now" would promise the one thing
+          this card deliberately does not do (A193). */}
+      <p id="quick-capture-hint" className="text-caption text-muted">
+        {t('today.capture.hint')}
       </p>
       {/* The action is a raised row rather than a filled button: this screen's one
           primary action is the review, and a second indigo fill would make two
-          things look like the next step. The sparkle is the assistant mark, and
-          the cost is in the label so the price is read before the run. */}
+          things look like the next step. The sparkle is the assistant mark, the
+          cost is in the label so the price is read before the run, and the row is
+          centred — which is the frame's arrangement and the one that keeps the
+          mark and the label together when the row wraps. */}
       <button
         type="button"
-        className="raised flex min-h-11 w-full items-center gap-2 rounded-field px-4 text-label font-medium text-primary-text disabled:opacity-45"
+        className="raised flex min-h-11 w-full flex-wrap items-center justify-center gap-2 rounded-field px-4 py-2 text-label font-medium text-primary-text disabled:opacity-45"
         disabled={busy || text.trim().length === 0}
         onClick={() => void run()}
       >

@@ -943,7 +943,13 @@ const SURFACES = [
   // `calendar`'s is the calendar's own count, which is the strongest of the three: it
   // proves the event landed inside the week `localWeek` renders, not merely that some
   // text is on the page.
-  { name: 'today', expect: 'Due flashcards', steps: [{ nav: 'Today' }] },
+  // The guard is the **deck title**, which comes from the fixture rather than from
+  // the screen's own copy: the review block renders it only when the queue is
+  // non-empty, so it catches the silently-empty state the anchored clock exists to
+  // prevent, and it cannot fail while a translation is being merged. (It replaced
+  // `Due flashcards`, which the frame now types in caps — `innerText` applies
+  // `text-transform`, so that string is no longer on the page.)
+  { name: 'today', expect: 'Kriptografi Kunci Publik', steps: [{ nav: 'Today' }] },
   { name: 'workspaces', steps: [{ nav: 'Work' }] },
   // Calendar and Tasks are **views inside the planner** as of the redesign, so they are
   // reached through the Planner tab and its own switcher rather than as tabs of their own.

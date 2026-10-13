@@ -116,9 +116,11 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
         </div>
       </div>
       {/* Its own row, left-aligned, so the pill does not compete with the header
-          controls for width on a narrow phone. */}
+          controls for width on a narrow phone. It is the **pill** variant, which is
+          what the phone frame draws here (`Account and timezone` → `Credit meter`,
+          153x34): the same capsule as the desktop bar, with the level bar in it. */}
       <div className="px-5 pb-3">
-        <CreditMeter />
+        <CreditMeter variant="pill" />
       </div>
     </div>
   )

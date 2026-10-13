@@ -374,7 +374,7 @@ describe('quick capture', () => {
   async function openDraft(user: UserEvent) {
     const field = await screen.findByLabelText('What do you have to do?')
     await user.type(field, 'selesaikan tugas kripto hari Jumat')
-    await user.click(screen.getByRole('button', { name: /Draft a task/ }))
+    await user.click(screen.getByRole('button', { name: /AI auto-breakdown/ }))
     await screen.findByText('Suggested task')
     return field
   }
@@ -385,7 +385,7 @@ describe('quick capture', () => {
     renderWithProviders(<TodayScreen />, { route: '/' })
 
     const field = await screen.findByLabelText('What do you have to do?')
-    const runButton = screen.getByRole('button', { name: /Draft a task/ })
+    const runButton = screen.getByRole('button', { name: /AI auto-breakdown/ })
     // Gate 7(d): the price is on the control, before the action runs, and it is
     // the matrix's number rather than a literal.
     expect(runButton).toHaveTextContent('2 credits')
@@ -426,7 +426,7 @@ describe('quick capture', () => {
 
     const field = await screen.findByLabelText('What do you have to do?')
     await user.type(field, 'selesaikan tugas kripto hari Jumat')
-    await user.click(screen.getByRole('button', { name: /Draft a task/ }))
+    await user.click(screen.getByRole('button', { name: /AI auto-breakdown/ }))
     await screen.findByText('Suggested task')
 
     await user.click(screen.getByRole('button', { name: 'Dismiss' }))

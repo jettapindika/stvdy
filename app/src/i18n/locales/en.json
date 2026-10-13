@@ -516,12 +516,6 @@
   },
   "today": {
     "subtitle": "Study blocks, due cards, and deadlines, arranged by the time you have available.",
-    "studyBlocks": {
-      "title": "Study blocks",
-      "emptyTitle": "No study blocks scheduled",
-      "emptyReason": "Blocks appear once you set an exam date and add the material to cover. The planner works backward from the exam, fits sessions into your study hours, and never overlaps a class.",
-      "planner": "Study blocks are proposed by the planner, which arrives in a later phase. Nothing here is invented in the meantime."
-    },
     "dueCards": {
       "title": "Due flashcards",
       "emptyTitle": "No cards due",
@@ -540,9 +534,9 @@
     },
     "timer": {
       "running": "Running",
-      "stopped": "Stopped",
+      "ready": "Ready",
       "stale": "Needs your call",
-      "start": "Start",
+      "start": "Start focus",
       "stopAndLog_one": "Stop and log {{count}} min",
       "stopAndLog_other": "Stop and log {{count}} min",
       "staleReason": "This timer has been running for more than four hours, so it is not counted automatically. Save the minutes you actually studied, or discard it.",
@@ -555,8 +549,18 @@
     "timeline": {
       "title": "Today's Timeline",
       "at": "at {{when}}",
-      "summaryEvents_one": "{{count}} event",
-      "summaryEvents_other": "{{count}} events",
+      "kindCount": {
+        "class_one": "{{count}} class",
+        "class_other": "{{count}} classes",
+        "exam_one": "{{count}} exam",
+        "exam_other": "{{count}} exams",
+        "study_block_one": "{{count}} study block",
+        "study_block_other": "{{count}} study blocks",
+        "deadline_one": "{{count}} deadline",
+        "deadline_other": "{{count}} deadlines",
+        "external_one": "{{count}} from a calendar",
+        "external_other": "{{count}} from a calendar"
+      },
       "summaryTasks_one": "{{count}} task",
       "summaryTasks_other": "{{count}} tasks",
       "summaryMinutes_one": "{{count}} min logged",
@@ -577,23 +581,17 @@
       "hint": "Add your course material and Stvdy builds the study tools from it.",
       "start": "Add your first workspace"
     },
-    "continue": {
-      "title": "Continue where you left off",
-      "open": "Open {{name}}",
-      "lastTouched": "Last changed {{when}}"
-    },
     "activity": {
-      "title": "Your study",
-      "minutes": "{{count}} minutes logged today",
       "streak": "{{count}}-day study streak",
       "loading": "Checking your study"
     },
     "capture": {
       "title": "Quick capture",
       "label": "What do you have to do?",
-      "placeholder": "selesaikan tugas kripto hari Jumat",
-      "run": "Draft a task",
-      "runWithCost": "Draft a task ({{count}} credits)",
+      "placeholder": "e.g. finish the crypto assignment Friday",
+      "hint": "One line in, a task draft you confirm. The line goes to the assistant.",
+      "run": "AI auto-breakdown",
+      "runWithCost": "AI auto-breakdown ({{count}} credits)",
       "noun": "a captured task",
       "draft": "task",
       "fieldTitle": "Title",
@@ -605,9 +603,9 @@
       "offline": "AI actions need a connection."
     },
     "greeting": {
-      "morning": "Good morning, {{name}}.",
-      "afternoon": "Good afternoon, {{name}}.",
-      "evening": "Good evening, {{name}}."
+      "morning": "Good morning, {{name}}. Here is what is on your desk today.",
+      "afternoon": "Good afternoon, {{name}}. Here is what is on your desk today.",
+      "evening": "Good evening, {{name}}. Here is what is on your desk today."
     },
     "openDay": "Open the calendar for {{date}}",
     "due": {
@@ -625,6 +623,8 @@
     },
     "deadlines": {
       "weekRange": "{{from}}–{{to}}",
+      "count_one": "{{count}} deadline",
+      "count_other": "{{count}} deadlines",
       "today": "Today",
       "inDays_one": "In {{count}} day",
       "inDays_other": "In {{count}} days",
