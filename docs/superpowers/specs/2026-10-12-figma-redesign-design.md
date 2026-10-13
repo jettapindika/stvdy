@@ -511,23 +511,30 @@ corrections rather than additions:
   that a rendered pair is named there rather than eyeballed, and the row is the only
   surface that puts body text on a warning ground.
 
-**Verification.** `ONLY_SURFACES=today` at both viewports, both themes, 100% and 200%:
-390×844 → 15 targets, 0 under 44px, 47 text pairs, lowest 5.28:1, 0 clipped, 0
-overlapped, page 390/390; 1365×900 → 16 targets, 0 under 32px, 54 text pairs, lowest
-5.28:1, 0 clipped, 0 overlapped, page 1365/1365. Both legs PASS with 0 unreached Tab
-stops and 0 without a ring.
+**Verification.** `ONLY_SURFACES=today,today-populated` at both viewports, both themes,
+100% and 200%. 390×844: `today` → 15 targets, 0 under 44px, 47 text pairs; `today-populated`
+→ 14 targets, 0 under 44px, 80 text pairs. 1365×900: `today` → 16 targets, 0 under 32px,
+54 text pairs; `today-populated` → 15 targets, 0 under 32px, 87 text pairs. Zero clipped,
+zero overlapped, page width exact, 0 unreached Tab stops and 0 without a ring, on every one
+of the sixteen combinations.
 
-The **whole app** was then walked with the same change in place, because the credit
-pill's level bar is shell chrome on every screen:
+The **whole app** was then walked with the same change in place — the credit pill's level
+bar is shell chrome on every screen, and `today-populated` is now a surface in its own right:
 
 | Leg | Surfaces | Combinations | Targets | Text pairs | Lowest contrast | Tab stops |
 |---|---|---|---|---|---|---|
-| 390×844, both themes, 100%/200% | 29 | 116 | 1,920 | 5,500 | 4.97:1 | 1,924, 0 unreached, 0 without a ring |
-| 1365×900, both themes, 100%/200% | 30 | 120 | 2,552 | 7,756 | 4.79:1 | 2,468, 0 unreached, 0 without a ring |
+| 390×844, both themes, 100%/200% | 30 | 120 | 1,976 | 5,820 | 4.71:1 | 1,984, 0 unreached, 0 without a ring |
+| 1365×900, both themes, 100%/200% | 31 | 124 | 2,612 | 8,104 | 4.71:1 | 2,532, 0 unreached, 0 without a ring |
 
-Zero clipped, zero overlapped, and the page width exact at every one of the 236
-combinations. The 4.79:1 pair is the board's own empty-column caption, which was the
-desktop leg's lowest before this change as well.
+Zero clipped, zero overlapped, and the page width exact at every one of the 244 combinations.
+
+**The lowest pair moved from 4.79:1 to 4.71:1, and it moved because a surface finally
+rendered the thing it measures.** 4.71:1 is the course tag — `IF4020`, `.chip` in a course
+hue — and it is the *declared* `success`-family pair on its own tint. It was always on the
+screen; no surface put a row on Today's timeline, so the walk had never measured it. The
+same is true of the two pairs this round added to `tokens.ts`: declaring a pair is what
+makes it checkable, and the row is the only surface that renders body text on a warning
+ground.
 
 `scripts/screenshot-frames.mjs today-desktop` and `today-mobile` capture the frame's
 own viewports at its own width, but the harness's fixtures put the task four days out
