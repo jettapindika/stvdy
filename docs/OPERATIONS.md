@@ -494,6 +494,37 @@ mode 644 — `docs/THREAT_MODEL.md` §5 counts an attacker who reaches this host
 this file is the reason that boundary matters. And it is the *only* copy: losing it means logging in
 again with the phone.
 
+### The merchant account is shared, and settlements are matched by amount
+
+**`G719828701` ("ztvn, Digital & Kreatif") takes QRIS payments for whatever else that
+business sells**, and this is visible rather than theoretical: `GET
+/transactions?merchant_id=G719828701&minutes=10080` on 2026-10-13 returned three real
+settlements from 2026-10-10 — Rp 4.000, Rp 7.000 and Rp 30.000, each `status: SETTLEMENT`,
+`paymentType: QRIS`, with the provider's own `orderId`. None of them is Stvdy's.
+
+**The bridge matches a settlement to a Stvdy invoice by the amount alone**, which is the
+whole reason it assigns a unique payable figure: it has no per-order callback, so the amount
+is the only discriminator it has. The consequence is worth stating plainly, because it is a
+property of the gateway that this server cannot verify away:
+
+- **a coincidental non-Stvdy payment of exactly the payable amount, inside the invoice's
+  window, would settle that invoice.** The offset (1..999 IDR) makes the figure unlikely to
+  collide, the 15-minute invoice window bounds how long a collision has to happen, and the
+  checkout screen shows the student the exact figure to transfer — but nothing in this tree
+  can distinguish the two payments after the fact.
+- **the same coincidence masks a real mismatch in the sweep.** The reconciliation join is on
+  `coalesce(payable_amount_idr, amount_idr)`, so an unrelated settlement of that amount makes
+  one of our payments look settled, in both directions.
+
+**This is A360, and `QRIS_RECONCILE_HOURS` is what keeps the unrelated sales out of the sweep.** The default 48
+hours currently excludes those 2026-10-10 settlements; a window long enough to include them
+makes the sweep report them hourly as *money the gateway took with no row behind it*, which is
+the correct verdict and useless noise. Raise it only alongside a way to tell the merchant's
+other business apart — and note the bridge clamps its own feed window to a week, so a value
+above 168 hours silently reads as **one hour**, not as a week (`minutes` outside 1..10080 falls
+back to the 60-minute default; that is why the 30-day query above answers `[]` while the 7-day
+one answers with data).
+
 ### What the operator watches
 
 | Signal | Where | What it means |
