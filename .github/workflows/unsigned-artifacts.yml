@@ -35,9 +35,16 @@ on:
           build-time value, not a runtime setting, so an artifact built with the wrong one
           cannot reach the server it was meant for — and the fallback is
           `http://localhost:8080`, which is why this is a required input rather than a
-          default nobody looks at. It must also be in the server's `WEB_ORIGIN` allowlist.
+          default nobody looks at. It must also be in the server's `WEB_ORIGIN` allowlist,
+          and its origin must be in the shell's `connect-src` (both are asserted in the
+          `version` job).
         required: true
-        default: https://stvdy.ztvn.my.id
+        # **The path is part of the value, and the bare origin is wrong here.** nginx mounts the
+        # API at `/api/` and serves the SPA everywhere else (`deploy/staging/nginx.conf`), so
+        # `VITE_API_BASE_URL=https://stvdy.ztvn.my.id` sends `/auth/login` to `try_files $uri
+        # /index.html` and the client parses the SPA's HTML as a login response. Measured on the
+        # live host: `/health` answers `text/html` and `/api/health` answers the API's JSON.
+        default: https://stvdy.ztvn.my.id/api
       visibility:
         description: What to do with the GitHub Release once the artifacts are built.
         type: choice
@@ -115,6 +122,15 @@ jobs:
         # `WEB_ORIGIN` is the server's allowlist and is a **pair** with this value: the browser
         # refuses the response otherwise, with nothing but a console error. It cannot be read
         # from here (it is the server's environment), so it is named in the run summary.
+        #
+        # **The app's own CSP is the second pair, and it is the one that shipped broken.** The
+        # packaged shell serves its document with the `app.security.csp` header from
+        # `src-tauri/tauri.conf.json` (Tauri builds it in `AppManager::get_asset` and sets it in
+        # `protocol::tauri`), and a `connect-src` that omits the API origin blocks every `fetch`
+        # the SPA makes — from inside a webview the student cannot open devtools on. So the
+        # origin about to be baked in is asserted against that allowlist here, before anything is
+        # built: the two are one contract, and a build whose CSP refuses its own API is a bundle
+        # that installs and then fails every request.
         env:
           API_BASE: ${{ inputs.api_base_url }}
         run: |
@@ -129,6 +145,23 @@ jobs:
               ;;
             *)
               echo "::error::api_base_url '$API_BASE' is not an absolute http(s) origin"
+              exit 1
+              ;;
+          esac
+
+          # The origin without its path: `connect-src` lists origins, and the staging SPA is
+          # built with the `/api` prefix while the installer input carries the bare origin.
+          origin="$(printf '%s' "$API_BASE" | sed -E 's#^([a-z]+://[^/]+).*#\1#')"
+          csp="$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['app']['security']['csp'])")"
+          connect_src="$(printf '%s' "$csp" | tr ';' '\n' | awk '$1 == "connect-src" { $1=""; print }')"
+          echo "origin:     $origin"
+          echo "connect-src:$connect_src"
+          case " $connect_src " in
+            *" $origin "*|*" $origin;"*)
+              echo "the app's CSP allows the origin these artifacts will call"
+              ;;
+            *)
+              echo "::error::the app's connect-src does not list $origin, so a packaged app blocks every request to the server it was built for. Add it to app.security.csp in src-tauri/tauri.conf.json."
               exit 1
               ;;
           esac

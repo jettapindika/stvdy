@@ -60,6 +60,30 @@ stapled to the `.app` **before** the dmg is rebuilt.
   a stale signature is worse than none, because `latest.json` would name a signature that does not
   match the file it points at.
 
+**The installers' own CSP is a third thing the four commands do not cover, and v0.1.2 shipped
+broken because of it** (A363). The packaged shell serves its document with
+`app.security.csp` from `src-tauri/tauri.conf.json` as a header — Tauri builds it in
+`AppManager::get_asset` and sets it on the response in `src/protocol/tauri.rs` — so its
+`connect-src` is enforced on every `fetch` the SPA makes. An origin that is not in that list is a
+request the webview refuses, with nothing but a console error and no devtools on a student's
+machine. **Read out of the shipped v0.1.2 artifacts:** the APK's embedded `assets/tauri.conf.json`
+carries `connect-src 'self' ipc: http://ipc.localhost http://localhost:8080
+https://api.stvdy.app` while its own release notes state the client talks to
+`http://168.110.202.106:8080`, and the dmg's `stvdy-shell` binary carries the same list — so both
+installers block every request to the server they were built for. The two are one contract, in the
+same shape as the server's `WEB_ORIGIN`, and the unsigned-artifacts workflow's origin step now
+**asserts it before anything is built**: the origin about to be baked into `VITE_API_BASE_URL`
+must appear in `connect-src`, or the run fails. What it cannot check is whether the list should
+also carry some *other* origin — that is the review of a one-line diff.
+
+**The same input carries a path, and the bare origin is wrong for this deployment.** nginx mounts
+the API at `/api/` and serves the SPA everywhere else (`deploy/staging/nginx.conf`), so
+`VITE_API_BASE_URL=https://stvdy.ztvn.my.id` sends `/auth/login` to `try_files $uri /index.html`
+and the client parses the SPA's HTML as a login response. Measured on the live host: `/health`
+answers `text/html` and `/api/health` answers the API's JSON — which is why the workflow's default
+is `https://stvdy.ztvn.my.id/api`, and why an artifact's base URL and the proxy's mount point are
+one contract as well.
+
 - macOS: `universal-apple-darwin` target, `codesign` + `notarytool`, hardened
   runtime, minimum macOS 11.0, **and the notarization ticket stapled into both the `.app` and
   the `.dmg`** (A333) — an unstapled dmg fails on a machine with no network.
