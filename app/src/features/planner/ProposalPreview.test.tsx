@@ -84,7 +84,7 @@ describe('the proposal grid’s current-time line', () => {
     // Exactly one row is today, so exactly one line. This is also what proves the grid
     // rendered its week at all: a component that failed to build days would report zero
     // and pass the rest of this test vacuously.
-    const lines = container.querySelectorAll('span.bg-border-strong')
+    const lines = container.querySelectorAll<HTMLElement>('span.bg-border-strong')
     expect(lines).toHaveLength(1)
 
     const line = lines[0]

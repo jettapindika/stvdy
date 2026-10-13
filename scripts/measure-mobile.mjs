@@ -2550,10 +2550,41 @@ async function main() {
   const available = SURFACES.filter(
     (surface) => surface.desktopOnly !== true || MIN_TARGET === DESKTOP_TARGET,
   )
-  const surfaces =
-    ONLY === undefined
-      ? available
-      : available.filter((surface) => ONLY.split(',').includes(surface.name))
+  /**
+   * A name in `ONLY_SURFACES` that matches nothing is a **failure**, not a smaller run.
+   *
+   * The filter below drops an unknown name silently, and only the *all*-names-missing
+   * case used to fail — which is the one case a typo cannot produce. So
+   * `ONLY_SURFACES=planner,calendar,syllabus,planner-ai-breakdown` walked three surfaces
+   * and printed `PASS` while claiming four, and `planner-ai-breakdown` is not a surface
+   * name in this table at all. That is the same shape as the vacuity the rest of this
+   * file guards against: a run that reads green over coverage it never had. A
+   * filtered run is not a gate result, and this is what keeps the verdict line honest
+   * about which surfaces it covered.
+   *
+   * Checked against `SURFACES` rather than `available`, so a name that is real but not
+   * walkable on this leg (`tasks-board` on a phone) is reported as *that* rather than as
+   * a typo.
+   */
+  const requested = ONLY === undefined ? null : ONLY.split(',')
+  if (requested !== null) {
+    const unknown = requested.filter(
+      (name) => !SURFACES.some((surface) => surface.name === name),
+    )
+    if (unknown.length > 0) {
+      fail(`ONLY_SURFACES named no such surface: ${unknown.join(', ')}`)
+    }
+    const unwalkable = requested.filter(
+      (name) => !available.some((surface) => surface.name === name),
+    )
+    if (unwalkable.length > 0) {
+      fail(
+        `ONLY_SURFACES named ${unwalkable.join(', ')}, which this leg does not walk ` +
+          `(the surface is desktopOnly and this is a phone leg)`,
+      )
+    }
+  }
+  const surfaces = requested === null ? available : available.filter((s) => requested.includes(s.name))
   if (surfaces.length === 0) {
     fail(`ONLY_SURFACES=${ONLY} matched no surface`)
   }
