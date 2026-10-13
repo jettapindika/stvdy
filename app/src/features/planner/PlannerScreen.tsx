@@ -89,7 +89,7 @@ export function PlannerScreen() {
     view === 'tasks' ? t('planner.tasks.subtitle') : t('planner.calendar.subtitle')
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8">
+    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={formatInZone(now, timeZone, { dateStyle: 'full' })}
         title={t('nav.planner')}

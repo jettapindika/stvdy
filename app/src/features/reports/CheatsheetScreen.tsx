@@ -56,7 +56,7 @@ export function CheatsheetScreen() {
 
   if (cheatsheet.isPending) {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <LoadingState label={t('cheatsheet.loading')} />
       </div>
     )
@@ -64,7 +64,7 @@ export function CheatsheetScreen() {
 
   if (error !== null) {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <ApiErrorNotice
           error={error}
           noun={t('errors.nouns.cheatsheet')}
@@ -83,7 +83,7 @@ export function CheatsheetScreen() {
 
   if (sheet.status === 'failed') {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <EmptyState
           title={t('cheatsheet.failed.title')}
           reason={sheet.error ?? t('cheatsheet.failed.reason')}
@@ -95,7 +95,7 @@ export function CheatsheetScreen() {
   const generating = sheet.status === 'pending' || sheet.status === 'generating'
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         // The scope and the date the student is revising for, which is the context
         // the title cannot carry. The date is omitted rather than filled with a

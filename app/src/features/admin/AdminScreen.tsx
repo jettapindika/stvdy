@@ -80,7 +80,7 @@ export function AdminScreen() {
 
   if (isPhone) {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('admin.title')} subtitle={t('admin.webOnly')} />
         <EmptyState title={t('admin.webOnlyTitle')} reason={t('admin.webOnlyReason')} />
       </div>
@@ -99,9 +99,15 @@ export function AdminScreen() {
     // container took its max-content width — which the tables' `min-w-3xl` made
     // 1714px at 200% text — and the whole document scrolled sideways at 390px while
     // every inner `overflow-x-auto` sat there containing nothing. A definite width
-    // (`w-full`, capped by `max-w-6xl`) is what puts the scroll back inside the
-    // tables' own boxes, and it is the same remedy the dashboard's `w-full` records.
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8">
+    // (`w-full`) is what puts the scroll back inside the tables' own boxes, and it
+    // is the same remedy the dashboard's `w-full` records.
+    //
+    // There is deliberately **no max-width and no `mx-auto`**. The frame's content
+    // column is the full width less 32px a side (1408 − 248 = 1160 at 1440), so the
+    // console is as wide as its window; the `max-w-6xl` that used to be here capped
+    // it 8px short of the design and `mx-auto` would re-introduce the auto cross
+    // margin the paragraph above exists to remove.
+    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('admin.eyebrow')}
         title={t('admin.title')}

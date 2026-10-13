@@ -40,8 +40,9 @@ import { COURSE_NAMES, courseVars } from '@/tokens/tokens'
  *
  * **The card grid is why this screen is wider than the reading column.** The design
  * draws three 371px course cards across a 1160px directory; at `max-w-3xl` they
- * would be one column of 240px cards, which is not the design. `max-w-6xl` is the
- * grid's own width, and the prose inside a card keeps its own measure.
+ * would be one column of 240px cards, which is not the design. The container takes
+ * the frame's own column instead — the full width less 32px a side — and the prose
+ * inside a card keeps its own measure.
  */
 
 type Sort = 'recent' | 'name'
@@ -124,7 +125,7 @@ export function WorkspaceListScreen() {
     // pushed the root to **502px inside a 390px viewport** with 25 elements past the right
     // edge and the page scrolling sideways. The class is content-dependent, which is why it
     // is worth the paragraph: a screen that fits today is one field away from not fitting.
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8">
+    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('workspaces.list.eyebrow')}
         title={t('nav.workspaces')}
@@ -318,7 +319,13 @@ export function WorkspaceListScreen() {
               <option value="name">{t('workspaces.list.sortName')}</option>
             </select>
           </div>
-          <ul className="grid list-none grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {/* `gap-6` = 24px, which is the frame's own pitch. `411:43737 Workspace grid`
+              is 1160 wide holding three cells at x=0, 394.667 and 789.333, each
+              370.667 wide — so the gap is 394.667 - 370.667 = 24, and
+              3 x 370.667 + 2 x 24 = 1160. At `gap-4` the cards were 376 wide, 5.3px
+              too wide with the gaps 8px too narrow. The vertical pitch agrees: rows sit
+              at y=0 and y=356 against a 332px card, which is the same 24. */}
+          <ul className="grid list-none grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
             {ordered.map((workspace) => (
               <WorkspaceCard key={workspace.id} workspace={workspace} />
             ))}

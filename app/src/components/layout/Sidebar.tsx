@@ -51,18 +51,27 @@ export function Sidebar() {
   ]
 
   return (
+    // The top padding is `28px + the safe-area inset`, not `pt-7` plus `pt-safe-top`.
+    // Two padding-top utilities do not add — the later one in the stylesheet wins, and
+    // `pt-safe-top` resolves to 0 off a notched device, so the rail sat flush at the
+    // window's top edge instead of 28px below it. The inset is added rather than
+    // substituted so the design's 28px survives on a device that has one.
     <nav
       aria-label={t('shell.nav.main')}
-      className="hidden w-54 shrink-0 flex-col gap-1 border-r border-border bg-surface px-3 py-4 pt-safe-top md:flex"
+      className="hidden w-54 shrink-0 flex-col gap-8 bg-surface px-5 pb-6 shadow-[inset_-1px_0_0_0_var(--border)] pt-[calc(1.75rem+env(safe-area-inset-top,0px))] md:flex"
     >
-      <Wordmark className="mb-4 px-2" />
+      <Wordmark />
 
-      {items.map((item) => (
-        <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-item">
-          <Icon name={item.icon} className="nav-icon" />
-          {item.label}
-        </NavLink>
-      ))}
+      {/* The nav items are their own 4px group: the rail's own gap is 32px, which is
+          the design's spacing *between* the rail's blocks, not between its items. */}
+      <div className="flex w-full flex-col gap-1">
+        {items.map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-item">
+            <Icon name={item.icon} className="nav-icon" />
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
 
       <SemesterCourses />
 
@@ -93,27 +102,30 @@ function SemesterCourses() {
   if (rows.length === 0) return null
 
   return (
-    <div className="mt-2 flex flex-col gap-0.5 border-t border-border pt-4">
-      <p className="eyebrow px-2 pb-2">{t('shell.semester')}</p>
-      {rows.map((workspace) => (
-        <NavLink
-          key={workspace.id}
-          to={`/workspaces/${workspace.id}`}
-          className="flex min-h-10 flex-col justify-center gap-0.5 rounded-field px-2 py-1.5 hover:bg-surface-raised"
-        >
-          {workspace.course_code && (
-            <span className="meta text-primary-text">{workspace.course_code}</span>
-          )}
-          {/* `title` is not decoration: the rail is 216px and a course name is longer
-              than that, so the name truncates — and the harness exempts a `truncate`
-              only when the full text is reachable another way. Without it the reader
-              has no way to see which course they are looking at. */}
-          <span className="truncate text-label text-text" title={workspace.name}>
-            {workspace.name}
-          </span>
-        </NavLink>
-      ))}
-    </div>
+    <>
+      <div className="h-px w-full bg-border" />
+      <div className="flex w-full flex-col gap-5">
+        <p className="eyebrow">{t('shell.semester')}</p>
+        {rows.map((workspace) => (
+          <NavLink
+            key={workspace.id}
+            to={`/workspaces/${workspace.id}`}
+            className="flex w-full flex-col gap-1 rounded-field hover:bg-surface-raised"
+          >
+            {workspace.course_code && (
+              <span className="meta text-primary-text">{workspace.course_code}</span>
+            )}
+            {/* `title` is not decoration: the rail is 216px and a course name is longer
+                than that, so the name truncates — and the harness exempts a `truncate`
+                only when the full text is reachable another way. Without it the reader
+                has no way to see which course they are looking at. */}
+            <span className="truncate text-label font-medium text-text" title={workspace.name}>
+              {workspace.name}
+            </span>
+          </NavLink>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -133,12 +145,10 @@ function SidebarFooter() {
   const zone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
 
   return (
-    <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4">
-      <p className="flex items-start gap-2 px-2 text-caption text-muted">
-        <Icon name="help" size={16} className="mt-0.5 shrink-0" />
-        {t('shell.railNote')}
-      </p>
-      <p className="meta px-2 uppercase">{zone}</p>
+    <div className="flex flex-col gap-2">
+      <Icon name="help" size={20} className="shrink-0" />
+      <p className="text-caption text-muted">{t('shell.railNote')}</p>
+      <p className="meta uppercase">{zone}</p>
     </div>
   )
 }

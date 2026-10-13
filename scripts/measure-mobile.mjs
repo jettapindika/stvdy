@@ -2835,4 +2835,33 @@ async function main() {
   console.log(verdict('PASS'))
 }
 
-await main()
+/**
+ * Run only when this file *is* the program.
+ *
+ * `scripts/screenshot-frames.mjs` imports this module to reuse the fixture API and
+ * the sign-in sequence, because a screenshot of a screen with the wrong data in it
+ * is a screenshot of a different screen — and a second copy of 800 lines of fixtures
+ * would drift from this one and quietly start measuring a state the app cannot
+ * produce. Importing must therefore not start a gate run.
+ */
+const isEntry =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isEntry) await main()
+
+export {
+  ANCHOR,
+  APP_URL,
+  CHROME_CANDIDATES,
+  ROUTES,
+  SURFACES,
+  USER,
+  VIEWPORT,
+  fail,
+  findChrome,
+  main,
+  openSurface,
+  puppeteer,
+  root,
+  routeFor,
+  signIn,
+}

@@ -120,7 +120,7 @@ export function SettingsScreen() {
   // empty id — a write the server would reject as another row's.
   if (settings.isPending || session.status === 'loading') {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
+      <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
         <LoadingState label={t('settings.loading')} />
       </div>
@@ -129,7 +129,7 @@ export function SettingsScreen() {
 
   if (row === undefined) {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
+      <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
         {error !== null ? <ApiErrorNotice error={error} noun={t('settings.noun')} /> : null}
       </div>
@@ -171,7 +171,7 @@ export function SettingsScreen() {
   const footerZoneLabel = `${footerZone} · ${zoneOffsetLabel(now, footerZone)}`
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col gap-6 px-5 py-8">
+    <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('shell.settingsEyebrow')}
         title={t('nav.settings')}

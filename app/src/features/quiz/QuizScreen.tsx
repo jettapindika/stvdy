@@ -222,8 +222,8 @@ export function QuizScreen() {
   // `w-full` is load-bearing on both: a root whose width is its fit-content cannot go
   // below its content's min-content, so one long word would push the page sideways
   // instead of wrapping inside it.
-  const pageClass = 'mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8'
-  const stateClass = 'mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8'
+  const pageClass = 'mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 md:px-[32px] py-8'
+  const stateClass = 'mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8'
 
   if (quiz.isPending) {
     return (

@@ -54,7 +54,7 @@ export function DevicesScreen() {
   const { t } = useTranslation()
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+    <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('devices.eyebrow')}
         title={t('devices.title')}

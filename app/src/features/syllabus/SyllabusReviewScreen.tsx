@@ -119,7 +119,7 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
 
   if (written !== null) {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 md:px-[32px] py-8">
         <PageHeader title={t('syllabus.review.title')} />
         <p className="note note-success wrap-anywhere">
           {t('syllabus.review.written', {
@@ -141,7 +141,7 @@ export function SyllabusReviewScreen({ draftId }: { draftId: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 md:px-[32px] py-8">
       <PageHeader title={t('syllabus.review.title')} subtitle={t('syllabus.review.subtitle')} />
 
       {/* The header line the honesty rule asks for: nothing exists yet. */}

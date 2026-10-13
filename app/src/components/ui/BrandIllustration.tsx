@@ -1,6 +1,28 @@
 import { useTranslation } from 'react-i18next'
 
 /**
+ * The product's wordmark: the name, set in the heading face.
+ *
+ * **Text only, at 28px.** Every frame in the design draws the mark as a single text
+ * node — 80x35 in the rail and the phone header, 80x36 in the auth header — with no
+ * glyph beside it. This previously drew a 20px book mark plus a 16px label, which
+ * was the illustration's own book reused as a logo; the frames do not do that, so
+ * neither does this. `text-[28px]` is arbitrary rather than a scale step because the
+ * type scale has no 28.
+ */
+export function Wordmark({ className }: { className?: string }) {
+  const { t } = useTranslation()
+
+  return (
+    <span
+      className={`font-heading text-[28px] leading-[normal] font-semibold text-text ${className ?? ''}`}
+    >
+      {t('app.name')}
+    </span>
+  )
+}
+
+/**
  * The brand illustration, reproduced from the user's Figma design.
  *
  * An open book in the brand azure with a four-point sparkle and a teal checkmark.
@@ -19,34 +41,6 @@ import { useTranslation } from 'react-i18next'
  * rather than a composition, so the book's box is kept inside x 56..344 and the
  * sparkle occupies the space above and to the right of it.
  */
-export function Wordmark({ className }: { className?: string }) {
-  const { t } = useTranslation()
-
-  return (
-    <span className={`flex items-center gap-2 ${className ?? ''}`}>
-      {/* The mark is the book from the design's own illustration, which is a
-          user-provided asset. No invented logo. */}
-      <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none">
-        <path
-          d="M12 6C9.8 4.4 6.8 4 4.5 4.7v12.6c2.3-.7 5.3-.3 7.5 1.3"
-          stroke="var(--primary)"
-          strokeWidth="1.9"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M12 6c2.2-1.6 5.2-2 7.5-1.3v12.6c-2.3-.7-5.3-.3-7.5 1.3"
-          stroke="var(--primary)"
-          strokeWidth="1.9"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <span className="text-base font-semibold tracking-tight">{t('app.name')}</span>
-    </span>
-  )
-}
-
 export function BrandIllustration({ className }: { className?: string }) {
   const { t } = useTranslation()
 

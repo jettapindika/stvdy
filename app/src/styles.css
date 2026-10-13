@@ -48,8 +48,8 @@
   /* actions and brand */
   --primary: #4f46e5;      /* white on this is 6.29:1 */
   /* The hover fill. The design states `#4F46E5 -> #3525CD`, and that is a
-     **light-theme** pair: `--primary-text` inverts to `#A5B4FC` in the dark block, and
-     white on `#A5B4FC` is 2.0:1 — below even the 3:1 UI floor, and a regression from the
+     **light-theme** pair: `--primary-text` inverts to `#C4BFFF` in the dark block, and
+     white on `#C4BFFF` is 1.72:1 — below even the 3:1 UI floor, and a regression from the
      6.29:1 the button has at rest. So hover gets its own token, which is the only way
      one declaration can be right in both themes. */
   --primary-hover: #3525cd; /* white on this is 8.90:1 */
@@ -95,51 +95,65 @@
   :root {
     --bg: #0b0f19;
     --surface: #111827;
-    --surface-raised: #1a2335;
+    --surface-raised: #1b2435;
     --border: #263246;
-    /* 4.04:1 on surface, 4.36:1 on bg. */
+    /* 4.04:1 on surface, 4.36:1 on bg. Not a Figma variable: the design's
+       `border/default` is a hairline and cannot carry a control's boundary at the
+       3:1 an input or focusable outline needs, which is the same reason the light
+       theme has one. */
     --border-strong: #6a789d;
 
     --text: #f1f5f9;        /* 16.19:1 on surface */
-    --text-muted: #a3b1c6;  /*  8.16:1 on surface */
+    --text-muted: #b4bdcf;  /*  9.39:1 on surface, 8.24:1 on raised */
+    /* Not a Figma variable. The design has three text levels in the light sheets
+       (primary, muted, on-action) and no fourth; this is the app's caption level,
+       held one step below `--text-muted` so the two stay distinguishable. */
     --text-subtle: #8493aa; /*  5.69:1 on surface */
 
     /* Unchanged in dark: the fill is dark enough for white text at 6.29:1, and
        the same indigo in both themes is what makes the brand recognisable. */
     --primary: #4f46e5;
-    /* Hover goes *darker* here, not lighter. The light theme's `#3525CD` is a shade
-       that reads as "pressed" against a light ground; on the dark surface the same
-       direction would lighten the fill toward the label and cost the contrast. White on
-       this is 8.14:1. */
+    /* Not a Figma variable — the design states no dark hover fill. Hover goes
+       *darker* here, not lighter: the light theme's `#3525CD` is a shade that reads
+       as "pressed" against a light ground, and on the dark surface the same
+       direction would lighten the fill toward the label and cost the contrast.
+       White on this is 8.14:1. */
     --primary-hover: #3f37c9;
     --on-primary: #ffffff;
-    --primary-text: #a5b4fc; /* 8.90:1 on surface */
-    --primary-tint: #1e1b4b;
+    --primary-text: #c4bfff; /* 10.34:1 on surface, 8.52:1 on the tint */
+    --primary-tint: #28234d;
 
-    --source: #7dd3fc;       /* 8.88:1 on the tint */
-    --source-tint: #0c2a3f;
+    --source: #8cd3ff;       /* 10.88:1 on surface, 8.96:1 on the tint */
+    --source-tint: #0d2b40;
 
-    --success: #4edea3;      /* 9.01:1 on the tint */
-    --success-tint: #0b2a1f;
-    --warning: #fbbf24;      /* 8.31:1 on the tint */
-    --warning-tint: #3a2a08;
-    --danger: #fda4af;       /* 8.34:1 on the tint */
-    --danger-tint: #3f1420;
+    --success: #85e0ba;      /* 11.29:1 on surface, 8.22:1 on the tint */
+    --success-tint: #10382d;
+    --warning: #f8d787;      /* 12.72:1 on surface, 9.74:1 on the tint */
+    --warning-tint: #392c16;
+    --danger: #ffb4ab;       /* 10.45:1 on surface, 8.20:1 on the tint */
+    --danger-tint: #432327;
 
-    --course-indigo: #a5b4fc;
-    --course-sky: #7dd3fc;
-    --course-emerald: #4edea3;
-    --course-amber: #fbbf24;
-    --course-rose: #fda4af;
+    /* Course colours: six categorical hues, used as a 4px marker plus a tinted
+       chip plus an initial or icon. Never as the only signal, and never as a
+       status colour: a course is not a state. Each is >= 4.5:1 both on the ground
+       and on its own tint. */
+    --course-indigo: #c4bfff;
+    --course-sky: #8cd3ff;
+    --course-emerald: #85e0ba;
+    --course-amber: #f8d787;
+    --course-rose: #ffb4ab;
     --course-violet: #c4b5fd;
-    --course-indigo-tint: #1e1b4b;
-    --course-sky-tint: #0c2a3f;
-    --course-emerald-tint: #0b2a1f;
-    --course-amber-tint: #3a2a08;
-    --course-rose-tint: #3f1420;
+    --course-indigo-tint: #28234d;
+    --course-sky-tint: #0d2b40;
+    --course-emerald-tint: #10382d;
+    --course-amber-tint: #392c16;
+    --course-rose-tint: #432327;
     --course-violet-tint: #2a1b4d;
 
-    --ring: #a5b4fc;        /* 9.61:1 on bg, 8.90:1 on surface */
+    /* Not a Figma variable; it tracks `--primary-text`, because a focus ring is a
+       brand affordance and the two drifting apart is how a ring ends up invisible
+       on the surface it sits on. 9.61:1 on bg, 8.90:1 on surface. */
+    --ring: #c4bfff;
     --shadow-float: 0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px -16px rgb(0 0 0 / 0.55);
   }
 }
@@ -332,6 +346,29 @@
 }
 
 @layer components {
+  /* --- Typography scale --------------------------------------------------- */
+
+  /* The `text-display` / `text-h1..h4` utilities carry only size and line-height, so
+     they inherit the family and weight of whatever they land on. The heading face
+     (Plus Jakarta Sans 600) reaches a real `<h1>`–`<h4>` through the base rule above,
+     but a `<p>` or a `<span>` wearing the same scale got **Inter 400 at the right
+     size** — the empty-state title rendered Inter 18/23 where the design's H4 is
+     Jakarta 600 18/23, and the same for `StudyHubScreen`, `BreakdownPanel`,
+     `States`, `PricingScreen`, `PlanUsageSections` and the rest.
+
+     This is in `@layer components` on purpose: Tailwind's utility layer comes after
+     it, so an explicit family still wins where a specimen needs one
+     (`font-mono text-h1` on the focus timer, `font-heading text-h2` on the study
+     card) and nothing that already names a family is affected. */
+  .text-display,
+  .text-h1,
+  .text-h2,
+  .text-h3,
+  .text-h4 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+  }
+
   /* --- Surfaces ----------------------------------------------------------- */
 
   /* A card sits on the ground: surface fill, hairline border, 12px radius. The
@@ -429,7 +466,7 @@
   /* The action fill: the brand indigo, with white text at 6.29:1 in both themes.
      Hover uses `--primary-hover`, a **per-theme** token rather than `--primary-text`:
      that token inverts between themes (it is the indigo used as *text*), so using it as
-     a fill put white on `#A5B4FC` in dark — 2.0:1. See the token's own comment. */
+     a fill put white on `#C4BFFF` in dark — 1.72:1. See the token's own comment. */
   .btn-primary {
     background-color: var(--primary);
     color: var(--on-primary);
@@ -775,7 +812,13 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     line-height: 1.125rem;
-    letter-spacing: 0.04em;
+    /* `letter-spacing: 0`, like every other style in the design. The previous
+       revision added 0.04em here on the argument that tracking is what makes an
+       11px mono line legible; the design's own metadata says `letterSpacing: 0`
+       on every text node in the file, and the caps come from the string rather
+       than from the CSS. `text-transform` stays, because the design's strings are
+       typed in caps and a translation need not be. */
+    letter-spacing: 0;
     text-transform: uppercase;
     color: var(--text-muted);
   }
@@ -1015,12 +1058,17 @@
        its container rather than letting its label wrap, which is what clipped the task
        row's "Medium" at 200% text. */
     min-width: 0;
-    padding: 0.1rem 0.6rem;
+    /* The design's badge: `px-[10px] py-[4px]`, 999 radius, JetBrains Mono Regular
+       at 11/1.5. This was `0.1rem 0.6rem` (1.6/9.6) in Inter 500 at 12px, so every
+       badge on screen — Status, Priority, the citation and indexing pills — was
+       2.4px shorter, 0.4px narrower, one pixel larger and in the wrong family. */
+    padding: 0.25rem 0.625rem;
     border-radius: var(--radius-pill);
     background-color: var(--surface-raised);
     color: var(--text-muted);
-    font-size: 0.75rem;
-    font-weight: 500;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 400;
     line-height: 1.5;
     /* No `nowrap`: the label has to survive 200% text scale and a long label in
        another language, and a pill that overflows its row clips the state it is

@@ -65,26 +65,26 @@ export const COLORS: Record<Theme, Record<string, string>> = {
   dark: {
     bg: '#0b0f19',
     surface: '#111827',
-    'surface-raised': '#1a2335',
+    'surface-raised': '#1b2435',
     border: '#263246',
     'border-strong': '#6a789d',
     text: '#f1f5f9',
-    'text-muted': '#a3b1c6',
+    'text-muted': '#b4bdcf',
     'text-subtle': '#8493aa',
     primary: '#4f46e5',
     'primary-hover': '#3f37c9',
     'on-primary': '#ffffff',
-    'primary-text': '#a5b4fc',
-    'primary-tint': '#1e1b4b',
-    source: '#7dd3fc',
-    'source-tint': '#0c2a3f',
-    success: '#4edea3',
-    'success-tint': '#0b2a1f',
-    warning: '#fbbf24',
-    'warning-tint': '#3a2a08',
-    danger: '#fda4af',
-    'danger-tint': '#3f1420',
-    ring: '#a5b4fc',
+    'primary-text': '#c4bfff',
+    'primary-tint': '#28234d',
+    source: '#8cd3ff',
+    'source-tint': '#0d2b40',
+    success: '#85e0ba',
+    'success-tint': '#10382d',
+    warning: '#f8d787',
+    'warning-tint': '#392c16',
+    danger: '#ffb4ab',
+    'danger-tint': '#432327',
+    ring: '#c4bfff',
   },
 }
 
@@ -121,8 +121,8 @@ export const PAIRS: Pair[] = [
   // Actions and brand.
   { fg: 'on-primary', bg: 'primary', min: MIN.text, where: 'the label on a primary button' },
   // The hover fill, declared because a pair the gate does not measure is a pair that
-  // drifts: using `primary-text` as the hover fill put white on `#A5B4FC` in dark
-  // (2.0:1) while every declared pair stayed green.
+  // drifts: using `primary-text` as the hover fill put white on `#C4BFFF` in dark
+  // (1.72:1) while every declared pair stayed green.
   {
     fg: 'on-primary',
     bg: 'primary-hover',
@@ -177,11 +177,11 @@ export const COURSES: Record<Theme, Record<string, { marker: string; tint: strin
     violet: { marker: '#6d28d9', tint: '#ede4ff' },
   },
   dark: {
-    indigo: { marker: '#a5b4fc', tint: '#1e1b4b' },
-    sky: { marker: '#7dd3fc', tint: '#0c2a3f' },
-    emerald: { marker: '#4edea3', tint: '#0b2a1f' },
-    amber: { marker: '#fbbf24', tint: '#3a2a08' },
-    rose: { marker: '#fda4af', tint: '#3f1420' },
+    indigo: { marker: '#c4bfff', tint: '#28234d' },
+    sky: { marker: '#8cd3ff', tint: '#0d2b40' },
+    emerald: { marker: '#85e0ba', tint: '#10382d' },
+    amber: { marker: '#f8d787', tint: '#392c16' },
+    rose: { marker: '#ffb4ab', tint: '#432327' },
     violet: { marker: '#c4b5fd', tint: '#2a1b4d' },
   },
 }

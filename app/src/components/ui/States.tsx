@@ -126,7 +126,7 @@ export function NotBuiltYet({
   const { t } = useTranslation()
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-3 px-5 py-10">
+    <section className="mx-auto flex max-w-2xl flex-col gap-3 px-5 md:px-[32px] py-10">
       {level === 1 ? <h1>{title}</h1> : level === 2 ? <h2>{title}</h2> : <h3>{title}</h3>}
       <div className="note">
         <p className="text-body text-muted">{t('states.notBuiltYet', { what })}</p>

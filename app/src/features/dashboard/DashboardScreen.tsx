@@ -117,7 +117,7 @@ export function DashboardScreen() {
     totals.quizzes_taken === 0
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         // The window, in words, is the eyebrow: it is the one fact the heading
         // cannot carry, and every figure below is a count over these local days.

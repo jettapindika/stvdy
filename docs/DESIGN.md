@@ -62,24 +62,24 @@ on a miss in either theme — so this table cannot drift from what renders.
 |---|---|---|---|
 | `bg` | `#FAF8FF` | `#0B0F19` | Page ground. |
 | `surface` | `#FFFFFF` | `#111827` | Cards and panels. |
-| `surface-raised` | `#F2F3FF` | `#1A2335` | Insets and secondary blocks: raised, not recessed. |
+| `surface-raised` | `#F2F3FF` | `#1B2435` | Insets and secondary blocks: raised, not recessed. |
 | `border` | `#DDE0F0` | `#263246` | Hairlines and dividers. 1px in both themes. |
 | `border-strong` | `#7E85A6` | `#6A789D` | A boundary that must be visible: input edges. Derived, see below. |
 | `text` | `#131B2E` | `#F1F5F9` | Body text. 17.16:1 / 16.19:1 on `surface`. |
-| `text-muted` | `#464555` | `#A3B1C6` | Secondary text. 9.36:1 / 8.16:1. |
+| `text-muted` | `#464555` | `#B4BDCF` | Secondary text. 9.36:1 / 9.39:1. |
 | `text-subtle` | `#6B6A7C` | `#8493AA` | Captions and hints. 5.28:1 / 5.69:1. |
 | `primary` | `#4F46E5` | `#4F46E5` | **The action fill.** White on it is 6.29:1 in both themes. |
-| `primary-text` | `#3525CD` | `#A5B4FC` | Indigo as text: links, active nav. 9.14:1 / 8.90:1 on `surface`. |
-| `primary-tint` | `#E2DFFF` | `#1E1B4B` | Selected rows, working chips. |
-| `source` | `#006591` | `#7DD3FC` | **Citations only.** 4.97:1 / 8.88:1 on its tint. |
-| `source-tint` | `#C9E6FF` | `#0C2A3F` | The citation chip's fill. |
-| `success` | `#005338` | `#4EDEA3` | Done and mastered. 7.87:1 / 9.01:1 on its tint. |
-| `success-tint` | `#D5F5E8` | `#0B2A1F` | |
-| `warning` | `#92400E` | `#FBBF24` | Due soon. 6.37:1 / 8.31:1 on its tint. |
-| `warning-tint` | `#FEF3C7` | `#3A2A08` | |
-| `danger` | `#BA1A1A` | `#FDA4AF` | Again, overdue, destructive, error. 5.00:1 / 8.34:1 on its tint. |
-| `danger-tint` | `#FFDAD6` | `#3F1420` | |
-| `ring` | `#4F46E5` | `#A5B4FC` | The focus ring. Derived, see below. |
+| `primary-text` | `#3525CD` | `#C4BFFF` | Indigo as text: links, active nav. 9.14:1 / 10.34:1 on `surface`. |
+| `primary-tint` | `#E2DFFF` | `#28234D` | Selected rows, working chips. |
+| `source` | `#006591` | `#8CD3FF` | **Citations only.** 4.97:1 / 8.96:1 on its tint. |
+| `source-tint` | `#C9E6FF` | `#0D2B40` | The citation chip's fill. |
+| `success` | `#005338` | `#85E0BA` | Done and mastered. 7.87:1 / 8.22:1 on its tint. |
+| `success-tint` | `#D5F5E8` | `#10382D` | |
+| `warning` | `#92400E` | `#F8D787` | Due soon. 6.37:1 / 9.74:1 on its tint. |
+| `warning-tint` | `#FEF3C7` | `#392C16` | |
+| `danger` | `#BA1A1A` | `#FFB4AB` | Again, overdue, destructive, error. 5.00:1 / 8.20:1 on its tint. |
+| `danger-tint` | `#FFDAD6` | `#432327` | |
+| `ring` | `#4F46E5` | `#C4BFFF` | The focus ring. Derived, see below. |
 
 Two tokens are derived rather than specified, and both for the same reason: the
 spec's value cannot carry the role it is given.
@@ -89,7 +89,7 @@ spec's value cannot carry the role it is given.
   of a component boundary. An input whose only edge is a 1.25:1 hairline is an
   input a low-vision user cannot find. `#7E85A6` is the same hue family at 3.44:1
   on the ground and 3.63:1 on a card.
-- **`ring`.** The spec's dark `--primary-text` (`#A5B4FC`) is the focus ring in
+- **`ring`.** The spec's dark `--primary-text` (`#C4BFFF`) is the focus ring in
   dark mode, and the fill `--primary` in light. Using `--primary` in both would put
   a 2.82:1 ring on a dark card, which is a focus indicator that fails the same
   3:1 rule it exists to satisfy.

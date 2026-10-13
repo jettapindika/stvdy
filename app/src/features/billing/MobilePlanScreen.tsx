@@ -40,7 +40,7 @@ export function MobilePlanScreen() {
   const timezone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader title={t('billing.planAndUsage')} subtitle={t('plan.subtitle')} />
       <PlanUsageSections />
       <p className="note">{t('plan.mobile.noPurchase')}</p>

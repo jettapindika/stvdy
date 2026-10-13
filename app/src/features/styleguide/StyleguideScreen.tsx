@@ -126,7 +126,7 @@ export function StyleguideScreen() {
   }))
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-5 py-8">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('styleguide.eyebrow')}
         title={t('styleguide.title')}

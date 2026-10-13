@@ -388,9 +388,15 @@ describe('the study screen survives 200% text', () => {
     expect(remMinimums(study)).toEqual([])
     // The root's width is its container's, not its content's. The className is a
     // template literal (it swaps the reading column for the panel's two), so the
-    // assertion is on the two branches rather than on a `className="…"` capture.
-    expect(study).toContain('mx-auto flex w-full flex-col gap-6 px-5 py-6')
-    expect(study).toContain('panelOpen ? \'max-w-5xl\' : \'max-w-3xl\'')
+    // assertion is on the properties the root must carry rather than on a
+    // `className="…"` capture: `w-full` is the definite width, and the branches are
+    // the two reading-column caps.
+    //
+    // **Asserted by property, not by literal.** The literal used to name the root's
+    // exact class list, so adding the desktop `md:px-8` broke a test about width.
+    // A test that fails on a padding change is pinning the string, not the property.
+    expect(study).toMatch(/className=\{`[^`]*\bw-full\b[^`]*flex-col gap-6[^`]*`\}/)
+    expect(study).toContain("panelOpen ? 'max-w-5xl' : 'max-w-3xl'")
   })
 
   it('lets the grade row reflow, and keeps every word on its button', () => {

@@ -363,14 +363,21 @@ describe('the phone layout the browser measured', () => {
     expect(root, 'the panel root must carry its classes inline').toBeTruthy()
     expect(root).toContain('w-full')
     expect(root).toContain('min-w-0')
-    // And the page column that now owns the centring keeps both halves, so the
-    // property is not merely moved out of the tree: this is where the width is
+    // And the page column that now owns the centring keeps the half that matters, so
+    // the property is not merely moved out of the tree: this is where the width is
     // made definite for the whole view.
+    //
+    // **`w-full`, and deliberately neither `mx-auto` nor a `max-w-*`.** The frame's
+    // content column is the full width less 32px a side, so there is nothing to cap
+    // and nothing to centre — and `mx-auto` would actively undo the property, because
+    // an auto cross margin stops a flex item being stretched and sizes it by its
+    // content instead. The assertion is on `w-full` because that is the property;
+    // pinning the old cap and centring made this fail for a change that strengthened it.
     const host = readFileSync(join(__dirname, '..', 'planner', 'PlannerScreen.tsx'), 'utf8')
-    const column = /<div className="([^"]*\bmax-w-5xl\b[^"]*)"/.exec(host)?.[1]
+    const column = /<div className="([^"]*\bw-full\b[^"]*flex-col gap-6[^"]*)"/.exec(host)?.[1]
     expect(column, 'the host column must carry its classes inline').toBeTruthy()
     expect(column).toContain('w-full')
-    expect(column).toContain('mx-auto')
+    expect(column).not.toContain('mx-auto')
   })
 
   it('keeps the native date control, rather than squeezing it to fit', () => {

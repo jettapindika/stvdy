@@ -137,7 +137,7 @@ export function PricingScreen() {
 
   if (!policy.allowPurchaseUi) {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('pricing.title')} subtitle={t('plan.subtitle')} />
         <p className="max-w-prose text-body text-muted">{t('plan.mobile.noPurchase')}</p>
       </div>
@@ -150,7 +150,7 @@ export function PricingScreen() {
   const currentPlan = data?.plans.find((plan) => plan.id === data.current_plan)
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 py-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader title={t('pricing.title')} subtitle={t('pricing.subtitle')} />
 
       {plans.isPending && <SkeletonRows rows={3} label={t('pricing.loading')} />}

@@ -331,7 +331,7 @@ export function StudyScreen() {
     // min-content, and a card whose text is long would push the page sideways instead
     // of wrapping inside it.
     <div
-      className={`mx-auto flex w-full flex-col gap-6 px-5 py-6 ${
+      className={`mx-auto flex w-full flex-col gap-6 px-5 md:px-[32px] py-6 ${
         panelOpen ? 'max-w-5xl' : 'max-w-3xl'
       }`}
     >

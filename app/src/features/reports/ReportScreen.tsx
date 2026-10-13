@@ -72,13 +72,13 @@ import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
  * The design's frame is a 1160px two-column body — the outline builder and a
  * 336px context column — so this screen does not take the `max-w-3xl` reading
  * column: at 48rem the builder would be narrower than the rows it holds and the
- * context column would have nowhere to go. `max-w-6xl` is the closest step on the
- * scale, and the grid below puts the 336px column back with `rem`, not with a
- * pixel width, so it still grows with the student's text size.
+ * context column would have nowhere to go. The container is the frame's own column
+ * (the full width less 32px a side), and the grid below puts the 336px column back
+ * with `rem`, not with a pixel width, so it still grows with the student's text size.
  */
 function ReportPage({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-5 py-8">{children}</div>
+    <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">{children}</div>
   )
 }
 

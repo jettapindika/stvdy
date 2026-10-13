@@ -240,11 +240,23 @@ UTC+07:00`), which the app already has.
 
 ## 8. Dark mode
 
-53 of the 54 frames are light-only. Every new surface is expressed in the
-existing tokens (`--bg`, `--surface`, `--surface-raised`, `--border`,
-`--text*`, `--primary*`, `--source*`, `--success/warning/danger*`) so the dark
-block keeps working, and the one dark frame is used to check the dark
-treatment of the new chrome. No literal `#FFFFFF` / `#F2F3FF` in a component.
+- 53 of the 54 frames are light-only. Every new surface is expressed in the
+  existing tokens (`--bg`, `--surface`, `--surface-raised`, `--border`,
+  `--text*`, `--primary*`, `--source*`, `--success/warning/danger*`) so the dark
+  block keeps working, and the one dark frame is used to check the dark
+  treatment of the new chrome. No literal `#FFFFFF` / `#F2F3FF` in a component.
+
+**Correction, made after the fact.** The paragraph above describes the *structure*
+of dark mode correctly and its *values* not at all: this pass left the dark block's
+values where it found them, one step away from the design's, on the reading that
+they were a deliberate accessibility choice. They were not. `411:19278` is a
+**component specimen** — its own annotation reads "Supplied core + documented
+proposed role colors" — and `get_variable_defs` on it returns the design's dark
+values, which its nodes apply through `color/source/*`, `color/danger/*` and
+`color/brand/*`. Every one of those values clears 4.5:1 on the surface and on its
+own tint (8.20:1 to 12.72:1), so nothing was being protected by the substitutes.
+The dark block now carries the design's values; A250 records the reversal and the
+four tokens that remain derived.
 
 ## 9. States
 
@@ -330,6 +342,28 @@ naming because it is the *caption on a raised block* pair `tokens.ts` declares, 
 board is the first surface to render it — so the number moved from 4.97 to 4.79 when the
 surface was added, and it moved because a declared pair finally got measured rather than
 because anything regressed.
+
+### Two instruments for the question the gate cannot answer
+
+Gate 5 answers "is any target undersized, any text unreadable, anything clipped" — all of
+which have numbers for answers. It cannot answer **"does this screen match its frame"**,
+because the frames are 1440, 1680 and 1760 wide and the gate walks 390 and 1365. So the
+comparison needs its own instruments, and two were added:
+
+- **`scripts/screenshot-frames.mjs`** photographs each screen at *the frame's own width*,
+  in the frame's own theme, with the frame's own data. It imports `measure-mobile.mjs`'s
+  fixtures and its `signIn`/`openSurface` rather than restating them, so the screen it
+  captures cannot drift from the screen the gate measures. `var/frames/` holds the
+  captures and `var/frames/figma/` the frames they are compared against.
+- **`scripts/probe-frame.mjs`** prints the browser's `getComputedStyle` and
+  `getBoundingClientRect` for a screen's shell, its boxes and every text node. This is the
+  one that finds *numbers*, because the frames' own values are exact — `get_metadata`
+  returns every node's `x`, `y`, `width` and `height` — so "the rail's wordmark sits at
+  y=28 with height 35" is checkable rather than eyeballed. It is how the 32px content
+  padding, the 216px rail and the `176x44` nav item were confirmed.
+
+Both are development instruments, not gates: they print, they do not pass or fail, and
+neither is wired into CI.
 
 ---
 

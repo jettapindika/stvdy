@@ -122,7 +122,7 @@ export function StudyHubScreen() {
   const dueCount = dashboard.data?.totals.cards_due ?? null
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('study.hub.eyebrow')}
         title={t('nav.study')}

@@ -116,7 +116,7 @@ export function TodayScreen() {
   )
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8">
+    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
       {offline ? (
         <div className="note flex flex-wrap items-center gap-3" role="status">
           <Icon name="alert" className="shrink-0 text-warning" />
