@@ -46,23 +46,23 @@ Visual reference: /design contains HTML exports from Google Stitch (mobile + des
 role              | light                          | dark
 bg                | #FAF8FF                        | #0B0F19
 surface           | #FFFFFF                        | #111827
-surface-raised    | #F2F3FF                        | #1A2335
+surface-raised    | #F2F3FF                        | #1B2435
 border            | #DDE0F0                        | #263246
 text              | #131B2E                        | #F1F5F9
-text-muted        | #464555                        | #A3B1C6
+text-muted        | #464555                        | #B4BDCF
 text-subtle       | #6B6A7C                        | #8493AA
 primary (fill)    | #4F46E5 (white label)          | #4F46E5 (white label)
-primary-text/icon | #3525CD                        | #A5B4FC
-primary-tint      | #E2DFFF                        | #1E1B4B
-source (citations)| text #006591, tint #C9E6FF     | text #7DD3FC, tint #0C2A3F
-success           | text #005338, tint #D5F5E8     | text #4EDEA3, tint #0B2A1F
-warning           | text #92400E, tint #FEF3C7     | text #FBBF24, tint #3A2A08
-danger            | text #BA1A1A, tint #FFDAD6     | text #FDA4AF, tint #3F1420
+primary-text/icon | #3525CD                        | #C4BFFF
+primary-tint      | #E2DFFF                        | #28234D
+source (citations)| text #006591, tint #C9E6FF     | text #8CD3FF, tint #0D2B40
+success           | text #005338, tint #D5F5E8     | text #85E0BA, tint #10382D
+warning           | text #92400E, tint #FEF3C7     | text #F8D787, tint #392C16
+danger            | text #BA1A1A, tint #FFDAD6     | text #FFB4AB, tint #432327
 Semantic usage: indigo = actions/brand/selection; sky = sources and citations ONLY; emerald = done/mastered; amber = due soon/warning; rose = Again/overdue/destructive/error. Course colors: 6 categorical hues (indigo, sky, emerald, amber, rose, violet) used as a 4px marker + tinted chip + initial/icon, never as the only signal. Add a CI test that computes contrast for every documented text/background token pair (>= 4.5:1 text, >= 3:1 large text and UI icons/borders) and fails the build on a miss.
 
 ## Type, shape, motion
 - Fonts bundled locally: Plus Jakarta Sans (headings 600/700), Inter (UI/body), JetBrains Mono (page refs, timestamps, hotkeys only).
-- Scale (px/line-height), **from the Figma design, which supersedes the earlier scale**: Display 48/62, H1 32/42, H2 24/32, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Small 13/20, Caption 12/18, Metadata 11/18, phone tab label 10/12. The earlier rule "NOTHING below 12px" is **withdrawn**: the design's metadata role is 11px monospace (uppercase with tracking as an eyebrow), and it carries most of the redesign's character. Body is 16/24 at every viewport, not 14/22 on desktop. Mobile inputs are 16px (prevents iOS zoom). Layouts must survive 200% text scaling and Indonesian strings (~25% longer than English).
+- Scale (px/line-height), **from the Figma design, which supersedes the earlier scale**: Display 48/62, H1 32/42, H2 24/32, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Small 13/20, Caption 12/18, Metadata 11/18, phone tab label 10/12. The earlier rule "NOTHING below 12px" is **withdrawn**: the design's metadata role is 11px monospace (uppercase as an eyebrow, at `letter-spacing: 0` like every other style in the file), and it carries most of the redesign's character. Body is 16/24 at every viewport, not 14/22 on desktop. Mobile inputs are 16px (prevents iOS zoom). Layouts must survive 200% text scaling and Indonesian strings (~25% longer than English).
 - 4pt spacing grid: 8 tight groups, 12 control padding, 16 card body, 24 related blocks, 32 section separation. Radius: 8 controls, 12 cards, 16 sheets/modals, 999 chips. 1px borders in both themes; shadows only for floating layers.
 - Motion 120/200/300 ms ease-out. Respect prefers-reduced-motion (card flip becomes a crossfade). No looping animations except loading and active-recording states.
 - One outline icon set, drawn for this product and bundled as SVG (no CDN, no imported pack), 20px in controls and 24px in navigation. Use an icon, not an emoji, for the streak.

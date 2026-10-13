@@ -379,23 +379,26 @@ export function TimeGrid({
                       )}
                       {/* The current-time line, on today's row only, positioned from
                           the instant the view was opened — never from a fresh
-                          `new Date()`. The label is not `shrink-0`: it is text, and a
-                          text item that cannot shrink contributes its full width to
-                          the cell's min-content width, which is the overflow this
-                          file exists to prevent. The hairline is `flex-1`, so the
-                          label keeps its intrinsic width anyway. */}
+                          `new Date()`.
+
+                          **The rule spans the remaining width; it is not offset by the
+                          hour.** It used to carry `marginLeft: <now as a % of the
+                          07:00–22:00 window>`, and that is the defect the 200%-text gate
+                          found: a percentage margin is **not shrinkable**, so at 20:25 it
+                          claimed 89% of the row, left this label 7px, and wrapped "Now"
+                          onto three lines. The design's own current-time row (`411:26931`,
+                          the Today timeline) is `label — flex-1 rule — label` with no
+                          positional offset at all, which is also the honest form here: a
+                          day's events are listed in order rather than placed on a time
+                          axis, so an offset derived from the clock was a claim this layout
+                          does not make.
+
+                          The rule is `min-w-0`, so it is the thing that gives way in a
+                          narrow column, and the label keeps its intrinsic width. */}
                       {bucket.day.key === todayKey && nowInWindow ? (
                         <li className="flex min-w-0 items-center gap-2">
                           <span className="meta min-w-0 break-words">{t('calendar.now')}</span>
-                          <span
-                            aria-hidden="true"
-                            className="h-px flex-1 bg-border-strong"
-                            style={{
-                              marginLeft: `${
-                                String(((nowMin - GRID_START_HOUR * 60) / GRID_MINUTES) * 100)
-                              }%`,
-                            }}
-                          />
+                          <span aria-hidden="true" className="h-px min-w-0 flex-1 bg-border-strong" />
                         </li>
                       ) : null}
                     </ul>

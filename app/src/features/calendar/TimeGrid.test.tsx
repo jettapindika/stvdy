@@ -30,7 +30,7 @@ import { TimeGrid, eventCellId } from './TimeGrid'
 
 const ZONE = 'Asia/Jakarta'
 
-/** 10:00 in Jakarta on Wednesday 10 June 2026 — 20% into the 07:00–22:00 window. */
+/** 10:00 in Jakarta on Wednesday 10 June 2026 — inside the 07:00–22:00 window. */
 const NOW = new Date('2026-06-10T03:00:00Z')
 
 const OWN_EVENT: EventRow = {
@@ -150,15 +150,25 @@ describe('the time grid', () => {
     expect(bar.style.width).toBe('10%')
   })
 
-  it('renders the current-time line on today’s row only, positioned from the now prop', () => {
+  it('renders the current-time line on today’s row only', () => {
     render()
 
     const today = rowOf('e-own')
     expect(today.textContent).toContain('Wednesday')
     const line = today.querySelector<HTMLElement>('span.bg-border-strong')
     expect(line).not.toBeNull()
-    // 10:00 is 180 of the window's 900 minutes past 07:00: 20%.
-    expect(line?.style.marginLeft).toBe('20%')
+    // **The rule spans the remaining width; it is not offset by the hour.** It used to
+    // carry `marginLeft: '20%'` here, derived from the window's 900 minutes, and that is
+    // the defect the 200%-text gate found: a percentage margin is not shrinkable, so late
+    // in the day it claimed most of the row, left the "Now" label about 7px, and wrapped
+    // it onto three lines. The design's own current-time row (`411:26931`) is
+    // `label — flex-1 rule — label` with no positional offset, and a day's events are
+    // listed in order rather than placed on a time axis, so the offset was a claim this
+    // layout does not make. Asserted as the property: no inline offset, and the rule is
+    // the flexible item that gives way.
+    expect(line?.style.marginLeft).toBe('')
+    expect(line?.className).toContain('flex-1')
+    expect(line?.className).toContain('min-w-0')
 
     // Thursday's row has no line: "now" is not on a day that is not today.
     const other = rowOf('e-ext')

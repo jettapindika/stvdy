@@ -2125,6 +2125,17 @@ async function signIn(page) {
 }
 
 /**
+ * How long a navigation step keeps looking for its control before failing.
+ *
+ * A step that follows a navigation is looking for a control the *next* screen renders,
+ * and that screen may still be fetching when the click arrives. Five seconds is far
+ * longer than a local render and far shorter than the walk's own timeouts, and it is a
+ * bound rather than a wait: a control that never appears still fails, with the message
+ * in the loop inside `openSurface`, just later.
+ */
+const STEP_TIMEOUT_MS = 5000
+
+/**
  * Navigates by clicking, not by changing the URL.
  *
  * The access token lives in memory only on the web build, so a reload would drop
@@ -2257,16 +2268,29 @@ async function openSurface(page, surface) {
     // the desktop). One `SURFACES` table is walked at both widths, so the pair is an
     // alias like `Work`/`Workspaces` rather than two rows.
     const aliases = { Work: 'Workspaces', More: 'Settings', Calendar: 'Plan' }
-    // The two attempts are separated by a wait, and that is load-bearing for a step
-    // that follows a navigation: `{ nav: 'Planner' }, { link: 'Calendar' }` clicks the
-    // tab, and the retry then has to look for the alias **in the planner's own DOM**,
-    // which does not exist until React has re-rendered. Retrying immediately found
-    // neither label and failed with "no a labelled Calendar" — a failure that reads as
-    // a missing control rather than as a race.
-    let found = await click(wanted)
-    if (!found && aliases[wanted] !== undefined) {
-      await new Promise((resolve) => setTimeout(resolve, 400))
-      found = await click(aliases[wanted])
+    /**
+     * **Poll, rather than sample once.**
+     *
+     * A step that follows a navigation is looking for a control the *next* screen
+     * renders, and that screen may still be fetching when the click arrives. The
+     * previous form tried the label once and, only if an alias existed, once more
+     * after a 400ms wait — so `{ tab: 'Studio' }` (which has no alias) got a single
+     * attempt, and a slow response turned into "no `[role="tab"]` labelled Studio on
+     * the way to workspace-studio-quiz", a failure that reads as a missing control
+     * rather than as a race. That is the same class the alias comment below already
+     * documents, just not covered for labels without an alias.
+     *
+     * The loop is bounded and still fails loudly, so a control that genuinely is not
+     * rendered fails with the message below — it just fails after the timeout instead
+     * of immediately. The wait is on the *label*, so it cannot make a wrong screen
+     * pass: the surface's own `expect` is asserted afterwards.
+     */
+    const deadline = Date.now() + STEP_TIMEOUT_MS
+    let found = false
+    while (!found && Date.now() < deadline) {
+      found = await click(wanted)
+      if (!found && aliases[wanted] !== undefined) found = await click(aliases[wanted])
+      if (!found) await new Promise((resolve) => setTimeout(resolve, 100))
     }
     if (!found) fail(`no ${scope} labelled "${wanted}" on the way to ${surface.name}`)
     await new Promise((resolve) => setTimeout(resolve, 400))
