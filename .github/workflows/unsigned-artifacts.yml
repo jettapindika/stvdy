@@ -28,7 +28,7 @@ on:
       version:
         description: The version to build. It must equal the tree's, in all four places.
         required: true
-        default: 0.1.2
+        default: 0.1.3
       api_base_url:
         description: >-
           The API origin baked into the SPA at build time (`VITE_API_BASE_URL`). It is a
@@ -546,6 +546,11 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
           VISIBILITY: ${{ inputs.visibility }}
           APK_SIGNING: ${{ inputs.apk_signing }}
+          # The origin the installers were built against, named in the notes. It is the input
+          # rather than a literal because the two drifted once already: the notes said
+          # `https://api.stvdy.app` while the artifacts baked in the staging domain, so a reader
+          # following the note would look for a server these files cannot reach.
+          API_BASE: ${{ inputs.api_base_url }}
         run: |
           set -euo pipefail
           tag="v$VERSION"
@@ -599,7 +604,7 @@ jobs:
             'The signed path — the one that does publish a manifest — is' \
             '.github/workflows/release.yml, and it needs the certificates in docs/RELEASE.md.' \
             '' \
-            'The client talks to https://api.stvdy.app; the server is not part of this release.' \
+            'The client talks to '"$API_BASE"'; the server is not part of this release.' \
             'SHA256SUMS.txt covers every file above.' > notes.md
           cat notes.md
 

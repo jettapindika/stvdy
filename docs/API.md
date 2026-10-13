@@ -64,7 +64,7 @@ Consume with `fetch` + a stream reader, not `EventSource`: chat needs POST and a
 Public. Liveness plus a cheap readiness probe.
 
 ```json
-{ "status": "ok", "version": "0.1.2", "env": "dev", "plans": 3 }
+{ "status": "ok", "version": "0.1.3", "env": "dev", "plans": 3 }
 ```
 
 Returns 500 if the database is unreachable.

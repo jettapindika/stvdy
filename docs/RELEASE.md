@@ -567,7 +567,7 @@ inconvenience in it — so the two are separate files, and this one says on ever
 missing.
 
 ```bash
-gh workflow run unsigned-artifacts.yml -f version=0.1.2 \
+gh workflow run unsigned-artifacts.yml -f version=0.1.3 \
   -f visibility=prerelease -f apk_signing=operator-keystore
 ```
 
@@ -770,7 +770,7 @@ single user sees it. The service is not launched publicly until rows 8 and 9 are
 `tauri.conf.json`. Mobile build numbers are bumped per submission.
 
 **A bump touches more than those three, and the ones it misses are the ones nothing used to
-check.** As of v0.1.2 the places are:
+check.** As of v0.1.3 the places are:
 
 | Place | Bound by |
 |---|---|
@@ -781,6 +781,8 @@ check.** As of v0.1.2 the places are:
 | `src-tauri/gen/apple/project.yml`, both blocks | nothing — it is XcodeGen's committed output, so it is byte-compared to the template by hand |
 | the two committed lock files (`Cargo.lock`, `src-tauri/Cargo.lock`) | `cargo metadata` rewrites them; the local packages' versions live there. `src-tauri/plugins/mobile/Cargo.lock` carries none, so it does not move |
 | `CONTRIBUTING.md`'s `/health` line (moved there from `README.md`), `docs/API.md`'s Phase 0 section | nothing — a documented response body that disagrees with the response is a false example |
+| the staging image tag's default — `deploy/staging/docker-compose.staging.yml`, `scripts/staging-deploy.sh`, `scripts/staging-sync.sh`, `docs/OPERATIONS.md`'s two examples | nothing — but the tag is the *server* image's name, so it is the workspace version rather than the shell's. Left behind, `docker compose` deploys an image labelled `0.1.2` whose `/health` reports `0.1.3` |
+| `.github/workflows/unsigned-artifacts.yml`'s `version` input default | nothing — the workflow's own `version` job refuses a mismatch against the tree, so a stale default fails the run rather than mislabelling an artifact |
 
 The iOS blocks' **`CFBundleVersion`** is deliberately not in that list: it is `"0.1.0"` and
 `"1"`, it was already stale at v0.1.1, and `a96a31d` recorded why moving it would be a guess —

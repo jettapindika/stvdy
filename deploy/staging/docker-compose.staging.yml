@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: ${SERVER_IMAGE:-stvdy-server:0.1.2}
+    image: ${SERVER_IMAGE:-stvdy-server:0.1.3}
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,6 +64,8 @@ services:
       - ./data/objects:/data/objects
       # The dev mail sink. With `SMTP_URL` unset the verification link is a file rather than an
       # inbox (B3), which is the only way to complete a signup on a host that receives no mail.
+      # With a relay set the directory is not written at all, and what remains in it is history:
+      # the mount stays because the empty-`SMTP_URL` posture is still one deployment away.
       - ./data/mail:/data/mail
     # **No published port, deliberately.** `web` proxies `/api/` to this service over the
     # compose network, so the API has exactly one public entry point and it is the one behind

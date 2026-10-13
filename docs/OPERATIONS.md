@@ -277,7 +277,7 @@ token with `Zone:DNS:Edit` for the zone, which makes
 runs to completion before the replica starts (A346).
 
 ```bash
-cd ~/stvdy && SERVER_IMAGE=stvdy-server:0.1.2 bash scripts/staging-deploy.sh
+cd ~/stvdy && SERVER_IMAGE=stvdy-server:0.1.3 bash scripts/staging-deploy.sh
 ```
 
 **One config pair is checked before this runs, because half of it stops the boot.** `QRIS_BASE_URL`
@@ -303,7 +303,7 @@ there, natively (`amd64`), because the laptop is `arm64` and a cross-build of th
 slower than the fetch. `scripts/staging-sync.sh` is that step:
 
 ```bash
-bash scripts/staging-sync.sh                    # ubuntu@129.225.10.139, stvdy-server:0.1.2, main
+bash scripts/staging-sync.sh                    # ubuntu@129.225.10.139, stvdy-server:0.1.3, main
 bash scripts/staging-sync.sh host tag ref       # or explicitly
 ```
 
