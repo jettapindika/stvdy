@@ -44,7 +44,7 @@ const NON_SYNC_TABLES: &[&str] = &[
     "credit_ledger",
     "payments",
     "subscriptions",
-    "webhook_events",
+    "gateway_events",
     "discount_codes",
     // Phase 13. The once-per-user redemption row (A298): a billing internal like
     // `discount_codes` itself, and no client entity reaches it.
@@ -467,7 +467,7 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
         // unique key is `(code, user_id)`, so a second attempt by one account is refused by
         // the database rather than by a read-then-write in the route. It is also the answer
         // to "why was this code counted" — the row names the payment that redeemed it, and
-        // `on delete cascade` on that payment is right here (unlike `webhook_events`, which
+        // `on delete cascade` on that payment is right here (unlike `gateway_events`, which
         // is evidence and takes `set null`). Not a `+sync` table (A298): it is a billing
         // internal like `discount_codes` itself, and `0017_sync_triggers.sql` stays the last
         // trigger-attaching migration.
@@ -490,7 +490,7 @@ async fn tables_added_beyond_the_spec_are_deliberate(pool: PgPool) {
                 "calendar_connections",
                 "subscriptions",
                 "payments",
-                "webhook_events",
+                "gateway_events",
                 "credit_ledger",
                 "usage_events",
                 "discount_codes",

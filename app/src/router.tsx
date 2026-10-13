@@ -130,7 +130,7 @@ const purchaseRoutes = __PURCHASE_UI__
       // The QRIS checkout screen, keyed by the payment it is about. A route
       // rather than a panel, because a student who reloads, or opens the link
       // on another device, must land back on the same live invoice — and the
-      // poll is what recovers a webhook the gateway never delivered (A301).
+      // poll is what reads the settlement the gateway is holding (A301).
       { path: 'billing/checkout/:paymentId', element: <CheckoutRoute /> },
     ]
   : []

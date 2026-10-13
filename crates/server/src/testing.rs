@@ -19,7 +19,7 @@ use stvdy_core::traits::clock::Clock;
 use stvdy_core::traits::embedder::Embedder;
 use stvdy_core::traits::mailer::Mailer;
 use stvdy_core::traits::payment::{
-    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
+    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider,
 };
 use stvdy_core::traits::storage::Storage;
 use stvdy_core::traits::testing::{
@@ -116,11 +116,7 @@ pub fn config() -> AppConfig {
             // The base URL points nowhere on purpose: the double never opens a socket, and
             // a suite that wants a real wire uses `common::stub_http_json`.
             ("QRIS_BASE_URL", "http://127.0.0.1:1"),
-            ("QRIS_API_KEY", "test-qris-api-key"),
-            ("QRIS_CALLBACK_TOKEN", "test-qris-callback-token"),
-            ("QRIS_SIGNATURE_SCHEME", "hmac_sha256_hex"),
-            ("QRIS_SIGNATURE_HEADER", "X-Callback-Signature"),
-            ("QRIS_WEBHOOK_IPS", ""),
+            ("QRIS_MERCHANT_ID", "test-merchant-id"),
             ("QRIS_FEE_PERCENT", "0"),
             ("QRIS_FEE_FIXED_IDR", "0"),
             ("QRIS_INVOICE_TTL_MINUTES", "15"),
@@ -135,21 +131,20 @@ pub fn plans() -> PlansFile {
     load_plans(&root().join("config/plans.toml")).expect("plans.toml must load")
 }
 
-/// A gateway that signs bodies like a real one **and** serves a scripted transaction
-/// list, so the reconciliation sweep is testable.
+/// A scripted gateway that also serves a transaction list, so the reconciliation sweep is
+/// testable.
 ///
-/// It wraps [`MockPayment`] rather than reimplementing it: the signature is a real
-/// HMAC over the bytes the test posts, which is the property every webhook test depends
-/// on. The one thing `MockPayment` cannot do is answer `recent_transactions` — it is a
-/// contract trait double in `crates/core`, and the listing is this server's own
-/// extension — so the script for that lives here.
+/// It wraps [`MockPayment`] rather than reimplementing it: the status script, the invoice
+/// record and the refund notes are the contract double's, and one wrapper means a change to
+/// the double cannot leave this half behind. The one thing `MockPayment` cannot do is answer
+/// `recent_transactions` — it is a contract trait double in `crates/core`, and the listing
+/// is this server's own extension — so the script for that lives here.
 pub struct TestGateway {
     mock: MockPayment,
     transactions: std::sync::Mutex<std::collections::VecDeque<Vec<GatewayTransaction>>>,
 }
 
 impl TestGateway {
-    /// A gateway signing with the mock's own secret.
     pub fn new() -> Self {
         Self {
             mock: MockPayment::new(),
@@ -157,14 +152,14 @@ impl TestGateway {
         }
     }
 
-    /// The headers a real gateway would send for this body.
-    pub fn sign(&self, body: &[u8]) -> axum::http::HeaderMap {
-        self.mock.sign(body)
-    }
-
     /// The next status `get_status` will report.
     pub fn push_status(&self, status: GatewayStatus) {
         self.mock.push_status(status);
+    }
+
+    /// Makes the double add a unique offset to every invoice, as the real bridge does.
+    pub fn set_unique_offset(&self, offset: i64) {
+        self.mock.set_unique_offset(offset);
     }
 
     /// Every invoice request this double was handed, in order.
@@ -197,16 +192,8 @@ impl PaymentProvider for TestGateway {
         self.mock.create_invoice(request).await
     }
 
-    async fn get_status(&self, order_id: &str) -> Result<GatewayStatus, PaymentError> {
-        self.mock.get_status(order_id).await
-    }
-
-    fn parse_and_verify_webhook(
-        &self,
-        headers: &axum::http::HeaderMap,
-        raw_body: &[u8],
-    ) -> Result<WebhookEvent, PaymentError> {
-        self.mock.parse_and_verify_webhook(headers, raw_body)
+    async fn get_status(&self, provider_payment_id: &str) -> Result<GatewayStatus, PaymentError> {
+        self.mock.get_status(provider_payment_id).await
     }
 
     async fn refund_note(&self, order_id: &str, amount_idr: i64) -> Result<(), PaymentError> {
@@ -253,8 +240,8 @@ pub fn state(pool: PgPool) -> AppState {
         renderer: None,
         fetcher: offline_fetcher(),
         ics_fetch: offline_ics_fetch(),
-        // A real HMAC over the bytes a test posts, so a webhook test that passes
-        // actually verified something. `TestState` keeps a handle to the same object.
+        // A scripted gateway, so a suite that drives checkout or the poller gets the
+        // double rather than a socket. `TestState` keeps a handle to the same object.
         payment: Some(Arc::new(TestGateway::new())),
         push: Arc::new(crate::integrations::push::PushRouter::default()),
         // `None`, the same shape `llm` and `renderer` take: a suite that drives a Google sync
@@ -401,7 +388,7 @@ pub struct TestState {
     pub storage: Arc<InMemoryStorage>,
     pub mailer: Arc<RecordingMailer>,
     pub clock: Arc<FixedClock>,
-    /// The gateway double, so a webhook test can sign the body it posts and a poll test
+    /// The gateway double, so a checkout test can assert the amount it was handed and a poll test
     /// can script the status the gateway will report.
     pub gateway: Arc<TestGateway>,
 }

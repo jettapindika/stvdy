@@ -30,6 +30,24 @@ export const API_ERROR_CODES = [
   'token_expired',
   'plan_required',
   'feature_locked',
+  /**
+   * The account was deleted at the student's own request and is inside its grace
+   * window (A355). Its own code rather than `forbidden` because the sentence has
+   * to carry the purge date, and only the server knows it: `apiErrorReason`
+   * returns the server's sentence for this code.
+   */
+  'account_deleted',
+  /**
+   * A refusal with no plan story behind it: a signature that does not match
+   * (A73), a device over its allowance, a caller not allowed to read this row.
+   *
+   * It is also what a 403 becomes when the body carries no code this build
+   * knows. That fallback is the point of the arm: the notice for `plan_required`
+   * offers "See plans", and a plan cannot fix a tampered signature, an unverified
+   * email or a deleted account — which is exactly how a deleted account came to
+   * be rendered as a plan gate.
+   */
+  'forbidden',
   /** A verified email is required before any action that costs money (A43). */
   'email_not_verified',
   'not_found',
@@ -40,6 +58,13 @@ export const API_ERROR_CODES = [
    * fetch a fresh link, not to sign in again.
    */
   'link_expired',
+  /**
+   * The sync cursor is older than the history the server still retains, so this
+   * device cannot catch up incrementally and has to start over (A186). Distinct
+   * from `link_expired`, which shares its status: "open the source again" is the
+   * wrong instruction for a copy that is too far behind.
+   */
+  'resync_required',
   /** The account's credit balance is short of what the action costs. */
   'insufficient_credits',
   'rate_limited',
@@ -148,7 +173,14 @@ export function codeForStatus(status: number): ApiErrorCode {
     case 402:
       return 'insufficient_credits'
     case 403:
-      return 'plan_required'
+      // 403 is the overloaded status — a plan gate, a locked feature, an
+      // unverified email, a tampered signature, a deleted account, a device over
+      // its allowance — and the body's `code` is what tells them apart. This arm
+      // is only for a body that carried none, so it has to be the one that
+      // claims nothing: `plan_required` here offered "See plans" as the remedy
+      // for every refusal whose code this build did not recognise, which is how
+      // a deleted account (`account_deleted`) was shown as a plan problem.
+      return 'forbidden'
     case 404:
       return 'not_found'
     case 409:
@@ -177,6 +209,8 @@ export function statusForCode(code: ApiErrorCode): number {
   switch (code) {
     case 'insufficient_credits':
       return 402
+    case 'account_deleted':
+    case 'forbidden':
     case 'email_not_verified':
     case 'plan_required':
     case 'feature_locked':
@@ -188,6 +222,7 @@ export function statusForCode(code: ApiErrorCode): number {
     case 'limit_reached':
       return 422
     case 'link_expired':
+    case 'resync_required':
       return 410
     case 'rate_limited':
       return 429
@@ -234,11 +269,18 @@ export function apiErrorFromBody(status: number, body: unknown): ApiError {
 /**
  * What the user is told, per code.
  *
- * None of these repeat the server's `message`, which is a log line. Each one says
+ * These do not repeat the server's `message`, which is a log line. Each one says
  * what happened and what can be done about it, because "Something went wrong" is
  * a state that names neither (R-27). The copy lives in `error.<code>.reason` in
  * the locale files, so the mapping here is the *key* rather than the sentence and
  * an Indonesian user reads Indonesian.
+ *
+ * Two codes are the exception, for the same reason: their server sentence is the
+ * only statement of a fact the client does not have. `validation` is one and is
+ * handled by `validationMessage`, which has to attribute it to a field.
+ * `account_deleted` is the other — the purge date exists nowhere else, and a
+ * composed sentence could only say "after a while" about the one date the
+ * student is waiting for.
  */
 export function apiErrorReason(error: ApiError, t: TFunction): string {
   // `network` is the only code this client raises itself, and it is the only one
@@ -250,6 +292,12 @@ export function apiErrorReason(error: ApiError, t: TFunction): string {
       ? t('error.network.reason')
       : t('error.network.reasonAt', { origin: error.origin })
   }
+
+  // The date this address is released on, which the server names and the client
+  // cannot compute. The locale entry is the fallback for a refusal whose message
+  // was empty, so the notice still reads as something.
+  if (error.code === 'account_deleted' && error.message.length > 0) return error.message
+
   return t(`error.${error.code}.reason`)
 }
 

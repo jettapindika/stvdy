@@ -6,15 +6,17 @@
 //!    is the *device row* (A144). A body that says `platform: "web"` from an `ios` device
 //!    is still refused, because the body is the client's claim and the device row is a
 //!    fact written at login.
-//!  * **The amount comes from `billing::price`**, never from the body and never from the
-//!    gateway. It is the same function the webhook later checks the payment against, so
-//!    the number quoted and the number verified cannot disagree.
+//!  * **The amount comes from `billing::price`**, never from the body. It is the same
+//!    function the settlement is later checked against, so the number quoted and the
+//!    number verified cannot disagree. The one figure this module does *not* compute is the
+//!    gateway's unique offset, which arrives with the invoice and is stored beside the price
+//!    rather than replacing it (`payments.payable_amount_idr`).
 //!  * **A second checkout for the same plan and period reuses the pending invoice**
 //!    (A307) rather than minting a second QR: "the user paid twice for one period" is one
 //!    of the spec's edge cases, and a second QR is how it happens.
 //!  * **A gateway failure rolls the whole thing back.** A pending row with no QR is worse
-//!    than no row: the student cannot pay it, and the poller would ask the gateway about
-//!    an order the gateway never created.
+//!    than no row: the student cannot pay it, and the poller would ask the gateway about a
+//!    payment the gateway never created.
 
 use chrono::Duration;
 use serde::{Deserialize, Serialize};
@@ -43,6 +45,13 @@ pub struct PaymentView {
     pub billing_period: Option<String>,
     pub credits: Option<i32>,
     pub amount_idr: i64,
+    /// The amount to actually transfer: the price plus the gateway's unique offset.
+    ///
+    /// Always present, and always at least `amount_idr` — the field is coalesced to the
+    /// price so a client never has to decide what a null means. The offset exists so the
+    /// gateway can match a settlement to one order by amount alone; it is at most 999 IDR,
+    /// which is why the checkout screen shows it as a line rather than as a second price.
+    pub payable_amount_idr: i64,
     pub amount_before_discount_idr: i64,
     pub discount_percent: i32,
     pub discount_code: Option<String>,
@@ -72,6 +81,7 @@ macro_rules! payment_select {
         // INT4 and would decode exactly as badly.
         "select id, order_id, kind, plan_id, billing_period, credits,
                 amount_idr::bigint as amount_idr,
+                coalesce(payable_amount_idr, amount_idr)::bigint as payable_amount_idr,
                 coalesce(amount_before_discount_idr, amount_idr)::bigint
                     as amount_before_discount_idr,
                 discount_percent, discount_code, student_discount, qr_string, expires_at,
@@ -92,9 +102,9 @@ pub struct CheckoutBody {
 
 /// `POST /billing/checkout`
 ///
-/// Takes `VerifiedUser`, so A43's "a verified email before any action that costs money"
-/// is enforced by the extractor rather than by a line in the handler a later edit could
-/// drop.
+/// Takes `VerifiedUser`, so the gate is enforced by the extractor rather than by a line in
+/// the handler a later edit could drop. Checkout is one of the routes A43 named first — a
+/// verified address before any action that costs money — and A359 kept it there.
 pub async fn create(
     state: &AppState,
     user: &VerifiedUser,
@@ -332,10 +342,10 @@ pub(crate) async fn open_invoice(
     let expires_at = state.clock.now() + Duration::minutes(ttl_minutes);
 
     // The provider recorded on the row is the gateway that minted the invoice, never a
-    // literal. `payments` is unique on `(provider, order_id)` and the webhook resolves an
-    // order with the same `gateway.name()`, so a hardcoded `'qris_gateway'` would be a
-    // lookup that cannot match the moment a second provider exists — and every callback for
-    // it would answer 404 while the payment sat pending.
+    // literal. `payments` is unique on `(provider, order_id)` and the poller resolves a
+    // payment with the same `gateway.name()`, so a hardcoded `'qris_gateway'` would be a
+    // lookup that cannot match the moment a second provider exists — and every status
+    // question for it would answer "unknown" while the payment sat pending.
     let provider = gateway.name();
 
     let payment_id: Uuid = sqlx::query_scalar(
@@ -422,15 +432,25 @@ pub(crate) async fn open_invoice(
 
     // The gateway's expiry is authoritative (A6/A306): it is the instant the code dies, and
     // the countdown the client renders is this value against the client's own clock.
+    //
+    // `payable_amount_idr` is written in the same statement, and it is the one number here
+    // that did not come from us. The gateway adds a unique offset so it can match a
+    // settlement by amount alone, so the figure the QR encodes is not the price — and if it
+    // were not stored, the checkout screen would show a number the student must not
+    // transfer and the amount check would flag every real payment. `None` (a gateway that
+    // charges exactly what it is asked for) leaves the column NULL, and every reader falls
+    // back to `amount_idr`.
     sqlx::query(
         "update payments
-            set qr_string = $2, provider_payment_id = $3, expires_at = $4
+            set qr_string = $2, provider_payment_id = $3, expires_at = $4,
+                payable_amount_idr = $5
           where id = $1",
     )
     .bind(payment_id)
     .bind(&invoice.qr_string)
     .bind(&invoice.provider_payment_id)
     .bind(invoice.expires_at)
+    .bind(invoice.payable_amount_idr)
     .execute(&mut *conn)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("writing the QR back: {error}")))?;
@@ -439,6 +459,7 @@ pub(crate) async fn open_invoice(
         %payment_id,
         order_id = %order_id,
         amount_idr = new.amount_idr,
+        payable_amount_idr = invoice.payable_amount_idr.unwrap_or(new.amount_idr),
         kind = new.kind,
         platform = %user.platform,
         "checkout opened"
@@ -456,6 +477,13 @@ pub(crate) async fn open_invoice(
 /// **Expiry is re-checked here**, so a client whose clock is wrong cannot extend its own
 /// invoice by not noticing. A pending row past its expiry reads `expired`, and the poll
 /// stops on every terminal status.
+///
+/// **And the gateway is asked, once, before the row is read.** The bridge never pushes, so
+/// this poll is the fast ingress: without it a student who has paid waits for the
+/// five-minute sweep to notice, which is a "waiting for confirmation" screen in front of
+/// money that already moved (A301). It is asked *after* the expiry check, so a row this
+/// request just expired is not resurrected by a late answer, and its result is only ever a
+/// committed status — the read below is what the client sees either way.
 pub async fn show(state: &AppState, user: &AuthUser, payment_id: Uuid) -> AppResult<PaymentView> {
     let mut conn =
         state.pool.acquire().await.map_err(|error| {
@@ -475,6 +503,11 @@ pub async fn show(state: &AppState, user: &AuthUser, payment_id: Uuid) -> AppRes
     if expired.rows_affected() > 0 {
         tracing::info!(%payment_id, "an invoice expired while the client was polling");
     }
+
+    // The gateway call is scoped to the caller's own payment by the statement inside
+    // `refresh_pending`, and a failure inside it is swallowed there: a bridge that is down
+    // must not turn the checkout screen's poll into an error page.
+    crate::billing::poll::refresh_pending(state, user.user_id, payment_id).await?;
 
     // The scope is in the statement, not in a check after the read: "every query scoped to
     // the authenticated user" is a rule about the query.

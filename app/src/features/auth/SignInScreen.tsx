@@ -48,7 +48,17 @@ export function SignInScreen() {
         className="flex flex-col gap-4 sm:gap-5"
         onSubmit={(event) => {
           event.preventDefault()
-          signIn.mutate({ email, password }, { onSuccess: () => void navigate('/workspaces') })
+          signIn.mutate(
+            { email, password },
+            {
+              // An unverified account is sent to the screen that can fix it rather than to
+              // the workspace, which would refuse it (A359). The shell's gate would redirect
+              // anyway; doing it here is the same destination without the bounce, and it
+              // keeps the reason for the landing visible in one place.
+              onSuccess: (response) =>
+                void navigate(response.user.email_verified ? '/workspaces' : '/verify'),
+            },
+          )
         }}
       >
         {showNotice && error !== null && (

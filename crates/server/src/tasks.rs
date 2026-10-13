@@ -409,7 +409,7 @@ fn task_columns(alias: Option<&str>) -> String {
 /// account's task is not merely filtered out of the answer — it is never read.
 pub async fn list(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     let rows = list_in(&state.pool, user.user_id, &query).await?;
@@ -462,7 +462,7 @@ pub(crate) async fn list_in(
 /// `POST /tasks`. 201 `{task}`, 409 when the id is already taken.
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     // One transaction, so the id check and the insert cannot interleave with a second
@@ -588,7 +588,7 @@ async fn check_workspace_owned(
 /// `PATCH /tasks/:id`. 200 `{task}`, 404 for another account's row or a tombstone.
 pub async fn update(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
@@ -760,7 +760,7 @@ pub(crate) async fn restore_cascaded_subtree(
 /// `DELETE /tasks/:id`. 204, and the tombstone is the whole subtree (A197).
 pub async fn delete_one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let mut tx =

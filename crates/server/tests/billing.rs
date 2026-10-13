@@ -97,7 +97,7 @@ async fn checkout_requires_a_verified_email(pool: PgPool) {
     assert!(harness.gateway.invoices().is_empty());
 }
 
-/// One pending payment, one order id, a 15-minute expiry, and the amount the webhook will
+/// One pending payment, one order id, a 15-minute expiry, and the amount the settlement is
 /// later be checked against.
 #[sqlx::test(migrations = "../../migrations")]
 async fn checkout_writes_one_pending_payment_with_the_quoted_amount(pool: PgPool) {

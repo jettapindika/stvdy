@@ -1,42 +1,46 @@
 #!/usr/bin/env bash
 # Phase 13 end-to-end smoke test: the QRIS money path, against the real server, the real
-# Postgres, and a gateway this run names out loud.
+# Postgres, and a gateway this run scripts.
 #
-# Drives the real process over HTTP and reads the real database back, because the parts
-# this phase can get wrong are exactly the parts a trait-level double cannot see: that the
-# invoice the server *sends* carries the order id, the amount and the expiry we stored;
-# that the signature over the raw bytes is what the route verifies; that a duplicate
-# callback changes nothing in `subscriptions` or `credit_ledger`; that a mismatched amount
-# lands in `review` with both numbers written down; and that the poller — the same
-# `apply_paid` the webhook calls — does nothing to a payment the webhook already applied.
+# Drives the real process over HTTP and reads the real database back, because the parts this
+# phase can get wrong are exactly the parts a trait-level double cannot see: that the invoice
+# the server *sends* carries the order id, the price and the lifetime, and that the figure it
+# stores is the **payable amount the gateway assigned**; that the client's own poll is what
+# applies a paid answer; that a replay changes nothing in `subscriptions`, `credit_ledger` or
+# `gateway_events`; that a settlement for the bare price lands in `review` with both numbers
+# written down; and that the reconciliation sweep joins the gateway's feed to our rows **by
+# amount**.
 #
-# **Which gateway this run used, printed and never implied.** B1 is unresolved: the real
-# gateway has no identity, no docs and no response shapes, so this run exercises the wire
-# the server sends against **`scripts/stub-qris.py`** (the mock) unless `QRIS_BASE_URL`
-# points somewhere other than loopback, in which case it is the **sandbox** and this script
-# only signs callbacks — it cannot mint invoices at a gateway it does not control. Either
-# way the run prints the mode and the base URL in its first line, and nothing here claims a
-# live gateway was exercised.
+# **The gateway never pushes.** B1 resolved to a self-hosted QRIS bridge (`gopay-bridge`) that
+# is *polled*: the server's only ingress is its own status reads, so there is no callback to
+# sign and no payload to forge, and a local run can only produce "the buyer paid" by being the
+# thing the server asks. That is what `scripts/stub-qris.py` is, and this run drives it through
+# its `/_control` routes. The run prints the gateway and its base URL in its first line, and
+# nothing here claims a live gateway was exercised.
 #
-# Seven scenarios, in order:
-#   1. a checkout: a pending row, the config's amount, a QR string, and a 15-minute expiry
-#      — plus the invoice request the gateway actually received
-#   2. a verified webhook: the plan active, one subscription, one `sub:` grant, and a
-#      second device's token reading `pro`
-#   3. the duplicate: the same event id twice (one activation), then the same payment under
-#      a **fresh** event id (still one activation) — the two defences are different
-#   4. a mismatched amount: refused into `review`, with nothing activated
-#   5. an expired invoice: a payment made after the code died is `review`, and the poll
-#      route reads `expired` rather than extending it
-#   6. the poller: nothing happens to a payment the webhook already applied (asserted
-#      structurally — the gateway is never asked about it), and a *pending* payment the
-#      gateway reports paid is activated by the same code path
-#   7. the margin report: the free/paid split, printed
+# Nine scenarios, in order:
+#   1. a checkout: a pending row, the config's price, the gateway's **payable** (the price plus
+#      its unique offset), a QR string the stub derived from this request, and the invoice
+#      request the gateway actually received
+#   2. a status word the bridge never sends: the server refuses it rather than obeying it
+#   3. the client's poll activates the payment: the plan active, one subscription, one `sub:`
+#      grant, one `gateway_events` row, and a second device's token reading `pro`
+#   4. the replay: the same answer twice — one activation, one audit row, and the gateway is
+#      never asked again (the guarded transition's own subject is gone with the callback, and
+#      the run says so where it used to be asserted)
+#   5. a settlement for the bare price: `review`, with both numbers in `review_reason` — the
+#      assertion `payments.payable_amount_idr` exists for
+#   6. an expired invoice: the poll route reads and persists `expired` rather than extending it
+#   7. the poller: nothing for a payment the client's poll already applied (asserted
+#      structurally — the gateway is never asked about it), and a *pending* payment the gateway
+#      reports paid is activated by the same code path, without double-activating
+#   8. the reconciliation sweep: the feed's join is on the amount
+#   9. the margin report: the free/paid split, printed
 #
-# **Run this against a freshly started server.** It makes several requests to the
-# credential routes, and `ratelimit::auth_layer` (A12) is an in-process bucket of 30
-# requests per minute per IP, so a second run inside the same server process may have to
-# wait for cells. The script waits and says so rather than hanging.
+# **Run this against a freshly started server.** It makes several requests to the credential
+# routes, and `ratelimit::auth_layer` (A12) is an in-process bucket of 30 requests per minute
+# per IP, so a second run inside the same server process may have to wait for cells. The script
+# waits and says so rather than hanging.
 #
 # Not a test suite (that is crates/server/tests): this proves the wired process works.
 set -euo pipefail
@@ -81,25 +85,28 @@ fi
 db() { "$PSQL" "$DATABASE_URL" -tAc "$1"; }
 
 GATEWAY_URL="$(env_key QRIS_BASE_URL "")"
-QRIS_API_KEY="$(env_key QRIS_API_KEY "")"
-CALLBACK_TOKEN="$(env_key QRIS_CALLBACK_TOKEN "")"
-SIGN_SCHEME="$(env_key QRIS_SIGNATURE_SCHEME hmac_sha256_hex)"
-SIGN_HEADER="$(env_key QRIS_SIGNATURE_HEADER X-Callback-Signature)"
+MERCHANT_ID="$(env_key QRIS_MERCHANT_ID "")"
 TTL_MINUTES="$(env_key QRIS_INVOICE_TTL_MINUTES 15)"
+RECONCILE_HOURS="$(env_key QRIS_RECONCILE_HOURS 48)"
 MAIL_DIR="$(env_key MAIL_DIR "$MAIL_DIR")"
 
 [ -n "$GATEWAY_URL" ] || fail "no QRIS_BASE_URL. The server refuses to mint an invoice \
 without a gateway (502 provider_error), so this run cannot start a payment. Start the \
-server with the stub, as 'just smoke-server-phase13' does, or point QRIS_BASE_URL at the \
-sandbox."
-[ -n "$CALLBACK_TOKEN" ] || fail "no QRIS_CALLBACK_TOKEN: nothing can be signed, so no \
-callback could be verified."
+server with the stub, as 'just smoke-server-phase13' does."
+[ -n "$MERCHANT_ID" ] || fail "no QRIS_MERCHANT_ID. The server refuses to boot with a base \
+URL and no merchant id (A301), and this run reads the sweep's own query back, so it needs \
+the same value the server was started with."
 
-# Which gateway this is. A loopback base URL is the stub this script starts; anything else
-# is a gateway somebody else runs, and the run says so rather than assuming.
+# Which gateway this is. A loopback base URL is the stub this script starts; anything else is
+# a gateway somebody else runs — and a gateway this script does not control cannot be
+# scripted, which is every paid answer below. So the mode is printed and a non-loopback base
+# URL is refused rather than quietly turning the run into something weaker.
 case "$GATEWAY_URL" in
-  http://127.0.0.1:*|http://localhost:*) GATEWAY_MODE="mock (scripts/stub-qris.py)"; MOCK=1 ;;
-  *) GATEWAY_MODE="sandbox (an external gateway at QRIS_BASE_URL)"; MOCK="" ;;
+  http://127.0.0.1:*|http://localhost:*) GATEWAY_MODE="stub (scripts/stub-qris.py)" ;;
+  *) fail "$GATEWAY_URL is not loopback. This run scripts the gateway's answers through the \
+stub's /_control routes — the bridge never pushes, so a paid answer has to be produced on \
+demand — and a gateway this script does not control cannot be scripted. Point QRIS_BASE_URL \
+at scripts/stub-qris.py, which is what 'just smoke-server-phase13' does." ;;
 esac
 # The stub's port is the base URL's own port, so a run with a different one starts the stub
 # where the server is already looking.
@@ -109,46 +116,37 @@ if [ -z "$GATEWAY_PORT" ]; then
     ''|*[!0-9]*) GATEWAY_PORT=8200 ;;
   esac
 fi
-printf 'gateway: %s at %s | signature %s in %s | invoice ttl %s min\n' \
-  "$GATEWAY_MODE" "$GATEWAY_URL" "$SIGN_SCHEME" "$SIGN_HEADER" "$TTL_MINUTES"
-if [ "$GATEWAY_MODE" != "mock (scripts/stub-qris.py)" ]; then
-  printf 'note: the sandbox mode signs callbacks for the run; the run cannot mint invoices\n'
-  printf '      at a gateway it does not control, so it reads the invoice the server stored.\n'
-  printf '      B1 is unresolved, so no gateway here is the vendor this product will use.\n'
-fi
+printf 'gateway: %s at %s | merchant %s | invoice ttl %s min | reconcile window %s h\n' \
+  "$GATEWAY_MODE" "$GATEWAY_URL" "$MERCHANT_ID" "$TTL_MINUTES" "$RECONCILE_HOURS"
 
-# --- the stub gateway, when the base URL is ours -------------------------------------------
+# --- the stub gateway ------------------------------------------------------------------------
 STUB_PID=""
 cleanup() {
   [ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-case "$GATEWAY_MODE" in
-  "mock (scripts/stub-qris.py)")
-    say "the stub QRIS gateway"
-    STUB_LOG="${STUB_LOG:-var/stub-phase13-requests.jsonl}"
-    mkdir -p "$(dirname "$STUB_LOG")"
-    rm -f "$STUB_LOG"
-    if nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null; then
-      printf 'a listener is already on %s; using it and starting none (its own log, if any, is not this run'"'"'s)\n' \
-        "$GATEWAY_PORT"
-    else
-      python3 scripts/stub-qris.py --port "$GATEWAY_PORT" --api-key "$QRIS_API_KEY" \
-        --log "$STUB_LOG" > "$TMP/stub.log" 2>&1 &
-      STUB_PID="$!"
-      for _ in $(seq 1 40); do
-        nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null && break
-        sleep 0.25
-      done
-      if ! nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null; then
-        cat "$TMP/stub.log"
-        fail "the stub gateway did not start on $GATEWAY_PORT"
-      fi
-    fi
-    nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null || fail "no stub gateway on $GATEWAY_PORT"
-    ;;
-esac
+say "the stub QRIS gateway"
+STUB_LOG="${STUB_LOG:-var/stub-phase13-requests.jsonl}"
+mkdir -p "$(dirname "$STUB_LOG")"
+rm -f "$STUB_LOG"
+if nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null; then
+  printf 'a listener is already on %s; using it and starting none (its own log, if any, is not this run'"'"'s)\n' \
+    "$GATEWAY_PORT"
+else
+  python3 scripts/stub-qris.py --port "$GATEWAY_PORT" --log "$STUB_LOG" \
+    > "$TMP/stub.log" 2>&1 &
+  STUB_PID="$!"
+  for _ in $(seq 1 40); do
+    nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null && break
+    sleep 0.25
+  done
+  if ! nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null; then
+    cat "$TMP/stub.log"
+    fail "the stub gateway did not start on $GATEWAY_PORT"
+  fi
+fi
+nc -z 127.0.0.1 "$GATEWAY_PORT" 2>/dev/null || fail "no stub gateway on $GATEWAY_PORT"
 
 say "health"
 curl -fsS "$BASE/health" > "$TMP/health.json" 2>/dev/null \
@@ -237,87 +235,104 @@ login_second_device() { # $1 = email, $2 = platform
 uid() { db "select id from users where email = 'phase13-$1-$STAMP@$DOMAIN'"; }
 email_of() { printf 'phase13-%s-%s@%s' "$1" "$STAMP" "$DOMAIN"; }
 
-# The signature, computed the way the gateway would: over the **raw bytes** we then post.
+# --- the gateway, and the two ways this run makes it answer ---------------------------------
 #
-# `--data-binary` rather than `-d`, and the body file is written by the same python that
-# signed it: a shell that re-encoded the JSON would sign different bytes than it sent, and
-# the signature would fail for a reason that looks like a server bug.
-cat > "$TMP/sign.py" <<'PY'
-import base64, hashlib, hmac, json, sys
-
-src, out, scheme, secret = sys.argv[1:5]
-event = json.load(open(src))
-body = json.dumps(event, separators=(",", ":")).encode()
-open(out, "wb").write(body)
-
-mac = hmac.new(secret.encode(), body, hashlib.sha256)
-if scheme == "hmac_sha256_hex":
-    print(mac.hexdigest())
-elif scheme == "hmac_sha256_base64":
-    print(base64.b64encode(mac.digest()).decode())
-elif scheme == "shared_token":
-    print(secret)
-else:
-    raise SystemExit(f"unknown QRIS_SIGNATURE_SCHEME {scheme!r}")
-PY
-
-post_webhook() { # $1 = output file, $2 = the event as a JSON file
-  local sig
-  sig="$(python3 "$TMP/sign.py" "$2" "$TMP/event-body.json" "$SIGN_SCHEME" "$CALLBACK_TOKEN")"
-  [ -n "$sig" ] || fail "signing the callback produced nothing"
-  curl -sS -o "$1" -w '%{http_code}' -X POST "$BASE/webhooks/qris" \
-    -H 'content-type: application/json' -H "$SIGN_HEADER: $sig" \
-    --data-binary "@$TMP/event-body.json"
-}
-
-# A paid event, as `mapping::webhook_from_body` reads it.
-paid_event() { # $1 = out file, $2 = event id, $3 = order id, $4 = amount, $5 = paid_at
-  python3 - "$1" "$2" "$3" "$4" "$5" <<'PY'
-import json, sys
-out, event_id, order_id, amount, paid_at = sys.argv[1:6]
-json.dump(
-    {
-        "event_id": event_id,
-        "kind": "paid",
-        "order_id": order_id,
-        "amount_idr": int(amount),
-        "currency": "IDR",
-        "paid_at": paid_at,
-        "provider_payment_id": f"gw-{event_id}",
-    },
-    open(out, "w"),
-)
-PY
-}
-
-now_rfc3339() { python3 -c "import datetime; print(datetime.datetime.now(datetime.UTC).isoformat().replace('+00:00','Z'))"; }
-
-# The gateway's request log, for the assertions about what we *sent*.
+# The bridge never pushes, so every outcome asserted below is one this run scripted and then
+# caused the server to *read*: `script_status` is the only way a payment becomes paid.
 gw_requests() { curl -fsS "$GATEWAY_URL/_control/requests"; }
+
+gw_asked() { # $1 = gateway payment id -> how many times the gateway was asked about it
+  gw_requests | python3 -c "
+import json, sys
+print(sum(1 for r in json.load(sys.stdin)['requests'] if r.get('path') == '/payment/' + sys.argv[1]))" "$1"
+}
+
+script_status() { # $1 = gateway payment id, $2 = the status word, $3 = extra JSON fields ("" for none)
+  python3 - "$TMP/status.json" "$1" "$2" "$3" <<'PY'
+import json, sys
+out, payment_id, status, extra = sys.argv[1:5]
+body = {"payment_id": payment_id, "status": status}
+body.update(json.loads(extra) if extra else {})
+json.dump(body, open(out, "w"))
+PY
+  curl -fsS -X POST "$GATEWAY_URL/_control/status" -H 'content-type: application/json' \
+    --data-binary "@$TMP/status.json" > /dev/null
+}
+
+script_paid() { # $1 = gateway payment id, $2 = the settlement instant, $3 = the amount that landed ("" = the invoice's own)
+  local extra
+  if [ -n "$3" ]; then
+    extra="{\"paid_at\":\"$2\",\"uniqueAmount\":$3}"
+  else
+    extra="{\"paid_at\":\"$2\"}"
+  fi
+  script_status "$1" "paid" "$extra"
+}
+
+# The audit row the server keys an applied answer on: `gateway:<id>:<paid_at>`, with the
+# settlement instant as chrono's `to_rfc3339` writes it (`+00:00`, not `Z`).
+event_id() { # $1 = gateway payment id, $2 = the settlement instant
+  python3 -c "
+import datetime, sys
+instant = datetime.datetime.fromisoformat(sys.argv[2].replace('Z', '+00:00'))
+print(f'gateway:{sys.argv[1]}:{instant.isoformat()}')" "$1" "$2"
+}
+
+epoch() { python3 -c "
+import datetime, sys
+print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00')).timestamp()))" "$1"; }
+
+# **Second precision, deliberately**: the audit id is the settlement instant as the server
+# serialises it, and a fractional second would be written with a different number of digits by
+# Python and by chrono — making the id this script computes a different string from the id the
+# server writes, for a reason that has nothing to do with the money path.
+now_rfc3339() { python3 -c "
+import datetime
+print(datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat().replace('+00:00','Z'))"; }
+
+checkout() { # $1 = token, $2 = plan, $3 = period, $4 = output file
+  curl -sS -o "$4" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
+    -H "authorization: Bearer $1" -H 'content-type: application/json' \
+    -d "{\"plan_id\":\"$2\",\"billing_period\":\"$3\"}"
+}
+
+poll_payment() { # $1 = payment id, $2 = token, $3 = output file
+  curl -sS -o "$3" -w '%{http_code}' "$BASE/billing/payments/$1" -H "authorization: Bearer $2"
+}
+
+# The gateway's id for our payment: the bridge mints its own, our order id travels as
+# `reference`, and every status question is asked with the bridge's.
+gw_payment_id() { db "select provider_payment_id from payments where id = '$1'"; }
 
 # ==========================================================================================
 # 1. A checkout
 # ==========================================================================================
-say "1. a checkout: a pending row, the config's amount, a QR string, a $TTL_MINUTES-minute expiry"
+say "1. a checkout: a pending row, the config's price, the gateway's payable, a QR string, a $TTL_MINUTES-minute expiry"
 CHECKOUT="$(signup checkout)"
 CHECKOUT_ID="$(uid checkout)"
 CHECKOUT_EMAIL="$(email_of checkout)"
-STATUS="$(curl -sS -o "$TMP/payment.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
-  -H "authorization: Bearer $CHECKOUT" -H 'content-type: application/json' \
-  -d '{"plan_id":"pro","billing_period":"monthly"}')"
+STATUS="$(checkout "$CHECKOUT" pro monthly "$TMP/payment.json")"
 [ "$STATUS" = "200" ] || fail "the checkout answered $STATUS: $(cat "$TMP/payment.json")"
 
 PAYMENT_ID="$(field '["id"]' < "$TMP/payment.json")"
 ORDER_ID="$(field '["order_id"]' < "$TMP/payment.json")"
 AMOUNT="$(field '["amount_idr"]' < "$TMP/payment.json")"
+PAYABLE="$(field '["payable_amount_idr"]' < "$TMP/payment.json")"
 QR="$(field '["qr_string"]' < "$TMP/payment.json")"
 EXPIRES="$(field '["expires_at"]' < "$TMP/payment.json")"
 P_STATUS="$(field '["status"]' < "$TMP/payment.json")"
-printf 'checkout: status=%s amount=%s expires_at=%s order_id=%s\n' \
-  "$P_STATUS" "$AMOUNT" "$EXPIRES" "$ORDER_ID"
+OFFSET=$((PAYABLE - AMOUNT))
+printf 'checkout: status=%s amount_idr=%s payable_amount_idr=%s (the gateway offset is %s) expires_at=%s order_id=%s\n' \
+  "$P_STATUS" "$AMOUNT" "$PAYABLE" "$OFFSET" "$EXPIRES" "$ORDER_ID"
 
 [ "$P_STATUS" = "pending" ] || fail "a fresh checkout is pending, got $P_STATUS"
 [ "$AMOUNT" = "$PRO_MONTHLY" ] || fail "the amount is $AMOUNT; $PLANS says pro monthly is $PRO_MONTHLY"
+# **The payable is the gateway's**, and it is the assertion this phase exists for: it is the
+# price plus an offset in 1..999. A payable equal to the price means either the gateway
+# assigned no offset or the server dropped it — and the second would make every real
+# settlement a mismatch.
+[ "$OFFSET" -ge 1 ] && [ "$OFFSET" -le 999 ] \
+  || fail "the payable is $PAYABLE against a price of $AMOUNT: the offset must be in 1..999"
 [ -n "$QR" ] && [ "$QR" != "None" ] || fail "no QR string on the invoice"
 python3 - "$EXPIRES" "$TTL_MINUTES" <<'PY'
 import datetime, sys
@@ -329,63 +344,85 @@ assert 0 < minutes <= ttl, f"the expiry is {minutes:.1f} minutes away, wanted at
 assert minutes > ttl - 2, f"the expiry is {minutes:.1f} minutes away, wanted about {ttl}"
 print(f"expiry is {minutes:.1f} minutes away, from a {ttl}-minute ttl")
 PY
-# The stored row is what the webhook checks, so the response and the row are compared.
-STORED="$(db "select status || '|' || amount_idr || '|' || coalesce(qr_string,'') from payments where id = '$PAYMENT_ID'")"
-[ "$STORED" = "pending|$AMOUNT|$QR" ] || fail "the stored row disagrees with the response: $STORED"
+# The stored row is what the settlement is checked against, so the response and the row are
+# compared — including the payable, which is the figure the QR encodes.
+STORED="$(db "select status || '|' || amount_idr || '|' || coalesce(payable_amount_idr, 0) || '|' || coalesce(qr_string,'') from payments where id = '$PAYMENT_ID'")"
+[ "$STORED" = "pending|$AMOUNT|$PAYABLE|$QR" ] || fail "the stored row disagrees with the response: $STORED"
 
-if [ "$GATEWAY_MODE" = "mock (scripts/stub-qris.py)" ]; then
-  # **What we sent.** The stub derives the invoice from the request, so a QR string that is
-  # the gateway's own is proof the invoice request carried this order id and this amount —
-  # and the stub's 401 on a wrong `Authorization` is what makes the auth header observable.
-  [ "$QR" = "STUBQRIS:$ORDER_ID:$AMOUNT" ] \
-    || fail "the QR string is $QR, not the stub's derivation from this request"
-  python3 - "$(gw_requests)" "$ORDER_ID" "$AMOUNT" <<'PY'
+# **What we sent.** The stub derives the invoice from the request, so a QR string that is the
+# gateway's own derivation is proof the invoice request carried this order id, this price and
+# this lifetime — and that the payable it assigned is the number the code encodes.
+GW_ID="$(gw_payment_id "$PAYMENT_ID")"
+[ -n "$GW_ID" ] || fail "the payment row carries no gateway id: no invoice was minted"
+printf 'the gateway minted %s for this checkout\n' "$GW_ID"
+[ "$QR" = "STUBQRIS:$ORDER_ID:$PAYABLE" ] \
+  || fail "the QR string is $QR, not the stub's derivation from this request"
+python3 - "$(gw_requests)" "$ORDER_ID" "$AMOUNT" "$TTL_MINUTES" <<'PY'
 import json, sys
 requests = json.loads(sys.argv[1])["requests"]
-order_id, amount = sys.argv[2], int(sys.argv[3])
-sent = [r for r in requests if r.get("path") == "/invoices" and r.get("method") == "POST"]
+order_id, amount, minutes = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+sent = [r for r in requests if r["method"] == "POST" and r["path"] == "/payments"]
 assert sent, f"the gateway received no invoice request: {requests}"
 last = sent[-1]
-assert last["body"]["order_id"] == order_id, last
-assert last["body"]["amount_idr"] == amount, last
-assert last["body"]["expires_at"], last
-assert last["auth"], "the invoice request carried no Authorization header"
-print(f"the gateway received POST /invoices with order_id={order_id} amount_idr={amount}")
+assert last["body"] == {"amount": amount, "reference": order_id, "minutes": minutes}, last
+print(f"the gateway received POST /payments {json.dumps(last['body'])}")
 PY
-  printf 'the gateway received the invoice request, and the QR string is its own derivation\n'
-else
-  printf 'the sandbox minted the QR string (stored length %s); the run cannot derive it\n' "${#QR}"
-fi
+printf 'the gateway received the invoice request, and the QR string is its own derivation of the payable\n'
 
 # ==========================================================================================
-# 2. A verified webhook
+# 2. A status word the bridge never sends
 # ==========================================================================================
-say "2. a verified webhook: the plan active, one subscription, one grant, a second device"
+#
+# The stub echoes a scripted status verbatim instead of inventing one, so this is the server's
+# own `Invalid` — the failure a typo in the run should produce — and not a stub that silently
+# answers something the server accepts. The poll route swallows a bridge failure into "the row
+# stays pending" (a bridge that is down must not turn the checkout screen into an error page),
+# so the row not moving is what a refused answer looks like from here.
+say "2. a status word the bridge never sends: the server refuses it, and the row does not move"
+script_status "$GW_ID" "settled" ""
+STATUS="$(poll_payment "$PAYMENT_ID" "$CHECKOUT" "$TMP/poll-bogus.json")"
+[ "$STATUS" = "200" ] || fail "the poll answered $STATUS: $(cat "$TMP/poll-bogus.json")"
+BOGUS="$(field '["status"]' < "$TMP/poll-bogus.json")"
+STORED_BOGUS="$(db "select status from payments where id = '$PAYMENT_ID'")"
+printf 'the gateway answering "settled": the poll reads %s, the row is %s\n' "$BOGUS" "$STORED_BOGUS"
+[ "$BOGUS" = "pending" ] || fail "an answer the server cannot read must not move the row, it reads $BOGUS"
+[ "$STORED_BOGUS" = "pending" ] || fail "an unreadable answer wrote $STORED_BOGUS to the row"
+
+# ==========================================================================================
+# 3. The client's poll activates the payment
+# ==========================================================================================
+say "3. the client's poll activates the payment: one subscription, one grant, one audit row"
 SUBS_BEFORE="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
 LEDGER_BEFORE="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID' and period_key like 'sub:%'")"
 [ "$SUBS_BEFORE" = "0" ] || fail "a fresh account already has $SUBS_BEFORE subscription(s)"
 
 PAID_AT="$(now_rfc3339)"
-paid_event "$TMP/event-1.json" "evt-$STAMP-1" "$ORDER_ID" "$AMOUNT" "$PAID_AT"
-STATUS="$(post_webhook "$TMP/hook-1.json" "$TMP/event-1.json")"
-[ "$STATUS" = "200" ] || fail "the webhook answered $STATUS: $(cat "$TMP/hook-1.json")"
-printf 'webhook: status=%s duplicate=%s status=%s\n' "$STATUS" \
-  "$(field '["duplicate"]' < "$TMP/hook-1.json")" "$(field '["status"]' < "$TMP/hook-1.json")"
-[ "$(field '["duplicate"]' < "$TMP/hook-1.json")" = "False" ] || fail "the first callback is not a duplicate"
-[ "$(field '["status"]' < "$TMP/hook-1.json")" = "activated" ] \
-  || fail "the first callback must activate: $(cat "$TMP/hook-1.json")"
+script_paid "$GW_ID" "$PAID_AT" ""
+STATUS="$(poll_payment "$PAYMENT_ID" "$CHECKOUT" "$TMP/poll-paid.json")"
+[ "$STATUS" = "200" ] || fail "the poll answered $STATUS: $(cat "$TMP/poll-paid.json")"
+PAID_STATUS="$(field '["status"]' < "$TMP/poll-paid.json")"
+printf 'the client polled; the gateway reported paid at %s, and the response reads %s\n' \
+  "$PAID_AT" "$PAID_STATUS"
+[ "$PAID_STATUS" = "paid" ] || fail "the client's own poll must apply the paid answer, it reads $PAID_STATUS"
 
-ROW="$(db "select status || '|' || coalesce(paid_at::text,'') from payments where id = '$PAYMENT_ID'")"
-case "$ROW" in paid\|*) ;; *) fail "the payment is not paid: $ROW" ;; esac
+# The settlement instant on the row is the gateway's, not ours: `paid_at` is what the period
+# rules and the margin report are computed from.
+STORED_PAID_AT="$(db "select extract(epoch from paid_at)::bigint from payments where id = '$PAYMENT_ID'")"
+[ "$STORED_PAID_AT" = "$(epoch "$PAID_AT")" ] \
+  || fail "the row's paid_at is not the settlement instant the gateway reported: $STORED_PAID_AT vs $(epoch "$PAID_AT")"
 SUBS_AFTER="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID' and status = 'active'")"
 LEDGER_AFTER="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID' and period_key like 'sub:%'")"
 GRANTED="$(db "select coalesce(sum(delta),0) from credit_ledger where user_id = '$CHECKOUT_ID' and period_key like 'sub:%'")"
 PERIOD_END="$(db "select current_period_end from subscriptions where user_id = '$CHECKOUT_ID' and status = 'active'")"
-printf 'applied: subscriptions %s -> %s | sub: grants %s -> %s (delta %s) | period_end %s\n' \
-  "$SUBS_BEFORE" "$SUBS_AFTER" "$LEDGER_BEFORE" "$LEDGER_AFTER" "$GRANTED" "$PERIOD_END"
-[ "$SUBS_AFTER" = "1" ] || fail "the webhook wrote $SUBS_AFTER active subscriptions, wanted 1"
-[ "$LEDGER_AFTER" = "1" ] || fail "the webhook wrote $LEDGER_AFTER subscription grants, wanted 1"
+GATEWAY_EVENTS="$(db "select count(*) from gateway_events where event_id = '$(event_id "$GW_ID" "$PAID_AT")'")"
+printf 'applied: subscriptions %s -> %s | sub: grants %s -> %s (delta %s) | gateway_events %s | period_end %s\n' \
+  "$SUBS_BEFORE" "$SUBS_AFTER" "$LEDGER_BEFORE" "$LEDGER_AFTER" "$GRANTED" "$GATEWAY_EVENTS" "$PERIOD_END"
+[ "$SUBS_AFTER" = "1" ] || fail "the poll wrote $SUBS_AFTER active subscriptions, wanted 1"
+[ "$LEDGER_AFTER" = "1" ] || fail "the poll wrote $LEDGER_AFTER subscription grants, wanted 1"
 [ "$GRANTED" = "$PRO_CREDITS" ] || fail "the grant is $GRANTED credits; the matrix says $PRO_CREDITS"
+# The audit row is keyed on the settlement, so the same answer read twice collides on this key
+# (A293) — which is what section 4 turns on.
+[ "$GATEWAY_EVENTS" = "1" ] || fail "the activation wrote $GATEWAY_EVENTS audit rows, wanted 1"
 python3 - "$PAID_AT" "$PERIOD_END" <<'PY'
 import datetime, sys
 paid = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
@@ -396,7 +433,7 @@ print(f"the period is {days:.2f} days: a fresh 30-day period from paid_at (A296)
 PY
 
 # The plan, on the device that did not pay. The plan is not a JWT claim (A22): entitlements
-# are loaded per request, so a token minted after the webhook sees it.
+# are loaded per request, so a token minted after the payment sees it.
 SECOND="$(login_second_device "$CHECKOUT_EMAIL" "web")"
 curl -fsS "$BASE/usage" -H "authorization: Bearer $SECOND" > "$TMP/usage.json"
 PLAN="$(field '["plan"]' < "$TMP/usage.json")"
@@ -407,64 +444,81 @@ printf 'the second device: plan=%s subscription=%s period_end=%s\n' \
 [ "$SUB_STATUS" = "active" ] || fail "the second device sees subscription $SUB_STATUS"
 
 # ==========================================================================================
-# 3. The duplicate — both defences
+# 4. The replay
 # ==========================================================================================
-say "3. the duplicate: the same event twice, then the same payment under a fresh event id"
+#
+# **Defence one**, `gateway_events`' `unique (provider, event_id)` with `on conflict do
+# nothing`: the id is `gateway:<id>:<paid_at>`, so the *same* answer read twice — the client's
+# poll and the five-minute sweep can both be in flight — collides and the second read applies
+# nothing. This section drives exactly that: the same settlement instant, scripted again, and
+# the poll run again.
+#
+# **Defence two, the guarded `status = 'pending'` transition, has no subject in this run.**
+# The callback ingress that used to deliver a *second answer* for one payment is gone (the
+# bridge never pushes), and both readers left select pending rows *before* they ask the
+# gateway — `poll::refresh_pending` returns without a call once the row is not `pending`, and
+# `poll::poll_pending`'s query is `where status = 'pending'`. So a payment that is already
+# `paid` is never asked about again, and the transition can only fire for two readers genuinely
+# in flight with two different answers — a race a scripted run cannot force deterministically.
+# `crates/server/tests/payment_jobs.rs::a_replayed_answer_activates_once` is where that outcome
+# is asserted. What this run asserts instead is the stronger, observable half: the replay is
+# not merely harmless, it **never reaches the gateway** (the `asked` count below).
+say "4. the replay: the same answer again, and nothing moves"
 PAID_BEFORE="$(db "select paid_at from payments where id = '$PAYMENT_ID'")"
-STATUS="$(post_webhook "$TMP/hook-2.json" "$TMP/event-1.json")"
-[ "$STATUS" = "200" ] || fail "the duplicate answered $STATUS: $(cat "$TMP/hook-2.json")"
-DUP="$(field '["duplicate"]' < "$TMP/hook-2.json")"
-DUP_STATUS="$(field '["status"]' < "$TMP/hook-2.json")"
-printf 'the same event id again: duplicate=%s status=%s\n' "$DUP" "$DUP_STATUS"
-[ "$DUP" = "True" ] || fail "the second identical event is not reported as a duplicate"
-[ "$DUP_STATUS" = "duplicate" ] || fail "the duplicate's status is $DUP_STATUS"
-
-# Defence two: the same payment reported under a **new** event id. A unique key on the event
-# id cannot see this one; the guarded transition is what catches it.
-paid_event "$TMP/event-2.json" "evt-$STAMP-2" "$ORDER_ID" "$AMOUNT" "$PAID_AT"
-STATUS="$(post_webhook "$TMP/hook-3.json" "$TMP/event-2.json")"
-[ "$STATUS" = "200" ] || fail "the re-report answered $STATUS: $(cat "$TMP/hook-3.json")"
-REPORT="$(field '["status"]' < "$TMP/hook-3.json")"
-printf 'the same payment, a fresh event id: duplicate=%s status=%s\n' \
-  "$(field '["duplicate"]' < "$TMP/hook-3.json")" "$REPORT"
-[ "$REPORT" = "already_paid" ] || fail "a second report of a paid payment must be already_paid, got $REPORT"
-
+ASKED_REPLAY_BEFORE="$(gw_asked "$GW_ID")"
+script_paid "$GW_ID" "$PAID_AT" ""
+STATUS="$(poll_payment "$PAYMENT_ID" "$CHECKOUT" "$TMP/poll-again.json")"
+[ "$STATUS" = "200" ] || fail "the replay's poll answered $STATUS: $(cat "$TMP/poll-again.json")"
 SUBS_NOW="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
 LEDGER_NOW="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID' and period_key like 'sub:%'")"
 PAID_AFTER="$(db "select paid_at from payments where id = '$PAYMENT_ID'")"
-EVENTS="$(db "select count(*) from webhook_events where event_id in ('evt-$STAMP-1','evt-$STAMP-2')")"
-printf 'after both replays: subscriptions=%s grants=%s paid_at unchanged=%s webhook_events=%s\n' \
-  "$SUBS_NOW" "$LEDGER_NOW" "$([ "$PAID_BEFORE" = "$PAID_AFTER" ] && echo yes || echo no)" "$EVENTS"
+EVENTS_NOW="$(db "select count(*) from gateway_events where event_id = '$(event_id "$GW_ID" "$PAID_AT")'")"
+ASKED_REPLAY_AFTER="$(gw_asked "$GW_ID")"
+printf 'the same answer again: subscriptions=%s grants=%s paid_at unchanged=%s audit rows for it=%s asked %s -> %s\n' \
+  "$SUBS_NOW" "$LEDGER_NOW" "$([ "$PAID_BEFORE" = "$PAID_AFTER" ] && echo yes || echo no)" \
+  "$EVENTS_NOW" "$ASKED_REPLAY_BEFORE" "$ASKED_REPLAY_AFTER"
 [ "$SUBS_NOW" = "1" ] || fail "a replay wrote a second subscription: $SUBS_NOW"
 [ "$LEDGER_NOW" = "1" ] || fail "a replay wrote a second grant: $LEDGER_NOW"
 [ "$PAID_BEFORE" = "$PAID_AFTER" ] || fail "a replay moved paid_at"
-[ "$EVENTS" = "2" ] || fail "the audit rows are wrong: $EVENTS"
+[ "$EVENTS_NOW" = "1" ] || fail "a replay wrote a second audit row for the same answer: $EVENTS_NOW"
+[ "$ASKED_REPLAY_AFTER" = "$ASKED_REPLAY_BEFORE" ] \
+  || fail "the poll asked the gateway about a payment that is no longer pending"
 
 # ==========================================================================================
-# 4. A mismatched amount
+# 5. A settlement for the bare price
 # ==========================================================================================
-say "4. a mismatched amount: refused into review, with nothing activated"
+#
+# The gateway's answer says what landed, and the server checks it against
+# `payments.payable_amount_idr` — not against the price. A buyer who transfers the price
+# instead of the payable is the case the two numbers exist for: the payment is `paid` (the
+# money moved) and `review` (a human decides), with both figures written down.
+say "5. a settlement for the bare price: review, with both numbers written down"
 MISMATCH="$(signup mismatch)"
 MISMATCH_ID="$(uid mismatch)"
-STATUS="$(curl -sS -o "$TMP/payment-2.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
-  -H "authorization: Bearer $MISMATCH" -H 'content-type: application/json' \
-  -d '{"plan_id":"pro","billing_period":"monthly"}')"
+STATUS="$(checkout "$MISMATCH" pro monthly "$TMP/payment-2.json")"
 [ "$STATUS" = "200" ] || fail "the second checkout answered $STATUS: $(cat "$TMP/payment-2.json")"
-ORDER_2="$(field '["order_id"]' < "$TMP/payment-2.json")"
 PAYMENT_2="$(field '["id"]' < "$TMP/payment-2.json")"
-paid_event "$TMP/event-3.json" "evt-$STAMP-3" "$ORDER_2" "1" "$(now_rfc3339)"
-STATUS="$(post_webhook "$TMP/hook-4.json" "$TMP/event-3.json")"
-[ "$STATUS" = "200" ] || fail "the mismatched callback answered $STATUS: $(cat "$TMP/hook-4.json")"
-printf 'a 1-IDR callback against a %s-IDR invoice: status=%s\n' "$PRO_MONTHLY" \
-  "$(field '["status"]' < "$TMP/hook-4.json")"
-[ "$(field '["status"]' < "$TMP/hook-4.json")" = "review" ] || fail "a mismatch must be review"
+AMOUNT_2="$(field '["amount_idr"]' < "$TMP/payment-2.json")"
+PAYABLE_2="$(field '["payable_amount_idr"]' < "$TMP/payment-2.json")"
+GW_ID_2="$(gw_payment_id "$PAYMENT_2")"
+[ "$AMOUNT_2" = "$PRO_MONTHLY" ] || fail "the second checkout's amount is $AMOUNT_2, wanted $PRO_MONTHLY"
+[ "$PAYABLE_2" -gt "$AMOUNT_2" ] || fail "the second checkout's payable is not above its price: $PAYABLE_2"
+script_paid "$GW_ID_2" "$(now_rfc3339)" "$AMOUNT_2"
+STATUS="$(poll_payment "$PAYMENT_2" "$MISMATCH" "$TMP/poll-mismatch.json")"
+[ "$STATUS" = "200" ] || fail "the mismatched poll answered $STATUS: $(cat "$TMP/poll-mismatch.json")"
+M_STATUS="$(field '["status"]' < "$TMP/poll-mismatch.json")"
+printf 'a %s-IDR settlement against a %s-IDR invoice: the response reads %s\n' \
+  "$AMOUNT_2" "$PAYABLE_2" "$M_STATUS"
+[ "$M_STATUS" = "review" ] || fail "a settlement for the bare price must be review, got $M_STATUS"
 REVIEW="$(db "select status || ' :: ' || coalesce(review_reason,'') from payments where id = '$PAYMENT_2'")"
 printf 'the row: %s\n' "$REVIEW"
 case "$REVIEW" in review*) ;; *) fail "the payment did not land in review: $REVIEW" ;; esac
-python3 - "$REVIEW" <<'PY'
+python3 - "$REVIEW" "$AMOUNT_2" "$PAYABLE_2" <<'PY'
 import sys
-row = sys.argv[1]
-assert "1 IDR" in row and "10000 IDR" in row, f"both numbers must be written down: {row}"
+row, amount, payable = sys.argv[1], sys.argv[2], sys.argv[3]
+assert f"{amount} IDR" in row, f"the settlement's own number must be written down: {row}"
+assert f"{payable} IDR" in row, f"the payable it was checked against must be written down: {row}"
+print("both numbers are in the reason, so a human can see which two figures disagree")
 PY
 [ "$(db "select count(*) from subscriptions where user_id = '$MISMATCH_ID'")" = "0" ] \
   || fail "a mismatched amount activated a subscription"
@@ -472,72 +526,51 @@ PY
   || fail "a mismatched amount granted credits"
 
 # ==========================================================================================
-# 5. An expired invoice
+# 6. An expired invoice
 # ==========================================================================================
 #
-# Two different facts, and the server keeps them apart (A295): a payment made *after* the
-# code expired is `review` unconditionally, because a switch that could activate it would be
-# a switch that sells expired invoices. The run drives the expiry by moving the row's
-# `expires_at` into the past, which is what a student who waited too long leaves behind.
-say "5. an expired invoice: paid after the code died, and the poll route says so"
+# The poll route re-checks expiry itself and **persists** it, so a student whose clock is wrong
+# cannot extend their own invoice by not noticing: a pending row past its expiry reads
+# `expired` and the row follows. The run drives the expiry by moving the row's `expires_at`
+# into the past, which is what a student who waited too long leaves behind.
+#
+# Not asserted here any more: **a payment made after the code died landing in `review`**. The
+# callback ingress that used to deliver it is gone (the bridge never pushes), the poll route
+# terminalises a row past its expiry *before* it asks the gateway, and the sweep's window is
+# `expires_at > now()` — so the only answer that reaches that rule is one whose settlement
+# instant is beyond an expiry that has not passed yet, which no honest scripted run produces.
+# The rule is covered by crates/server/tests/payment_jobs.rs.
+say "6. an expired invoice: the poll route reads and persists expired"
 EXPIRED="$(signup expired)"
-EXPIRED_ID="$(uid expired)"
-STATUS="$(curl -sS -o "$TMP/payment-3.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
-  -H "authorization: Bearer $EXPIRED" -H 'content-type: application/json' \
-  -d '{"plan_id":"pro","billing_period":"yearly"}')"
+STATUS="$(checkout "$EXPIRED" pro yearly "$TMP/payment-3.json")"
 [ "$STATUS" = "200" ] || fail "the third checkout answered $STATUS: $(cat "$TMP/payment-3.json")"
-ORDER_3="$(field '["order_id"]' < "$TMP/payment-3.json")"
 PAYMENT_3="$(field '["id"]' < "$TMP/payment-3.json")"
 [ "$(field '["amount_idr"]' < "$TMP/payment-3.json")" = "$PRO_YEARLY" ] \
   || fail "the yearly amount is not the config's $PRO_YEARLY"
 
 db "update payments set expires_at = now() - interval '1 minute' where id = '$PAYMENT_3'" > /dev/null
-
-# **The late callback first, while the row is still `pending`.** The poll route re-checks
-# expiry and *persists* it, so asking the poll first would terminalise the row and the
-# callback would then hit the guarded transition (`where status = 'pending'`), update zero
-# rows and answer `already_paid` — a correct answer to a different question. The order is
-# therefore the order a real late payment arrives in: the money moves, then someone looks.
-paid_event "$TMP/event-4.json" "evt-$STAMP-4" "$ORDER_3" "$PRO_YEARLY" "$(now_rfc3339)"
-STATUS="$(post_webhook "$TMP/hook-5.json" "$TMP/event-4.json")"
-[ "$STATUS" = "200" ] || fail "the late callback answered $STATUS: $(cat "$TMP/hook-5.json")"
-LATE="$(db "select status || ' :: ' || coalesce(review_reason,'') from payments where id = '$PAYMENT_3'")"
-printf 'a payment made after the expiry: %s\n' "$LATE"
-case "$LATE" in review*) ;; *) fail "a payment after the expiry must be review: $LATE" ;; esac
-case "$LATE" in *"expired at"*) ;; *) fail "the reason must name the expiry: $LATE" ;; esac
-[ "$(db "select count(*) from subscriptions where user_id = '$EXPIRED_ID'")" = "0" ] \
-  || fail "an expired invoice activated a subscription"
-
-# And the poll route re-checks expiry on its own, so a student whose clock is wrong cannot
-# extend their own invoice by not noticing. Driven on a **second** expired invoice, because
-# the one above is now `review` and a poll of it would prove nothing about the re-check.
-STATUS="$(curl -sS -o "$TMP/payment-5.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
-  -H "authorization: Bearer $EXPIRED" -H 'content-type: application/json' \
-  -d '{"plan_id":"pro","billing_period":"monthly"}')"
-[ "$STATUS" = "200" ] || fail "the fifth checkout answered $STATUS: $(cat "$TMP/payment-5.json")"
-PAYMENT_5="$(field '["id"]' < "$TMP/payment-5.json")"
-db "update payments set expires_at = now() - interval '1 minute' where id = '$PAYMENT_5'" > /dev/null
-curl -fsS "$BASE/billing/payments/$PAYMENT_5" -H "authorization: Bearer $EXPIRED" > "$TMP/poll-expired.json"
+STATUS="$(poll_payment "$PAYMENT_3" "$EXPIRED" "$TMP/poll-expired.json")"
+[ "$STATUS" = "200" ] || fail "the expired poll answered $STATUS: $(cat "$TMP/poll-expired.json")"
 READ_BACK="$(field '["status"]' < "$TMP/poll-expired.json")"
-STORED_5="$(db "select status from payments where id = '$PAYMENT_5'")"
-printf 'the poll route on a pending-but-expired invoice: reads %s, the row is %s\n' "$READ_BACK" "$STORED_5"
+STORED_3="$(db "select status from payments where id = '$PAYMENT_3'")"
+printf 'the poll route on a pending-but-expired invoice: reads %s, the row is %s\n' "$READ_BACK" "$STORED_3"
 [ "$READ_BACK" = "expired" ] || fail "an expired invoice must read expired, got $READ_BACK"
-[ "$STORED_5" = "expired" ] || fail "the poll must persist the expiry, the row is $STORED_5"
+[ "$STORED_3" = "expired" ] || fail "the poll must persist the expiry, the row is $STORED_3"
 
 # ==========================================================================================
-# 6. The poller
+# 7. The poller
 # ==========================================================================================
 #
 # Two halves, and the first is the one that makes the second mean something.
 #
-#   (a) **After the webhook, the poller changes nothing — structurally.** The proof is not
-#       that the numbers are unchanged but that the gateway is **never asked**: the poll
-#       pass selects `status = 'pending'` rows, and a paid row is not one. Asserting only
-#       the numbers would pass against a poller that asked and then did nothing.
-#   (b) **A pending payment the gateway reports paid is activated**, by the same
-#       `apply_paid` the webhook calls. Without this half, (a) is what a poller that never
-#       ran would also report.
-say "6. the poller: nothing for a paid row (never asked), everything for a pending one"
+#   (a) **After the client's poll, the poller changes nothing — structurally.** The proof is
+#       not that the numbers are unchanged but that the gateway is **never asked**: the pass
+#       selects `status = 'pending'` rows, and a paid row is not one. Asserting only the
+#       numbers would pass against a poller that asked and then did nothing.
+#   (b) **A pending payment the gateway reports paid is activated**, by the same `apply_paid`
+#       the client's poll calls, and a second pass over the now-paid row changes nothing.
+#       Without this half, (a) is what a poller that never ran would also report.
+say "7. the poller: nothing for a payment the client's poll already applied (never asked), everything for one it has not"
 
 run_job() { # $1 = kind, $2 = payload json
   local kind="$1" payload="$2"
@@ -568,71 +601,40 @@ The job's own error: $error"
   printf '  %s: done\n' "$kind"
 }
 
-# (a) The gateway is told nothing about the paid order, and nothing moves.
-#
-# The structural half — "the gateway was never asked" — is only observable in mock mode,
-# because it reads the stub's own request log. Against a sandbox the run says so and falls
-# back to the numbers, which is a weaker check and is labelled as one.
 SUBS_SNAPSHOT="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
 LEDGER_SNAPSHOT="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID'")"
-if [ "$MOCK" = "1" ]; then
-  ASKED_BEFORE="$(gw_requests | python3 -c "
-import json,sys
-print(sum(1 for r in json.load(sys.stdin)['requests'] if r.get('path') == '/invoices/$ORDER_ID'))")"
-  # The gateway *would* say paid if it were asked, so "nothing changed" is not an accident
-  # of the stub having nothing to say.
-  curl -fsS -X POST "$GATEWAY_URL/_control/status" -H 'content-type: application/json' \
-    -d "{\"order_id\":\"$ORDER_ID\",\"status\":{\"status\":\"paid\",\"paid_at\":\"$PAID_AT\",\"amount_idr\":$AMOUNT,\"provider_payment_id\":\"stub-late\"}}" \
-    > /dev/null
-  run_job poll_payment '{}'
-  ASKED_AFTER="$(gw_requests | python3 -c "
-import json,sys
-print(sum(1 for r in json.load(sys.stdin)['requests'] if r.get('path') == '/invoices/$ORDER_ID'))")"
-  SUBS_NOW="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
-  LEDGER_NOW="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID'")"
-  printf '  the paid order: asked %s -> %s time(s) | subscriptions %s -> %s | ledger rows %s -> %s\n' \
-    "$ASKED_BEFORE" "$ASKED_AFTER" "$SUBS_SNAPSHOT" "$SUBS_NOW" "$LEDGER_SNAPSHOT" "$LEDGER_NOW"
-  [ "$ASKED_AFTER" = "$ASKED_BEFORE" ] \
-    || fail "the poller asked the gateway about a payment that is no longer pending"
-else
-  printf '  the sandbox cannot be scripted or read back, so the poller runs against it and\n'
-  printf '  only the numbers are asserted (the "never asked" half needs the stub'"'"'s log)\n'
-  run_job poll_payment '{}'
-  SUBS_NOW="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
-  LEDGER_NOW="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID'")"
-  printf '  subscriptions %s -> %s | ledger rows %s -> %s\n' \
-    "$SUBS_SNAPSHOT" "$SUBS_NOW" "$LEDGER_SNAPSHOT" "$LEDGER_NOW"
-fi
+ASKED_BEFORE="$(gw_asked "$GW_ID")"
+run_job poll_payment '{}'
+ASKED_AFTER="$(gw_asked "$GW_ID")"
+SUBS_NOW="$(db "select count(*) from subscriptions where user_id = '$CHECKOUT_ID'")"
+LEDGER_NOW="$(db "select count(*) from credit_ledger where user_id = '$CHECKOUT_ID'")"
+printf '  the paid payment: asked %s -> %s time(s) | subscriptions %s -> %s | ledger rows %s -> %s\n' \
+  "$ASKED_BEFORE" "$ASKED_AFTER" "$SUBS_SNAPSHOT" "$SUBS_NOW" "$LEDGER_SNAPSHOT" "$LEDGER_NOW"
+[ "$ASKED_AFTER" = "$ASKED_BEFORE" ] \
+  || fail "the poller asked the gateway about a payment that is no longer pending"
 [ "$SUBS_NOW" = "$SUBS_SNAPSHOT" ] || fail "the poller changed the subscription count"
 [ "$LEDGER_NOW" = "$LEDGER_SNAPSHOT" ] || fail "the poller wrote ledger rows"
 
-# (b) A pending payment, which the gateway reports paid. Mock mode only, because the answer
-# has to be scripted: a sandbox would honestly report `pending` and this half would prove
-# nothing.
-if [ "$MOCK" = "1" ]; then
 POLLED="$(signup polled)"
 POLLED_ID="$(uid polled)"
-STATUS="$(curl -sS -o "$TMP/payment-4.json" -w '%{http_code}' -X POST "$BASE/billing/checkout" \
-  -H "authorization: Bearer $POLLED" -H 'content-type: application/json' \
-  -d '{"plan_id":"pro","billing_period":"monthly"}')"
+STATUS="$(checkout "$POLLED" pro monthly "$TMP/payment-4.json")"
 [ "$STATUS" = "200" ] || fail "the fourth checkout answered $STATUS: $(cat "$TMP/payment-4.json")"
-ORDER_4="$(field '["order_id"]' < "$TMP/payment-4.json")"
 PAYMENT_4="$(field '["id"]' < "$TMP/payment-4.json")"
-curl -fsS -X POST "$GATEWAY_URL/_control/status" -H 'content-type: application/json' \
-  -d "{\"order_id\":\"$ORDER_4\",\"status\":{\"status\":\"paid\",\"paid_at\":\"$(now_rfc3339)\",\"amount_idr\":$PRO_MONTHLY,\"provider_payment_id\":\"stub-poll\"}}" \
-  > /dev/null
+GW_ID_4="$(gw_payment_id "$PAYMENT_4")"
+PAID_AT_4="$(now_rfc3339)"
+script_paid "$GW_ID_4" "$PAID_AT_4" ""
 run_job poll_payment '{}'
 POLLED_STATUS="$(db "select status from payments where id = '$PAYMENT_4'")"
 POLLED_SUBS="$(db "select count(*) from subscriptions where user_id = '$POLLED_ID' and status = 'active'")"
 POLLED_GRANTS="$(db "select count(*) from credit_ledger where user_id = '$POLLED_ID' and period_key like 'sub:%'")"
-printf '  a lost webhook, recovered by polling: payment=%s subscriptions=%s grants=%s\n' \
+printf '  a paid answer the client never polled: payment=%s subscriptions=%s grants=%s\n' \
   "$POLLED_STATUS" "$POLLED_SUBS" "$POLLED_GRANTS"
 [ "$POLLED_STATUS" = "paid" ] || fail "the poller did not apply a paid answer: $POLLED_STATUS"
 [ "$POLLED_SUBS" = "1" ] || fail "the poller wrote $POLLED_SUBS subscriptions, wanted 1"
 [ "$POLLED_GRANTS" = "1" ] || fail "the poller wrote $POLLED_GRANTS grants, wanted 1"
 
-# And a second pass over the now-paid row changes nothing: the same idempotency the webhook
-# has, because it is the same function.
+# And a second pass over the now-paid row changes nothing: the same idempotency the client's
+# poll has, because it is the same function.
 run_job poll_payment '{}'
 POLLED_SUBS_2="$(db "select count(*) from subscriptions where user_id = '$POLLED_ID' and status = 'active'")"
 POLLED_GRANTS_2="$(db "select count(*) from credit_ledger where user_id = '$POLLED_ID' and period_key like 'sub:%'")"
@@ -640,22 +642,109 @@ printf '  the same poll a second time: subscriptions %s -> %s | grants %s -> %s\
   "$POLLED_SUBS" "$POLLED_SUBS_2" "$POLLED_GRANTS" "$POLLED_GRANTS_2"
 [ "$POLLED_SUBS_2" = "$POLLED_SUBS" ] || fail "a second poll wrote a second subscription"
 [ "$POLLED_GRANTS_2" = "$POLLED_GRANTS" ] || fail "a second poll wrote a second grant"
-else
-  printf '  the sandbox half of the poller is not driven: a real gateway would report\n'
-  printf '  `pending` for a payment that has not been made, which proves nothing. The\n'
-  printf '  activation is covered by crates/server/tests/payment_jobs.rs.\n'
-fi
 
 # ==========================================================================================
-# 7. The margin report's split
+# 8. The reconciliation sweep
 # ==========================================================================================
 #
-# The admin flag is set in the database because the smoke run has no admin console: the
-# route takes `AdminUser`, which reads `users.is_admin` per request, so the flag is what an
-# operator would set once. The account is a **customer** in the report, and the report
-# excludes admins from both sides — so the account that reads it is the one that pays, and
-# the numbers below are its own.
-say "7. the margin report: the free/paid split"
+# **The join is on the amount.** The bridge's feed carries the *provider's* order id and never
+# sends our `reference` back, so the only field that identifies one of our payments is the
+# figure that landed — the same fact the bridge matches its own settlements by, and the reason
+# `payments.payable_amount_idr` is stored beside the price.
+#
+# Three rows, and each says something different about the join:
+#   * the paid payment, whose payable the feed carries -> left alone;
+#   * a pending payment whose payable the feed also carries -> left alone, which is the join
+#     *finding* an amount rather than failing to;
+#   * a pending payment the feed says nothing about -> `review`, with its amount in the reason.
+say "8. the reconciliation sweep: the feed's join is on the amount"
+SWEPT="$(signup swept)"
+STATUS="$(checkout "$SWEPT" pro monthly "$TMP/payment-5.json")"
+[ "$STATUS" = "200" ] || fail "the fifth checkout answered $STATUS: $(cat "$TMP/payment-5.json")"
+ROW_A="$(field '["id"]' < "$TMP/payment-5.json")"
+PAYABLE_A="$(field '["payable_amount_idr"]' < "$TMP/payment-5.json")"
+STATUS="$(checkout "$SWEPT" pro yearly "$TMP/payment-6.json")"
+[ "$STATUS" = "200" ] || fail "the sixth checkout answered $STATUS: $(cat "$TMP/payment-6.json")"
+ROW_B="$(field '["id"]' < "$TMP/payment-6.json")"
+PAYABLE_B="$(field '["payable_amount_idr"]' < "$TMP/payment-6.json")"
+
+# The sweep only considers rows older than ten minutes (a pending invoice created seconds ago
+# is not a mismatch), so the rows this scenario is about are aged past that floor.
+db "update payments set created_at = now() - interval '15 minutes' where id in ('$PAYMENT_ID', '$ROW_A', '$ROW_B')" > /dev/null
+
+# The feed, from the stub's own ledger (the paid payments it minted) plus two settlements it did
+# not mint: an amount the server holds a row for, and one no row of ours carries.
+UNKNOWN=999999
+python3 - "$TMP/extra.json" "$PAYABLE_A" "$UNKNOWN" <<'PY'
+import datetime, json, sys
+out, payable, unknown = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+instant = datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+json.dump(
+    {
+        "transactions": [
+            {"id": "tx-extra-1", "orderId": "gopay-extra-1", "status": "settlement",
+             "paymentType": "qris", "amount": payable, "realAmount": payable,
+             "currency": "IDR", "time": instant},
+            {"id": "tx-extra-2", "orderId": "gopay-extra-2", "status": "settlement",
+             "paymentType": "qris", "amount": unknown, "realAmount": unknown,
+             "currency": "IDR", "time": instant},
+        ]
+    },
+    open(out, "w"),
+)
+PY
+curl -fsS -X POST "$GATEWAY_URL/_control/transactions" -H 'content-type: application/json' \
+  --data-binary "@$TMP/extra.json" > /dev/null
+
+run_job reconcile_payments '{}'
+
+python3 - "$(gw_requests)" "$MERCHANT_ID" "$((RECONCILE_HOURS * 60))" <<'PY'
+import json, sys
+requests = json.loads(sys.argv[1])["requests"]
+merchant, minutes = sys.argv[2], sys.argv[3]
+feeds = [r for r in requests if r["method"] == "GET" and r["path"] == "/transactions"]
+assert feeds, f"the sweep never read the feed: {requests}"
+last = feeds[-1]
+assert last["query"].get("merchant_id") == merchant, last
+assert last["query"].get("minutes") == minutes, last
+print(f"the sweep read GET /transactions?merchant_id={merchant}&minutes={minutes}")
+PY
+
+PAID_ROW="$(db "select status || '|' || coalesce(review_reason,'') from payments where id = '$PAYMENT_ID'")"
+ROW_A_STATE="$(db "select status || '|' || coalesce(review_reason,'') from payments where id = '$ROW_A'")"
+ROW_B_STATE="$(db "select status || '|' || coalesce(review_reason,'') from payments where id = '$ROW_B'")"
+printf '  the paid payment, whose payable the feed carries: %s\n' "$PAID_ROW"
+printf '  a pending row the feed carries the amount of:       %s\n' "$ROW_A_STATE"
+printf '  a pending row the feed says nothing about:          %s\n' "$ROW_B_STATE"
+[ "$PAID_ROW" = "paid|" ] \
+  || fail "the sweep flagged a paid payment whose amount the feed carries: $PAID_ROW"
+[ "$ROW_A_STATE" = "pending|" ] \
+  || fail "a feed entry for this row's payable must leave the row alone: $ROW_A_STATE"
+case "$ROW_B_STATE" in
+  "review|the gateway has no transaction for $PAYABLE_B IDR") ;;
+  *) fail "a row the feed has no amount for must be flagged with that amount: $ROW_B_STATE" ;;
+esac
+[ "$(db "select count(*) from payments where coalesce(payable_amount_idr, amount_idr) = $UNKNOWN")" = "0" ] \
+  || fail "the sweep wrote a row for money it cannot attribute"
+
+# **The one half of this sweep the database does not carry.** Money the gateway took with no
+# row of ours is counted and written to `tracing::error!` by `billing::poll::reconcile` — there
+# is no row to flag, so the job's `flagged` count is a log line and nothing else. This run
+# cannot read the server's log, so what it asserts is the feed the sweep read (above), that
+# such a settlement leaves no row behind, and that the join by amount decided every row it
+# could. That is the honest limit of a black-box run against a live process.
+printf '  the %s-IDR settlement no row of ours carries: counted and logged, and no row written\n' "$UNKNOWN"
+
+# ==========================================================================================
+# 9. The margin report's split
+# ==========================================================================================
+#
+# The admin flag is set in the database because the smoke run has no admin console: the route
+# takes `AdminUser`, which reads `users.is_admin` per request, so the flag is what an operator
+# would set once. The account is a **customer** in the report, and the report excludes admins
+# from both sides — so the account that reads it is the one that pays, and the numbers below
+# are its own.
+say "9. the margin report: the free/paid split"
 db "update users set is_admin = true where id = '$CHECKOUT_ID'" > /dev/null
 FROM="$(python3 -c "
 import datetime; print((datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=40)).isoformat().replace('+00:00','Z'))")"

@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use stvdy_sync::proto::Entity;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::tasks::Reject;
@@ -277,7 +277,7 @@ fn event_columns() -> &'static str {
 /// `to` defaults to `from + 7 days`, which is the horizon the calendar screen shows.
 pub async fn list(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<WindowQuery>,
 ) -> AppResult<Json<Value>> {
     let from = query
@@ -331,7 +331,7 @@ pub(crate) async fn list_in(
 /// `POST /events`. 201 `{event}`.
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     // One transaction, so the id check and the insert cannot interleave with a second
@@ -484,7 +484,7 @@ where
 /// names the calendar, so the client can say why the event is not editable.
 pub async fn update(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
@@ -574,7 +574,7 @@ pub async fn update(
 /// `DELETE /events/:id`. 204, with the same read-only rule as `PATCH`.
 pub async fn delete_one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let mut tx = state.pool.begin().await.map_err(|error| {

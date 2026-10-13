@@ -12,7 +12,7 @@ use serde::Serialize;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use stvdy_core::prompts::PromptChunk;
@@ -91,7 +91,7 @@ pub struct ChunkView {
 /// `GET /chunks/:id`
 pub async fn get_chunk(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(chunk_id): Path<Uuid>,
 ) -> AppResult<Json<ChunkView>> {
     let row = sqlx::query_as::<_, (Uuid, Uuid, Option<i32>, i32, String)>(

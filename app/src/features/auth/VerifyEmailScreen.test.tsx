@@ -117,4 +117,48 @@ describe('the verification page', () => {
     expect(await screen.findByText(/A new link is on its way/)).toBeInTheDocument()
     expect(calls.filter((call) => call.url.endsWith('/auth/resend-verification'))).toHaveLength(1)
   })
+
+  it('offers an unverified signed-in user a way out, and no way into the workspace', async () => {
+    // A359 closes the workspace until the address is confirmed, so the invitation to it is
+    // gone. What replaces it is the two things a student whose mail never arrives actually
+    // needs: another link, and a way to stop being signed in as an account they cannot use —
+    // a mistyped address would otherwise be permanent.
+    const calls = mockFetch((url) => {
+      if (url.endsWith('/auth/refresh')) {
+        return jsonResponse(200, {
+          access_token: 'access-1',
+          refresh_token: 'refresh-2',
+          expires_at: '2026-10-11T10:00:00Z',
+        })
+      }
+      if (url.endsWith('/auth/me')) return jsonResponse(200, USER)
+      if (url.endsWith('/auth/logout')) return jsonResponse(204)
+      return jsonResponse(204)
+    })
+
+    await saveSession({ refreshToken: 'refresh-1', deviceId: 'device-1' })
+    const user = userEvent.setup()
+
+    renderWithProviders(<VerifyEmailScreen />, { route: '/verify' })
+
+    expect(await screen.findByText('Check your email')).toBeInTheDocument()
+    // Waited for rather than asserted directly: this text is the signed-in half of the view,
+    // and the session is still being restored when the title first paints.
+    expect(
+      await screen.findByText(/Your workspace opens as soon as this address is confirmed/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Go to your workspaces' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Use a different address' }))
+
+    // The refresh token is revoked server-side rather than only dropped locally: the whole
+    // point of this control is that the session is over. It is the *rotated* token
+    // (`refresh-2`), because restoring the session exchanged the stored one — the value the
+    // server would still accept is the only one worth revoking.
+    await vi.waitFor(() => {
+      expect(calls.filter((call) => call.url.endsWith('/auth/logout'))).toHaveLength(1)
+    })
+    const logout = calls.find((call) => call.url.endsWith('/auth/logout'))
+    expect(JSON.parse(String(logout?.init.body))).toEqual({ refresh_token: 'refresh-2' })
+  })
 })

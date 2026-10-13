@@ -44,7 +44,7 @@ use stvdy_core::calendar::policy::{self, LocalState, Origin, RemoteState, Winner
 use stvdy_core::entitlements::Feature;
 use stvdy_core::traits::calendar::{CalendarError, RemoteEvent};
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::integrations::fetch::Validators;
 use crate::state::AppState;
@@ -399,7 +399,7 @@ fn occurrence_key(occurrence: &Occurrence) -> String {
 /// also what makes the answer assertable.
 pub async fn manual_sync(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     crate::entitlements::require(&state, &user, Feature::GoogleCalendar).await?;
 

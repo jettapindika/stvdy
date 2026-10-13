@@ -35,7 +35,7 @@ use uuid::Uuid;
 use stvdy_core::config::ReminderChannel;
 use stvdy_core::reminders::{MAX_LOOKAHEAD_DAYS, ReminderKind, dedupe_key, defer_for_quiet_hours};
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::tasks::Reject;
@@ -146,7 +146,7 @@ async fn reminder_settings(state: &AppState, user: &AuthUser) -> AppResult<(Opti
 /// `POST /reminders`: idempotent by the dedupe key.
 pub async fn register(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(payload): Json<NewReminder>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let now = state.clock.now();
@@ -280,7 +280,7 @@ pub struct FeedRow {
 /// the feed on purpose (A286): a reminder that silently never arrives is what the student
 /// reports as "reminders are broken", and the reason is the only thing that distinguishes
 /// "quiet hours moved it past its subject" from "the token is dead".
-pub async fn feed(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
+pub async fn feed(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<Value>> {
     let now = state.clock.now();
     let rows: Vec<FeedRow> = sqlx::query_as(
         "select r.id, r.kind, r.subject_id, r.local_date, r.fire_at, r.status, r.skip_reason
@@ -316,7 +316,7 @@ pub async fn feed(State(state): State<AppState>, user: AuthUser) -> AppResult<Js
 /// what moves a reminder to `sent`.
 pub async fn ack(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let owned: bool = sqlx::query_scalar(

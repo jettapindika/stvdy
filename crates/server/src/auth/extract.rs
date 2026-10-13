@@ -155,9 +155,22 @@ struct SessionUser {
     subscription_status: Option<String>,
 }
 
-/// An authenticated user whose email is verified. A43: signup may create the
-/// account, but chat, generation, search and ingestion stay locked until the
-/// address is confirmed, so that a scripted account cannot spend.
+/// An authenticated user whose email is verified: the extractor the workspace takes.
+///
+/// A43 (A359): signup creates the account, and **nothing else in the app works until the
+/// address is confirmed**. The rule started narrower — verified email before any action that
+/// *costs money*, which is why this extractor was on chat, generation, search, ingestion and
+/// checkout and nowhere else — but a gate that stops at spending is a gate a scripted account
+/// walks around: it can still hold a workspace, fill it from a device's local cache, and read
+/// everything back, at no cost to itself and some cost to the operator.
+///
+/// So the axis is now the *surface*, not the price. Everything that reads or writes the
+/// student's study data takes this extractor. What stays on [`AuthUser`] is the account's own
+/// administrative surface — the session, the devices, the settings row, the export and the
+/// deletion — because a student whose address cannot receive mail must still be able to
+/// revoke a device, take their data out and leave. `route_sweep.rs` classifies every
+/// registered route on this axis, so a new route has to choose a side rather than inherit
+/// one.
 #[derive(Debug, Clone)]
 pub struct VerifiedUser(pub AuthUser);
 

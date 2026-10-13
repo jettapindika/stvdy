@@ -105,3 +105,70 @@ describe('the session gate', () => {
     expect(screen.queryByText('Today content')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * The second gate (A359): an unverified session reaches its own account surface and nothing
+ * else.
+ *
+ * The server refuses the workspace to an unverified account, so this is not the enforcement —
+ * it is what keeps the refusal from being the whole interface. Twenty screens of
+ * `403 email_not_verified` is a worse answer than one screen carrying the remedy, and the
+ * account routes are deliberately still open so a student whose mail never arrives can leave.
+ */
+describe('the verification gate', () => {
+  const UNVERIFIED = { ...USER, email_verified: false, email_verified_at: null }
+
+  function renderAppWithSettings() {
+    return renderWithProviders(
+      <Routes>
+        <Route path="/" element={<App />}>
+          <Route index element={<p>Today content</p>} />
+          <Route path="settings" element={<p>Settings content</p>} />
+        </Route>
+        <Route path="/signin" element={<p>Sign in screen</p>} />
+        <Route path="/verify" element={<p>Verify screen</p>} />
+      </Routes>,
+      { route: '/' },
+    )
+  }
+
+  it('holds an unverified session at the verify screen instead of the shell', async () => {
+    mockFetch(() => jsonResponse(200, UNVERIFIED))
+    setAccessToken('access-1')
+
+    renderAppWithSettings()
+
+    expect(await screen.findByText('Verify screen')).toBeInTheDocument()
+    expect(screen.queryByText('Today content')).not.toBeInTheDocument()
+  })
+
+  it('lets an unverified session reach its own account surface', async () => {
+    // The way out: a student who mistyped their address has to be able to reach the device
+    // list, the data export and the deletion. Refusing those is the trap this asserts against.
+    mockFetch(() => jsonResponse(200, UNVERIFIED))
+    setAccessToken('access-1')
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<App />}>
+          <Route path="settings" element={<p>Settings content</p>} />
+        </Route>
+        <Route path="/verify" element={<p>Verify screen</p>} />
+      </Routes>,
+      { route: '/settings' },
+    )
+
+    expect(await screen.findByText('Settings content')).toBeInTheDocument()
+    expect(screen.queryByText('Verify screen')).not.toBeInTheDocument()
+  })
+
+  it('renders the shell for a verified session', async () => {
+    mockFetch(() => jsonResponse(200, USER))
+    setAccessToken('access-1')
+
+    renderAppWithSettings()
+
+    expect(await screen.findByText('Today content')).toBeInTheDocument()
+    expect(screen.queryByText('Verify screen')).not.toBeInTheDocument()
+  })
+})

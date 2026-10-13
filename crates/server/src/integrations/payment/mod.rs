@@ -1,71 +1,49 @@
-//! The QRIS gateway: the wire, and the one file B1 changes.
+//! The payment gateway client, and the one capability the server needs on top of the
+//! core contract.
 //!
-//! `crates/core/src/traits/payment.rs` is the **contract** — the trait, its DTOs and
-//! `PaymentError` — and slice A landed it. This module is the only implementation the
-//! product ships, plus the server-side capability the contract does not carry.
+//! B1 is resolved: the gateway is a self-hosted QRIS bridge, and
+//! [`mapping`](self::mapping) is the single file its wire shape lives in. Everything
+//! here is transport, plus the two facts the rest of the money path reads:
 //!
-//! **B1 is unresolved**, so the design is the one that survives the docs arriving: the
-//! field names live in [`mapping`] (the only file that changes), the signature scheme
-//! is a closed set parsed at boot ([`signature`], A292), and every value is env-driven
-//! ([`crate::config::QrisConfig`]). Every behavioural test in this phase runs against
-//! [`stvdy_core::traits::testing::MockPayment`], so the suite that proves idempotency,
-//! amount-checking and the period rules keeps passing on the day B1 resolves.
+//!  * the bridge is **polled**, so [`PaymentGateway::recent_transactions`] exists for
+//!    the reconciliation sweep, which needs to see money the gateway received and we
+//!    have no row for (A301). `PaymentProvider` is a committed contract and has no
+//!    listing method; adding one for a single caller would change it for every
+//!    implementation, so the method lives here and the test double provides it.
+//!  * the bridge assigns the **amount**, so the invoice's `payable_amount_idr` is what
+//!    the buyer transfers and what a settlement is matched against.
 
 pub mod mapping;
 pub mod qris;
-pub mod signature;
 
 pub use qris::QrisGateway;
 
 use chrono::{DateTime, Utc};
 
-use stvdy_core::traits::payment::{GatewayStatus, PaymentError, PaymentProvider};
+use stvdy_core::traits::payment::{PaymentError, PaymentProvider};
 
-/// One transaction as the gateway reports it, for the reconciliation sweep (A301).
+/// One settled transaction as the gateway reports it, for the reconciliation sweep.
 ///
-/// `status` uses the same [`GatewayStatus`] vocabulary a status query answers with, so
-/// the sweep and the poller agree about what "paid" means.
+/// There is no status field, and that is not an omission: the bridge's feed route is
+/// queried with `statuses=settlement,capture`, so every entry it returns is money that
+/// arrived. A `status` here could only ever repeat that.
+///
+/// `amount_idr` is the gross amount and it is the **join key**, because the feed's own
+/// `orderId` is the provider's and not ours. It is the same figure the bridge matches
+/// its own settlements by, and the same figure `payments.payable_amount_idr` holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayTransaction {
-    pub order_id: String,
-    pub status: GatewayStatus,
+    pub transaction_id: String,
     pub amount_idr: i64,
+    pub paid_at: DateTime<Utc>,
 }
 
 /// The capability this server needs **on top of** the contract's trait.
-///
-/// `PaymentProvider` is committed and does not have a listing method, but
-/// `reconcile_payments` has to see the gateway's recent transactions to notice a payment
-/// we have no row for. Adding the method to the core trait would change a committed
-/// contract for one caller, so it lives here — one method, and the mock used in tests
-/// provides it through [`crate::testing::TestGateway`].
 #[async_trait::async_trait]
 pub trait PaymentGateway: PaymentProvider {
-    /// The gateway's transactions from the last `since_hours`.
+    /// The gateway's settled transactions from the last `since_hours`.
     async fn recent_transactions(
         &self,
         since_hours: i64,
     ) -> Result<Vec<GatewayTransaction>, PaymentError>;
-}
-
-/// The instant a [`GatewayStatus`] says the money moved, if it says one.
-///
-/// One reader for the two callers that need it (the webhook's late-payment rule and the
-/// poller's), so A295's "paid before the expiry" test cannot mean two things.
-pub fn paid_at(status: &GatewayStatus) -> Option<DateTime<Utc>> {
-    match status {
-        GatewayStatus::Paid { paid_at, .. } => Some(*paid_at),
-        GatewayStatus::Pending
-        | GatewayStatus::Expired
-        | GatewayStatus::Failed
-        | GatewayStatus::Refunded => None,
-    }
-}
-
-/// The fee a [`GatewayStatus`] reports, if it reports one.
-pub fn fee_idr(status: &GatewayStatus) -> Option<i64> {
-    match status {
-        GatewayStatus::Paid { fee_idr, .. } => *fee_idr,
-        _ => None,
-    }
 }

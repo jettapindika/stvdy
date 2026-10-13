@@ -101,11 +101,11 @@ impl AppState {
 
     /// The payment gateway, or the honest 502.
     ///
-    /// One accessor for both callers (checkout and the webhook), so a deployment with no
-    /// gateway cannot answer one way at checkout and another way at the callback. The
-    /// error is `provider_error`, not `not_found`: nothing is missing from the request —
-    /// the *deployment* cannot take money, and an operator reading the log must be able
-    /// to tell the two apart.
+    /// One accessor for every caller (checkout, the poller, the reconciliation sweep), so a
+    /// deployment with no gateway cannot answer one way at checkout and another way at the
+    /// poll. The error is `provider_error`, not `not_found`: nothing is missing from the
+    /// request — the *deployment* cannot take money, and an operator reading the log must
+    /// be able to tell the two apart.
     pub fn payment(
         &self,
     ) -> crate::error::AppResult<&Arc<dyn crate::integrations::payment::PaymentGateway>> {

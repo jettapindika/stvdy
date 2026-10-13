@@ -346,8 +346,60 @@ fn the_money_copy_is_complete_in_both_languages() {
     );
 }
 
-/// **Gate 6, the money half.** A checkout, a signed webhook, and the period it buys — read
-/// back through `Asia/Jakarta` at every step.
+/// Confirms a payment through the one function that activates one.
+///
+/// **Not through the poller, and the reason is this suite's clock.** `account` freezes the
+/// clock at `jakarta_morning()`, so the invoice's own `expires_at` is in the past as far as
+/// the database is concerned — the sweep's `expires_at > now()` window excludes it and the
+/// client's poll would expire it, both correctly. That makes the ingress untestable here
+/// rather than broken, and `tests/payment_jobs.rs` covers it with a real clock: the client's
+/// poll activating, the sweep recovering, a replay activating once.
+///
+/// What this file is about is the money path's *arithmetic and copy* under a frozen instant,
+/// and the event built below is byte-for-byte the one `billing::poll` synthesises from the
+/// gateway's answer — same kind, same amount, same `paid_at` — so the period and the receipt
+/// are the ones a real settlement produces.
+async fn settle(harness: &TestState, payment: &serde_json::Value, paid_at: DateTime<Utc>) {
+    let amount = payment["amount_idr"].as_i64().unwrap();
+    let event = stvdy_core::traits::payment::GatewayEvent {
+        event_id: format!(
+            "jakarta:{}:{}",
+            payment["order_id"].as_str().unwrap(),
+            paid_at
+        ),
+        kind: stvdy_core::traits::payment::GatewayEventKind::Paid,
+        order_id: payment["order_id"].as_str().unwrap().to_string(),
+        amount_idr: amount,
+        currency: "IDR".to_string(),
+        paid_at: Some(paid_at),
+        provider_payment_id: payment["order_id"]
+            .as_str()
+            .map(|order| format!("mock-{order}")),
+        fee_idr: None,
+        raw: serde_json::json!({ "source": "test", "status": "paid" }),
+    };
+
+    let mut conn = harness.state.pool.acquire().await.unwrap();
+    let applied = stvdy_server::billing::apply::apply_paid(
+        &mut conn,
+        &harness.state,
+        payment["id"].as_str().unwrap().parse().unwrap(),
+        &event,
+    )
+    .await
+    .expect("the apply runs");
+
+    assert!(
+        matches!(
+            applied,
+            stvdy_server::billing::apply::Applied::Activated { .. }
+        ),
+        "the gateway's paid answer did not activate the payment: {applied:?}"
+    );
+}
+
+/// **Gate 6, the money half.** A checkout, the gateway's own report that it settled, and the
+/// period it buys — read back through `Asia/Jakarta` at every step.
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     let (harness, app, token) = account(pool).await;
@@ -380,11 +432,17 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     );
     assert_eq!(
         amount, expected.due_idr,
-        "the checkout quotes `billing::price`'s number, which is what the webhook checks"
+        "the checkout quotes `billing::price`'s number, which is what the settlement is \
+         checked against"
     );
     assert_eq!(
         amount, 10_000,
         "pro monthly is 10,000 IDR in config/plans.toml"
+    );
+    assert_eq!(
+        payment["payable_amount_idr"].as_i64().unwrap(),
+        amount,
+        "the gateway charged the price exactly; the payable is what the student transfers"
     );
 
     // **The sharp pair.** The expiry is 15 minutes after the clock, and the Jakarta user's
@@ -418,42 +476,9 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
         expires_at.format("%Y-%m-%d %H:%M")
     );
 
-    // --- the webhook the gateway would send ----------------------------------------------
+    // --- the gateway's own report, applied by the one function that acts on it -------------
 
-    let order_id = payment["order_id"].as_str().unwrap().to_string();
-    let body = serde_json::json!({
-        "event_id": "jakarta-paid-1",
-        "kind": "paid",
-        "order_id": order_id,
-        "amount_idr": amount,
-        "currency": "IDR",
-        "paid_at": clock.to_rfc3339(),
-        "provider_payment_id": "gw-jakarta-1",
-    })
-    .to_string();
-    let headers = harness.gateway.sign(body.as_bytes());
-
-    let mut request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/webhooks/qris")
-        .header("content-type", "application/json");
-    for (name, value) in headers.iter() {
-        request = request.header(name, value);
-    }
-    let response = tower::ServiceExt::oneshot(
-        app.clone(),
-        request.body(axum::body::Body::from(body.clone())).unwrap(),
-    )
-    .await
-    .unwrap();
-    let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-        .await
-        .unwrap();
-    let outcome: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-    assert_eq!(status, StatusCode::OK, "{outcome}");
-    assert_eq!(outcome["duplicate"], false, "{outcome}");
-    assert_eq!(outcome["status"], "activated", "{outcome}");
+    settle(&harness, &payment, clock).await;
 
     // --- the period it bought, on the student's own calendar ------------------------------
 
@@ -549,12 +574,12 @@ async fn the_money_copy_is_correct_in_indonesia(pool: PgPool) {
     );
 }
 
-/// The money path in one step: the checkout, then the signed `paid` webhook the gateway
-/// would send, returning the amount paid and the period end the subscription was given.
+/// The money path in one step: the checkout, then the gateway's own report that it settled,
+/// returning the amount paid and the period end the subscription was given.
 ///
 /// The two receipt cases below are about the **mail**, and the checkout half is
 /// `the_money_copy_is_correct_in_indonesia`'s; sharing the steps keeps each case about the
-/// one thing it is named for rather than re-proving the webhook.
+/// one thing it is named for rather than re-proving the money path.
 async fn paid_in_indonesia(harness: &TestState, app: &Router, token: &str) -> (i64, DateTime<Utc>) {
     let clock = jakarta_morning();
 
@@ -568,40 +593,8 @@ async fn paid_in_indonesia(harness: &TestState, app: &Router, token: &str) -> (i
     .await;
     assert_eq!(status, StatusCode::OK, "{payment}");
 
-    let order_id = payment["order_id"].as_str().unwrap().to_string();
     let amount = payment["amount_idr"].as_i64().unwrap();
-    let body = serde_json::json!({
-        "event_id": "jakarta-receipt-1",
-        "kind": "paid",
-        "order_id": order_id,
-        "amount_idr": amount,
-        "currency": "IDR",
-        "paid_at": clock.to_rfc3339(),
-        "provider_payment_id": "gw-jakarta-receipt-1",
-    })
-    .to_string();
-    let headers = harness.gateway.sign(body.as_bytes());
-
-    let mut request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/webhooks/qris")
-        .header("content-type", "application/json");
-    for (name, value) in headers.iter() {
-        request = request.header(name, value);
-    }
-    let response = tower::ServiceExt::oneshot(
-        app.clone(),
-        request.body(axum::body::Body::from(body)).unwrap(),
-    )
-    .await
-    .unwrap();
-    let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-        .await
-        .unwrap();
-    let outcome: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
-    assert_eq!(status, StatusCode::OK, "{outcome}");
-    assert_eq!(outcome["status"], "activated", "{outcome}");
+    settle(harness, &payment, clock).await;
 
     let period_end: DateTime<Utc> = sqlx::query_scalar(
         "select current_period_end from subscriptions

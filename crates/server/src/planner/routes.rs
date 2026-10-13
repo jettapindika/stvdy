@@ -60,7 +60,7 @@ pub async fn create_proposal(
 /// outcome as an exception it must unwrap before it can show the message.
 pub async fn proposal(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
     let row = load_proposal(&state, user.user_id, id).await?;
@@ -69,12 +69,14 @@ pub async fn proposal(
 
 /// `POST /plans/accept` — the write (A264).
 ///
-/// Takes `AuthUser`: the credits were spent at plan time, and accepting is a read of the
-/// caller's own proposal plus the rows it becomes. A second accept of the same proposal is a
-/// 409 rather than a second set of events, which is what makes the endpoint safe to retry.
+/// Takes `VerifiedUser` (A359), like every route over the student's own study rows: the
+/// credits were already spent at plan time and accepting spends nothing more, but "spends
+/// nothing" is no longer the test — an unverified account has no workspace to accept a plan
+/// into. A second accept of the same proposal is a 409 rather than a second set of events,
+/// which is what makes the endpoint safe to retry.
 pub async fn accept(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<crate::planner::apply::AcceptBody>,
 ) -> AppResult<Json<Value>> {
     let ids = crate::planner::apply::accept(&state, &user, body.proposal_id, body.blocks).await?;

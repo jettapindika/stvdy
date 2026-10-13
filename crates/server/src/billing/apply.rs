@@ -1,9 +1,9 @@
 //! **The one function that activates a paid payment** (A301).
 //!
-//! The webhook calls it; `poll_payment` calls it; a future admin "mark paid" calls it.
-//! That is the whole design: a payment recovered by polling and one recovered by a
-//! webhook cannot differ, because they are the same code. If a second activation path
-//! ever appears, this module's reason for existing is gone.
+//! The poller calls it; the admin "mark paid" tool calls it. That is the whole design: a
+//! payment recovered by the client's poll and one recovered by the five-minute sweep
+//! cannot differ, because they are the same code. If a second activation path ever
+//! appears, this module's reason for existing is gone.
 //!
 //! It takes a **connection** rather than a pool, and that is what makes the money path
 //! one transaction: the payment's status, the subscription, the credit grant, the fee
@@ -12,7 +12,7 @@
 //!
 //! Two idempotency defences, because they defend different replays (A293):
 //!
-//!  * the caller inserts into `webhook_events` first, and `on conflict (provider,
+//!  * the caller inserts into `gateway_events` first, and `on conflict (provider,
 //!    event_id) do nothing returning id` means *no row* is "this exact event was already
 //!    handled";
 //!  * the payment's own transition is `update payments set status = 'paid' … where id =
@@ -28,7 +28,7 @@ use sqlx::{PgConnection, Row};
 use stvdy_core::billing::{BillingPeriod, apply_payment};
 use stvdy_core::config::PlanId;
 use stvdy_core::traits::mailer::Email;
-use stvdy_core::traits::payment::{WebhookEvent, WebhookKind};
+use stvdy_core::traits::payment::{GatewayEvent, GatewayEventKind};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -74,6 +74,10 @@ struct PaymentRow {
     billing_period: Option<String>,
     credits: Option<i32>,
     amount_idr: i64,
+    /// The amount the buyer was told to transfer, when the gateway assigned one. `None`
+    /// on a row written before this column existed and on a gateway that charges exactly
+    /// what it is asked for, which is why the check below reads `coalesce`.
+    payable_amount_idr: Option<i64>,
     expires_at: DateTime<Utc>,
 }
 
@@ -85,24 +89,25 @@ struct SubscriptionRow {
     current_period_end: DateTime<Utc>,
 }
 
-/// Applies a **verified, paid** event to one payment, inside the caller's transaction.
+/// Applies a **paid** gateway event to one payment, inside the caller's transaction.
 ///
-/// The caller has already checked the signature and the amount's currency is in the
-/// event; what this function decides is whether the money may be applied at all. It
-/// returns `Ok(Applied::Review { .. })` rather than an error for a payment that must not
-/// be activated, because a mismatch is a *recorded outcome*, not a failed request: the
-/// gateway should get a 200 and stop retrying.
+/// The caller has already resolved the payment and read the gateway's own words; what
+/// this function decides is whether the money may be applied at all. It returns
+/// `Ok(Applied::Review { .. })` rather than an error for a payment that must not be
+/// activated, because a mismatch is a *recorded outcome*, not a failed request: the
+/// gateway has already taken the money, and the queue is where a human reads it.
 pub async fn apply_paid(
     conn: &mut PgConnection,
     state: &AppState,
     payment_id: Uuid,
-    event: &WebhookEvent,
+    event: &GatewayEvent,
 ) -> AppResult<Applied> {
     let payment: Option<PaymentRow> = sqlx::query_as(
         // `amount_idr::bigint`: the column is INT4 and the field is `i64`, and sqlx decodes
         // by SQL type — without the cast every read of this row fails at runtime.
         "select id, user_id, kind, plan_id, billing_period, credits,
-                amount_idr::bigint as amount_idr, expires_at
+                amount_idr::bigint as amount_idr,
+                payable_amount_idr::bigint as payable_amount_idr, expires_at
            from payments
           where id = $1
           for update",
@@ -113,25 +118,25 @@ pub async fn apply_paid(
     .map_err(|error| AppError::Internal(anyhow::anyhow!("loading the payment: {error}")))?;
 
     let Some(payment) = payment else {
-        // The caller resolved this id from the order id, so a miss here is a
+        // The caller resolved this id from the gateway's own id, so a miss here is a
         // programming error rather than a bad request.
         return Err(AppError::Internal(anyhow::anyhow!(
             "payment {payment_id} disappeared between the lookup and the apply"
         )));
     };
 
-    // A non-paid callback is a recorded fact, not an activation. `expired` on an order we
+    // A non-paid event is a recorded fact, not an activation. `expired` on an order we
     // still have pending is the gateway telling us the code died, which is worth writing
     // down; the other kinds are noted and otherwise left alone.
-    if event.kind != WebhookKind::Paid {
+    if event.kind != GatewayEventKind::Paid {
         let status = match event.kind {
-            WebhookKind::Expired => "expired",
-            WebhookKind::Failed => "failed",
-            WebhookKind::Refunded => "refunded",
-            WebhookKind::Paid => unreachable!("handled above"),
+            GatewayEventKind::Expired => "expired",
+            GatewayEventKind::Failed => "failed",
+            GatewayEventKind::Refunded => "refunded",
+            GatewayEventKind::Paid => unreachable!("handled above"),
         };
         // Only a `pending` row moves: a `paid` payment must not be un-paid by a late
-        // `expired` callback, which is exactly the out-of-order delivery a real gateway
+        // `expired` report, which is exactly the out-of-order sequence a real gateway
         // produces.
         let updated = sqlx::query(
             "update payments set status = $2, reconciled_at = now(), provider_status = $3
@@ -142,7 +147,7 @@ pub async fn apply_paid(
         .bind(kind_str(event.kind))
         .execute(&mut *conn)
         .await
-        .map_err(|error| AppError::Internal(anyhow::anyhow!("recording a callback: {error}")))?;
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("recording an event: {error}")))?;
 
         if updated.rows_affected() == 0 {
             return Ok(Applied::AlreadyPaid);
@@ -184,6 +189,13 @@ pub async fn apply_paid(
     // The amount check comes **after** the transition, so a mismatched payment is marked
     // paid-but-under-review rather than left `pending` for a retry loop. Both directions
     // are the same outcome: over- and under-payment both need a human (A294).
+    //
+    // The comparison is against the **payable** amount, not the price: the gateway adds a
+    // unique offset so it can match a settlement by amount alone, and that offset is what
+    // the buyer was told to transfer and what the QR encodes. Comparing against the price
+    // would flag every real payment. `coalesce` covers a row written before the column
+    // existed, and a gateway that charges exactly what it is asked for.
+    let payable_idr = payment.payable_amount_idr.unwrap_or(payment.amount_idr);
     if event.currency != "IDR" {
         return review(
             conn,
@@ -195,13 +207,13 @@ pub async fn apply_paid(
         )
         .await;
     }
-    if event.amount_idr != payment.amount_idr {
+    if event.amount_idr != payable_idr {
         return review(
             conn,
             payment.id,
             format!(
                 "the gateway reported {} IDR but the invoice is for {} IDR",
-                event.amount_idr, payment.amount_idr
+                event.amount_idr, payable_idr
             ),
         )
         .await;
@@ -249,13 +261,15 @@ pub async fn apply_paid(
     }
 
     // The fee: the gateway's own number where it reports one, otherwise the configured
-    // rate, otherwise nothing at all. Never a guess (A304).
+    // rate, otherwise nothing at all. Never a guess (A304). The base is the **payable**
+    // amount, because that is what the provider took its cut from — the price plus the
+    // gateway's own offset.
     let fee_idr = event.fee_idr.or_else(|| {
         state
             .config
             .qris
             .as_ref()
-            .and_then(|qris| qris.fee_idr_for(payment.amount_idr))
+            .and_then(|qris| qris.fee_idr_for(payable_idr))
     });
     sqlx::query("update payments set gateway_fee_idr = $2 where id = $1")
         .bind(payment.id)
@@ -313,7 +327,7 @@ async fn activate_subscription(
     };
     let plan = PlanId::parse(plan_id);
     // The provider recorded on the subscription is the gateway that took the money, from the
-    // same `name()` the webhook resolves orders with — never a literal. One string for "who
+    // same `name()` the poller resolves payments with — never a literal. One string for "who
     // was paid" is what keeps `payments.provider` and `subscriptions.provider` comparable.
     let provider = state.payment()?.name();
 
@@ -603,37 +617,17 @@ fn receipt_zone(raw: Option<&str>) -> chrono_tz::Tz {
 
 /// The stored spelling of an event kind (`payments.provider_status`).
 ///
-/// A free function rather than a method on [`WebhookEvent`]: the type lives in
+/// A free function rather than a method on [`GatewayEvent`]: the type lives in
 /// `crates/core`, and an inherent `impl` for a foreign type is not something a server
 /// crate can write. The vocabulary is the same one `mapping` reads, so the wire spelling
 /// and the stored spelling cannot drift.
-pub fn kind_str(kind: WebhookKind) -> &'static str {
+pub fn kind_str(kind: GatewayEventKind) -> &'static str {
     match kind {
-        WebhookKind::Paid => "paid",
-        WebhookKind::Expired => "expired",
-        WebhookKind::Failed => "failed",
-        WebhookKind::Refunded => "refunded",
+        GatewayEventKind::Paid => "paid",
+        GatewayEventKind::Expired => "expired",
+        GatewayEventKind::Failed => "failed",
+        GatewayEventKind::Refunded => "refunded",
     }
-}
-
-/// The `payments` row a callback's order id resolves to, scoped to its owner.
-///
-/// `provider` is part of the lookup as well as the order id, because `order_id` is only
-/// unique *within* a provider (`unique (provider, order_id)`) — a second gateway with the
-/// same order numbering must not resolve to the first gateway's payment.
-pub async fn payment_for_order(
-    conn: &mut PgConnection,
-    provider: &str,
-    order_id: &str,
-) -> AppResult<Option<Uuid>> {
-    let row: Option<Uuid> =
-        sqlx::query_scalar("select id from payments where provider = $1 and order_id = $2")
-            .bind(provider)
-            .bind(order_id)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(|error| AppError::Internal(anyhow::anyhow!("resolving the order: {error}")))?;
-    Ok(row)
 }
 
 /// The amount and status a caller needs to decide whether to bother calling [`apply_paid`].

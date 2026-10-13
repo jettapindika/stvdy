@@ -48,13 +48,18 @@ docs/
 
 # Local tooling that the image does not run: the fetch scripts have already been run and
 # their output is committed under `assets/`, and the smoke scripts drive a *running* host.
-# The test fixtures under `crates/server/tests/fixtures/` are deliberately **not** excluded:
-# the integration-test binaries copied into `/opt/tests` read them at run time.
+# The test fixtures under `crates/server/tests/fixtures/` are deliberately **not** excluded,
+# because the build compiles the integration tests and a fixture is read at compile time by
+# whichever test names it.
 scripts/
 justfile
 docker-compose.yml
 Dockerfile
 .dockerignore
+
+# The staging deploy's own files (`deploy/staging/`). They configure a host, not the image:
+# the compose file names the image, and the nginx config serves the SPA beside it.
+deploy/
 
 # Documentation at the repository root and under `docs/`. Deliberately **not** a bare
 # `*.md`: `prompts/` is a directory of Markdown files that the build compiles in with

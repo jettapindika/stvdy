@@ -110,8 +110,8 @@ async fn dispatch(state: &AppState, job: &ClaimedJob) -> Result<(), jobs::Failur
         "plan_goal" => crate::jobs::handlers::plan::run(state, job).await,
         // The two payment passes (A301). Both are singletons with a `dedupe_key`, so a
         // restart or a second instance cannot double-run them, and both call the *same*
-        // `billing::apply::apply_paid` the webhook does — one code path, so a payment
-        // recovered by polling and one recovered by a webhook cannot differ.
+        // `billing::apply::apply_paid` the checkout screen's poll does — one code path, so
+        // a payment recovered by the sweep and one recovered by the client cannot differ.
         "poll_payment" => crate::jobs::handlers::poll_payment::run(state, job).await,
         "reconcile_payments" => crate::jobs::handlers::reconcile_payments::run(state, job).await,
         // The hard delete behind `DELETE /account` (A355). Scheduled by the deletion request at

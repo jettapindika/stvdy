@@ -14,8 +14,8 @@ import type { PaymentView } from '@/api/queries/billing'
  *
  * The two properties a support ticket comes from are pinned first: the countdown
  * is the **server's** expiry measured against the client's clock (never a duration
- * the client invented), and the total is the **server's** `amount_idr` (never a
- * subtraction the client did).
+ * the client invented), and the total is the **server's** `payable_amount_idr`
+ * (never a total the client summed).
  */
 
 const NOW = Date.parse('2026-10-12T09:00:00Z')
@@ -31,6 +31,7 @@ function payment(overrides: Partial<PaymentView> = {}): PaymentView {
     billing_period: 'monthly',
     credits: null,
     amount_idr: 5000,
+    payable_amount_idr: 5000,
     amount_before_discount_idr: 10000,
     discount_percent: 50,
     discount_code: null,
@@ -78,7 +79,7 @@ describe('the countdown', () => {
 describe('the state machine', () => {
   it('a paid payment never renders a new QR', () => {
     // Every expiry, including one in the past: paid outranks the clock, because a
-    // student whose invoice expired while our webhook was in flight has paid.
+    // student whose invoice expired before the settlement was read has paid.
     for (const expires of [EXPIRES, '2026-10-12T08:00:00Z', '2030-01-01T00:00:00Z']) {
       expect(checkoutState(payment({ status: 'paid', expires_at: expires }), NOW)).toBe('paid')
     }
@@ -112,7 +113,7 @@ describe('the state machine', () => {
   it('separates "the code is dead" from "the server still holds the payment open"', () => {
     // The clock can end the *code* — the countdown, the expired state — without
     // ending the *poll*: the poll continues while the server says `pending`,
-    // because a webhook that is merely late must still be able to move the screen
+    // because a settlement that is merely late must still be able to move the screen
     // to paid. Only the server's own status is terminal, which is why nothing here
     // decides when to stop asking.
     const stale = payment()
@@ -127,13 +128,46 @@ describe('the order summary', () => {
     // A screen that re-derived the arithmetic would print 5,000 here, and that
     // disagreement with the charge is the defect this pins.
     const lines = orderLines(
-      payment({ amount_idr: 4900, amount_before_discount_idr: 10000, discount_percent: 50 }),
+      payment({
+        amount_idr: 4900,
+        payable_amount_idr: 4900,
+        amount_before_discount_idr: 10000,
+        discount_percent: 50,
+      }),
       'en',
     )
     const total = lines.at(-1)
     expect(total?.labelKey).toBe('total')
     expect(total?.value).toBe(formatAmount(4900, 'en'))
     expect(total?.value).not.toBe(formatAmount(5000, 'en'))
+  })
+
+  it('adds no line when the gateway left the quoted price alone', () => {
+    // The common case: the gateway assigned no unique amount, so `payable_amount_idr`
+    // equals `amount_idr` and the summary is exactly the server's itemisation. No
+    // zero line explaining an offset that does not exist.
+    const lines = orderLines(payment(), 'en')
+    expect(lines.map((line) => line.labelKey)).toEqual(['beforeDiscount', 'discountStudent', 'total'])
+    expect(lines.some((line) => line.labelKey === 'uniqueAmount')).toBe(false)
+    expect(lines.at(-1)?.value).toBe(formatAmount(5000, 'en'))
+  })
+
+  it("names the gateway's unique amount above a total that is the payable amount", () => {
+    // The gateway added 123 IDR so the transfer could be matched by amount alone.
+    // The student sees the offset named, and the total is the row's own
+    // `payable_amount_idr` — never a sum of the lines above it.
+    const lines = orderLines(payment({ payable_amount_idr: 5123 }), 'en')
+    expect(lines.map((line) => line.labelKey)).toEqual([
+      'beforeDiscount',
+      'discountStudent',
+      'uniqueAmount',
+      'total',
+    ])
+    expect(lines.at(-2)?.value).toBe(formatAmount(123, 'en'))
+    expect(lines.at(-1)?.value).toBe(formatAmount(5123, 'en'))
+    // Not the quoted price: a summary that kept `amount_idr` as its total would
+    // print 5,000, and the student would transfer the wrong number.
+    expect(lines.at(-1)?.value).not.toBe(formatAmount(5000, 'en'))
   })
 
   it('names a discount once, and says which one it is', () => {
@@ -155,6 +189,7 @@ describe('the order summary', () => {
     const lines = orderLines(
       payment({
         amount_idr: 10000,
+        payable_amount_idr: 10000,
         amount_before_discount_idr: 10000,
         discount_percent: 0,
         student_discount: false,
@@ -172,6 +207,7 @@ describe('the order summary', () => {
         billing_period: null,
         credits: 500,
         amount_idr: 12500,
+        payable_amount_idr: 12500,
         amount_before_discount_idr: 12500,
         discount_percent: 0,
         student_discount: false,

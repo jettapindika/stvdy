@@ -159,6 +159,38 @@ describe('signing up', () => {
     expect(await screen.findByText('That address is already registered')).toBeInTheDocument()
     expect(store.values.size).toBe(0)
   })
+
+  it('says the address belongs to a deleted account rather than offering a plan', async () => {
+    // The refusal a marked account meets on signup (A355): 403 `account_deleted`
+    // with the purge date in the sentence. It used to render as "Not on your plan"
+    // with a link to the plans page, because the code was absent from the client's
+    // vocabulary and a 403 fell back to `plan_required` — a remedy that cannot
+    // exist for an account that is going away.
+    mockFetch(() =>
+      jsonResponse(403, {
+        code: 'account_deleted',
+        message:
+          'This account was deleted at your request; its data is removed on 2026-10-20 12:13 UTC, which releases this address for a new account',
+        min_plan: null,
+        limit: null,
+        used: null,
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SignUpScreen />)
+
+    await user.type(screen.getByLabelText(/email/i), 'student@example.com')
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery staple')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    expect(await screen.findByText('Account deleted')).toBeInTheDocument()
+    // The date the address frees up is the actionable half, and it comes from the
+    // server's own sentence because nothing else carries it.
+    expect(screen.getByRole('alert')).toHaveTextContent('2026-10-20')
+    expect(screen.queryByText('Not on your plan')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'See plans' })).not.toBeInTheDocument()
+    expect(store.values.size).toBe(0)
+  })
 })
 
 describe('signing in', () => {

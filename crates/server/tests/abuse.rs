@@ -9,8 +9,10 @@
 //!  * The **spend cap** bounds the provider-cost ceiling's overshoot (A155), so the
 //!    test asserts both halves: the allowance is not spent early, and a read is
 //!    never capped at all (A149).
-//!  * The **verified-email gate** is A43's first control, and it is a property of
-//!    the four spending routes' extractor rather than of any handler.
+//!  * The **verified-email gate** is A43's first control, and A359 widened it from the four
+//!    spending routes to the whole workspace: it is a property of the routes' extractors
+//!    rather than of any handler, and `route_sweep.rs` drives every route on that axis in both
+//!    directions (the ones that must refuse, and the account's own surface, which must not).
 //!
 //! R5 is why the per-IP test also asserts the *log line*: the false-positive rate on
 //! a campus NAT has to be measurable before the number is tuned, and a 429 with no
@@ -112,14 +114,16 @@ async fn router(harness: &TestState) -> axum::Router {
     stvdy_server::routes::router(harness.state.clone()).expect("the router")
 }
 
-/// A43(1): an unverified account cannot chat, generate or ingest.
+/// A43(1)/A359: an unverified account cannot reach the workspace at all.
 ///
-/// The four routes are the four that take `VerifiedUser`, and `route_sweep.rs`
-/// asserts that statically. This asserts the property a client sees: 403
-/// `email_not_verified`, and **no** work started — no chunks, no queued job, no
-/// credit spent.
+/// This used to be the narrower rule — "cannot chat, generate or ingest" — and it created a
+/// workspace first to reach those routes, with a comment saying so. That is the behaviour A359
+/// removed: the workspace is where the gate starts, so the four refusals are now one of a
+/// larger set and `route_sweep.rs` drives every route on this axis in both directions. What is
+/// asserted here is the property a client sees for the four that spend money: 403
+/// `email_not_verified`, and **no** work started — no chunks, no queued job, no credit spent.
 #[sqlx::test(migrations = "../../migrations")]
-async fn an_unverified_account_cannot_chat_generate_search_or_ingest(pool: PgPool) {
+async fn an_unverified_account_cannot_reach_its_workspace(pool: PgPool) {
     let harness = TestState::new(pool);
     let app = router(&harness).await;
 
@@ -134,10 +138,10 @@ async fn an_unverified_account_cannot_chat_generate_search_or_ingest(pool: PgPoo
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let token = body["access_token"].as_str().expect("a token").to_string();
 
-    // Creating a workspace is not one of the four: it costs nothing and spends
-    // nothing, so it must work even unverified — otherwise this test could not
-    // reach the routes it is about.
-    let (status, workspace) = json(
+    // Creating a workspace is refused too (A359). It spends nothing, which was the reason it
+    // used to be allowed — but an account that can hold a workspace can be filled from a
+    // device's local cache and read back, so "costs nothing" is not the test any more.
+    let (status, refused) = json(
         &app,
         "POST",
         "/workspaces",
@@ -145,12 +149,12 @@ async fn an_unverified_account_cannot_chat_generate_search_or_ingest(pool: PgPoo
         serde_json::json!({ "name": "Cell biology" }),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{workspace}");
-    let workspace_id = workspace["workspace"]["id"]
-        .as_str()
-        .expect("a workspace id")
-        .to_string();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["code"], "email_not_verified");
 
+    // Every route behind the workspace answers the same way, and the id is arbitrary: the gate
+    // runs in the extractor, before the handler looks anything up.
+    let workspace_id = uuid::Uuid::now_v7();
     let (status, refused) = json(
         &app,
         "POST",

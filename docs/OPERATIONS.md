@@ -27,11 +27,20 @@ start (`docs/RELEASE.md`).
 
 | Component | Version | Env | Absent |
 |---|---|---|---|
-| Chromium | `ARG CHROMIUM_VERSION` (Debian bookworm) | `CHROME_PATH=/usr/bin/chromium` | server starts; `GET /cheatsheets/:id/pdf` answers 409, a report's `format=pdf` answers 502 |
+| Chromium (`chromium` + `chromium-common` + `chromium-sandbox`, Debian trixie) | `ARG CHROMIUM_VERSION` | `CHROME_PATH=/usr/bin/chromium` | server starts; `GET /cheatsheets/:id/pdf` answers 409, a report's `format=pdf` answers 502. **`chromium-sandbox` is separate and required** — Debian does not pull it in with `chromium`, and without it the browser dies with `No usable sandbox!` and the renderer is `None` after the launch deadline (A338) |
 | pdfium | `chromium/8086`, checksum-verified | `PDFIUM_LIB_PATH=/opt/pdfium/lib/libpdfium.so` | PDF ingestion is unavailable and the job fails with a message naming the variable (A51) |
 | Embedding model | `intfloat/multilingual-e5-base`, pre-baked | `FASTEMBED_CACHE_DIR=/opt/models/fastembed` | the first ingest downloads 1.06 GB, which on a host with no egress is a stall or a failure (A2) |
-| LibreOffice | bookworm's `libreoffice-core`/`-writer`/`-impress` | `SOFFICE_BIN=/usr/bin/soffice` | the source still ingests, the preview is absent, and `GET /sources/:id/preview` answers 404 (A158) |
+| LibreOffice | trixie's `libreoffice-core`/`-writer`/`-impress` | `SOFFICE_BIN=/usr/bin/soffice` | the source still ingests, the preview is absent, and `GET /sources/:id/preview` answers 404 (A158) |
 | Print assets | KaTeX 0.19.0 + Inter/JetBrains Mono | `ASSETS_DIR=/opt/assets` | **not** a runtime dependency: `rust-embed` compiled them into the binary and `GET /assets/{*path}` serves that copy (A339) |
+
+**The Chromium pin has a shelf life.** `trixie-security` carries only the browser's *current*
+version, so once Debian ships the next upload the pinned `ARG CHROMIUM_VERSION` stops resolving and
+`apt-get install` fails with `Version '…' for 'chromium' was not found`. That is the pin working:
+the build stops rather than silently rendering every PDF with a different browser. The remedy is a
+re-pin — read the value from `apt-cache policy chromium` in `debian:trixie-slim`, update the `ARG`,
+and re-run `scripts/release-image.sh`, whose acceptance test is what proves the new browser still
+renders the six-page document. It is a weekly-rebuild chore (A337), and **a rebuild of an older
+commit fails once its pin is superseded** — that is expected rather than a broken tag.
 
 The image runs as the non-root user `stvdy` (uid 10001) with Chromium's sandbox **on**. The
 renderer refuses an unsandboxed render outside dev, so `--no-sandbox` is not the fix for a
@@ -42,7 +51,7 @@ The sandbox needs two things the container runtime must provide:
 
 ```sh
 docker run -d --name stvdy \
-  --shm-size=1g --tmpfs /tmp \
+  --shm-size=1g --tmpfs /tmp --security-opt seccomp=unconfined \
   -e DATABASE_URL=… -e APP_ENV=prod \
   -e JWT_SECRET=… -e ENCRYPTION_KEY_HEX=… -e WEB_ORIGIN=https://… \
   -e STORAGE_BACKEND=s3 -e S3_ENDPOINT=… -e S3_BUCKET=… \
@@ -52,6 +61,22 @@ docker run -d --name stvdy \
 
 `--shm-size` and a writable `/tmp` are both required. A missing `/dev/shm` is the classic
 "Chromium dies with a memory error that looks like a code bug" failure.
+
+**`--security-opt seccomp=unconfined` is the third flag and it is the one that is easy to omit.**
+`--shm-size` and `--tmpfs` give the sandbox the *resources* it needs; this gives it the
+*permission*. Docker's default seccomp profile blocks the namespace the renderer's sandbox moves
+into, so without it Chromium answers `Failed to move to new namespace … errno = Operation not
+permitted` and `Zygote process exited prematurely with exit code 1`. The renderer is then absent,
+which is a PDF nobody can download rather than a failed deploy (A130) — **and until
+`LAUNCH_TIMEOUT` existed it was worse than that**: `Browser::new` never returned, so the server
+came up with no error logged and no port bound. That is why the launch is now bounded
+(`crates/server/src/render/chrome.rs`); the flag is still required, because a renderer that cannot
+start is a feature that does not work.
+
+The flag grants no capability. `--cap-add SYS_ADMIN` is the alternative and it is a broader one: it
+is what the setuid `chrome-sandbox` helper path needs where unprivileged user namespaces are
+unavailable, and it hands the container a near-root capability, so prefer `seccomp=unconfined`
+where it works. `--no-sandbox` remains not the answer (A338).
 
 ## Deploying a new image
 
@@ -66,8 +91,20 @@ contract, not a convenience:
 
 ```sh
 # 1. Migrate. Runs to completion and exits. No port is bound.
+#
+# It takes the same environment the replica does, because the **image** sets `APP_ENV=prod`,
+# `--migrate-only` loads and validates the whole `AppConfig` before it touches the database
+# (`crates/server/src/main.rs`), and a prod config refuses to build without `JWT_SECRET`
+# (≥32 chars), a non-zero `ENCRYPTION_KEY_HEX` **and** a `WEB_ORIGIN`. A `--migrate-only` run
+# carrying only `DATABASE_URL` therefore exits on `JWT_SECRET must be set …` — and then on
+# `WEB_ORIGIN must be set …` — without migrating anything. That validation is deliberate: a
+# broken `plans.toml` is a startup failure rather than a 500 on the first request.
 docker run --rm --network host \
   -e DATABASE_URL="$DATABASE_URL" \
+  -e APP_ENV=prod \
+  -e JWT_SECRET="$JWT_SECRET" \
+  -e ENCRYPTION_KEY_HEX="$ENCRYPTION_KEY_HEX" \
+  -e WEB_ORIGIN="$WEB_ORIGIN" \
   stvdy-server:<tag> --migrate-only
 
 # 2. Only then start the replica(s).
@@ -171,12 +208,12 @@ whatever else it offers.
 |---|---|---|---|
 | 1 | **An Indonesian region** | the API, the database, the bucket and SearXNG are all in an Indonesian region, and the vendor documents it | UU PDP's data-residency expectation, and the latency the Batam trial demonstrated. One region for all four, not four regions that agree by accident |
 | 2 | **Managed Postgres 16 with pgvector** | `select extversion from pg_extension where extname='vector'` returns a version, and the migrations run to completion | The migrations create the extensions and the `vector` columns. A container volume holding the database is *not* this row: it has no PITR, and A347's RPO of 15 minutes is unreachable without it |
-| 3 | **A lifetime that matches the product** | a paid term of at least a year, not a trial | **A45's trial host (`168.110.202.106`) is disqualified.** A 1-month trial that the QRIS webhook or the update manifest points at is an outage with a date on it |
+| 3 | **A lifetime that matches the product** | a paid term of at least a year, not a trial | **A45's trial host (`129.225.10.139`) is disqualified.** A 1-month trial that the Google OAuth redirect URI or the update manifest points at is an outage with a date on it |
 | 4 | **Egress** | outbound HTTPS to the model provider, the search tier if it is not local, SMTP and Apple's notary service | The build stage needs it (the embedding model, the pdfium download), and so does a live ingest. A host with no egress turns the first ingest into a 1.06 GB stall |
-| 5 | **A static IP or a DNS name you control** | a name that resolves and that you can point at the host without a vendor's help | The QRIS webhook URL and the update manifest endpoint are both published values. A host whose address changes is a webhook that stops arriving and an updater that reports "up to date" forever |
-| 6 | **One container with `--shm-size` and a writable `/tmp`** | `docker run` accepts both flags | Chromium's sandbox needs `/dev/shm` and a writable `/tmp`. Without them the browser dies with a memory error that reads like a code bug (A338) |
+| 5 | **A static IP or a DNS name you control** | a name that resolves and that you can point at the host without a vendor's help | The Google OAuth redirect URI and the update manifest endpoint are both published values. A host whose address changes is a webhook that stops arriving and an updater that reports "up to date" forever |
+| 6 | **One container with `--shm-size`, a writable `/tmp`, and `--security-opt seccomp=unconfined`** | `docker run` accepts all three flags | Chromium's sandbox needs `/dev/shm` and a writable `/tmp` as resources, and the seccomp flag as permission: Docker's default profile blocks the namespace the sandbox moves into, and the browser then dies with `Failed to move to new namespace … Operation not permitted`. Without the first two it dies with a memory error that reads like a code bug; without the third the renderer never starts and the PDF path is dead (A338). Before the launch deadline existed, that last case hung the boot instead |
 | 7 | **TLS termination** | a certificate that renews without a human, and `WEB_ORIGIN` matching the web build's origin | The app's CORS is origin-checked and the plugin refuses a non-HTTPS update endpoint. A self-signed certificate is not this row |
-| 8 | **Enough disk for the model cache and the object cache** | at least 5 GB free after the image | The image carries 1.06 GB of embedding weights plus the release `target/` directory (A337, A342) |
+| 8 | **Enough disk for the image, and for building it** | at least 5 GB free after the image, and **~40 GB free to build it** | The image carries 1.06 GB of embedding weights plus Chromium, LibreOffice and the acceptance test's binary (A337, A342). Building it needs roughly twice the image: BuildKit holds the build stage's `target/` and the runtime image's copy at once, and the compiler needs its own workspace — a 45 GB host with ~9 GB used was **not** enough until the runtime payload was narrowed to the one test binary the check runs |
 | 9 | **A place for the dumps** | either the host's own PITR, or a volume that `pg_dump` writes to and R2 receives | A347's restore drill reads the newest dump. A host where the dump has nowhere to land is a host with no backup |
 
 **What is *not* on this list, deliberately:** a load balancer, a second replica, or an autoscaling
@@ -184,6 +221,278 @@ group. `crates/server/src/main.rs` runs the API, the worker and the scheduler as
 process, so one container is the whole server and a second replica is a later concern that this
 release does not need. Adding one before it is needed is how a deployment acquires a race it did
 not have — the migration race `--migrate-only` exists to remove (A346).
+
+## Staging
+
+**A45's trial host, and it is not a production host by construction.** `129.225.10.139`, Ubuntu
+24.04.5, region `ap-batam-1`, 2 vCPU / 11 GB / 45 GB, deployment root `~/stvdy/`, Docker 29.9.0 +
+Compose v5.6.0. **This is the second instance of that trial**: the first (`168.110.202.106`) lost SSH
+while it was still serving, and `scripts/staging-sync.sh` and the commands below now name this one.
+Nothing about the replacement changes what the host may hold — see A45. It exists for one month, so **nothing a third party has been told about may live
+here**: no Google OAuth redirect URI, no updater manifest, and no user data
+whose loss matters. It is the integration environment — the compose stack, SearXNG, the real server
+image, the SPA — and the tests it exists to make possible are the ones that need a second machine
+rather than a second laptop.
+
+**What runs there.** `deploy/staging/docker-compose.staging.yml` deploys as
+`~/stvdy/docker-compose.staging.yml`, beside the host's own `docker-compose.yml` (the SearXNG
+stack A45 provisioned; both files resolve to the same compose project name, so they share
+`stvdy_default`). The staging file declares `postgres` (pgvector 16), `server` (the image, with
+`--shm-size=1g` and a writable `/tmp` for Chromium's sandbox, A338), `gopay-bridge` (the QRIS
+minting/settlement bridge, container-to-container only) and `web` (nginx). SearXNG is *not* in that
+file — it is already on the shared network, so `SEARXNG_URL=http://searxng:8080/` reaches it with no
+published port (A344).
+
+**One origin, and it is the only public port.** `web` serves the SPA at `/` and proxies `/api/` to
+`server:8080` over the compose network (`deploy/staging/nginx.conf`), and the `server` service
+**publishes no port at all**. Two consequences worth stating, because both are the point:
+
+- **`VITE_API_BASE_URL` is `https://stvdy.ztvn.my.id/api`**, and the SPA and the API are therefore
+  same-origin. A single-origin deployment is what lets the bundle's one baked-in value match the
+  proxy's one path, and it is why the API needs no second public surface.
+- **There is exactly one cleartext surface, and it is not public.** `nginx` listens on `:80` and
+  Cloudflare is the only thing that reaches it. Publishing `:8080` as well — which is what this
+  deployment did before the domain existed — was a second listener carrying the same passwords and
+  bearer tokens, and it is now closed. Verified: `ss -ltn` on the host shows `:80` and nothing else.
+
+**Cloudflare terminates TLS, through a tunnel, so the origin has no inbound port at all.**
+`stvdy.ztvn.my.id` is a **Cloudflare Tunnel** (`stvdy-staging`), not a proxied A record: `cloudflared`
+runs as a systemd service on the host (`/etc/cloudflared/token`, `systemctl status cloudflared`) and
+dials **out** to Cloudflare's edge, which routes the hostname back down the tunnel to
+`http://localhost:80`. So the origin needs no certificate, no inbound firewall rule and no public
+address, and the traffic between Cloudflare and the host is encrypted by the tunnel rather than
+carried in the clear. The `1xsin*` edge codes in `cloudflared tunnel info` are Singapore — the
+nearest to Batam.
+
+**The tunnel's hostname is a dashboard step, and it is the one thing that needs a human.** The
+tunnel is token-run, so its ingress is managed remotely: **Zero Trust → Networks → Tunnels →
+`stvdy-staging` → Public Hostname → add `stvdy.ztvn.my.id` with service `http://localhost:80`.**
+Cloudflare creates the DNS record as part of that. The alternative, for a scripted setup, is an API
+token with `Zone:DNS:Edit` for the zone, which makes
+`cloudflared tunnel route dns stvdy-staging stvdy.ztvn.my.id` work; the account-level credential in
+`~/.cloudflared/cert.pem` can create tunnels but **cannot** create records in this zone
+(`code: 10000, Authentication error`), which is why the dashboard is the documented path.
+
+**The deploy is one command on the host**, and it is the same contract as production: the migration
+runs to completion before the replica starts (A346).
+
+```bash
+cd ~/stvdy && SERVER_IMAGE=stvdy-server:0.1.2 bash scripts/staging-deploy.sh
+```
+
+**One config pair is checked before this runs, because half of it stops the boot.** `QRIS_BASE_URL`
+and `QRIS_MERCHANT_ID` are set together or not at all: a base URL with no merchant id is a gateway
+whose reconciliation sweep could never read a feed, and the server refuses to start rather than
+running a sweep that silently learns nothing (A301). The error names the missing key and
+`staging-deploy.sh` fails at its `/health` probe, so it is a loud ten-second fix rather than a
+payment that is never noticed — but it is worth knowing before a deploy, not after. Setting
+neither is a supported deployment: checkout answers 502 `provider_error` and every other route is
+unaffected.
+
+`scripts/staging-deploy.sh` starts Postgres, runs `--migrate-only`, starts the replica and the SPA,
+probes `/health`, `/` and one `/assets/` path, and then runs `scripts/staging-smoke.sh`, which is
+the part `/health` cannot cover: signup → the verification link read out of the mail sink →
+`POST /auth/verify-email` → login → an authenticated `GET /workspaces`. **The mail sink is why a
+signup is completable at all here** — `SMTP_URL` is unset (B3), so the link is a file under
+`data/mail` rather than an inbox, and it is written by uid 10001, which is why the smoke script
+reads it with `sudo`.
+
+**The image is built on the host, from the whole build context, and `migrations/` is the part that
+is easy to leave out.** There is no registry in this deployment: the build context is rsynced to
+`~/stvdy/src` and `docker build` runs there, natively (`amd64`), because the laptop is `arm64` and
+a cross-build of this workspace is slower than the copy. `scripts/staging-sync.sh` is that step:
+
+```bash
+bash scripts/staging-sync.sh                    # ubuntu@129.225.10.139, stvdy-server:0.1.2
+bash scripts/staging-sync.sh host tag           # or explicitly
+```
+
+**It also ships the three deployment artifacts, which are not part of the build context.**
+`docker-compose.staging.yml`, `web/nginx.conf` and `.env.staging.example` are derived from this
+tree, but nothing compiles them — so the build context's rsync would not notice a change and the
+host would keep running whatever was last copied by hand. That is how a compose service can exist
+in this repository and not on the host: `gopay-bridge` did, and a deploy that looked green had no
+payment gateway in it. `.env.staging` is deliberately **not** shipped — it is the one file on the
+host that is not derived from this tree, and it holds the deployment's secrets and its filled-in
+values; the template lands beside it under a name nothing reads, so a new key is one `diff` away
+rather than a paragraph in a document.
+
+**The gateway's own source is a fourth thing, and it comes from outside this repository.**
+`~/stvdy/gopay-bridge-src/` is the build context for the `gopay-bridge` service, from the
+gateway's own repository (`docs/OPERATIONS.md` § Payments). The sync checks for it and warns
+rather than shipping it: a copy of another project's source is not something this script should
+be able to invent.
+
+**`migrations/` is not optional in its file list, and leaving it out produces a runtime 500 rather
+than a build failure.** `sqlx::migrate!` embeds the migration files at **compile** time, so an image
+built from a context whose `migrations/` is stale carries code for a schema its database does not
+have — and the migration step cannot repair it, because `--migrate-only` runs *that image's* embedded
+set. The symptom is a single failing route with a message naming a column, not a broken deploy:
+`GET /workspaces` answered `500 internal error: listing workspaces: error returned from database:
+column w.course_code does not exist`. The same trap applies to `prompts/`, `templates/`, `config/`
+and `assets/`, all of which are compiled in.
+
+**The SPA is built against the public origin, because Vite inlines `VITE_API_BASE_URL` at build
+time.** The value carries the `/api` prefix, which is the path nginx mounts the API on:
+
+```bash
+VITE_API_BASE_URL=https://stvdy.ztvn.my.id/api npm --prefix app run build
+rsync -az app/dist/ ubuntu@129.225.10.139:~/stvdy/web/dist/
+```
+
+`WEB_ORIGIN` in `.env.staging` is `https://stvdy.ztvn.my.id` — the origin the bundle is served
+from — and `OBJECTS_PUBLIC_BASE_URL` is `https://stvdy.ztvn.my.id/api`, because the presigned read
+URL is built as `{that}/objects/{id}` and has to come back through the same prefix. **The three
+values are one contract**: the bundle's base, the server's CORS allowlist and the presigner's base
+all describe the same origin and path, and changing one without the others is the failure to
+expect — a CORS rejection with nothing but a console error, or a source download that 404s.
+
+**The two firewall layers, and both must be opened for anything that listens publicly.** Oracle's
+**VCN security list** and the host's own firewall are separate gates: a service that is listening
+and unreachable is indistinguishable from a crashed one, and fixing one layer looks like having
+fixed nothing. Both were opened for 80 and 8080 to bring the stack up on the raw IP, and the intent
+is that both are **closed again** — the tunnel is outbound-only, so nothing needs an inbound rule.
+
+**On the current host the host-side layer is `ufw`, and that is a real improvement over the
+instance it replaced.** `ufw status verbose` on `129.225.10.139`:
+
+```
+22, 443, 80, 8080   ALLOW IN   Anywhere   (+ the v6 pairs)
+Default: deny (incoming), allow (outgoing), deny (routed)
+```
+
+Two of those four are gratuitous and worth closing: `:8080` answers nothing (the `server` service
+publishes no port, so nothing can answer there), and `:443` is unused because the tunnel dials out
+rather than accepting inbound TLS. `:80` is the one that matters — it is a cleartext surface
+carrying passwords and bearer tokens, which is precisely what the domain exists to avoid.
+
+**The commands are the safe ones now, and that is the point of naming them.** `ufw` owns its chains
+and rewrites them whole, so `sudo ufw delete allow 80` cannot leave a window with no rules — which
+is what makes the closure finishable here at all. Do **not** reach for `iptables -F` on this host
+for the same reason the paragraph below exists: the default is `deny (incoming)` and the reject
+rules are ufw's, so editing them by hand is how a host that serves its website refuses every login.
+
+**And that is what happened to the previous instance.** `168.110.202.106` kept serving nginx on 80
+and answering `/api/health` while refusing SSH on every port tried, and the replacement
+(`129.225.10.139`, 2026-10-13) is what unblocked the closure. The lesson generalises: the removal
+step is the dangerous one, not the opening one, and it should be done with the tool that owns the
+rules.
+
+If a direct-IP fallback is ever needed again, the pair is the thing to remember — the VCN rule is a
+console setting rather than a machine one, so it is the half that is easy to believe you have
+already done: with only the host layer open, everything is listening, `curl` works on the machine,
+and every port is still closed from outside.
+
+**Editing an `INPUT` chain by hand over SSH locks you out, and it has happened — on the previous instance, which is why it was replaced.** `INPUT`'s policy is
+`DROP`, so `iptables -F INPUT` leaves the machine unreachable the instant it runs — including the
+SSH connection the command arrived on, which is killed before the script can add the accept rules
+back. The result is a host that serves its website perfectly and refuses every new login, and
+**there is no way back in without the Oracle console** (Run Command, the serial console, or a
+detach-and-fix of the boot volume). Two rules follow, and the second is the one that matters:
+
+- **Never `-F` a chain whose policy is `DROP` over the connection you need.** Insert the new accepts
+  first, verify with `iptables -S`, then delete the old ones — or `iptables-restore` the whole
+  chain in one atomic operation, which never leaves a window with no rules.
+- **Keep the rule that lets you back in ahead of any `REJECT`.** A chain where a catch-all `REJECT`
+  precedes the SSH accept looks correct in `iptables -S` and blocks every *new* session while the
+  current one keeps working — so it fails silently until you reconnect.
+
+Recovery, once console access exists:
+
+```sh
+sudo iptables -F INPUT
+sudo iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -A INPUT -p icmp -j ACCEPT
+sudo iptables -A INPUT -i lo -j ACCEPT
+sudo iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+sudo iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited
+sudo sh -c 'iptables-save > /etc/iptables/rules.v4'
+```
+
+The tunnel is unaffected by this: `cloudflared` dials out and reaches nginx over loopback, which the
+`-i lo` accept covers, so the public hostname keeps serving throughout.
+
+**What is deliberately absent, and each absence is a decision rather than an omission.**
+
+| Absent | Why |
+|---|---|
+| Google OAuth, updater manifests | A45: both are addresses a third party has been told about, and this host expires. (The QRIS **webhook URL** is no longer on this list — the gateway is polled and publishes no port, so nothing about the payment path is an address anyone was told about. See § Payments) |
+| TLS | **Terminated by Cloudflare, and the origin has no inbound port.** `stvdy.ztvn.my.id` is a Cloudflare Tunnel (`stvdy-staging`), so the browser's TLS ends at Cloudflare's edge, the hop from the edge to the host is encrypted by the tunnel, and `cloudflared` dials out — the origin needs no certificate and no firewall rule. Row 7 of the host checklist is still unsatisfied for **production** (a certificate that renews without a human, on a host the operator owns end to end), and this deployment does not satisfy it either: it borrows someone else's TLS. What it does fix is the thing the earlier version of this row got wrong — with the ports open, `POST /auth/login` carried a password in cleartext over the public internet, and that is no longer true |
+| R2 | `STORAGE_BACKEND=local` with `OBJECTS_PUBLIC_BASE_URL` pointing back at the API. A331's presigned-reads-only rule is a production requirement, and staging is not worth a bucket |
+| Backups | The database volume is not dumped: A347's RPO and restore drill are about the production database, and a staging restore proves nothing about it. Treat every row here as disposable |
+| Monitoring and alerting | A348's four signals and their owner are production obligations |
+
+## Payments: the gateway sidecar (B1, resolved)
+
+**The gateway is a separate program, and it is the operator's, not the server's.** `gopay-bridge`
+wraps GoPay merchant infrastructure: it derives a dynamic QRIS from the merchant's static payload,
+watches the transaction feed, and answers over a small local HTTP surface. It runs as the
+`gopay-bridge` service in the staging compose file, on `stvdy_default`, with **no published port** —
+the server reaches it at `http://gopay-bridge:8787`, and nothing else can reach it at all. That is
+the whole of its access control (A292), so treat "it is on a network" as the boundary it is.
+
+**Its source lives outside this repository.** It is a Go module with its own `README.md` that
+documents the HTTP surface, and the deployed copy is the build context
+`~/stvdy/gopay-bridge-src/` on the host. `crates/server/src/integrations/payment/mapping.rs` is the
+one file in *this* tree that knows its field names, so a change on that side is a change there.
+
+### The session, which is the one thing that needs a human
+
+The bridge authenticates to GoPay with a **phone-OTP login** and persists the session (access token,
+refresh token, device id) to `~/stvdy/data/gopay/gopay-session.json`, mode 0600, owned by uid 65532.
+It refreshes the access token itself, so the normal state is invisible. What is *not* automatic is
+the refresh token's own lifetime: when it lapses, every call to GoPay answers `AUTH_REQUIRED` and the
+bridge's own endpoints answer 500 with that message inside.
+
+**The symptom, and it looks like a server fault rather than a login expiry.** Checkout still mints a
+row and answers 502 `provider_error`; a pending payment's status read answers 500 from the bridge and
+the server logs it at `debug`; and `reconcile_payments` logs `the reconciliation sweep could not list
+transactions` hourly. The row that names it is in the bridge's log:
+
+```sh
+docker compose -f docker-compose.staging.yml logs --tail=50 gopay-bridge
+# [AUTH_REQUIRED] refresh token expired or invalid; login again
+```
+
+**Logging in again** needs the merchant's phone and the SMS code, so it is an operator action with a
+phone in hand:
+
+```sh
+docker compose -f docker-compose.staging.yml exec gopay-bridge \
+  wget -qO- --post-data='{"phone":"<the merchant number>","country_code":"62"}' \
+  --header='Content-Type: application/json' http://127.0.0.1:8787/request-otp
+# → {"otp_token":"…"} ; the code arrives by SMS
+docker compose -f docker-compose.staging.yml exec gopay-bridge \
+  wget -qO- --post-data='{"otp":"<the code>","otp_token":"<the token>"}' \
+  --header='Content-Type: application/json' http://127.0.0.1:8787/verify-otp
+```
+
+The bridge writes the new session to the same file itself; there is nothing to copy. `GET /me` then
+returns the merchant id, which is the value `QRIS_MERCHANT_ID` must hold — the reconciliation sweep
+cannot read the feed without it, and the server **fails to boot** rather than starting with a sweep
+that silently learns nothing.
+
+**Two things to know about the session file.** It holds live tokens for a merchant account, so it is
+gitignored in the bridge's own repository and must never be committed, printed, or copied around at
+mode 644 — `docs/THREAT_MODEL.md` §5 counts an attacker who reaches this host as out of scope, and
+this file is the reason that boundary matters. And it is the *only* copy: losing it means logging in
+again with the phone.
+
+### What the operator watches
+
+| Signal | Where | What it means |
+|---|---|---|
+| `payment flagged for review` (error) | `server` log | A mismatch: money with no row, a row with no transaction, an amount that is not the payable, or a refund. `GET /admin/payments?status=review` is the queue, and `review_reason` names both numbers |
+| `the reconciliation sweep could not list transactions` (warn) | `server` log, hourly | The bridge did not answer — usually the expired session above, sometimes the host's egress to GoPay |
+| `the gateway refused to mint an invoice` (error) | `server` log | Checkout rolled back, so there is no row: the student can retry immediately |
+| The bridge's own log | `docker compose … logs gopay-bridge` | Session restores, payment creation, and the `AUTH_REQUIRED` line |
+
+**The bridge's payment state is durable as of this phase.** It keeps every pending payment in
+`~/stvdy/data/gopay/gopay-state.json` (0600, same owner), so a restart no longer strands a buyer's
+QR — which matters because the server's row points at the bridge's own payment id, and a bridge that
+forgot it would answer 404 and the sweep would flag the payment for review. The file is rewritten
+whole on every mutation and never pruned, so it grows with total payment volume; that is fine at
+staging volume and is the follow-up if this ever runs long enough to matter.
 
 ## The reverse proxy and the public surface
 
@@ -236,6 +545,74 @@ because it asserts the schema and the row counts, not the exit code.
 
 30 days of retention is what the RPO and RTO imply rather than an independent decision: a bug
 noticed a month later is still recoverable, and the bucket stays small.
+
+### The whole-VPS archive, which is what the staging host actually runs
+
+**The paragraph above is the production plan; this is the deployment.** They are not the same
+thing, and the difference is recorded here because a reader who goes looking for
+`/var/backups/stvdy` or an `r2:` remote on this host finds neither — the backup that exists is a
+whole-VPS archive to **Google Drive**, and it is the one that has to be found in an incident.
+
+`/etc/cron.d/stvdy-backup`, hourly at `:00`, as root:
+
+```
+0 * * * * root /opt/stvdy/bin/stvdy-backup.sh >> /var/log/stvdy-backup.log 2>&1
+```
+
+`/opt/stvdy/bin/stvdy-backup.sh` is the whole implementation and it documents itself — its header
+is the authoritative description of what an archive holds and what is deliberately absent. In
+summary: `/etc`, `/home` (including the deployment root, so `.env.staging`, the compose files and
+`data/{objects,mail,gopay}`), `/opt`, `/root`, `/boot`, `/srv`, `/usr/local`, `var/log`,
+`var/spool`, `var/lib/dpkg`, `var/lib/docker/volumes` (so **`stvdy_pgdata`** is there) and
+`postgres/stvdy.dump` — a `pg_dump -Fc` taken at the same moment, because copying a live data
+directory alone gives a torn snapshot. `/usr` and `/var/lib/containerd` are excluded as
+derivable, which is what keeps each archive ~200 MB instead of ~24 GB.
+
+**It runs as root for a reason that is easy to undo by accident.** The containers create bind-mount
+directories at mode 0750 owned by in-container uids — `/home/ubuntu/stvdy/data/gopay` is uid 65532
+— so an unprivileged run cannot read the whole tree and `tar` exits 2. The rclone config is read
+from `ubuntu`'s home **by explicit path** (`RCLONE_CONFIG=/home/ubuntu/.config/rclone/rclone.conf`,
+exported by the script) because a bare `sudo rclone` looks in `/root` and finds nothing. That is
+the whole reason a manual probe of this backup appears to fail: the remote is there, the config is
+not where `sudo` looks.
+
+**Verified 2026-10-13, on the current host:**
+
+| Check | Result |
+|---|---|
+| Cron | `active` + `enabled`, `/etc/cron.d/stvdy-backup` 0644 root:root (cron ignores a group-writable file) |
+| Remote | `gdrive:` only; `root_folder_id` *is* the backup folder, so the archives list at `gdrive:` directly |
+| Archives | 9 present, 1.721 GiB total, newest `2000_2026-10-13.tar.gz` (20:00 Jakarta) |
+| Upload | the script reads the size back and dies if it disagrees — the log line is `remote confirms 207004927 bytes` |
+| Contents | 35,597 entries; `MANIFEST.txt`, `postgres/stvdy.dump` (starts `PGDMP`, so `restore-drill.sh` can drive it), `etc/cron.d/stvdy-backup`, `home/ubuntu/stvdy/{.env.staging,docker-compose.staging.yml,data/gopay/gopay-session.json,gopay-bridge-src/}`, and 1,565 files under `var/lib/docker/volumes/stvdy_pgdata` |
+
+**The RPO this actually meets is 60 minutes, not the 15 in the heading above**, and the archive's
+own header says so rather than leaving the number to be inferred. Hourly is what the script's
+comment accepts explicitly ("hourly is the least a deployment should accept, and the RPO in this
+document then needs correcting rather than quietly not being met"). Correcting it here is the
+whole point: on this host the honest statement is **RPO 1 hour**, and the 15-minute figure applies
+to the production database that does not exist yet.
+
+**Two things an operator should know before relying on it.**
+
+1. **The archive holds live secrets.** `.env.staging` carries `JWT_SECRET`, `ENCRYPTION_KEY_HEX`,
+   `POSTGRES_PASSWORD`, `LLM_API_KEY` and both Google client secrets; `etc/` carries the SSH host
+   keys. The Drive folder is private to one account and **must stay that way** — a link share on
+   it hands out this machine's identity. `data/mail` also holds real verification emails.
+2. **rclone's shared Google Drive `client_id` is being retired during 2026**, and every run logs
+   the notice. It is a deadline rather than a warning: when it lands, uploads fail and the only
+   symptom is `die "upload failed"` in `/var/log/stvdy-backup.log`. The fix is the operator's —
+   create a Drive `client_id`/`client_secret` and re-authorise the remote
+   (`rclone config reconnect gdrive:`) — and it is worth doing before the failure, not after.
+
+**The restore path is inside the archive**, which is why the script stores itself in it:
+`MANIFEST.txt` at the archive root is the ordered procedure. The shape is: extract, reinstall from
+`packages.txt`, `docker compose up -d` with the archived compose file, then
+`pg_restore -Fc` the dump into a healthy Postgres — and then **verify it rather than trusting it**,
+with `scripts/restore-drill.sh`, which asserts the schema and the row counts. **That drill has not
+been run against these archives**: what is verified above is that the archives exist, are complete
+and are byte-accounted for, not that one has been restored. Launch checklist row 14 is the row
+that requires the drill, and it is still open.
 
 ### R2
 
@@ -430,8 +807,9 @@ for stopping the loss.
    revoked device's token is refused and its cache is wiped on the next pass.
 4. **Disable signups** so no new account can be created while the investigation runs.
 5. **Rotate every provider credential** the server holds: the model provider key, the search
-   service's secret, SMTP, the R2 API token, the QRIS keys, and the push credentials. Rotating
-   them is cheap and they are the ones that spend money.
+   service's secret, SMTP, the R2 API token, the GoPay merchant session (revoking it at GoPay's own
+   end, then logging the bridge in again — § Payments), and the push credentials. Rotating them is
+   cheap and they are the ones that spend money.
 6. **Rotate the updater's minisign key only through a release** (A332): installed apps verify
    against the key compiled into them, so a new key reaches an install only via an update signed
    by the old one. If the old key is what leaked, there is no in-band path — see R8 in

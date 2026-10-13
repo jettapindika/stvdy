@@ -29,7 +29,7 @@
 //! that form.
 //!
 //! **Retained — audit with no personal content.** `change_log` and `mutation_log` hold entity
-//! names, ids and operation types; `webhook_events` holds the gateway's own callbacks and has
+//! names, ids and operation types; `gateway_events` holds the gateway's own answers and has
 //! no `user_id` column at all. None of them can be read back into a student's data, and the
 //! `change_log` rows a purge writes are the tombstones of the rows it just removed.
 //!

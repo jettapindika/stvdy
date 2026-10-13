@@ -101,9 +101,9 @@ fn first_line_title(text: &str) -> String {
 
 /// `POST /workspaces/:id/syllabus` (multipart: `file` or `text`, optional `title`).
 ///
-/// 202 `{ draft_id, source_id }`. Takes `VerifiedUser`, not `AuthUser`: ingestion is one of
-/// the four things A43 keeps locked until the address is confirmed, and this route spends
-/// eight credits and then a model call.
+/// 202 `{ draft_id, source_id }`. Takes `VerifiedUser` (A359): ingestion is part of the
+/// student's study data, so it is behind a confirmed address like every route around it, and
+/// this one additionally spends eight credits and then a model call.
 ///
 /// The workspace check is [`require_writable_row`], the same call
 /// `POST /workspaces/:id/sources` makes: a workspace a downgrade flagged read-only cannot
@@ -416,7 +416,7 @@ fn item_json(item: &ReviewItem) -> serde_json::Value {
 /// treat a normal outcome as an exception it must unwrap before it can show the message.
 pub async fn draft(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(draft_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let row = load_draft(&state, user.user_id, draft_id).await?;
@@ -492,7 +492,7 @@ pub struct ConfirmItem {
 /// what makes the endpoint safe to retry after a timeout.
 pub async fn confirm(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(draft_id): Path<Uuid>,
     Json(body): Json<ConfirmBody>,
 ) -> AppResult<Json<serde_json::Value>> {

@@ -8,14 +8,11 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use hmac::digest::KeyInit;
-use hmac::{Hmac, Mac};
-use http::HeaderMap;
-use sha2::Sha256;
 use tokio::sync::mpsc;
 
 use super::clock::Clock;
@@ -24,10 +21,7 @@ use super::llm::{
     ChatRequest, ChatResponse, ChatStream, LlmError, LlmProvider, StreamEvent, ToolCall, Usage,
 };
 use super::mailer::{Email, MailError, Mailer};
-use super::payment::{
-    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
-    WebhookKind,
-};
+use super::payment::{GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider};
 use super::push::{PushError, PushMessage, PushPlatform, PushProvider};
 use super::storage::{Storage, StorageError};
 
@@ -483,77 +477,38 @@ impl PushProvider for ScriptedPush {
     }
 }
 
-/// The header `MockPayment` signs with.
-pub const MOCK_SIGNATURE_HEADER: &str = "x-mock-signature";
-
-/// The secret [`MockPayment::new`] signs with.
-pub const MOCK_SECRET: &[u8] = b"mock-secret";
-
-/// The body of a callback, as a gateway would send it.
-///
-/// A separate type from [`WebhookEvent`] on purpose: `raw` is not a field a gateway
-/// sends, it is the parsed body itself. Deriving `Deserialize` on the event would
-/// have made `raw` a required key of the wire format.
-#[derive(Debug, serde::Deserialize)]
-struct CallbackBody {
-    event_id: String,
-    kind: WebhookKind,
-    order_id: String,
-    amount_idr: i64,
-    currency: String,
-    #[serde(default)]
-    paid_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    provider_payment_id: Option<String>,
-    #[serde(default)]
-    fee_idr: Option<i64>,
-}
-
-/// A gateway that signs bodies the way a real one would.
-///
-/// The HMAC is real, and that is the point. The webhook suite asserts that a
-/// tampered body is rejected; a double that returned a canned event could not fail,
-/// so the assertion would hold no matter what the route did — a vacuous test in the
-/// same class as a determinism fixture whose inputs were all distinguishable.
+/// A scripted gateway.
 ///
 /// It is scripted rather than smart: `get_status` pops the next queued status, so a
-/// test says what the gateway will report and in what order.
-#[derive(Debug)]
+/// test says what the gateway will report and in what order. An empty queue is an
+/// error rather than a default, because a poller test that forgot to script a status
+/// must fail rather than silently assert that nothing happened.
+///
+/// **It charges exactly the amount it is asked for by default** — `payable_amount_idr` is
+/// `None` — which is the case a suite that does not care about the real gateway's unique
+/// offset should get. [`MockPayment::set_unique_offset`] makes it behave like the bridge,
+/// which adds an offset in `[1, 999]` so it can match a settlement by amount alone.
+#[derive(Debug, Default)]
 pub struct MockPayment {
-    secret: Vec<u8>,
     statuses: Mutex<VecDeque<GatewayStatus>>,
     invoices: Mutex<Vec<InvoiceRequest>>,
     refunds: Mutex<Vec<(String, i64)>>,
+    unique_offset: AtomicI64,
 }
 
 impl MockPayment {
-    /// A gateway signing with [`MOCK_SECRET`].
     pub fn new() -> Self {
-        Self::with_secret(MOCK_SECRET)
+        Self::default()
     }
 
-    /// A gateway with its own secret, for the "another gateway cannot sign for this
-    /// one" case.
-    pub fn with_secret(secret: &[u8]) -> Self {
-        Self {
-            secret: secret.to_vec(),
-            statuses: Mutex::new(VecDeque::new()),
-            invoices: Mutex::new(Vec::new()),
-            refunds: Mutex::new(Vec::new()),
-        }
-    }
-
-    /// The headers a real gateway would send for this body, so a test signs the
-    /// same bytes it posts and the route's verification is exercised for real.
-    pub fn sign(&self, body: &[u8]) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        // `from_str` cannot fail for hex, which is ASCII by construction; if it ever
-        // did, the header would be absent and verification would fail closed rather
-        // than pass with an empty signature.
-        if let Ok(value) = http::HeaderValue::from_str(&hex::encode(self.tag(body))) {
-            headers.insert(MOCK_SIGNATURE_HEADER, value);
-        }
-        headers
+    /// The offset every invoice adds to the requested amount, as the real gateway does.
+    ///
+    /// Zero — the default — reports no payable amount at all, so the row's column stays
+    /// NULL and every reader falls back to the price. That is the shape a deployment with a
+    /// gateway that charges what it is asked for has, and a suite that never calls this must
+    /// keep exercising it.
+    pub fn set_unique_offset(&self, offset: i64) {
+        self.unique_offset.store(offset, Ordering::SeqCst);
     }
 
     /// The next status `get_status` will report.
@@ -578,22 +533,6 @@ impl MockPayment {
             .map(|guard| guard.clone())
             .unwrap_or_default()
     }
-
-    fn tag(&self, body: &[u8]) -> Vec<u8> {
-        // HMAC accepts a key of any length, so this cannot fail; the empty tag keeps
-        // the function total without a panic, and an empty tag never verifies.
-        let Ok(mut mac) = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.secret) else {
-            return Vec::new();
-        };
-        mac.update(body);
-        mac.finalize().into_bytes().to_vec()
-    }
-}
-
-impl Default for MockPayment {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[async_trait::async_trait]
@@ -610,6 +549,14 @@ impl PaymentProvider for MockPayment {
             qr_string: format!("MOCKQRIS:{}:{}", req.order_id, req.amount_idr),
             expires_at: req.expires_at,
             provider_payment_id: Some(format!("mock-{}", req.order_id)),
+            // The offset the real gateway adds, or `None` when it charges what it is asked
+            // for. `None` rather than `Some(req.amount_idr)`: the null is the case the
+            // column's `coalesce` exists for, and a suite that never sets an offset must
+            // keep exercising it.
+            payable_amount_idr: match self.unique_offset.load(Ordering::SeqCst) {
+                0 => None,
+                offset => Some(req.amount_idr + offset),
+            },
         };
         let mut invoices = self
             .invoices
@@ -619,7 +566,7 @@ impl PaymentProvider for MockPayment {
         Ok(invoice)
     }
 
-    async fn get_status(&self, _order_id: &str) -> Result<GatewayStatus, PaymentError> {
+    async fn get_status(&self, _provider_payment_id: &str) -> Result<GatewayStatus, PaymentError> {
         let mut statuses = self
             .statuses
             .lock()
@@ -630,47 +577,6 @@ impl PaymentProvider for MockPayment {
         statuses
             .pop_front()
             .ok_or_else(|| PaymentError::Provider("mock payment has no queued status left".into()))
-    }
-
-    fn parse_and_verify_webhook(
-        &self,
-        headers: &HeaderMap,
-        raw_body: &[u8],
-    ) -> Result<WebhookEvent, PaymentError> {
-        // Signature first, parse second. The other order would let a tampered body
-        // decide which failure the route reports.
-        let presented = headers
-            .get(MOCK_SIGNATURE_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|hex_tag| hex::decode(hex_tag).ok())
-            .ok_or(PaymentError::Signature)?;
-        let Ok(mut mac) = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.secret) else {
-            return Err(PaymentError::NotConfigured);
-        };
-        mac.update(raw_body);
-        // `verify_slice` is the constant-time comparison; `==` on the tag would leak
-        // the prefix that matched.
-        mac.verify_slice(&presented)
-            .map_err(|_| PaymentError::Signature)?;
-
-        let raw: serde_json::Value = serde_json::from_slice(raw_body).map_err(|error| {
-            PaymentError::Invalid(format!("callback body is not JSON: {error}"))
-        })?;
-        let body: CallbackBody = serde_json::from_value(raw.clone()).map_err(|error| {
-            PaymentError::Invalid(format!("callback body is not an event: {error}"))
-        })?;
-
-        Ok(WebhookEvent {
-            event_id: body.event_id,
-            kind: body.kind,
-            order_id: body.order_id,
-            amount_idr: body.amount_idr,
-            currency: body.currency,
-            paid_at: body.paid_at,
-            provider_payment_id: body.provider_payment_id,
-            fee_idr: body.fee_idr,
-            raw,
-        })
     }
 
     async fn refund_note(&self, order_id: &str, amount_idr: i64) -> Result<(), PaymentError> {

@@ -23,7 +23,7 @@ use sqlx::PgPool;
 use stvdy_core::billing::BillingPeriod;
 use stvdy_core::config::PlanId;
 use stvdy_core::entitlements::SubStatus;
-use stvdy_core::traits::payment::{WebhookEvent, WebhookKind};
+use stvdy_core::traits::payment::{GatewayEvent, GatewayEventKind};
 use stvdy_server::auth::extract::AuthUser;
 use stvdy_server::billing::apply::{Applied, apply_paid};
 use stvdy_server::jobs::ClaimedJob;
@@ -145,11 +145,11 @@ async fn pending_payment(
     .unwrap()
 }
 
-/// A verified `paid` callback for `payment`, as the webhook would have parsed one.
-fn paid_event(amount_idr: i64, paid_at: DateTime<Utc>) -> WebhookEvent {
-    WebhookEvent {
+/// A `paid` event for `payment`, as the poller builds one from the gateway's answer.
+fn paid_event(amount_idr: i64, paid_at: DateTime<Utc>) -> GatewayEvent {
+    GatewayEvent {
         event_id: format!("evt-{}", Uuid::now_v7()),
-        kind: WebhookKind::Paid,
+        kind: GatewayEventKind::Paid,
         order_id: "order".to_string(),
         amount_idr,
         currency: "IDR".to_string(),
@@ -160,8 +160,8 @@ fn paid_event(amount_idr: i64, paid_at: DateTime<Utc>) -> WebhookEvent {
     }
 }
 
-/// Confirms a payment through the one path the webhook and the poller share.
-async fn confirm(harness: &TestState, payment_id: Uuid, event: &WebhookEvent) -> Applied {
+/// Confirms a payment through the one path the client's poll and the sweep share.
+async fn confirm(harness: &TestState, payment_id: Uuid, event: &GatewayEvent) -> Applied {
     let mut conn = harness.state.pool.acquire().await.unwrap();
     apply_paid(&mut conn, &harness.state, payment_id, event)
         .await

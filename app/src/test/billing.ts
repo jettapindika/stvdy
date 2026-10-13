@@ -160,6 +160,10 @@ export const PAYMENT: PaymentView = {
   billing_period: 'monthly',
   credits: null,
   amount_idr: 6172,
+  // Equal to `amount_idr`: this invoice's gateway assigned no unique amount, so
+  // the fixture exercises the common case and a test that wants the offset sets
+  // `payable_amount_idr` itself.
+  payable_amount_idr: 6172,
   amount_before_discount_idr: PRO_MONTHLY,
   discount_percent: 50,
   discount_code: null,

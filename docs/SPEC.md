@@ -102,7 +102,7 @@ English and Bahasa Indonesia from day one (i18next + react-i18next, ICU plurals,
 - LLM: trait `LlmProvider` with streaming AND tool/function calling. Implement one provider first (base URL + API key + model via env). Support a per-request override key (BYOK).
 - Web search: trait `SearchProvider`, one impl first (Tavily or Brave via env).
 - Calendar: `oauth2` (Google OAuth, offline access, PKCE), `icalendar` (generate ICS), `ical` (parse ICS), `chrono` + `chrono-tz`, `rrule`. Encrypt secrets at rest with `aes-gcm` using a key from env.
-- Payments: trait `PaymentProvider` with ONE implementation now: `qris_gateway`, for my existing gateway. GATEWAY = <FILL IN: gateway name and link to its API docs>. Implement against that gateway's documented API (create QRIS invoice, status query, webhook/callback signature verification). Everything gateway-specific (base URL, keys, callback token/signature scheme, fee rates) comes from env/config. Keep the trait generic so other providers (including store billing) can be added later.
+- Payments: trait `PaymentProvider` with ONE implementation now: `qris_gateway`, for my existing gateway. **GATEWAY = the self-hosted `gopay-bridge` over my GoPay merchant account** (its own README documents the HTTP surface; resolved 2026-10-13, see `docs/ASSUMPTIONS.md` B1). Implement against that gateway's documented API (create QRIS invoice, status query). Everything gateway-specific (base URL, keys, callback token/signature scheme, fee rates) comes from env/config. Keep the trait generic so other providers (including store billing) can be added later.
 - Push: APNs (iOS) and FCM (Android) via a `PushProvider` trait; desktop uses native OS notifications.
 - Client (Tauri 2): `tauri` v2 with plugins for deep-link, notification, updater (desktop only), dialog/fs, opener, os, global-shortcut (desktop only), and a secure-storage solution; `rusqlite` (or sqlx-sqlite) for the local cache.
 - Frontend: React + Vite + TypeScript + Tailwind (theme from the CSS-variable tokens), React Router, TanStack Query, i18next, `pdfjs-dist` (bundled worker) for the source viewer, date-fns, simple SVG chart components. No other heavy state libraries.
@@ -120,7 +120,7 @@ English and Bahasa Indonesia from day one (i18next + react-i18next, ICU plurals,
 # REPO STRUCTURE
 /crates/core      -> pure logic, NO web code: chunking, retrieval, prompt rendering, SM-2, planner, entitlements engine, generation orchestration, agent tool definitions, all traits.
 /crates/sync      -> shared sync protocol DTOs (used by BOTH server and client) + the client sync engine (pull/push, outbox, cursor, conflict rules).
-/crates/server    -> Axum app: routes, auth/sessions, SSE, job worker, Google/ICS integration, QRIS payments/webhooks, config.
+/crates/server    -> Axum app: routes, auth/sessions, SSE, job worker, Google/ICS integration, QRIS payments, config.
 /app              -> shared React + Vite UI for all platforms: /app/src/tokens, /app/src/components (design-system library + a gallery page), /app/src/i18n, /app/src/platform (adapters), /app/src/features/*.
 /src-tauri        -> Tauri 2 shell for macOS, Windows, iOS, Android: commands, local SQLite cache, plugins, mobile native plugins (Swift/Kotlin) for push notifications.
 /design           -> Stitch HTML exports (reference only, never shipped).
@@ -447,7 +447,7 @@ create table payments (
 create index on payments (user_id, created_at);
 create index on payments (status, expires_at);
 
-create table webhook_events (            -- idempotency + audit
+create table gateway_events (            -- idempotency + audit (renamed from webhook_events, 0039)
   id uuid primary key default gen_random_uuid(),
   provider text not null,
   event_id text not null,
@@ -616,7 +616,19 @@ chat_message=1, web_sear, flashcard_batch(10)=4, quiz(10 questions)=6, report_ou
 - Downgrade/expiry: never delete user data. After a 3-day grace period (configurable), over-limit workspaces/sources become read-only (viewable, exportable); features above the plan are locked with clear messaging; extra devices beyond the new limit are flagged read-only until the user revokes some.
 - Margin safety: log provider_cost_usd per action in usage_events; admin margin report (revenue minus provider cost minus gateway fees, per plan and per user); a hard monthly provider-cost ceiling per user per plan (config) that falls back to the cheap model or pauses expensive actions with a clear message.
 
-## Payments: QRIS via my gateway (trait `PaymentProvider`: create_invoice, get_status, parse_and_verify_webhook, refund_note)
+## Payments: QRIS via my gateway (trait `PaymentProvider`: create_invoice, get_status, refund_note)
+
+> **As built, 2026-10-13 — three divergences from the flow below, recorded here rather than
+> silently.** The gateway that resolved (B1) **never pushes**: it reports an outcome only through
+> its own status route. So (a) there is no callback and no signature to verify — the trait has no
+> `parse_and_verify_webhook`, and step 3's webhook becomes the server *reading* the status route,
+> from the checkout screen's own poll as the fast path and `poll_payment` as the backstop; (b) the
+> gateway assigns the amount, adding a unique offset in 1..999 so it can match a settlement by
+> amount alone, so the equality check in step 3 is against the **payable** amount and not the
+> price (`payments.payable_amount_idr`, A357); and (c) `webhook_events` is `gateway_events`,
+> because nothing writes it but us. Everything else below — prepaid periods, one transaction,
+> idempotency, the period rules, the edge cases, the never-trust-the-client rule — is what shipped.
+> See `docs/API.md` § Billing and `docs/ARCHITECTURE.md` § Payments for the implementation.
 - QRIS is a one-time payment, so billing is PREPAID PERIODS only: 30 days (monthly) or 365 days (yearly). No auto-renew, no stored payment methods. Every renewal or credit pack is a new QRIS invoice.
 - Checkout flow:
   1. `POST /billing/checkout` {plan_id, period} or {credit_pack}, optional discount_code. Server computes the amount (plan price, discount, student promo), creates a `payments` row (status=pending, unique `order_id`, `expires_at`, default 15 minutes, configurable) and calls the gateway to create a QRIS invoice.

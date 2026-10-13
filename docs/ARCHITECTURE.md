@@ -1299,7 +1299,7 @@ runs also runs inside it (`scripts/release-image.sh`, CI's `image` job).
 
 | Installed | Version | Env | Why it is pinned |
 |---|---|---|---|
-| Chromium (Debian `chromium` + `chromium-common`) | `ARG CHROMIUM_VERSION` | `CHROME_PATH` | the renderer's output is the document a student prints, and `tests/pdf.rs` asserts a page count and a footer read back from the renderer — an unpinned browser makes that depend on when the image was built |
+| Chromium (Debian `chromium` + `chromium-common` + `chromium-sandbox`) | `ARG CHROMIUM_VERSION` | `CHROME_PATH` | the renderer's output is the document a student prints, and `tests/pdf.rs` asserts a page count and a footer read back from the renderer — an unpinned browser makes that depend on when the image was built. `chromium-sandbox` is the setuid helper the sandbox needs (A338) and Debian does not pull it in with `chromium`: without it the browser refuses to start with `No usable sandbox!` |
 | pdfium (`bblanchon/pdfium-binaries`) | `chromium/8086`, SHA-256 verified | `PDFIUM_LIB_PATH` | the one dependency that parses attacker-supplied files; an unpinned download from a release URL is a supply-chain hole (A341) |
 | `fastembed` model | `intfloat/multilingual-e5-base` | `FASTEMBED_CACHE_DIR` | 1.06 GB, and the config default is a *relative* path, which in a container means "relative to the working directory" (A342) |
 | LibreOffice (`-core`/`-writer`/`-impress`) | trixie | `SOFFICE_BIN` | the PPTX/DOCX preview (A158); dormant until Phase 7's ingestion lands (A343) |
@@ -1312,12 +1312,15 @@ bookworm carries 2.36, and the crate ships one distribution per target, so the b
 the only thing that can move. The security cost of the larger base is accepted, and the
 mitigation is a pinned base digest plus a weekly rebuild.
 
-**The image carries the release `target/` directory.** That is what makes `cargo test --test
-pdf` runnable inside it, and it is the phase's stated risk's defence: the acceptance test is
-`#[ignore]`d so a laptop without a browser still gets a green `cargo test`, and the only honest
-way to keep it from being a test nobody runs is to run it against the image's own Chromium,
-pdfium and assets (A337). The image is therefore larger than a minimal runtime — a deliberate
-trade, stated here so it is not mistaken for an oversight.
+**The image carries the acceptance test's binary, and nothing else from the build.** That is what
+makes `cargo test --test pdf` runnable inside it, and it is the phase's stated risk's defence: the
+acceptance test is `#[ignore]`d so a laptop without a browser still gets a green `cargo test`, and
+the only honest way to keep it from being a test nobody runs is to run it against the image's own
+Chromium, pdfium and assets (A337). **It is one binary, not the release `target/` directory** — the
+test builds its document from `stvdy_core` (compiled in) and serves the embedded assets itself, so
+it needs neither fixtures nor the other sixty-odd test binaries. Copying the whole profile was
+6.4 GB of dead weight and doubled the build's disk peak, which is what made the image unbuildable
+on a 45 GB host.
 
 **Non-root, sandbox on.** The renderer refuses an unsandboxed render outside dev, so the
 container runs as `stvdy` (uid 10001) and Chromium keeps its sandbox. The sandbox needs
@@ -1615,52 +1618,60 @@ fact in words, so the screen is readable without the bars and works with a scree
 
 ## Payments (Phase 13)
 
-**The trait is the design, and B1 is why.** The QRIS gateway has no identity, no base URL, no auth
-scheme, no invoice-create response shape, no status-query shape, no callback signature scheme and no
-fee rates — the spec's own line is `GATEWAY = <FILL IN>`. So everything that touches the wire is
-written against a **documented internal contract we define and we test**, and the mapping from that
-contract to the gateway's fields lives in one file with every value read from env. The defence is
-structural rather than a promise:
+**The gateway is a separate program, and the seam is one file.** B1 resolved to a self-hosted
+`gopay-bridge` over a GoPay merchant account: it derives a dynamic QRIS from the merchant's static
+payload, watches the merchant transaction feed, and answers over a small local HTTP surface. Three
+of its properties shape everything else in this section:
 
-- `PaymentProvider` lives in `crates/core/src/traits/payment.rs` and is the contract's own signature
-  (A290). It is implemented by a mock in `crates/core/src/traits/testing.rs` that computes a **real
-  HMAC-SHA256** and compares with `Mac::verify_slice` — a canned-event double could not fail, so the
-  whole signature suite would be vacuous. Every behavioural test in this phase runs against the
-  trait, not the vendor, so the suite that proves idempotency, amount-checking and the period rules
-  keeps passing on the day the docs arrive.
-- The vendor's field names live in exactly one module,
-  `crates/server/src/integrations/payment/mapping.rs`, with tests that assert the request we send
-  and the responses we accept — so a mapping change is a test change and not a silent one. **No name
-  in that file is a real provider's**, and its doc comment says so.
-- The signature scheme is `QRIS_SIGNATURE_SCHEME`, a closed set of three shapes
-  (`hmac_sha256_hex`, `hmac_sha256_base64`, `shared_token`), each unit-tested, and an unknown value
-  **fails at startup** rather than defaulting to something that would verify everything. A
-  configured gateway with no `QRIS_CALLBACK_TOKEN` also fails to boot: the token is the HMAC key.
+- **It never pushes.** There is no callback, so the server *asks* — from two places with two
+  different jobs: the checkout screen's own poll (`GET /billing/payments/:id`, which asks the
+  gateway once while the row is `pending`) is the fast ingress, and `poll_payment` every five
+  minutes is the backstop for a client that closed the tab. The former is why a student who has paid
+  does not stare at "waiting for confirmation" for five minutes.
+- **It assigns the amount.** Every invoice is priced at the requested amount **plus an offset in
+  1..999**, so the bridge can match a settlement to one order by amount alone without a per-order
+  callback. That figure is `payments.payable_amount_idr`, and it is the only number in the money
+  path the server does not compute: `amount_idr` stays `billing::price`'s output (what was bought),
+  the payable is what was charged, and the checkout screen shows the difference as its own line
+  (A357).
+- **It mints its own id.** Our `order_id` travels as the bridge's `reference` and is never a lookup
+  key: every status question is asked with `provider_payment_id`, and the reconciliation sweep joins
+  the transaction feed on the **amount** for the same reason.
 
-**What changes when B1's docs arrive:** `mapping.rs`, one arm of `signature.rs` if the scheme is not
-one of the three, and the env values. Nothing else, and no test outside those two files.
+The seam is `crates/server/src/integrations/payment/mapping.rs`: every path, query parameter,
+request key and response field name is a named function there with a test that asserts the request
+we send and the responses we accept, so a bridge change is a test change rather than a silent
+production failure. `PaymentProvider` (A290) is unchanged in spirit — the server is its only caller
+and a client never talks to the gateway — minus the callback method, which has no caller left to
+justify it, and `crates/core` therefore no longer carries `http` or `hmac`.
+
+**There is no unauthenticated ingress.** The former `POST /webhooks/qris`, its three signature
+schemes, its HMAC key and its IP allowlist are deleted, and the control that replaced them is a
+network fact: `deploy/staging/docker-compose.staging.yml` gives the bridge no `ports:` and no
+`expose:`, so it is reachable only from the compose network and holds no credential of ours (A292).
 
 **The money moves in one transaction, through one function.** `billing::apply::apply_paid` is the
-only activation path: the webhook calls it, `poll_payment` calls it, and a future admin "mark paid"
-calls it. The webhook and the poller therefore cannot diverge, and the poller's synthesised event id
-(`poll:<order_id>:<paid_at>`) is **stable**, so two polls of one payment collide on `webhook_events`'
-unique key exactly as two webhooks would. `billing/poll.rs` contains no subscription update and no
-credit grant, and the reconciliation sweep can only write `review_reason` on rows in
-`('pending','paid')` — so a sweep can never become a scheduled activation.
+only activation path: the checkout screen's poll calls it, `poll_payment` calls it, and the admin
+"mark paid" tool calls it. Those three therefore cannot diverge, and the synthesised event id
+(`gateway:<provider_payment_id>:<paid_at>`) is **stable**, so two reads of one settlement collide on
+`gateway_events`' unique key exactly as two callbacks would. `billing/poll.rs` contains no
+subscription update and no credit grant, and the reconciliation sweep can only write `review_reason`
+on rows in `('pending','paid')` — so a sweep can never become a scheduled activation.
 
-**Idempotency has two defences because there are two replays** (A293). The *same* event replayed is
-caught by `webhook_events`' `unique (provider, event_id)` with `on conflict do nothing returning id`.
-The *same payment* reported under a **new** event id is caught by the transition itself being
+**Idempotency has two defences because there are two replays** (A293). The *same* answer read twice
+is caught by `gateway_events`' `unique (provider, event_id)` with `on conflict do nothing returning
+id`. The *same payment* reported under a **new** event id is caught by the transition itself being
 `update payments set status = 'paid' … where id = $1 and status = 'pending'`, so a second report
-updates zero rows. A defence against one does nothing against the other, and only the second happens
-when a real gateway re-sends with a fresh id.
+updates zero rows. A defence against one does nothing against the other, and both are live here: the
+client's poll and the sweep can be in flight at once.
 
 **The amount is checked after the transition**, so a mismatch is marked paid-but-under-review rather
 than left `pending` for a retry loop; both over- and under-payment are the same outcome, `review`,
-with the two numbers in `review_reason`. A payment made after the expiry is `review`
-**unconditionally**; the `QRIS_HONOR_LATE_PAYMENT` switch decides only the case where the student
-paid in time and our confirmation arrived late — a switch that could activate a payment made after
-the deadline would be a switch that sells expired invoices.
+with the two numbers in `review_reason`. The comparison is against **`payable_amount_idr`**, not the
+price — comparing against the price would put every real payment in the queue. A payment made after
+the expiry is `review` **unconditionally**; the `QRIS_HONOR_LATE_PAYMENT` switch decides only the
+case where the student paid in time and our confirmation arrived late — a switch that could activate
+a payment made after the deadline would be a switch that sells expired invoices.
 
 **The period rules** are pure and live in `crates/core/src/billing/period.rs` (A296): live paid time
 is extended from `current_period_end` so paying early never loses days; anything else starts a fresh

@@ -1,15 +1,19 @@
-//! `poll_payment`: the fallback for a webhook that was lost (A301).
+//! `poll_payment`: the backstop for a client that is not watching (A301).
 //!
 //! A thin shell over [`crate::billing::poll::poll_pending`], and deliberately thin: the
-//! pass calls `billing::apply::apply_paid` — the *same* function the webhook calls — so a
-//! payment recovered by polling and one recovered by a webhook cannot differ. All this
-//! module adds is the job's failure policy, which is the one thing the pass cannot decide
-//! for itself.
+//! pass calls `billing::apply::apply_paid` — the *same* function the checkout screen's
+//! poll calls — so a payment recovered by this sweep and one recovered by the client
+//! cannot differ. All this module adds is the job's failure policy, which is the one thing
+//! the pass cannot decide for itself.
 //!
-//! **A gateway that is down is transient; an order the gateway does not know is not.** The
+//! **A gateway that is down is transient; a payment the gateway does not know is not.** The
 //! pass already writes `review` for the second (asking again would ask forever) and leaves
 //! the row `pending` for the first, so the failure this handler can still see is a
 //! database problem, and that is worth a retry.
+//!
+//! It is a backstop rather than the fast path: the bridge never pushes, so the checkout
+//! screen's own poll asks the gateway on every tick, and this pass exists for the student
+//! who paid and then closed the tab.
 
 use crate::billing::poll;
 use crate::jobs::{ClaimedJob, Failure};

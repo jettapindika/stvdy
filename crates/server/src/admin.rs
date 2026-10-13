@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use stvdy_core::config::PlanId;
-use stvdy_core::traits::payment::{WebhookEvent, WebhookKind};
+use stvdy_core::traits::payment::{GatewayEvent, GatewayEventKind};
 use uuid::Uuid;
 
 use crate::auth::extract::AdminUser;
@@ -33,7 +33,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/users/{id}/credits", post(grant_credits))
         .route("/admin/margin", get(margin))
         .route("/admin/users", get(users))
-        // The payment tools (A308). `mark-paid` runs the webhook's own apply rather than a
+        // The payment tools (A308). `mark-paid` runs the poller's own apply rather than a
         // second implementation, and `refund` records the row and leaves the subscription
         // alone — neither deletes anything.
         .route("/admin/payments", get(list_payments))
@@ -920,7 +920,7 @@ pub struct PaymentRow {
 
 /// `POST /admin/payments/:id/mark-paid`
 ///
-/// Runs **the same `apply_paid` the webhook runs** (A308/A301), so a manually confirmed payment
+/// Runs **the same `apply_paid` the poller runs** (A308/A301), so a manually confirmed payment
 /// and a gateway-confirmed one cannot activate differently — a second implementation here would
 /// be a second answer to "what does a payment do". The row records `provider = 'manual'` so the
 /// margin report can tell a comp from money that arrived.
@@ -934,8 +934,14 @@ pub async fn mark_paid(
 ) -> AppResult<Json<Value>> {
     // `amount_idr` is `int` (INT4) and the field is `i64`; sqlx decodes by SQL type, so the
     // cast is required — without it this read is a `ColumnDecode` error, not a widening.
+    //
+    // The amount read is the **payable** one, because that is what `apply_paid` checks a
+    // settlement against. For a row the gateway gave a unique offset, taking `amount_idr`
+    // here would make the admin's own confirmation fail the amount check — a comp refused by
+    // arithmetic the admin did not choose.
     let row: Option<(String, i64, String)> = sqlx::query_as(
-        "select status, amount_idr::bigint as amount_idr, order_id from payments where id = $1",
+        "select status, coalesce(payable_amount_idr, amount_idr)::bigint as amount_idr, order_id
+           from payments where id = $1",
     )
     .bind(payment_id)
     .fetch_optional(&state.pool)
@@ -946,12 +952,12 @@ pub async fn mark_paid(
         return Err(AppError::NotFound);
     };
 
-    // A synthetic, verified event: the admin *is* the verification here, which is what the
-    // audit row and the `provider = 'manual'` mark record. The amount is the row's own, so the
-    // amount check inside `apply_paid` cannot fail for a reason the admin did not choose.
-    let event = WebhookEvent {
+    // A synthetic event: the admin *is* the verification here, which is what the audit row
+    // and the `provider = 'manual'` mark record. The amount is the row's own, so the amount
+    // check inside `apply_paid` cannot fail for a reason the admin did not choose.
+    let event = GatewayEvent {
         event_id: format!("manual:{payment_id}"),
-        kind: WebhookKind::Paid,
+        kind: GatewayEventKind::Paid,
         order_id: order_id.clone(),
         amount_idr,
         currency: "IDR".to_string(),

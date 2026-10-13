@@ -27,7 +27,7 @@ use crate::actions::{
     ActionRow, ActionView, RESOLVED_VISIBLE_HOURS, Resolution, claim, execute, expire_stale, find,
     record_error, record_result,
 };
-use crate::auth::extract::{AuthUser, VerifiedUser};
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -55,7 +55,7 @@ pub fn routes() -> Router<AppState> {
 /// transaction, so this is the convenience and not the enforcement.
 pub async fn pending(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
 ) -> AppResult<Json<serde_json::Value>> {
     expire_stale(&state.pool, user.user_id).await?;
 
@@ -207,7 +207,7 @@ pub async fn confirm(
 /// silently succeeding.
 pub async fn reject(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     if find(&state.pool, user.user_id, id).await?.is_none() {

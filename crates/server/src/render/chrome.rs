@@ -39,6 +39,22 @@ const RENDER_TIMEOUT: Duration = Duration::from_secs(60);
 /// It is well inside [`RENDER_TIMEOUT`], so the deadline the caller sees is this one.
 const MATH_READY_TIMEOUT_MS: u64 = 30_000;
 
+/// How long a browser launch may take before it is abandoned.
+///
+/// **Bounded because the unbounded version is a total outage rather than a degraded
+/// feature.** `Browser::new` blocks until the browser is ready, and a browser that dies
+/// during startup leaves it blocking *forever*: the process stays alive, logs no error, and
+/// never binds its port. That is not hypothetical — the server image's first two sandbox
+/// failures (a missing `chromium-sandbox` package, then Docker's default seccomp profile
+/// blocking the namespace the sandbox moves into) both produced exactly that, and the hang
+/// is what made the image look unbuildable rather than unrunnable.
+///
+/// With a deadline, the same failure becomes what the absent-browser policy already
+/// documents: the renderer is `None`, the server serves everything except PDFs, and the log
+/// names the launch. A launch on this image takes about two seconds, so 30 s is a bound on
+/// something that is wrong rather than a budget for something that is slow.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Where Chromium is looked for when `CHROME_PATH` is unset.
 ///
 /// The image sets `CHROME_PATH` to its pinned build (see `docs/RELEASE.md`), so this list
@@ -201,6 +217,11 @@ impl Renderer {
     }
 
     /// One Chromium process, launched with the renderer's own options.
+    ///
+    /// The launch is bounded by [`LAUNCH_TIMEOUT`], which is the difference between a
+    /// degraded feature and an outage: `Browser::new` never returns when the browser dies
+    /// during startup, so an unbounded launch means a process that is alive, silent and
+    /// listening on nothing.
     fn launch_browser(
         executable: Option<&str>,
         allow_no_sandbox: bool,
@@ -212,9 +233,9 @@ impl Renderer {
             .build()
             .map_err(|error| RenderError::Launch(error.to_string()))?;
 
-        Browser::new(options)
+        with_deadline(LAUNCH_TIMEOUT, move || Browser::new(options))
             .map(Arc::new)
-            .map_err(|error| RenderError::Launch(error.to_string()))
+            .map_err(RenderError::Launch)
     }
 
     /// Renders one HTML document to an A4 PDF.
@@ -517,6 +538,41 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// Runs `work` on its own thread and gives it `deadline` to answer.
+///
+/// A thread rather than a timeout on the call itself, because `Browser::new` is a blocking
+/// third-party call with no cancellation: the only way to stop waiting on it is to stop
+/// waiting.
+///
+/// **A launch that outlives its deadline leaks the thread it was running on, and that is the
+/// accepted cost.** One thread per failed launch, in a process that is otherwise healthy and
+/// serving; killing the child process instead would mean re-implementing the launch, which is
+/// the crate's code and not this module's. A browser that arrives after the deadline is
+/// dropped with the channel's sender, so the process it started goes with it.
+fn with_deadline<T, E, F>(deadline: Duration, work: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+
+    match receiver.recv_timeout(deadline) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "the browser did not start within {} seconds",
+            deadline.as_secs()
+        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("the launch thread ended without answering".to_string())
+        }
+    }
+}
+
 /// The print options, as a pure function of the running header.
 ///
 /// Extracted so the acceptance test can assert the options the renderer actually uses
@@ -542,5 +598,47 @@ pub fn pdf_options(running_header: &str) -> PrintToPdfOptions {
         transfer_mode: None,
         generate_document_outline: Some(true),
         generate_tagged_pdf: Some(true),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The mechanism, not the browser: a launch that never answers must become an error
+    /// rather than an unbounded wait. `Browser::new` cannot be made to hang on demand, so
+    /// what is asserted is the deadline itself — the thing whose absence turned a broken
+    /// sandbox into a server that was alive, silent and listening on nothing.
+    #[test]
+    fn a_launch_that_outlives_its_deadline_is_an_error() {
+        let started = std::time::Instant::now();
+        let result = with_deadline::<(), String, _>(Duration::from_millis(50), || {
+            std::thread::sleep(Duration::from_secs(30));
+            Ok(())
+        });
+
+        let error = result.expect_err("a launch that never answers must fail");
+        assert_eq!(error, "the browser did not start within 0 seconds");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the deadline must be what ends the wait, not the work: waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_launch_inside_its_deadline_returns_the_value() {
+        let launched = with_deadline(Duration::from_secs(30), || Ok::<u32, String>(7));
+        assert_eq!(launched, Ok(7));
+    }
+
+    #[test]
+    fn a_launch_that_fails_reports_the_crates_own_message() {
+        let error = with_deadline::<(), String, _>(Duration::from_secs(30), || {
+            Err("Failed to move to new namespace".to_string())
+        })
+        .expect_err("the failure must survive the thread boundary");
+
+        assert_eq!(error, "Failed to move to new namespace");
     }
 }

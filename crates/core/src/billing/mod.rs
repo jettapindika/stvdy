@@ -5,7 +5,7 @@
 //! against whatever the production tables happen to hold.
 //!
 //! It is one module for one reason: the amount the server quotes at checkout and the
-//! amount the webhook checks a payment against come out of the same function, so a
+//! amount the settlement is checked against come out of the same function, so a
 //! customer cannot be charged one number and activated against another.
 
 mod period;

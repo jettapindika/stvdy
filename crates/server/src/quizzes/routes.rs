@@ -360,7 +360,7 @@ pub(crate) async fn enqueue_generation(
 /// still generating.
 pub async fn list_quizzes(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     workspaces::owned_name(&state, user.user_id, workspace_id).await?;
@@ -398,7 +398,7 @@ pub async fn list_quizzes(
 /// proctored, it is a study aid, and the student is meant to see why an answer is right.
 pub async fn get_quiz(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(quiz_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let quiz = owned_quiz(&state, user.user_id, quiz_id).await?;
@@ -473,7 +473,7 @@ pub struct AttemptBody {
 /// derived from the attempts when it is read.
 pub async fn record_attempt(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(quiz_id): Path<Uuid>,
     Json(body): Json<AttemptBody>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -559,7 +559,7 @@ pub async fn record_attempt(
 /// double-count.
 pub async fn quiz_results(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(quiz_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     owned_quiz(&state, user.user_id, quiz_id).await?;

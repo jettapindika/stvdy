@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -28,7 +28,7 @@ pub struct StatusView {
 /// `GET /sources/:id/status`
 pub async fn status(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(source_id): Path<Uuid>,
 ) -> AppResult<Json<StatusView>> {
     let row = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<DateTime<Utc>>, i64)>(

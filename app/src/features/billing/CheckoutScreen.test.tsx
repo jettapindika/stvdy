@@ -16,10 +16,12 @@ import type { PaymentView } from '@/api/queries/billing'
  *
  * **The total is the server's.** The fixture charges `6172` on a list price of
  * `12345`, and a third of the tests here assert that the number on screen is the
- * row's `amount_idr` — a screen that re-derived the arithmetic would print `6172`
- * too in this fixture, so one case is planted with a deliberately inconsistent row
- * (`amount_idr` that does not follow from the discount) to make the difference
- * observable. That is the only way this assertion can fail, and it must be able to.
+ * row's `payable_amount_idr` — a screen that re-derived the arithmetic would print
+ * `6172` too in this fixture, so one case is planted with a deliberately
+ * inconsistent row (`amount_idr` that does not follow from the discount) to make
+ * the difference observable, and another with the gateway's unique amount on top
+ * of the price. That is the only way this assertion can fail, and it must be able
+ * to.
  *
  * **Every state is spoken.** Five of the six states plus `offline` are rendered and
  * asserted for their *words*, because a QR screen is the natural place for a status
@@ -96,6 +98,7 @@ describe('the checkout screen', () => {
     const inconsistent: PaymentView = {
       ...PAYMENT,
       amount_idr: 5555,
+      payable_amount_idr: 5555,
       amount_before_discount_idr: PRO_MONTHLY,
       discount_percent: 50,
     }
@@ -111,6 +114,23 @@ describe('the checkout screen', () => {
     expect(screen.getByText(/12,345/)).toBeInTheDocument()
     expect(screen.getByText('Student discount')).toBeInTheDocument()
     expect(screen.getByText('50%')).toBeInTheDocument()
+  })
+
+  it("shows the gateway's unique amount when the charge exceeds the quoted price", async () => {
+    // The gateway added 123 IDR so it can match the transfer by amount alone. The
+    // offset is named rather than left for the student to wonder about, and the
+    // total is the payable figure — a screen reading `amount_idr` would print the
+    // quoted price and the student would transfer the wrong number.
+    const { container } = renderCheckout({
+      ...PAYMENT,
+      payable_amount_idr: PAYMENT.amount_idr + 123,
+    })
+
+    await screen.findByText('Total')
+    expect(screen.getByText('Unique amount for automatic matching')).toBeInTheDocument()
+    expect(screen.getByText(/IDR 123/)).toBeInTheDocument()
+    expect(container.textContent).toMatch(/6,295/)
+    expect(container.textContent).not.toMatch(/6,172/)
   })
 
   it('renders the QR from the server\'s payload, verbatim', async () => {
@@ -161,7 +181,7 @@ describe('the checkout screen', () => {
   it('says what "we have not heard from the gateway yet" means', async () => {
     renderCheckout()
 
-    // The state a student sits in when a webhook is lost. It must read as neither
+    // The state a student sits in before a settlement is read. It must read as neither
     // failure nor success, and it must say what happens next.
     const status = await stateRegion('Waiting for confirmation')
     expect(within(status).getByText('Waiting for confirmation')).toBeInTheDocument()

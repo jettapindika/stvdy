@@ -122,16 +122,33 @@ jobs:
       - name: The pin is the pin
         # An image that silently tracked Debian's `stable` would pass every other check in
         # this job: the browser starts, the render works, and the page count changes
-        # whenever Debian moves. So the version the running image reports is compared to
-        # the `ARG` in the Dockerfile, and a mismatch fails the build rather than changing
-        # every PDF.
+        # whenever Debian moves. So the version the image actually has installed is compared
+        # to the `ARG` in the Dockerfile, and a mismatch fails the build rather than
+        # changing every PDF.
+        #
+        # **It is the package version that is compared, not `chromium --version`.** The
+        # binary reports its upstream version alone (`Chromium 154.0.8037.92 built on Debian
+        # GNU/Linux 13 (trixie)`) while the `ARG` is Debian's package version
+        # (`154.0.8037.92-1~deb13u1`), so comparing those two strings can never pass — a
+        # green-looking check that is really an unsatisfiable one. `dpkg-query` answers the
+        # question the pin asks, and the binary's version is checked as the prefix of it.
         run: |
-          built=$(docker run --rm --entrypoint /usr/bin/chromium stvdy-server:ci --version)
+          built=$(docker run --rm --entrypoint /bin/sh stvdy-server:ci -c \
+            'dpkg-query -W -f=\${Version} chromium; echo; dpkg-query -W -f=\${Version} chromium-common; echo; dpkg-query -W -f=\${Version} chromium-sandbox')
           declared=$(grep -oE '^ARG CHROMIUM_VERSION=.*' Dockerfile | cut -d= -f2)
-          echo "built:    $built"
-          echo "declared: Chromium $declared"
-          test "$built" = "Chromium $declared" || {
-            echo "the image's Chromium is not the declared pin"; exit 1; }
+          binary=$(docker run --rm --entrypoint /usr/bin/chromium stvdy-server:ci --version)
+          echo "package:  $built"
+          echo "declared: $declared"
+          echo "binary:   $binary"
+          # Both packages, because they are built from one source and pinning only the binary
+          # would let the pair drift (the Dockerfile's own comment).
+          test "$(printf '%s\n' "$built" | sort -u)" = "$declared" || {
+            echo "the image's Chromium packages are not the declared pin"; exit 1; }
+          case "$binary" in
+            "Chromium ${declared%%-*}"*) ;;
+            *) echo "the image's Chromium binary does not report the pinned upstream version"
+               exit 1;;
+          esac
 
       - name: The other native dependencies are present
         # Each of these has a documented absent-binary policy, and each failure mode is a
@@ -151,11 +168,23 @@ jobs:
         # starting together both migrate, and the one that loses the race then serves
         # against a schema it has not verified (A346).
         run: |
+          # The migration carries the whole prod environment: `--migrate-only` validates the
+          # config before it touches the database, and the image sets `APP_ENV=prod`, which
+          # requires `JWT_SECRET`, `ENCRYPTION_KEY_HEX` and `WEB_ORIGIN` (A346).
           docker run --rm --network host \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy \
+            -e APP_ENV=prod \
+            -e JWT_SECRET=ci-only-secret-that-is-long-enough \
+            -e ENCRYPTION_KEY_HEX=1111111111111111111111111111111111111111111111111111111111111111 \
+            -e WEB_ORIGIN=http://localhost:5173 \
             stvdy-server:ci --migrate-only
 
-          docker run -d --name stvdy --network host --shm-size=1g --tmpfs /tmp \
+          # The three flags Chromium's sandbox needs (A338): `--shm-size` and `--tmpfs /tmp`
+          # are the resources, `--security-opt seccomp=unconfined` is the permission —
+          # Docker's default seccomp profile blocks the namespace the sandbox moves into, and
+          # a browser that dies there leaves the boot hung with no error and no bound port.
+          docker run -d --name stvdy --network host \
+            --shm-size=1g --tmpfs /tmp --security-opt seccomp=unconfined \
             -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/stvdy \
             -e APP_ENV=prod \
             -e JWT_SECRET=ci-only-secret-that-is-long-enough \

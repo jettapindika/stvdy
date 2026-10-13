@@ -139,72 +139,31 @@ pub struct AppConfig {
     pub assets_base_url: String,
 }
 
-/// The callback signature scheme, as a closed set (A292).
-///
-/// A closed set rather than a string, and an unknown value is a **startup** error:
-/// a default would be a scheme that verifies everything, which is the one failure
-/// mode this whole verification exists to prevent. Three shapes cover the plausible
-/// gateways — an HMAC in hex, the same in base64, and a plain shared token for one
-/// that signs nothing — so the code is finished before the docs arrive without
-/// pretending to know which one is right.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SignatureScheme {
-    /// `HMAC-SHA256(QRIS_CALLBACK_TOKEN, raw_body)`, hex, in `QRIS_SIGNATURE_HEADER`.
-    HmacSha256Hex,
-    /// The same tag, base64.
-    HmacSha256Base64,
-    /// The header *is* `QRIS_CALLBACK_TOKEN`, compared in constant time.
-    SharedToken,
-}
-
-impl SignatureScheme {
-    pub const ALL: [SignatureScheme; 3] = [
-        SignatureScheme::HmacSha256Hex,
-        SignatureScheme::HmacSha256Base64,
-        SignatureScheme::SharedToken,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SignatureScheme::HmacSha256Hex => "hmac_sha256_hex",
-            SignatureScheme::HmacSha256Base64 => "hmac_sha256_base64",
-            SignatureScheme::SharedToken => "shared_token",
-        }
-    }
-
-    /// `None` for anything not in the closed set: the caller turns that into a boot
-    /// failure rather than a default.
-    pub fn parse(raw: &str) -> Option<SignatureScheme> {
-        Self::ALL.into_iter().find(|scheme| scheme.as_str() == raw)
-    }
-
-    /// Whether the scheme needs `QRIS_CALLBACK_TOKEN` as an HMAC key rather than as
-    /// the literal header value. Both need the secret; only the message differs.
-    pub fn signs_with_hmac(self) -> bool {
-        !matches!(self, SignatureScheme::SharedToken)
-    }
-}
-
 /// Everything about the gateway that is a value rather than a shape.
 ///
 /// The field names are **not** here — they are in
-/// `integrations::payment::mapping`, which is the one file B1 changes. This struct
-/// is the env half: the URL, the credentials, the scheme, the fee rate, the invoice
-/// lifetime and the two switches that decide how a late or lost payment is treated.
+/// `integrations::payment::mapping`, which is the one file a bridge change touches.
+/// This struct is the env half: where the bridge is, which merchant's feed is read,
+/// the fee rate, the invoice lifetime and the two switches that decide how a late or
+/// lost payment is treated.
+///
+/// **There are no credentials here, and that is the gateway's shape rather than an
+/// omission.** The bridge authenticates to GoPay with its own phone-OTP session, kept
+/// in its own state file, and the surface it exposes is unauthenticated — which is why
+/// it publishes no host port and is reachable only from the compose network (A292's
+/// successor: the control is reachability, not a shared secret).
 #[derive(Debug, Clone)]
 pub struct QrisConfig {
     pub base_url: String,
-    pub api_key: SecretString,
-    pub callback_token: SecretString,
-    pub signature_scheme: SignatureScheme,
-    /// Defaults to `X-Callback-Signature`. The header name is a gateway fact, so it
-    /// is config too.
-    pub signature_header: String,
-    /// An allowlist checked **before** the signature when non-empty (A292).
-    pub webhook_ips: Vec<std::net::IpAddr>,
+    /// The merchant whose transaction feed the reconciliation sweep reads.
+    ///
+    /// Required, because the sweep is the only thing that notices money the gateway
+    /// received and we have no row for (A301), and a sweep that cannot name a merchant
+    /// is a sweep that silently learns nothing.
+    pub merchant_id: String,
     /// The gateway's percentage fee. Defaults to `0.0` — "unknown, record nothing" —
-    /// rather than a plausible-looking rate, because B1 has not told us the rate and
-    /// a made-up fee would silently corrupt the margin report (A304).
+    /// rather than a plausible-looking rate: the bridge reports no fee, so a made-up
+    /// one would silently corrupt the margin report (A304).
     pub fee_percent: f64,
     pub fee_fixed_idr: i64,
     pub invoice_ttl_minutes: i64,
@@ -584,56 +543,26 @@ impl AppConfig {
 
 /// The QRIS gateway configuration, or `None` when no base URL is set.
 ///
-/// **The signature scheme is parsed even when no gateway is configured**, and an
-/// unknown value is a boot failure either way: a typo in `QRIS_SIGNATURE_SCHEME` is
-/// an operator who believes a scheme is in force, and failing at startup is the only
-/// place that can be said loudly (A292).
+/// **A configured gateway with no `QRIS_MERCHANT_ID` is a boot failure**, not a
+/// first-sweep surprise: the merchant id is the only thing the reconciliation sweep
+/// can name, and a deployment that cannot read its own transaction feed is one where
+/// money that arrived with no `payments` row is never noticed (A301). Failing at
+/// startup is the only place that can be said loudly.
 ///
-/// A configured gateway with no `QRIS_API_KEY` or no `QRIS_CALLBACK_TOKEN` is also a
-/// boot failure rather than a first-webhook surprise. The callback token is the HMAC
-/// key (or the compared value), so booting without it would mean verifying signatures
-/// against an empty secret — which an attacker can reproduce.
+/// There is nothing to verify here, and that is deliberate: the bridge has no
+/// credentials and pushes nothing, so the two secrets this function used to require
+/// are gone with the callback path.
 fn qris_config(
     get: &impl Fn(&str) -> Option<String>,
     get_or: &impl Fn(&str, &str) -> String,
 ) -> anyhow::Result<Option<QrisConfig>> {
-    let scheme_raw = get_or("QRIS_SIGNATURE_SCHEME", "hmac_sha256_hex");
-    let Some(signature_scheme) = SignatureScheme::parse(&scheme_raw) else {
-        anyhow::bail!(
-            "QRIS_SIGNATURE_SCHEME must be one of {}, got {scheme_raw}",
-            SignatureScheme::ALL
-                .map(|scheme| scheme.as_str())
-                .join(", ")
-        );
-    };
-
     let Some(base_url) = get("QRIS_BASE_URL").filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
 
-    let api_key = get("QRIS_API_KEY")
+    let merchant_id = get("QRIS_MERCHANT_ID")
         .filter(|value| !value.is_empty())
-        .context("QRIS_BASE_URL is set but QRIS_API_KEY is not")?;
-    let callback_token = get("QRIS_CALLBACK_TOKEN")
-        .filter(|value| !value.is_empty())
-        .context(
-            "QRIS_BASE_URL is set but QRIS_CALLBACK_TOKEN is not: it is the HMAC key \
-             (or the compared value) for every callback, and an empty one verifies \
-             anything",
-        )?;
-
-    let webhook_ips = match get("QRIS_WEBHOOK_IPS").filter(|value| !value.is_empty()) {
-        None => Vec::new(),
-        Some(raw) => {
-            let mut parsed = Vec::new();
-            for candidate in raw.split(',').map(str::trim).filter(|c| !c.is_empty()) {
-                parsed.push(candidate.parse::<std::net::IpAddr>().with_context(|| {
-                    format!("QRIS_WEBHOOK_IPS entry {candidate:?} is not an IP address")
-                })?);
-            }
-            parsed
-        }
-    };
+        .context("QRIS_BASE_URL is set but QRIS_MERCHANT_ID is not")?;
 
     let fee_percent = get_or("QRIS_FEE_PERCENT", "0")
         .parse::<f64>()
@@ -663,11 +592,7 @@ fn qris_config(
 
     Ok(Some(QrisConfig {
         base_url: base_url.trim_end_matches('/').to_string(),
-        api_key: SecretString::from(api_key),
-        callback_token: SecretString::from(callback_token),
-        signature_scheme,
-        signature_header: get_or("QRIS_SIGNATURE_HEADER", "X-Callback-Signature"),
-        webhook_ips,
+        merchant_id,
         fee_percent,
         fee_fixed_idr,
         invoice_ttl_minutes,

@@ -1,9 +1,9 @@
 //! Task 6: `poll_payment` and `reconcile_payments` (A301).
 //!
-//! The suite's central assertion is that **the poller and the webhook share one apply
-//! function**: a poll that lands after a webhook is a no-op rather than a second
-//! activation. That is the defect this task exists to prevent, and the only way to test it
-//! is to run both against one payment.
+//! The suite's central assertion is that **the client's poll and the sweep share one apply
+//! function**: a sweep that runs after the checkout screen already saw the payment is a
+//! no-op rather than a second activation. That is the defect this task exists to prevent,
+//! and the only way to test it is to run both against one payment.
 //!
 //! Test code may unwrap and panic; `#[sqlx::test]` is a macro harness.
 
@@ -65,13 +65,13 @@ async fn payment_status(harness: &TestState, id: &str) -> String {
         .unwrap()
 }
 
-/// The spec's fallback: a webhook that was lost is recovered by asking the gateway.
+/// The backstop: a student who paid and closed the tab is recovered by the sweep.
 #[sqlx::test(migrations = "../../migrations")]
-async fn poll_payment_activates_a_payment_whose_webhook_was_lost(pool: PgPool) {
+async fn the_sweep_recovers_a_payment_the_client_stopped_watching(pool: PgPool) {
     let (harness, _app, _token, payment) = checkout(pool).await;
     let amount = payment["amount_idr"].as_i64().unwrap();
 
-    // The gateway says paid; no webhook ever arrived.
+    // The gateway says paid; nobody is polling the screen any more.
     harness.gateway.push_status(GatewayStatus::Paid {
         paid_at: chrono::Utc::now(),
         amount_idr: amount,
@@ -82,7 +82,7 @@ async fn poll_payment_activates_a_payment_whose_webhook_was_lost(pool: PgPool) {
     let applied = stvdy_server::billing::poll::poll_pending(&harness.state)
         .await
         .unwrap();
-    assert_eq!(applied, 1, "the poller did not recover a paid payment");
+    assert_eq!(applied, 1, "the sweep did not recover a paid payment");
 
     assert_eq!(
         payment_status(&harness, payment["id"].as_str().unwrap()).await,
@@ -91,8 +91,8 @@ async fn poll_payment_activates_a_payment_whose_webhook_was_lost(pool: PgPool) {
     assert_eq!(live_subscriptions(&harness).await, 1);
     assert_eq!(ledger_rows(&harness).await, 1);
 
-    // The fee the gateway reported is on the row, and the poll's event is recorded so the
-    // audit says where the activation came from. `gateway_fee_idr` is INT4, so the read is
+    // The fee the gateway reported is on the row, and the event is recorded so the audit
+    // says where the activation came from. `gateway_fee_idr` is INT4, so the read is
     // `Option<i32>` and the cast keeps sqlx from decoding it as anything else.
     let fee: Option<i32> =
         sqlx::query_scalar("select gateway_fee_idr::int from payments where id = $1::uuid")
@@ -102,12 +102,158 @@ async fn poll_payment_activates_a_payment_whose_webhook_was_lost(pool: PgPool) {
             .unwrap();
     assert_eq!(fee, Some(70));
     let source: Option<String> = sqlx::query_scalar(
-        "select payload->>'source' from webhook_events where event_id like 'poll:%'",
+        "select payload->>'source' from gateway_events where event_id like 'gateway:%'",
     )
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
     assert_eq!(source.as_deref(), Some("poll"));
+}
+
+/// **The fast ingress**: the checkout screen's own poll asks the gateway, so a student who
+/// has paid does not wait for the five-minute sweep. The bridge never pushes, so without
+/// this the screen sits on "waiting for confirmation" in front of money that moved.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_checkout_poll_asks_the_gateway_and_activates(pool: PgPool) {
+    let (harness, app, token, payment) = checkout(pool).await;
+    let amount = payment["amount_idr"].as_i64().unwrap();
+
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now(),
+        amount_idr: amount,
+        provider_payment_id: Some("gw-poll".to_string()),
+        fee_idr: None,
+    });
+
+    let (status, polled) = json(
+        &app,
+        "GET",
+        &format!("/billing/payments/{}", payment["id"].as_str().unwrap()),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{polled}");
+    assert_eq!(
+        polled["status"], "paid",
+        "the poll answered from the row without asking the gateway: {polled}"
+    );
+    assert_eq!(live_subscriptions(&harness).await, 1);
+
+    // And the sweep that follows is a no-op — one apply function, one activation.
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now(),
+        amount_idr: amount,
+        provider_payment_id: Some("gw-poll".to_string()),
+        fee_idr: None,
+    });
+    let applied = stvdy_server::billing::poll::poll_pending(&harness.state)
+        .await
+        .unwrap();
+    assert_eq!(applied, 0, "the sweep re-activated an already-paid payment");
+    assert_eq!(live_subscriptions(&harness).await, 1);
+    assert_eq!(ledger_rows(&harness).await, 1);
+}
+
+/// **The amount the settlement is checked against is the payable one.** The gateway adds a
+/// unique offset so it can match a settlement by amount alone; the row keeps the price and
+/// the payable apart, and the check reads the payable. Comparing against the price would put
+/// every real payment in `review`.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_offset_invoice_activates_against_its_payable_amount(pool: PgPool) {
+    let (harness, app, token, payment) = checkout(pool).await;
+    let amount = payment["amount_idr"].as_i64().unwrap();
+
+    // The double now behaves like the bridge: every invoice is priced at base + 137.
+    harness.gateway.set_unique_offset(137);
+    let (status, offset_payment) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "plan_id": "power", "billing_period": "monthly" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{offset_payment}");
+
+    let price = offset_payment["amount_idr"].as_i64().unwrap();
+    assert_eq!(
+        offset_payment["payable_amount_idr"].as_i64().unwrap(),
+        price + 137,
+        "the client is not told the figure it must transfer: {offset_payment}"
+    );
+
+    // The gateway reports the amount that actually landed.
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now(),
+        amount_idr: price + 137,
+        provider_payment_id: Some("gw-offset".to_string()),
+        fee_idr: None,
+    });
+    let (_, polled) = json(
+        &app,
+        "GET",
+        &format!(
+            "/billing/payments/{}",
+            offset_payment["id"].as_str().unwrap()
+        ),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        polled["status"], "paid",
+        "a settlement for the payable amount was refused: {polled}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("select count(*) from subscriptions where status = 'active'")
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap(),
+        1
+    );
+
+    // The other direction, and it is the one the column exists for: a settlement for the
+    // *price* is not the amount this invoice asked for, so it is a human's problem rather
+    // than an activation. Both numbers are on the row for them to read.
+    let (_, second) = json(
+        &app,
+        "POST",
+        "/billing/checkout",
+        &token,
+        serde_json::json!({ "plan_id": "power", "billing_period": "yearly" }),
+    )
+    .await;
+    let second_price = second["amount_idr"].as_i64().unwrap();
+    harness.gateway.push_status(GatewayStatus::Paid {
+        paid_at: chrono::Utc::now(),
+        amount_idr: second_price,
+        provider_payment_id: Some("gw-short".to_string()),
+        fee_idr: None,
+    });
+    let (_, polled) = json(
+        &app,
+        "GET",
+        &format!("/billing/payments/{}", second["id"].as_str().unwrap()),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(polled["status"], "review", "{polled}");
+
+    let reason: Option<String> =
+        sqlx::query_scalar("select review_reason from payments where id = $1::uuid")
+            .bind(second["id"].as_str().unwrap())
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    let reason = reason.expect("a review names its reason");
+    assert!(
+        reason.contains(&(second_price + 137).to_string())
+            && reason.contains(&second_price.to_string()),
+        "the reason does not name both amounts: {reason}"
+    );
+    let _ = amount;
 }
 
 /// Still pending at the gateway → still pending here, and `expired` once the invoice's own
@@ -169,62 +315,45 @@ async fn poll_payment_expires_an_invoice_the_gateway_says_is_dead(pool: PgPool) 
     assert_eq!(polled["status"], "expired", "{polled}");
 }
 
-/// The poller and the webhook run the SAME apply, so a poll that lands after the webhook
-/// is a no-op rather than a second activation.
+/// A replay of one answer activates once, and leaves one audit row.
+///
+/// Two defences are in play and this asserts the outcome rather than which one fired: the
+/// `gateway_events` unique key catches the *same* answer arriving twice (the client's poll
+/// and the sweep can both be in flight), and the guarded `status = 'pending'` transition
+/// catches the same payment reported under a **different** answer. A unique key cannot see
+/// the second and a guarded update cannot see the first, which is why both exist (A293).
 #[sqlx::test(migrations = "../../migrations")]
-async fn a_poll_after_a_webhook_changes_nothing(pool: PgPool) {
-    let (harness, app, _token, payment) = checkout(pool).await;
+async fn a_replayed_answer_activates_once(pool: PgPool) {
+    let (harness, _app, _token, payment) = checkout(pool).await;
     let amount = payment["amount_idr"].as_i64().unwrap();
+    // One instant, so both answers are the same event: the event id is derived from the
+    // settlement time, exactly as it is for a real gateway that reports one settlement.
+    let paid_at = chrono::Utc::now();
 
-    // The webhook gets there first.
-    let body = serde_json::json!({
-        "event_id": "evt_won_the_race",
-        "kind": "paid",
-        "order_id": payment["order_id"],
-        "amount_idr": amount,
-        "currency": "IDR",
-        "paid_at": chrono::Utc::now().to_rfc3339(),
-    })
-    .to_string()
-    .into_bytes();
-    let headers = harness.gateway.sign(&body);
-    let mut request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/webhooks/qris")
-        .header("content-type", "application/json");
-    for (name, value) in headers.iter() {
-        request = request.header(name, value);
+    for _ in 0..2 {
+        harness.gateway.push_status(GatewayStatus::Paid {
+            paid_at,
+            amount_idr: amount,
+            provider_payment_id: Some("gw-replay".to_string()),
+            fee_idr: None,
+        });
+        stvdy_server::billing::poll::poll_pending(&harness.state)
+            .await
+            .unwrap();
     }
-    let response = tower::ServiceExt::oneshot(
-        app.clone(),
-        request.body(axum::body::Body::from(body)).unwrap(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
 
-    let before_subscriptions = live_subscriptions(&harness).await;
-    let before_ledger = ledger_rows(&harness).await;
+    assert_eq!(
+        payment_status(&harness, payment["id"].as_str().unwrap()).await,
+        "paid"
+    );
+    assert_eq!(live_subscriptions(&harness).await, 1);
+    assert_eq!(ledger_rows(&harness).await, 1, "a period was granted twice");
 
-    // Now the poller asks the same question and gets the same answer. It must change
-    // nothing: same apply function, same guarded transition.
-    harness.gateway.push_status(GatewayStatus::Paid {
-        paid_at: chrono::Utc::now(),
-        amount_idr: amount,
-        provider_payment_id: Some("gw-poll".to_string()),
-        fee_idr: None,
-    });
-    let applied = stvdy_server::billing::poll::poll_pending(&harness.state)
+    let events: i64 = sqlx::query_scalar("select count(*) from gateway_events")
+        .fetch_one(&harness.state.pool)
         .await
         .unwrap();
-
-    assert_eq!(applied, 0, "the poll re-activated an already-paid payment");
-    assert_eq!(live_subscriptions(&harness).await, before_subscriptions);
-    assert_eq!(
-        ledger_rows(&harness).await,
-        before_ledger,
-        "the poll granted a second period"
-    );
+    assert_eq!(events, 1, "a replay wrote a second audit row");
 }
 
 /// A gateway transaction we have no row for is a `review` flag, not silence.
@@ -232,16 +361,13 @@ async fn a_poll_after_a_webhook_changes_nothing(pool: PgPool) {
 async fn reconcile_flags_a_gateway_payment_we_never_recorded(pool: PgPool) {
     let (harness, _app, _token, _payment) = checkout(pool).await;
 
-    // The gateway knows two orders: ours, and one we have no row for.
+    // The gateway took money for an amount no payment of ours is priced at. There is no
+    // order id to compare: the bridge's feed carries the *provider's* id, which is not
+    // ours, so the amount that landed is the only join key there is.
     harness.gateway.push_transactions(vec![GatewayTransaction {
-        order_id: "stvdy_someone_elses_order".to_string(),
-        status: GatewayStatus::Paid {
-            paid_at: chrono::Utc::now(),
-            amount_idr: 9_999,
-            provider_payment_id: None,
-            fee_idr: None,
-        },
+        transaction_id: "tx-someone-elses".to_string(),
         amount_idr: 9_999,
+        paid_at: chrono::Utc::now(),
     }]);
 
     let flagged = stvdy_server::billing::poll::reconcile(&harness.state)

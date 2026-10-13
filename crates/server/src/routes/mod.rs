@@ -120,13 +120,6 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         // feed is a database lookup keyed by a secret. This route acts only on an encrypted
         // `state` this server minted, so the peer is Google's redirect rather than a script.
         .route("/calendar/google/callback", get(calendar::oauth::callback))
-        // The gateway's callback. No bearer token: the gateway has no session, and the
-        // signature over the raw body is its authorisation (A292/A309). It is in the
-        // public group rather than the authenticated one because a route that
-        // authenticates by HMAC and one that authenticates by session are different
-        // things, and a shared `.merge()` is how the wrong one gets a layer it must not
-        // have.
-        .merge(crate::billing::routes::public_routes())
         // The print assets. Public because the browser that fetches them is headless
         // Chromium rendering a document with no credentials, and because every file is a
         // vendored upstream release with no user data in it (A339). The renderer rewrites

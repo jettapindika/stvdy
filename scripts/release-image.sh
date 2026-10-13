@@ -42,16 +42,44 @@ echo
 echo "=== the pin is the pin"
 # An image that silently tracked Debian's `stable` would pass every other check in this
 # script: the browser would start, the render would work, and the page count would change
-# whenever Debian moved. So the version the running image reports is compared to the `ARG`
-# in the Dockerfile.
-built="$(docker run --rm --entrypoint /usr/bin/chromium "$image" --version)"
+# whenever Debian moved. So the version the image actually has installed is compared to the
+# `ARG` in the Dockerfile.
+#
+# **It is the package version that is compared, not `chromium --version`.** The binary
+# reports its upstream version alone — `Chromium 154.0.8037.92 built on Debian GNU/Linux 13
+# (trixie)` — while `ARG CHROMIUM_VERSION` is Debian's package version
+# (`154.0.8037.92-1~deb13u1`), so a string comparison of the two can never pass. That was
+# true of the bookworm pin as well, and it went unnoticed because the build died at the
+# glibc link error long before this line ran. `dpkg-query` answers the question the pin
+# actually asks, and the binary's own version is checked as the prefix of it.
+# `\${Version}` is escaped twice over, deliberately: the outer shell must not expand it, and
+# the container's own `/bin/sh` must not either — `dpkg-query` is the thing that expands it,
+# and a version of this line without the escape passes an empty format string and answers
+# `dpkg-query: error in show format: may not be empty string` instead of a version.
+#
+# All three packages, because they are built from one source and are pinned together in the
+# `Dockerfile`: `chromium-sandbox` is the setuid helper A338's sandbox needs, and a browser
+# whose helper drifted from it is a renderer that refuses to start.
+built="$(docker run --rm --entrypoint /bin/sh "$image" -c \
+  'dpkg-query -W -f=\${Version} chromium; echo; dpkg-query -W -f=\${Version} chromium-common; echo; dpkg-query -W -f=\${Version} chromium-sandbox')"
 declared="$(grep -oE '^ARG CHROMIUM_VERSION=.*' Dockerfile | cut -d= -f2)"
-echo "built:    $built"
-echo "declared: Chromium $declared"
-if [ "$built" != "Chromium $declared" ]; then
-  echo "the image's Chromium is not the declared pin" >&2
+binary="$(docker run --rm --entrypoint /usr/bin/chromium "$image" --version)"
+echo "package:  $built"
+echo "declared: $declared"
+echo "binary:   $binary"
+# Both packages, because they are built from one source and pinning only the binary would
+# let the pair drift (the Dockerfile's own comment).
+if [ "$(printf '%s\n' "$built" | sort -u)" != "$declared" ]; then
+  echo "the image's Chromium packages are not the declared pin" >&2
   exit 1
 fi
+case "$binary" in
+"Chromium ${declared%%-*}"*) ;;
+*)
+  echo "the image's Chromium binary does not report the pinned upstream version" >&2
+  exit 1
+  ;;
+esac
 
 echo
 echo "=== the other native dependencies are present"
@@ -72,18 +100,37 @@ docker run --rm --entrypoint /bin/sh "$image" -c '
 
 echo
 echo "=== migrating (this must finish before the server starts: A346)"
+# The same environment the replica gets, and that is not redundant: the **image** sets
+# `APP_ENV=prod` (its own `ENV`, not this script's), `--migrate-only` loads and validates the
+# whole `AppConfig` before it touches the database (`main.rs`), and a prod config refuses to
+# build without `JWT_SECRET` (≥32 chars), a non-zero `ENCRYPTION_KEY_HEX` **and** a
+# `WEB_ORIGIN`. So the documented one-liner carrying only `DATABASE_URL` exited on
+# `JWT_SECRET must be set …` and then on `WEB_ORIGIN must be set …` without ever migrating;
+# `docs/OPERATIONS.md` and `docs/RELEASE.md` carry the corrected stanza.
 docker run --rm --network host \
   -e DATABASE_URL="$database_url" \
+  -e APP_ENV=prod \
+  -e JWT_SECRET="$jwt_secret" \
+  -e ENCRYPTION_KEY_HEX="$encryption_key" \
+  -e WEB_ORIGIN=http://localhost:5173 \
   "$image" --migrate-only
 
 echo
 echo "=== booting"
-# `--shm-size` and `--tmpfs /tmp` are the two flags Chromium's sandbox needs. Without them
-# the browser dies with a memory error that reads like a code bug (A338); the deployment
-# stanza is in `docs/OPERATIONS.md`.
+# The three flags Chromium's sandbox needs, and each is a distinct mechanism.
+#
+# `--shm-size` and `--tmpfs /tmp` are the resources it needs: without them the browser dies with
+# a memory error that reads like a code bug (A338). `--security-opt seccomp=unconfined` is the
+# **permission** it needs and it is the one that is easy to leave out: Docker's default seccomp
+# profile blocks the namespace the renderer's sandbox moves into, so the browser dies with
+# `Failed to move to new namespace … errno = Operation not permitted` and
+# `Zygote process exited prematurely`, and the server then **hangs** waiting for a browser that is
+# gone — no error, no bound port. It grants no capability (unlike the `--cap-add SYS_ADMIN`
+# alternative, which the SUID helper path needs only where unprivileged user namespaces are
+# unavailable). The deployment stanza is in `docs/OPERATIONS.md`.
 cleanup
 docker run -d --name "$container" --network host \
-  --shm-size=1g --tmpfs /tmp \
+  --shm-size=1g --tmpfs /tmp --security-opt seccomp=unconfined \
   -e DATABASE_URL="$database_url" \
   -e APP_ENV=prod \
   -e JWT_SECRET="$jwt_secret" \

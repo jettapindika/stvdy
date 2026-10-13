@@ -211,6 +211,33 @@ async fn a_deletion_request_marks_revokes_cancels_and_refuses_login(pool: PgPool
             .is_some_and(|m| m.contains("deleted at your request")),
         "the refusal must say the student asked for this: {body}"
     );
+    // And it must say what the purge date does to the address. This is the sentence a student
+    // reads on the *signup* form after trying to register again, and "removed on <date>" alone
+    // leaves the one question they have — whether they can come back with this address —
+    // unanswered. The purge anonymizes the row, which is what releases it
+    // (`purge_accounts`), so the promise is the mechanism's own.
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("releases this address")),
+        "the refusal must say the address is released at the purge: {body}"
+    );
+    // The sentence is rendered to the student rather than replaced by the client, so it has to
+    // read as one: capitalised, and the date at minute precision. `chrono`'s `Display` would
+    // have put sub-second noise in the middle of it, which is what a reader notices first.
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(
+        message.starts_with("This account was deleted"),
+        "the rendered sentence must be capitalised: {message}"
+    );
+    assert!(
+        message.contains(" UTC"),
+        "the purge date must carry its zone: {message}"
+    );
+    assert!(
+        !message.contains(".787348") && !message.contains(".0 "),
+        "the purge date must not carry sub-second precision: {message}"
+    );
 
     // Signing up again with the same address meets the same refusal rather than a 409 claiming
     // the account is taken — the address is held by the tombstone until the purge releases it.

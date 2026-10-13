@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../client'
 import { platform, type PlatformKind } from '../../platform'
-import { saveSession, setAccessToken } from '../../lib/tokens'
+import { clearSession, readRefreshToken, saveSession, setAccessToken } from '../../lib/tokens'
 
 /**
  * Auth: the four calls a session is made of, plus the device identity they carry.
@@ -158,5 +158,34 @@ export function useVerifyEmail() {
 export function useResendVerification() {
   return useMutation({
     mutationFn: () => api.post<void>('/auth/resend-verification'),
+  })
+}
+
+/**
+ * Ends this session.
+ *
+ * `POST /auth/logout` revokes the refresh token server-side, so the sign-out is not merely
+ * local: a copy of the token that leaked from this device stops working. The body carries the
+ * refresh token because that is the credential being revoked — the route is unauthenticated
+ * for that reason, which is also why this works for an account that cannot reach anything else.
+ *
+ * The store is cleared even when the request fails. A sign-out that left a working refresh
+ * token on the device because the network was down would be a lie about the one action whose
+ * whole purpose is to leave, and the failure mode of the alternative is worse than the
+ * failure mode of a live token the server will expire anyway.
+ */
+export function useSignOut() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const refreshToken = await readRefreshToken()
+      if (refreshToken !== null) {
+        await api.post<void>('/auth/logout', { refresh_token: refreshToken }, { auth: false })
+      }
+    },
+    onSettled: async () => {
+      await clearSession()
+      queryClient.clear()
+    },
   })
 }

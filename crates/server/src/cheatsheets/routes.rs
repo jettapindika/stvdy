@@ -33,7 +33,7 @@ use uuid::Uuid;
 use stvdy_core::config::ExportFormat;
 use stvdy_core::entitlements::Feature;
 
-use crate::auth::extract::{AuthUser, VerifiedUser};
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::jobs::handlers::cheatsheet as cheatsheet_job;
 use crate::state::AppState;
@@ -302,7 +302,7 @@ pub async fn create_cheatsheet(
 /// a page reload, and the Studio panel cannot poll the ones still generating.
 pub async fn list_cheatsheets(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     workspaces::owned_name(&state, user.user_id, workspace_id).await?;
@@ -327,7 +327,7 @@ pub async fn list_cheatsheets(
 /// `GET /cheatsheets/:id`.
 pub async fn get_cheatsheet(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(cheatsheet_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let cheatsheet = owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
@@ -344,7 +344,7 @@ pub async fn get_cheatsheet(
 /// bought, and withholding it would mean charging for something and delivering nothing.
 pub async fn cheatsheet_html(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(cheatsheet_id): Path<Uuid>,
 ) -> AppResult<Response> {
     owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
@@ -388,7 +388,7 @@ pub async fn cheatsheet_html(
 /// the plan check unbypassable.
 pub async fn cheatsheet_pdf(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(cheatsheet_id): Path<Uuid>,
 ) -> AppResult<Response> {
     crate::entitlements::require(&state, &user, Feature::ExportFormat(ExportFormat::Pdf)).await?;
@@ -447,7 +447,7 @@ pub async fn cheatsheet_pdf(
 /// A re-render that charged would be a second charge for the same document.
 pub async fn re_render(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(cheatsheet_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Ownership first, so another account's id is a 404 before anything is read from storage.

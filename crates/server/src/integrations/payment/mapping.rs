@@ -1,177 +1,168 @@
-//! **The one file B1 changes.**
+//! The gopay-bridge wire mapping — the one file the gateway's identity lives in.
 //!
-//! The gateway has no identity, no docs and no response shapes (B1, unresolved), so
-//! the honest design is an internal contract *we* define and *we* test, with every
-//! gateway-specific name isolated here (A291). Nothing in this file is a guess about
-//! a real provider: the names below are the internal contract's, and the comment on
-//! each says so. When the docs arrive, the diff is this file, one arm of
-//! [`signature`](super::signature) if the scheme is new, and the env values — no
-//! behavioural test changes, because every behavioural test in this phase runs
-//! against the trait's mock.
+//! B1 is resolved. The gateway is a self-hosted QRIS bridge (`../paymentgateway` in
+//! the development tree; its README is the API document) that wraps GoPay merchant
+//! infrastructure: it derives a **dynamic** QRIS from the merchant's static payload,
+//! watches the merchant transaction feed, and answers questions over a local HTTP
+//! surface. Every path, request key and response field name the product depends on is
+//! named here, so a bridge change is a diff in this file and a test change rather than
+//! a silent production failure.
 //!
-//! The tests at the bottom are the contract: they assert the body we send and the
-//! responses we accept, so a mapping change is a test change and not a silent one.
+//! Three properties of this gateway shape the rest of the money path, and each is
+//! visible in the functions below:
+//!
+//!  * **It assigns the amount.** `uniqueAmount` is the amount we ask for plus an
+//!    offset in `[1, 999]`, which is how the bridge tells concurrent orders apart and
+//!    matches a settlement to one of them **by amount alone**. So the invoice carries
+//!    a payable figure that is not the price, and every later check is against that
+//!    figure.
+//!  * **It mints its own id.** Our `order_id` travels as `reference` and is never a
+//!    lookup key: every status question is asked with the bridge's `id`.
+//!  * **It never pushes.** There is no callback to verify and no callback body to
+//!    parse, which is why this file has no `webhook_from_body` and why the poller is
+//!    the only reader of the status fields.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use stvdy_core::traits::payment::{
-    GatewayStatus, Invoice, InvoiceRequest, PaymentError, WebhookEvent,
-};
+use stvdy_core::traits::payment::{GatewayStatus, Invoice, InvoiceRequest, PaymentError};
 
 use super::GatewayTransaction;
 
-/// The request path for creating an invoice.
-///
-/// **Internal contract.** The real gateway's path is unknown, and a path invented in
-/// code would be a silent production failure on the day B1 resolves.
+/// The request path that mints an invoice.
 pub fn invoice_path() -> &'static str {
-    "/invoices"
+    "/payments"
 }
 
-/// The request path for reading an order's status.
-pub fn status_path(order_id: &str) -> String {
-    format!("/invoices/{order_id}")
+/// The request path that reads one payment's state.
+///
+/// Keyed by the id **the bridge minted**, never by our order id: the bridge's own
+/// route is `/payment/{id}`, and asking with our reference would be a request for a
+/// payment that does not exist under that name.
+pub fn status_path(provider_payment_id: &str) -> String {
+    format!("/payment/{provider_payment_id}")
 }
 
-/// The path the reconciliation sweep lists recent transactions from.
+/// The path the reconciliation sweep lists settled transactions from.
 pub fn transactions_path() -> &'static str {
     "/transactions"
 }
 
-/// The auth header we send, as `(name, value)`.
+/// The query parameter the transactions list is bounded by, in minutes.
 ///
-/// **Internal contract.** Bearer over the API key is the shape the plan pins; the
-/// gateway's own auth scheme is one of the things B1 names.
-pub fn auth_header(api_key: &str) -> (&'static str, String) {
-    ("Authorization", format!("Bearer {api_key}"))
+/// Minutes, not the `since_hours` the internal contract used: the bridge's handler
+/// takes `minutes` and clamps it to a week.
+pub fn transactions_minutes_param() -> &'static str {
+    "minutes"
 }
 
-/// The query parameter the transactions list is bounded by, in hours.
-pub fn transactions_since_param() -> &'static str {
-    "since_hours"
+/// The query parameter naming the merchant whose feed is read.
+pub fn transactions_merchant_param() -> &'static str {
+    "merchant_id"
 }
 
 /// The body we POST to [`invoice_path`].
 ///
-/// The keys are the internal contract's, deliberately identical to
-/// [`InvoiceRequest`]'s field names: a translation here would be a guess. What this
-/// function exists for is that there is exactly one place to translate *from*.
-pub fn invoice_body(request: &InvoiceRequest) -> Value {
-    json!({
-        "order_id": request.order_id,
-        "amount_idr": request.amount_idr,
-        "description": request.description,
-        "expires_at": request.expires_at.to_rfc3339(),
-    })
-}
-
-/// The invoice the gateway answers with.
+/// `minutes` rather than our `expires_at`: the bridge takes a *lifetime* and its own
+/// clock computes the deadline. That is why the invoice's `expiresAt` is what we store
+/// (A6) and what the checkout screen counts down against, rather than the instant we
+/// computed before the call.
 ///
-/// Reads the internal contract's field names, and reports a missing one as
-/// [`PaymentError::Invalid`] rather than defaulting: an invoice with no `qr_string` is
-/// an invoice a student cannot pay, and returning an empty string would make the
-/// checkout screen render a QR that encodes nothing.
-pub fn invoice_from_response(value: &Value) -> Result<Invoice, PaymentError> {
-    let order_id = string_field(value, "order_id")?;
-    let qr_string = string_field(value, "qr_string")?;
-    let expires_at = instant_field(value, "expires_at")?;
-    let provider_payment_id = optional_string(value, "provider_payment_id");
-
-    Ok(Invoice {
-        order_id,
-        qr_string,
-        expires_at,
-        provider_payment_id,
+/// `description` is deliberately absent: the bridge has no field for it, and a key the
+/// gateway ignores is a field nobody reads.
+pub fn invoice_body(request: &InvoiceRequest, minutes: i64) -> Value {
+    json!({
+        "amount": request.amount_idr,
+        "reference": request.order_id,
+        "minutes": minutes,
     })
 }
 
-/// The status of an order, as the poller reads it (A301).
+/// The invoice the bridge answers with.
+///
+/// `qrString` and `expiresAt` are required: an invoice with no QR is an invoice a
+/// student cannot pay, and an invoice with no deadline is a countdown the client would
+/// have to invent.
+///
+/// `uniqueAmount` is required too, and that is the load-bearing one. It is the figure
+/// the buyer transfers and the figure the settlement is checked against; defaulting it
+/// to the amount we asked for would make every real payment mismatch its invoice and
+/// land in `review`, which is exactly the failure this field exists to prevent.
+pub fn invoice_from_response(value: &Value) -> Result<Invoice, PaymentError> {
+    Ok(Invoice {
+        order_id: string_field(value, "reference")?,
+        // Non-empty, not merely present: the checkout screen renders this string verbatim,
+        // so an empty payload is a blank code the student scans and pays nothing with.
+        qr_string: non_empty_field(value, "qrString")?,
+        expires_at: instant_field(value, "expiresAt")?,
+        provider_payment_id: optional_string(value, "id"),
+        payable_amount_idr: Some(integer_field(value, "uniqueAmount")?),
+    })
+}
+
+/// The bridge's view of one payment, as the poller reads it.
+///
+/// The vocabulary is the bridge's (`pending`, `paid`, `expired`, `cancelled`) mapped
+/// onto the contract's. The two dead states stay apart: `cancelled` is a person or the
+/// buyer stopping the invoice and `expired` is the clock running out, and the row
+/// records which.
+///
+/// A `paid` answer reads `uniqueAmount` — what actually landed — and requires the
+/// `transaction` the bridge attaches in the same transition that marks the payment
+/// paid. Its `time` is the settlement instant A295's late-payment rule turns on, and
+/// substituting our own clock for a missing one would silently decide that rule. The
+/// bridge reports no fee, so `fee_idr` is `None` and the margin report falls back to
+/// the configured rate, or records nothing (A304).
 pub fn status_from_response(value: &Value) -> Result<GatewayStatus, PaymentError> {
     let status = string_field(value, "status")?;
     match status.as_str() {
         "pending" => Ok(GatewayStatus::Pending),
-        "paid" => Ok(GatewayStatus::Paid {
-            paid_at: instant_field(value, "paid_at")?,
-            amount_idr: integer_field(value, "amount_idr")?,
-            provider_payment_id: optional_string(value, "provider_payment_id"),
-            fee_idr: optional_integer(value, "fee_idr"),
-        }),
+        "paid" => {
+            let transaction = value.get("transaction").ok_or_else(|| {
+                PaymentError::Invalid(
+                    "the gateway reports a payment as paid with no transaction".to_string(),
+                )
+            })?;
+            Ok(GatewayStatus::Paid {
+                paid_at: instant_field(transaction, "time")?,
+                amount_idr: integer_field(value, "uniqueAmount")?,
+                provider_payment_id: optional_string(value, "id"),
+                fee_idr: optional_integer(value, "fee_idr"),
+            })
+        }
         "expired" => Ok(GatewayStatus::Expired),
-        "failed" => Ok(GatewayStatus::Failed),
-        "refunded" => Ok(GatewayStatus::Refunded),
+        "cancelled" => Ok(GatewayStatus::Cancelled),
         other => Err(PaymentError::Invalid(format!(
-            "the gateway reported an unknown status {other:?}"
+            "the gateway reported an unknown payment status {other:?}"
         ))),
     }
 }
 
-/// The fields a callback carries, as [`WebhookEvent`].
+/// The settled transactions from the merchant feed, for the reconciliation sweep
+/// (A301).
 ///
-/// Called **after** the signature verifies, and it is the only reader of a callback's
-/// field names. `currency` is required rather than defaulted to `IDR`: a payload that
-/// does not say what currency it is in cannot be compared against a rupiah amount
-/// (A294), and defaulting would turn a missing field into a match.
-pub fn webhook_from_body(raw: &Value) -> Result<WebhookEvent, PaymentError> {
-    let event_id = string_field(raw, "event_id")?;
-    let kind = match string_field(raw, "kind")?.as_str() {
-        "paid" => stvdy_core::traits::payment::WebhookKind::Paid,
-        "expired" => stvdy_core::traits::payment::WebhookKind::Expired,
-        "failed" => stvdy_core::traits::payment::WebhookKind::Failed,
-        "refunded" => stvdy_core::traits::payment::WebhookKind::Refunded,
-        other => {
-            return Err(PaymentError::Invalid(format!(
-                "the callback names an unknown kind {other:?}"
-            )));
-        }
-    };
-
-    Ok(WebhookEvent {
-        event_id,
-        kind,
-        order_id: string_field(raw, "order_id")?,
-        amount_idr: integer_field(raw, "amount_idr")?,
-        currency: string_field(raw, "currency")?,
-        paid_at: optional_instant(raw, "paid_at"),
-        provider_payment_id: optional_string(raw, "provider_payment_id"),
-        fee_idr: optional_integer(raw, "fee_idr"),
-        raw: raw.clone(),
-    })
-}
-
-/// The gateway's recent transactions, for the reconciliation sweep (A301).
+/// The bridge answers with a **bare array**, and every entry in it is money that
+/// arrived: the feed is queried with `statuses=settlement,capture`, so an unsettled
+/// transaction is not in this list at all and there is no status to filter here.
 ///
-/// The list is read from a `transactions` array, and each entry carries the same
-/// `status` vocabulary `status_from_response` reads: one vocabulary for an order's
-/// state, whether it arrives from a status query or from the list.
+/// **`amount` is the join key, not `orderId`.** The feed carries the *provider's*
+/// order id, which is not ours — the bridge never sends our `reference` back in the
+/// feed — so the only field that identifies one of our payments is the amount that
+/// landed. That is the same fact the bridge matches its own settlements by.
 pub fn transactions_from_response(value: &Value) -> Result<Vec<GatewayTransaction>, PaymentError> {
-    let entries = value
-        .get("transactions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            PaymentError::Invalid("the gateway response has no transactions list".to_string())
-        })?;
+    let entries = value.as_array().ok_or_else(|| {
+        PaymentError::Invalid("the gateway's transaction list is not an array".to_string())
+    })?;
 
-    entries
-        .iter()
-        .map(|entry| {
-            Ok(GatewayTransaction {
-                order_id: string_field(entry, "order_id")?,
-                status: status_from_response(entry)?,
-                amount_idr: integer_field(entry, "amount_idr")?,
-            })
-        })
-        .collect()
-}
-
-/// The gateway's own fee for a paid order, where the response reports one.
-///
-/// `None` when the field is absent **and** when the gateway is not configured with a
-/// rate: the margin report must be able to say "unknown" rather than record a
-/// plausible-looking number (A304). When the response does not carry a fee, the caller
-/// falls back to `QRIS_FEE_PERCENT` / `QRIS_FEE_FIXED_IDR`.
-pub fn fee_from_response(value: &Value) -> Option<i64> {
-    optional_integer(value, "fee_idr")
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        out.push(GatewayTransaction {
+            transaction_id: string_field(entry, "id")?,
+            amount_idr: integer_field(entry, "amount")?,
+            paid_at: instant_field(entry, "time")?,
+        });
+    }
+    Ok(out)
 }
 
 fn string_field(value: &Value, key: &str) -> Result<String, PaymentError> {
@@ -186,6 +177,20 @@ fn integer_field(value: &Value, key: &str) -> Result<i64, PaymentError> {
     value
         .get(key)
         .and_then(Value::as_i64)
+        .ok_or_else(|| PaymentError::Invalid(format!("the gateway response has no {key:?}")))
+}
+
+/// A string field that must also carry something.
+///
+/// Used for the QR payload alone, and the distinction is the point: a missing field and an
+/// empty one are the same failure to a student — a code that pays nothing — and `string_field`
+/// would pass `""` through.
+fn non_empty_field(value: &Value, key: &str) -> Result<String, PaymentError> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|raw| !raw.is_empty())
+        .map(str::to_string)
         .ok_or_else(|| PaymentError::Invalid(format!("the gateway response has no {key:?}")))
 }
 
@@ -206,7 +211,7 @@ fn optional_integer(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(Value::as_i64)
 }
 
-/// RFC 3339, which is what `timestamptz` serialises as everywhere else in this tree.
+/// RFC 3339, which is what the bridge serialises its instants as (`time.RFC3339`).
 fn optional_instant(value: &Value, key: &str) -> Option<DateTime<Utc>> {
     value
         .get(key)
@@ -219,97 +224,103 @@ fn optional_instant(value: &Value, key: &str) -> Option<DateTime<Utc>> {
 mod tests {
     use super::*;
 
-    fn request() -> InvoiceRequest {
-        InvoiceRequest {
+    /// The request we send, asserted field by field. A bridge that renames a key or
+    /// starts requiring another one turns this red rather than answering 400 in
+    /// production.
+    #[test]
+    fn the_invoice_request_is_the_bridges_shape() {
+        let request = InvoiceRequest {
             order_id: "ord_1".to_string(),
-            amount_idr: 5_000,
-            description: "Stvdy Pro (monthly)".to_string(),
-            expires_at: DateTime::parse_from_rfc3339("2026-10-12T09:15:00Z")
-                .expect("a fixed instant")
-                .with_timezone(&Utc),
-        }
+            amount_idr: 10_000,
+            description: "Stvdy pro (monthly)".to_string(),
+            expires_at: Utc::now(),
+        };
+
+        let body = invoice_body(&request, 15);
+        assert_eq!(
+            body,
+            json!({ "amount": 10_000, "reference": "ord_1", "minutes": 15 })
+        );
     }
 
-    /// The request we send is the internal contract, and this is the assertion that
-    /// makes a mapping change visible rather than silent.
+    /// The happy path: a full `POST /payments` answer, as the bridge writes it.
     #[test]
-    fn the_invoice_body_carries_the_order_id_amount_and_expiry() {
-        let body = invoice_body(&request());
+    fn a_created_invoice_parses_with_its_payable_amount() {
+        let raw = json!({
+            "id": "gw-7f2a",
+            "status": "pending",
+            "amount": 10_000,
+            "uniqueAmount": 10_137,
+            "qrString": "00020101021226...6304ABCD",
+            "reference": "ord_1",
+            "createdAt": "2026-10-13T03:00:00Z",
+            "expiresAt": "2026-10-13T03:15:00Z",
+            "secondsLeft": 900,
+        });
 
-        assert_eq!(body["order_id"], "ord_1");
-        assert_eq!(body["amount_idr"], 5_000);
-        assert_eq!(body["description"], "Stvdy Pro (monthly)");
-        assert_eq!(body["expires_at"], "2026-10-12T09:15:00+00:00");
-        // The amount is an integer, not a float or a string: a gateway that reads
-        // `"5000"` or `5000.0` is a gateway whose amount check means nothing.
-        assert!(body["amount_idr"].is_i64());
-    }
-
-    #[test]
-    fn the_invoice_response_is_read_field_by_field() {
-        let invoice = invoice_from_response(&json!({
-            "order_id": "ord_1",
-            "qr_string": "00020101021226...",
-            "expires_at": "2026-10-12T09:15:00Z",
-            "provider_payment_id": "gw_1",
-        }))
-        .expect("a complete response parses");
-
+        let invoice = invoice_from_response(&raw).unwrap();
         assert_eq!(invoice.order_id, "ord_1");
-        assert_eq!(invoice.qr_string, "00020101021226...");
+        assert_eq!(invoice.qr_string, "00020101021226...6304ABCD");
+        assert_eq!(
+            invoice.provider_payment_id.as_deref(),
+            Some("gw-7f2a"),
+            "the gateway's id is the handle every later question is asked with"
+        );
+        assert_eq!(
+            invoice.payable_amount_idr,
+            Some(10_137),
+            "the offset is the gateway's, and it is the figure the buyer transfers"
+        );
         assert_eq!(
             invoice.expires_at,
-            request().expires_at,
-            "the expiry the client counts down must be the gateway's own instant"
+            DateTime::parse_from_rfc3339("2026-10-13T03:15:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
         );
-        assert_eq!(invoice.provider_payment_id.as_deref(), Some("gw_1"));
+    }
 
-        // A response missing the QR string is a hard failure: an invoice a student
-        // cannot pay must not become an empty QR.
+    /// An invoice with no payable amount is refused rather than defaulted: a fallback
+    /// to the requested amount would make every real payment mismatch its invoice.
+    #[test]
+    fn an_invoice_without_a_payable_amount_is_refused() {
+        let raw = json!({
+            "id": "gw-1",
+            "qrString": "QR",
+            "reference": "ord_1",
+            "expiresAt": "2026-10-13T03:15:00Z",
+        });
+
         assert!(matches!(
-            invoice_from_response(
-                &json!({ "order_id": "ord_1", "expires_at": "2026-10-12T09:15:00Z" })
-            ),
-            Err(PaymentError::Invalid(_))
-        ));
-        // A non-instant expiry is refused too, rather than silently dropped.
-        assert!(matches!(
-            invoice_from_response(&json!({
-                "order_id": "ord_1",
-                "qr_string": "x",
-                "expires_at": "in fifteen minutes",
-            })),
+            invoice_from_response(&raw),
             Err(PaymentError::Invalid(_))
         ));
     }
 
+    /// Every status the bridge can report, and the two failures: an unknown word and a
+    /// `paid` answer with no transaction behind it.
     #[test]
-    fn every_status_the_poller_reads_parses_and_an_unknown_one_does_not() {
+    fn the_bridges_status_vocabulary_maps_onto_the_contracts() {
         assert_eq!(
-            status_from_response(&json!({ "status": "pending" })).expect("pending"),
+            status_from_response(&json!({ "status": "pending" })).unwrap(),
             GatewayStatus::Pending
         );
         assert_eq!(
-            status_from_response(&json!({ "status": "expired" })).expect("expired"),
+            status_from_response(&json!({ "status": "expired" })).unwrap(),
             GatewayStatus::Expired
         );
         assert_eq!(
-            status_from_response(&json!({ "status": "failed" })).expect("failed"),
-            GatewayStatus::Failed
-        );
-        assert_eq!(
-            status_from_response(&json!({ "status": "refunded" })).expect("refunded"),
-            GatewayStatus::Refunded
+            status_from_response(&json!({ "status": "cancelled" })).unwrap(),
+            GatewayStatus::Cancelled
         );
 
         let paid = status_from_response(&json!({
+            "id": "gw-7f2a",
             "status": "paid",
-            "paid_at": "2026-10-12T09:10:00Z",
-            "amount_idr": 5_000,
-            "provider_payment_id": "gw_1",
-            "fee_idr": 75,
+            "amount": 10_000,
+            "uniqueAmount": 10_137,
+            "transaction": { "id": "tx-1", "amount": 10_137, "time": "2026-10-13T03:05:00Z" },
         }))
-        .expect("paid");
+        .unwrap();
         match paid {
             GatewayStatus::Paid {
                 paid_at,
@@ -317,164 +328,82 @@ mod tests {
                 provider_payment_id,
                 fee_idr,
             } => {
-                assert_eq!(paid_at.to_rfc3339(), "2026-10-12T09:10:00+00:00");
-                assert_eq!(amount_idr, 5_000);
-                assert_eq!(provider_payment_id.as_deref(), Some("gw_1"));
-                assert_eq!(fee_idr, Some(75));
+                assert_eq!(
+                    amount_idr, 10_137,
+                    "what landed is the unique amount, not what we asked for"
+                );
+                assert_eq!(provider_payment_id.as_deref(), Some("gw-7f2a"));
+                assert_eq!(
+                    fee_idr, None,
+                    "the bridge reports no fee; a guess would corrupt the margin report"
+                );
+                assert_eq!(
+                    paid_at,
+                    DateTime::parse_from_rfc3339("2026-10-13T03:05:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc)
+                );
             }
             other => panic!("expected a paid status, got {other:?}"),
         }
 
-        // A fee the gateway does not report is `None`, not zero: the two mean
-        // different things to the margin report (A304).
-        match status_from_response(&json!({
-            "status": "paid",
-            "paid_at": "2026-10-12T09:10:00Z",
-            "amount_idr": 5_000,
-        }))
-        .expect("paid without a fee")
-        {
-            GatewayStatus::Paid { fee_idr, .. } => assert_eq!(fee_idr, None),
-            other => panic!("expected a paid status, got {other:?}"),
-        }
-
-        // A `paid` status with no amount is a failure, not a zero: an amount we
-        // invented would match the payment it is supposed to be checked against.
         assert!(matches!(
-            status_from_response(&json!({ "status": "paid", "paid_at": "2026-10-12T09:10:00Z" })),
+            status_from_response(&json!({ "status": "settlement" })),
             Err(PaymentError::Invalid(_))
         ));
-
-        assert!(matches!(
-            status_from_response(&json!({ "status": "settled" })),
-            Err(PaymentError::Invalid(_))
-        ));
-    }
-
-    #[test]
-    fn the_callback_body_is_read_into_the_event_the_money_path_uses() {
-        let raw = json!({
-            "event_id": "evt_1",
-            "kind": "paid",
-            "order_id": "ord_1",
-            "amount_idr": 5_000,
-            "currency": "IDR",
-            "paid_at": "2026-10-12T09:10:00Z",
-            "provider_payment_id": "gw_1",
-            "fee_idr": 75,
-            "anything_else": "kept in raw",
-        });
-        let event = webhook_from_body(&raw).expect("a complete callback parses");
-
-        assert_eq!(event.event_id, "evt_1");
-        assert_eq!(event.kind, stvdy_core::traits::payment::WebhookKind::Paid);
-        assert_eq!(event.order_id, "ord_1");
-        assert_eq!(event.amount_idr, 5_000);
-        assert_eq!(event.currency, "IDR");
-        assert_eq!(event.fee_idr, Some(75));
-        assert_eq!(
-            event.raw, raw,
-            "the raw payload is what a human reads when the amount does not match"
-        );
-
-        // A currency that is not stated is a failure, not an assumed `IDR`: A294's
-        // amount check is meaningless if we invent the unit.
-        assert!(matches!(
-            webhook_from_body(&json!({
-                "event_id": "evt_1",
-                "kind": "paid",
-                "order_id": "ord_1",
-                "amount_idr": 5_000,
-            })),
-            Err(PaymentError::Invalid(_))
-        ));
-
-        // An unknown kind is refused rather than defaulted to `Paid`.
-        assert!(matches!(
-            webhook_from_body(&json!({
-                "event_id": "evt_1",
-                "kind": "charged",
-                "order_id": "ord_1",
-                "amount_idr": 5_000,
-                "currency": "IDR",
-            })),
-            Err(PaymentError::Invalid(_))
-        ));
-
-        // The non-paid kinds are read too, because the webhook must not treat an
-        // expired or refunded callback as a paid one.
-        for (raw_kind, expected) in [
-            ("expired", stvdy_core::traits::payment::WebhookKind::Expired),
-            ("failed", stvdy_core::traits::payment::WebhookKind::Failed),
-            (
-                "refunded",
-                stvdy_core::traits::payment::WebhookKind::Refunded,
+        assert!(
+            matches!(
+                status_from_response(&json!({ "status": "paid", "uniqueAmount": 10_137 })),
+                Err(PaymentError::Invalid(_))
             ),
-        ] {
-            let event = webhook_from_body(&json!({
-                "event_id": "evt_2",
-                "kind": raw_kind,
-                "order_id": "ord_1",
-                "amount_idr": 5_000,
-                "currency": "IDR",
-            }))
-            .expect("a known kind parses");
-            assert_eq!(event.kind, expected);
-        }
-    }
-
-    #[test]
-    fn the_paths_and_the_auth_header_are_the_contract() {
-        assert_eq!(invoice_path(), "/invoices");
-        assert_eq!(status_path("ord_1"), "/invoices/ord_1");
-        assert_eq!(transactions_path(), "/transactions");
-        assert_eq!(transactions_since_param(), "since_hours");
-        assert_eq!(
-            auth_header("key_1"),
-            ("Authorization", "Bearer key_1".to_string())
+            "a paid answer with no settlement instant would decide A295 with our clock"
         );
     }
 
+    /// The feed is a bare array and every entry is settled money, joined on the amount.
     #[test]
-    fn the_fee_is_read_only_where_the_gateway_reports_one() {
-        assert_eq!(fee_from_response(&json!({ "fee_idr": 75 })), Some(75));
-        assert_eq!(fee_from_response(&json!({})), None);
-    }
+    fn the_transaction_feed_is_read_by_amount() {
+        let raw = json!([
+            {
+                "id": "tx-1",
+                "orderId": "gopay-99",
+                "status": "settlement",
+                "paymentType": "qris",
+                "amount": 10_137,
+                "realAmount": 10_037,
+                "currency": "IDR",
+                "time": "2026-10-13T03:05:00Z",
+            },
+            {
+                "id": "tx-2",
+                "orderId": "gopay-100",
+                "status": "capture",
+                "paymentType": "gopay",
+                "amount": 25_004,
+                "realAmount": 25_004,
+                "currency": "IDR",
+                "time": "2026-10-13T03:06:00Z",
+            },
+        ]);
 
-    #[test]
-    fn the_transaction_list_is_read_for_the_reconciliation_sweep() {
-        let list = transactions_from_response(&json!({
-            "transactions": [
-                {
-                    "order_id": "ord_1",
-                    "status": "paid",
-                    "amount_idr": 5_000,
-                    "paid_at": "2026-10-12T09:10:00Z",
-                },
-                { "order_id": "ord_2", "status": "pending", "amount_idr": 10_000 },
-            ]
-        }))
-        .expect("a list parses");
-
+        let list = transactions_from_response(&raw).unwrap();
         assert_eq!(list.len(), 2);
-        assert_eq!(list[0].order_id, "ord_1");
-        assert_eq!(list[0].amount_idr, 5_000);
-        assert!(matches!(list[0].status, GatewayStatus::Paid { .. }));
-        assert!(matches!(list[1].status, GatewayStatus::Pending));
+        assert_eq!(
+            list[0].amount_idr, 10_137,
+            "the gross amount is what the buyer transferred, which is what we key on"
+        );
+        assert_eq!(list[0].transaction_id, "tx-1");
+        assert_eq!(
+            list[1].amount_idr, 25_004,
+            "the fee is the provider's business; the join is on the gross"
+        );
 
-        // A missing list is a failure, not an empty one: an empty list read from a
-        // malformed response would make the sweep report every payment as unknown to
-        // the gateway, which is a false alarm a human then has to chase.
-        assert!(matches!(
-            transactions_from_response(&json!({ "items": [] })),
-            Err(PaymentError::Invalid(_))
-        ));
-        // An entry missing its order id is refused rather than skipped.
-        assert!(matches!(
-            transactions_from_response(&json!({
-                "transactions": [{ "status": "pending", "amount_idr": 1 }]
-            })),
-            Err(PaymentError::Invalid(_))
-        ));
+        assert!(
+            matches!(
+                transactions_from_response(&json!({ "transactions": [] })),
+                Err(PaymentError::Invalid(_))
+            ),
+            "the internal contract's wrapper is not this gateway's shape"
+        );
     }
 }

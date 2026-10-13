@@ -38,7 +38,7 @@ not exist or "fix" an accepted risk by adding client-side checks that provide no
 | Google Calendar refresh tokens | Full calendar read/write | Encrypted in `calendar_connections` (server) |
 | ICS feed tokens | Read the user's own calendar feed; a **capability URL** | `users.ics_feed_token` (server, **plaintext** — the settings screen must be able to show the link again, A242) |
 | BYOK keys (Power) | The user's own provider key | Encrypted (`aes-gcm`) in `user_api_keys` (server) |
-| Payment integrity | Getting a plan without paying | `payments` + gateway webhook (server) |
+| Payment integrity | Getting a plan without paying | `payments` + the gateway's own status route, read by the server (server) |
 | Content (uploaded sources, chunks, embeddings) | IP, or another user's corpus | Object storage + `chunks` (server); **never synced to clients** |
 | Service availability / cost ceiling | Denial of service, or financial drain | `provider_cost_ceiling_usd`, rate limits (server) |
 | **The update channel** (the published `latest.json`, the artifacts it points at, and the minisign key that signs it) | **Every installed desktop copy at once.** An attacker who can serve a manifest the app accepts does not need to compromise a user: the user's own app downloads and runs the attacker's binary, with the user's privileges. This is the highest-value asset in the product, and it did not exist before Phase 15 | `src-tauri/tauri.conf.json` `plugins.updater.pubkey` (compiled into the app); the **private** key is a GitHub Actions secret, never in the repository (A332) |
@@ -90,7 +90,7 @@ intent is permitted, affordable, or well-formed is decided on the right.
 | **Scripted abuser** | Bulk account creation, direct API calls, quota exhaustion | A43 (verification + signup limits + global cap), `provider_cost_ceiling_usd` |
 | **Cross-tenant attacker** | Guesses ids, replays cursors, probes endpoints | Per-`user_id` scoping everywhere; `change_log` filtered; Phase 8 isolation test |
 | **Malicious document author** | Uploads a PDF/DOCX/SVG containing prompt injection or markup | Retrieved text is data (`<user_context_data>`, A39); citations validated (A17); render escapes and allowlists SVG (A37) |
-| **Payment attacker** | Forged/replayed webhook, amount tampering | Signature verification, idempotency, amount equality check (`docs/SPEC.md` § Payments: QRIS via my gateway) |
+| **Payment attacker** | Forged/replayed settlement, amount tampering | Idempotency (two defences) and the payable-amount check (`docs/SPEC.md` § Payments: QRIS via my gateway). There is **no callback route to forge**: the gateway never pushes, so the only writer is the server reading the gateway's own status route (A292/A309) |
 | **Insider / server compromise** | — | **Out of scope** (trusted base) |
 
 ---
@@ -127,16 +127,25 @@ exact error code — and `every_section_5_fails_row_has_a_case` reads this docum
 rows are not bugs; they are the price of shipping a local-first client, and each is bounded to
 consequences the attacker inflicts on themselves.
 
-### The QRIS callback is not a row in the table above
+### The gateway is not reachable from the internet, and there is no callback to forge
 
-**The three webhook attempts — forge a callback, replay it, and confirm another account's order —
-are refusals, not §5 rows, and their tests are named in §9.** The table above answers "what can a
-modified *client* do with a client's privileges"; a forged callback is what **anyone on the
-internet** can do to a route that has no bearer token at all, and its control is the route's own
-authorisation rather than a tamper boundary. Adding them as rows would also mean three `tamper.rs`
-cases that do not belong to the thing that suite tests — its contract is client mutations at the
-sync and route boundary. The one thing this design **cannot** verify is the gateway's own claim
-that money arrived, which is R9 in §6.
+**The bridge publishes no port.** `deploy/staging/docker-compose.staging.yml` gives the service no
+`ports:` and no `expose:`, so it is reachable only from the compose network by service name, and the
+host's own firewall admits only 22 besides. That is the whole of its access control, and it is
+stated rather than implied: the bridge is **unauthenticated by design**, because the only client it
+has is our own server on the same network (A292). An attacker who reaches it is inside the host
+already, and §5's last row puts insider/server compromise out of scope.
+
+**And the one thing that used to be an unauthenticated write path is gone.** Phase 13 shipped
+`POST /webhooks/qris` — a route with no bearer token, authorising itself by signature — because B1
+was unresolved and every plausible gateway pushed. The gateway that resolved does not: it reports an
+outcome only through its own status route. So the route, its three signature schemes, its HMAC key
+and its IP allowlist are deleted rather than left dormant, and with them the class of attack they
+existed to refuse. A reader looking for the forge/replay/amount-tampering table that used to live
+here will find it in git history; the tests that replace it are in §9, and they assert the
+properties that still have a subject — idempotency across the client's poll and the sweep, and the
+amount check against the payable figure. The one thing this design **cannot** verify is the
+gateway's own claim that money arrived, which is R9 in §6.
 
 ### The ICS fetch is not a row in the table above
 
@@ -392,23 +401,26 @@ test failure — which is why it is written here.
 
 ### R9. The gateway's claim that money arrived is unverifiable by us
 
-**The risk.** Everything this phase does with a payment rests on the gateway telling the truth. A
-valid signature proves the message came from the gateway and proves nothing about the gateway: if
+**The risk.** Everything this phase does with a payment rests on the gateway telling the truth. If
 it reports a payment it never received, or reports one and keeps the money, the server activates a
-plan for money that does not exist. Nothing in this tree can tell the difference, and no amount of
-signature strength changes that — it is a property of the counterparty, not of the protocol.
+plan for money that does not exist. Nothing in this tree can tell the difference — and after B1
+resolved, the verification that used to sit in front of this is gone entirely: the bridge is polled,
+so there is no signed message to verify and no signature strength to argue about. What we have
+instead is the gateway's own word, read by us, which is exactly as trustworthy as the counterparty.
 
-**Why it is accepted rather than fixed.** The alternative is a settlement API to reconcile against,
-and B1 means the gateway has no documented API at all: it is unresolved whether one exposes a
-settlement feed, a bank statement, or nothing. Building against a feed whose shape is unknown is the
-guess this whole phase is designed to avoid (A291). The compensations that *are* in place are the
-ones that make the risk measurable rather than invisible: every callback is stored in
-`webhook_events` with its raw payload, `payments.provider_status` records what the gateway said, the
-hourly reconciliation sweep compares the gateway's own recent list against our rows in **both**
-directions (a transaction we have no row for, and a payment the gateway does not know), and both
-mismatches land as `review` rows with a `review_reason` a human reads. `QRIS_FEE_PERCENT` defaults
-to `0`/`0` — "unknown, record nothing" — rather than a plausible-looking rate, so the margin report
-says it does not know instead of inventing a number (A304).
+**Why it is accepted rather than fixed.** The bridge settles through a GoPay merchant account, so
+the money is real and the account is ours — the risk is not a fake gateway but an operator who
+misreads a feed, or a GoPay feed that reports a settlement it later reverses. Reconciling against a
+bank statement is the real control and it is a manual monthly step, not a code path: there is no
+documented settlement API for this account, and building against one whose shape is unknown is the
+guess this phase is designed to avoid (A291). The compensations that *are* in place are the ones that
+make the risk measurable rather than invisible: every answer we acted on is stored in
+`gateway_events` with its raw payload, `payments.provider_status` records what the gateway said, the
+hourly reconciliation sweep compares the gateway's own settled transactions against our rows in
+**both** directions (money we have no row for, and a payment the gateway has no transaction for),
+and both mismatches land as `review` rows with a `review_reason` a human reads. `QRIS_FEE_PERCENT`
+defaults to `0`/`0` — "unknown, record nothing" — rather than a plausible-looking rate, so the margin
+report says it does not know instead of inventing a number (A304).
 
 **Bounded because:** the exposure is one plan's price per fabricated payment, the gateway is a
 single contracted counterparty whose identity the operator controls (A45), and the reconciliation
@@ -462,7 +474,7 @@ The design never depends on this column. It is recorded so that no phase mistake
 | Every handler goes through entitlements; no bypass | 7 | `crates/server/tests/route_sweep.rs` — `every_registered_route_is_classified` extracts every registered `(method, path)` pair from `crates/server/src` and compares the table **both ways**, and `every_swept_route_refuses_an_exhausted_account` drives each `Swept` row through the real router asserting its exact `(status, code)`. `no_file_outside_the_entitlements_layer_reads_a_plan_limit` greps the tree for a plan-limit read and for the single reader of `provider_cost_ceiling_usd` |
 | Every row of §5 marked "fails" is actually rejected | 7 | `crates/server/tests/tamper.rs` — one case per row, asserting the exact error code; `every_section_5_fails_row_has_a_case` reads `docs/THREAT_MODEL.md` and fails when a "fails" row has no case (13 rows today) |
 | No cross-tenant leakage through `change_log` or pull | 8 | `crates/server/tests/sync_pull.rs::a_pull_never_contains_another_accounts_seq` (the pull's `seq` set is asserted against each account's own `change_log`), `the_payload_loader_cannot_be_pointed_at_another_users_row` (a planted foreign `entity_id` loads no payload, so the change ships `data: null` rather than another account's row), and `crates/server/tests/sync_convergence.rs::two_accounts_never_cross` — which asserts on the **`seq` values each store ever applied**, not on the absence of a 200, and first asserts both stores applied something so the loop cannot pass by iterating nothing |
-| Free-tier abuse controls are live | 7 | `crates/server/tests/abuse.rs` — `an_unverified_account_cannot_chat_generate_search_or_ingest`, `the_per_ip_signup_limit_trips_and_logs`, `a_public_email_domain_is_not_rate_limited`, `the_spend_cap_trips_at_ten_a_minute_and_never_caps_a_read`, `the_spend_cap_is_per_account` |
+| Free-tier abuse controls are live | 7 | `crates/server/tests/abuse.rs` — `an_unverified_account_cannot_reach_its_workspace`, `the_per_ip_signup_limit_trips_and_logs`, `a_public_email_domain_is_not_rate_limited`, `the_spend_cap_trips_at_ten_a_minute_and_never_caps_a_read`, `the_spend_cap_is_per_account`; the gate's full route coverage is `route_sweep.rs` — `every_route_takes_the_extractor_the_table_names` and `an_unverified_account_reaches_only_its_own_surface` (A359) |
 | Provider cost ceiling stops spend | 7 | `crates/server/tests/credits.rs::an_account_over_its_provider_cost_ceiling_is_refused` — an account at its ceiling gets `422 limit_reached` naming the plan whose ceiling is higher, with the ledger and `usage_events` untouched; `a_higher_plan_has_a_higher_ceiling` is the other half |
 | Webhook forgery/replay/amount tampering rejected | 13 | signature, idempotency, and amount-equality cases (`docs/SPEC.md` § QUALITY BAR, "Payment tests") |
 | Retrieved text cannot act as instructions | 12 | `crates/server/tests/agent_injection.rs::a_poisoned_source_does_not_create_a_task` — the phase's real risk, and it is **two-sided against vacuity**: the poison text is asserted to have been in the prompt inside `<sources>` (so the fixture was poisoned *and* delivered), the scripted model is asserted to have emitted the `create_task` call (so deleting the gate fails the test), and only then is the database asserted untouched — with a companion assertion that the proposal which *is* created is `status = 'pending'` and that no `tasks` row exists. § 5's subsection above carries the reasoning for why it is not a § 5 row |
@@ -487,22 +499,22 @@ The design never depends on this column. It is recorded so that no phase mistake
 | ICS feed cannot be brute-forced or indexed | 10 | `crates/server/tests/calendar.rs` — the feed is `text/calendar`, `no-store` and `noindex`, the route is in the 30/min/IP auth bucket, and a regenerated token 404s the old one while the new one serves |
 | A task deleted offline tombstones its subtree, and a restore brings back only what the cascade took | 9 | `offline_tasks.rs::deleting_a_parent_offline_tombstones_its_children`, `restoring_a_parent_restores_only_the_children_its_delete_tombstoned` (A197) |
 
-| The QRIS callback refuses forgery, replay and amount tampering | 13 | `crates/server/tests/webhooks.rs` — ten cases driving the **real** route with bodies the mock gateway really signs: a one-byte mutation of a signed body is 401, an unknown order is 404 with nothing written, the same event id twice activates once, the same payment under a fresh event id answers `already_paid` and activates nothing, a mismatched amount is `review` with both numbers in `review_reason`, and a payment made after the expiry is `review` unconditionally (A293, A294, A309). The three attempts are not §5 rows and the subsection above says why |
+| The payment path activates once, and only for the amount it asked for | 13 | `crates/server/tests/payment_jobs.rs` — `a_replayed_answer_activates_once` (one activation, one `gateway_events` row), `an_offset_invoice_activates_against_its_payable_amount` (a settlement for the payable activates; one for the bare price is `review` naming both numbers), `the_checkout_poll_asks_the_gateway_and_activates`, and `crates/server/tests/qris_gateway.rs` for the wire itself |
 
-### The three QRIS webhook attempts, with their tests
+### The payment path's three refusals, with their tests
 
-These are deliberately **not** rows in §5's table — the paragraph there says why — and they are
-asserted against the **real route**, with bodies the mock gateway really signs, in
-`crates/server/tests/webhooks.rs`:
+There is no callback route to forge (the gateway never pushes), so what remains is asserted against
+the code that does exist — the two ingresses that read the gateway's own answer, and the one
+function that acts on it:
 
 | Attempt | Outcome | Enforced by | Test |
 |---|---|---|---|
-| Forge a webhook to activate a plan without paying | **Refused.** 401, and nothing is written | The signature over the **raw bytes** in `QRIS_SIGNATURE_HEADER`, one of three schemes (A292); the body is never parsed before it verifies, so a forged payload cannot choose which failure is reported | `a_forged_signature_is_refused_and_writes_nothing` |
-| Replay a webhook to double-activate | **Refused.** 200 `{duplicate: true}` for the same event id, `"already_paid"` for the same payment under a **new** one; one subscription, one grant | `webhook_events`' `unique (provider, event_id)` with `on conflict do nothing returning id`, **and** the guarded transition `update payments … where id = $1 and status = 'pending'` (A293) — two defences because a unique key cannot see a fresh event id, and a guarded update cannot see the same id | `the_same_event_id_twice_activates_once`, `the_same_payment_under_a_new_event_id_activates_once` |
-| Confirm another account's order, or tamper with the amount | **Refused.** 404 for an order we do not have, with the `webhook_events` row rolled back so a guessed id writes nothing; `review` with both numbers in `review_reason` for an amount that does not equal `payments.amount_idr` | `order_id` resolves to a payment scoped by `provider` **and** the payment's own `user_id`; the amount is compared against the column the quote was written to, which comes from the same `billing::price` the quote did (A294) | `a_mismatched_amount_is_refused_into_review`, `an_unknown_order_is_404_and_writes_nothing` |
+| Read the same settlement twice to double-activate | **Refused.** One subscription, one credit grant, one `gateway_events` row | `gateway_events`' `unique (provider, event_id)` with `on conflict do nothing returning id`, **and** the guarded transition `update payments … where id = $1 and status = 'pending'` (A293). The synthesised event id `gateway:<provider_payment_id>:<paid_at>` is stable, so two reads of one settlement collide on the unique key exactly as two callbacks would | `payment_jobs.rs::a_replayed_answer_activates_once` |
+| Settle for an amount that is not what the invoice asked for | **Refused.** Marked paid-but-`review` with both numbers in `review_reason`, so a human reads it | The check is against `payable_amount_idr` — the figure the QR encodes and the buyer was told to transfer — not the price; both over- and under-payment are the same outcome (A294) | `payment_jobs.rs::an_offset_invoice_activates_against_its_payable_amount` |
+| Ask the gateway about another account's payment | **Refused.** The row is not read and the gateway is not asked | `billing::poll::refresh_pending` scopes its statement by `user_id`, like every other query a client can reach | `billing.rs` — the 404 on another account's payment id |
 
-**What the signature does not prove** is the gateway's own claim that money arrived — a signature
-proves the message came from the gateway and proves nothing about the gateway. That is R9 in §6.
+**What nothing proves** is the gateway's own claim that money arrived: with the callback gone there
+is no message to verify at all, only a status route we read. That is R9 in §6.
 
 An unverified claim in this document is a claim the repo does not have. When a phase closes a row of
 §5 or §6, it updates this file in the same commit.

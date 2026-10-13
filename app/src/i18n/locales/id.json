@@ -260,6 +260,7 @@
       "beforeDiscount": "Harga sebelum diskon",
       "discountStudent": "Diskon pelajar",
       "discountCode": "Kode {{code}}",
+      "uniqueAmount": "Jumlah unik untuk pencocokan otomatis",
       "total": "Total"
     },
     "state": {
@@ -481,6 +482,9 @@
       "sentTo": "Kami mengirim tautan verifikasi ke {{email}}. Buka untuk mengonfirmasi alamat itu.",
       "needLink": "Halaman ini butuh tautan dari email verifikasimu. Buka yang paling baru, atau masuk untuk minta tautan lain.",
       "goToWorkspaces": "Buka ruang belajarmu",
+      "lockedUntilVerified": "Ruang belajarmu terbuka begitu alamat ini dikonfirmasi. Sampai itu terjadi, ruang ini tetap tertutup, supaya tidak ada yang bisa masuk ke akun yang belum terbukti pemiliknya.",
+      "useAnotherAddress": "Pakai alamat lain",
+      "refreshingSession": "Menyelesaikan proses masukmu",
       "checking": "Memeriksa tautan verifikasi ini",
       "verifiedSignedIn": "Alamat emailmu sudah terverifikasi.",
       "verifiedSignedOut": "Alamat emailmu sudah terverifikasi. Masuk untuk lanjut.",
@@ -779,6 +783,14 @@
       "title": "Tidak tersedia di paket atau perangkat ini",
       "reason": "Ini tidak termasuk paketmu, atau perangkat ini sudah melewati batas paket."
     },
+    "account_deleted": {
+      "title": "Akun dihapus",
+      "reason": "Akun ini dihapus atas permintaanmu. Datanya dihapus di akhir masa tenggat, dan alamat ini bisa didaftarkan lagi setelah itu."
+    },
+    "forbidden": {
+      "title": "Tidak diizinkan",
+      "reason": "Kamu tidak punya akses ke ini. Kalau kamu sudah masuk, ini mungkin milik akun lain."
+    },
     "email_not_verified": {
       "title": "Email belum diverifikasi",
       "reason": "Verifikasi alamat emailmu dulu. Cek tautannya di kotak masukmu."
@@ -798,6 +810,10 @@
     "link_expired": {
       "title": "Tautan kedaluwarsa",
       "reason": "Tautan ini sudah kedaluwarsa. Buka sumbernya lagi untuk mendapat tautan baru."
+    },
+    "resync_required": {
+      "title": "Salinan lokal tertinggal",
+      "reason": "Salinan di perangkat ini terlalu jauh tertinggal untuk menyusul. Setel ulang data lokal lalu sinkron ulang dari awal."
     },
     "insufficient_credits": {
       "title": "Kredit tidak cukup",

@@ -591,7 +591,7 @@ async fn the_tripwires_are_computed_and_the_two_month_one_is_null_without_a_prev
     );
 }
 
-/// Marking paid runs the webhook's own apply, so it activates once and a second call changes
+/// Marking paid runs the poller's own apply, so it activates once and a second call changes
 /// nothing (A308).
 #[sqlx::test(migrations = "../../migrations")]
 async fn marking_a_payment_paid_activates_once(pool: PgPool) {
@@ -646,7 +646,7 @@ async fn marking_a_payment_paid_activates_once(pool: PgPool) {
     assert_eq!(subscription, "active");
 
     // A second call changes nothing: the state transition is guarded, exactly as it is for a
-    // replayed webhook (A293/A308).
+    // replayed answer (A293/A308).
     let (status, second) = request(
         &app,
         "POST",

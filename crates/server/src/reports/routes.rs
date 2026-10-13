@@ -32,7 +32,7 @@ use stvdy_core::entitlements::Feature;
 use stvdy_core::generation::report::{ReportOutline, parse_outline};
 use stvdy_core::prompts::PromptChunk;
 
-use crate::auth::extract::{AuthUser, VerifiedUser};
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::reports::generate::{self, OutlineRequest};
 use crate::state::AppState;
@@ -361,7 +361,7 @@ pub async fn create_outline(
 /// ones still generating.
 pub async fn list_reports(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     workspaces::owned_name(&state, user.user_id, workspace_id).await?;
@@ -386,7 +386,7 @@ pub async fn list_reports(
 /// `GET /reports/:id`.
 pub async fn get_report(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(report_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let report = owned_report(&state, user.user_id, report_id).await?;
@@ -406,7 +406,7 @@ pub async fn get_report(
 /// outline is, and the two would disagree about a section the student can see.
 pub async fn patch_report(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(report_id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -636,7 +636,7 @@ pub struct ExportQuery {
 /// answer names the plan rather than the price.
 pub async fn export_report(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(report_id): Path<Uuid>,
     Query(query): Query<ExportQuery>,
 ) -> AppResult<Response> {

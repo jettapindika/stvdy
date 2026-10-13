@@ -5,7 +5,7 @@ import { Link, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { asApiError } from '@/api/errors'
-import { AUTH_ME_KEY, useResendVerification, useVerifyEmail } from '@/api/queries/auth'
+import { AUTH_ME_KEY, useResendVerification, useSignOut, useVerifyEmail } from '@/api/queries/auth'
 import { ApiErrorNotice, ErrorState, LoadingState } from '@/components/ui/States'
 import { AuthCard } from './AuthLayout'
 import { useSession } from './useSession'
@@ -39,6 +39,7 @@ export function VerifyEmailScreen() {
   const session = useSession()
   const verify = useVerifyEmail()
   const resend = useResendVerification()
+  const signOut = useSignOut()
   const queryClient = useQueryClient()
   const started = useRef(false)
 
@@ -122,10 +123,24 @@ export function VerifyEmailScreen() {
           </p>
           {signedIn ? (
             <>
+              {/* The workspace is closed until the address is confirmed (A359), so there is
+                  no link to it here. What the student needs instead is the two ways forward:
+                  another link, or a different address — and the second one is why the
+                  sign-out is on this screen at all. An unverified account that could not
+                  sign out would be an account nobody can leave, and a mistyped address would
+                  be permanent. */}
+              <p className="text-label text-muted">{t('auth.verify.lockedUntilVerified')}</p>
               {resendBlock}
-              <Link to="/workspaces" className="btn btn-primary w-full">
-                {t('auth.verify.goToWorkspaces')}
-              </Link>
+              <button
+                type="button"
+                className="btn btn-quiet w-full"
+                disabled={signOut.isPending}
+                onClick={() => {
+                  signOut.mutate()
+                }}
+              >
+                {t('auth.verify.useAnotherAddress')}
+              </button>
             </>
           ) : (
             <Link to="/signin" className="btn btn-primary w-full">
@@ -142,9 +157,19 @@ export function VerifyEmailScreen() {
           <p className="note note-success" role="status">
             {signedIn ? t('auth.verify.verifiedSignedIn') : t('auth.verify.verifiedSignedOut')}
           </p>
-          <Link to={signedIn ? '/workspaces' : '/signin'} className="btn btn-primary w-full">
-            {signedIn ? t('auth.verify.goToWorkspaces') : t('auth.signIn.title')}
-          </Link>
+          {/* The session's copy of the user is what the shell's gate reads (A359), and the
+              token was spent a moment ago: until `/auth/me` answers, `email_verified` is still
+              false and a link to the workspace would bounce straight back here. Waiting is the
+              honest state — the verification has succeeded and the session has not caught up
+              yet — and it also keeps the token from being spent twice, since a bounce would
+              re-render this screen with `?token=` still in the URL. */}
+          {signedIn && !session.user.email_verified ? (
+            <LoadingState label={t('auth.verify.refreshingSession')} />
+          ) : (
+            <Link to={signedIn ? '/workspaces' : '/signin'} className="btn btn-primary w-full">
+              {signedIn ? t('auth.verify.goToWorkspaces') : t('auth.signIn.title')}
+            </Link>
+          )}
         </div>
       )}
 

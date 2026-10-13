@@ -1,10 +1,11 @@
-//! The QRIS wire suite: the request we send, the responses we accept, the three
-//! signature schemes, and the two idempotency defences the money path depends on.
+//! The gopay-bridge wire suite: the requests we send, the responses we accept, and the
+//! failures that must stay distinguishable.
 //!
-//! B1 (the gateway's identity and docs) is unresolved, so the wire tests exercise the
-//! **internal contract** — the field names in `integrations/payment/mapping.rs` and the
-//! schemes in `signature.rs`. The day the docs arrive, the fixtures change; nothing else
-//! in this phase does, because every behavioural test runs against the trait's mock.
+//! B1 is resolved, so this file is no longer a test of an invented contract — it is the
+//! test of the **real bridge's** API, exercised against a stub HTTP server so a bridge
+//! whose field is renamed fails here rather than in production. The three facts it pins are
+//! the three the money path depends on: the bridge mints its own payment id, it assigns the
+//! amount, and it answers with a bare transaction array.
 //!
 //! Test code may unwrap and panic; `#[sqlx::test]` is a macro harness, so the
 //! relaxations in clippy.toml are not guaranteed to apply.
@@ -12,33 +13,31 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use sqlx::PgPool;
-use stvdy_core::traits::payment::{InvoiceRequest, PaymentError, PaymentProvider};
-use stvdy_server::config::{AppConfig, SignatureScheme};
+use stvdy_core::traits::payment::{GatewayStatus, InvoiceRequest, PaymentError, PaymentProvider};
+use stvdy_server::config::AppConfig;
 use stvdy_server::integrations::payment::{PaymentGateway, QrisGateway};
 use stvdy_server::testing::{TestState, root};
 
 mod common;
 use common::stub_http_json;
 
-/// A gateway config pointing at `base_url`, built through the real env parser so the
+/// A bridge config pointing at `base_url`, built through the real env parser so the
 /// validation path is the one that ships.
-fn config_at(base_url: &str, scheme: &str) -> AppConfig {
+fn config_at(base_url: &str) -> AppConfig {
     AppConfig::from_env_at(
         &root(),
         &[
             ("APP_ENV", "dev"),
             ("QRIS_BASE_URL", base_url),
-            ("QRIS_API_KEY", "test-key"),
-            ("QRIS_CALLBACK_TOKEN", "test-callback-token"),
-            ("QRIS_SIGNATURE_SCHEME", scheme),
+            ("QRIS_MERCHANT_ID", "merchant-1"),
         ],
     )
-    .expect("a gateway config with a base URL must load")
+    .expect("a bridge config with a base URL must load")
 }
 
 fn gateway_at(base_url: &str) -> QrisGateway {
-    let config = config_at(base_url, "hmac_sha256_hex");
-    QrisGateway::from_config(config.qris.as_ref().expect("a gateway config")).expect("a gateway")
+    let config = config_at(base_url);
+    QrisGateway::from_config(config.qris.as_ref().expect("a bridge config")).expect("a gateway")
 }
 
 fn request() -> InvoiceRequest {
@@ -52,17 +51,24 @@ fn request() -> InvoiceRequest {
     }
 }
 
-/// The request we send is the internal contract, and B1 changes this test's fixtures and
-/// nothing else — which is the whole point of isolating the mapping.
+/// A created invoice: the path, the body, and the fact that **no credential travels** —
+/// the bridge is unauthenticated by design, so a header here would be a secret sent to a
+/// service that does not check it.
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_gateway_sends_the_order_id_and_amount_the_contract_names(pool: PgPool) {
+async fn the_invoice_request_is_the_bridges_shape_and_carries_no_credential(pool: PgPool) {
     let _ = pool;
     let stub = stub_http_json(
         200,
         serde_json::json!({
-            "order_id": "ord_1",
-            "qr_string": "00020101021226...",
-            "expires_at": "2026-10-12T09:15:00Z",
+            "id": "gw-7f2a",
+            "status": "pending",
+            "amount": 5_000,
+            "uniqueAmount": 5_137,
+            "qrString": "00020101021226...",
+            "reference": "ord_1",
+            "createdAt": "2026-10-12T09:00:00Z",
+            "expiresAt": "2026-10-12T09:15:00Z",
+            "secondsLeft": 900,
         })
         .to_string(),
     )
@@ -76,234 +82,282 @@ async fn the_gateway_sends_the_order_id_and_amount_the_contract_names(pool: PgPo
     let sent = stub.requests();
     assert_eq!(sent.len(), 1, "one request, not a retry");
     assert_eq!(sent[0].method, "POST");
-    assert_eq!(sent[0].path, "/invoices");
+    assert_eq!(sent[0].path, "/payments");
     assert_eq!(
         sent[0].header("authorization"),
-        Some("Bearer test-key"),
-        "the API key travels in the auth header and nowhere else"
+        None,
+        "the bridge has no auth header; a credential sent to it would be a secret in a log"
     );
 
     let body: serde_json::Value =
         serde_json::from_str(&sent[0].body).expect("the body we sent is JSON");
-    assert_eq!(body["order_id"], "ord_1");
-    assert_eq!(body["amount_idr"], 5_000);
+    assert_eq!(body["amount"], 5_000);
     assert!(
-        body["amount_idr"].is_i64(),
+        body["amount"].is_i64(),
         "an amount that arrives as a string is an amount a gateway cannot check"
     );
+    // Our order id travels as the bridge's `reference`, never as its id: the bridge keys
+    // its own routes on the id it mints.
+    assert_eq!(body["reference"], "ord_1");
+    assert_eq!(
+        body["minutes"], 15,
+        "the bridge takes a lifetime and computes the deadline itself"
+    );
 
-    // And the response was parsed, not merely accepted.
+    // And the response was parsed, including the two fields that are not ours.
     assert_eq!(invoice.order_id, "ord_1");
     assert_eq!(invoice.qr_string, "00020101021226...");
-    assert_eq!(invoice.expires_at, request().expires_at);
+    assert_eq!(
+        invoice.provider_payment_id.as_deref(),
+        Some("gw-7f2a"),
+        "the bridge's id is the handle every later question is asked with"
+    );
+    assert_eq!(
+        invoice.payable_amount_idr,
+        Some(5_137),
+        "the offset is the bridge's, and it is the figure the buyer must transfer"
+    );
+    assert_eq!(
+        invoice.expires_at,
+        chrono::DateTime::parse_from_rfc3339("2026-10-12T09:15:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+        "the bridge's deadline is authoritative, not the one we computed before the call"
+    );
 }
 
-/// The response shape we accept, against a stub HTTP server, so a vendor whose field is
-/// named differently fails here rather than in production.
+/// The status route, keyed by the id the bridge minted — and the failures that must stay
+/// apart, because the poller treats them differently.
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_gateway_parses_a_sandbox_shaped_invoice_and_status_response(pool: PgPool) {
+async fn a_payment_is_read_by_the_bridges_own_id(pool: PgPool) {
     let _ = pool;
 
     let paid = stub_http_json(
         200,
         serde_json::json!({
+            "id": "gw-7f2a",
             "status": "paid",
-            "paid_at": "2026-10-12T09:10:00Z",
-            "amount_idr": 5_000,
-            "provider_payment_id": "gw_1",
-            "fee_idr": 75,
+            "amount": 5_000,
+            "uniqueAmount": 5_137,
+            "qrString": "00020101021226...",
+            "reference": "ord_1",
+            "expiresAt": "2026-10-12T09:15:00Z",
+            "transaction": {
+                "id": "tx-1",
+                "amount": 5_137,
+                "time": "2026-10-12T09:10:00Z",
+            },
         })
         .to_string(),
     )
     .await;
 
     let status = gateway_at(paid.base_url())
-        .get_status("ord_1")
+        .get_status("gw-7f2a")
         .await
-        .expect("the stub answers a paid status");
+        .expect("the stub answers a paid payment");
 
     assert_eq!(paid.requests()[0].method, "GET");
-    assert_eq!(paid.requests()[0].path, "/invoices/ord_1");
+    assert_eq!(
+        paid.requests()[0].path,
+        "/payment/gw-7f2a",
+        "the route is keyed by the bridge's id, not our order id"
+    );
+
     match status {
-        stvdy_core::traits::payment::GatewayStatus::Paid {
+        GatewayStatus::Paid {
             amount_idr,
-            fee_idr,
+            paid_at,
             provider_payment_id,
-            ..
+            fee_idr,
         } => {
-            assert_eq!(amount_idr, 5_000);
-            assert_eq!(fee_idr, Some(75));
-            assert_eq!(provider_payment_id.as_deref(), Some("gw_1"));
+            assert_eq!(
+                amount_idr, 5_137,
+                "what landed is the unique amount, not what we asked for"
+            );
+            assert_eq!(
+                paid_at,
+                chrono::DateTime::parse_from_rfc3339("2026-10-12T09:10:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+                "the settlement instant is the bridge's; our clock would decide A295"
+            );
+            assert_eq!(provider_payment_id.as_deref(), Some("gw-7f2a"));
+            assert_eq!(
+                fee_idr, None,
+                "the bridge reports no fee; a guess would corrupt the margin report"
+            );
         }
         other => panic!("expected a paid status, got {other:?}"),
     }
 
-    // An order the gateway does not know is `UnknownOrder`, not a transport failure: the
+    // The two dead states stay apart: `cancelled` is a person, `expired` is the clock, and
+    // the row records which one it was.
+    for (raw, expected) in [
+        ("pending", GatewayStatus::Pending),
+        ("expired", GatewayStatus::Expired),
+        ("cancelled", GatewayStatus::Cancelled),
+    ] {
+        let stub = stub_http_json(200, serde_json::json!({ "status": raw }).to_string()).await;
+        assert_eq!(
+            gateway_at(stub.base_url())
+                .get_status("gw-1")
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+
+    // A payment the bridge does not know is `UnknownOrder`, not a transport failure: the
     // poller turns the first into `review` and would retry the second forever.
     let missing = stub_http_json(404, "{}").await;
     assert!(matches!(
         gateway_at(missing.base_url())
-            .get_status("ord_missing")
+            .get_status("gw-missing")
             .await,
         Err(PaymentError::UnknownOrder)
     ));
 
-    // A gateway error is `Provider`, which is retryable, and a malformed body is
-    // `Invalid`, which is not — the two must not collapse into one.
+    // A bridge error is `Provider`, which is retryable, and a malformed body is `Invalid`,
+    // which is not — the two must not collapse into one.
     let broken = stub_http_json(500, "{}").await;
     assert!(matches!(
-        gateway_at(broken.base_url()).get_status("ord_1").await,
+        gateway_at(broken.base_url()).get_status("gw-1").await,
         Err(PaymentError::Provider(_))
     ));
     let malformed = stub_http_json(200, "not json").await;
     assert!(matches!(
-        gateway_at(malformed.base_url()).get_status("ord_1").await,
+        gateway_at(malformed.base_url()).get_status("gw-1").await,
+        Err(PaymentError::Invalid(_))
+    ));
+    // A status word the bridge does not have is `Invalid` too, rather than a default that
+    // would read as "still pending" forever.
+    let unknown = stub_http_json(
+        200,
+        serde_json::json!({ "status": "settlement" }).to_string(),
+    )
+    .await;
+    assert!(matches!(
+        gateway_at(unknown.base_url()).get_status("gw-1").await,
         Err(PaymentError::Invalid(_))
     ));
 
-    // A response that is valid JSON but missing the QR string is `Invalid` too: an
-    // invoice a student cannot pay must not become an empty QR.
+    // A `paid` answer with no transaction behind it is refused: the settlement instant is
+    // the one fact A295's late-payment rule turns on, and substituting our clock for a
+    // missing one would silently decide it.
+    let bare_paid = stub_http_json(
+        200,
+        serde_json::json!({ "status": "paid", "uniqueAmount": 5_137 }).to_string(),
+    )
+    .await;
+    assert!(matches!(
+        gateway_at(bare_paid.base_url()).get_status("gw-1").await,
+        Err(PaymentError::Invalid(_))
+    ));
+}
+
+/// An invoice we cannot render or cannot check an amount against is `Invalid`, not an empty
+/// string and not a default: the first would be a QR that encodes nothing and the second
+/// would make every settlement mismatch.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_invoice_without_a_qr_or_a_payable_amount_is_refused(pool: PgPool) {
+    let _ = pool;
+
     let no_qr = stub_http_json(
         200,
-        serde_json::json!({ "order_id": "ord_1", "expires_at": "2026-10-12T09:15:00Z" })
-            .to_string(),
+        serde_json::json!({
+            "id": "gw-1",
+            "uniqueAmount": 5_137,
+            "reference": "ord_1",
+            "expiresAt": "2026-10-12T09:15:00Z",
+        })
+        .to_string(),
     )
     .await;
     assert!(matches!(
         gateway_at(no_qr.base_url()).create_invoice(request()).await,
         Err(PaymentError::Invalid(_))
     ));
+
+    let no_payable = stub_http_json(
+        200,
+        serde_json::json!({
+            "id": "gw-1",
+            "qrString": "00020101021226...",
+            "reference": "ord_1",
+            "expiresAt": "2026-10-12T09:15:00Z",
+        })
+        .to_string(),
+    )
+    .await;
+    assert!(matches!(
+        gateway_at(no_payable.base_url())
+            .create_invoice(request())
+            .await,
+        Err(PaymentError::Invalid(_))
+    ));
+
+    // An empty QR string is not a valid one either: the client renders this verbatim, and a
+    // blank payload is a blank screen rather than a payable code.
+    let empty_qr = stub_http_json(
+        200,
+        serde_json::json!({
+            "id": "gw-1",
+            "qrString": "",
+            "uniqueAmount": 5_137,
+            "reference": "ord_1",
+            "expiresAt": "2026-10-12T09:15:00Z",
+        })
+        .to_string(),
+    )
+    .await;
+    assert!(
+        matches!(
+            gateway_at(empty_qr.base_url())
+                .create_invoice(request())
+                .await,
+            Err(PaymentError::Invalid(_))
+        ),
+        "an empty QR payload must not reach the screen"
+    );
 }
 
-/// Each scheme verifies its own shape through the **real gateway**, and rejects the
-/// others. Three schemes with one test between them would let a copy-paste make two of
-/// them the same.
-#[sqlx::test(migrations = "../../migrations")]
-async fn every_signature_scheme_verifies_its_own_shape_and_rejects_the_others(pool: PgPool) {
-    let _ = pool;
-    let body = serde_json::json!({
-        "event_id": "evt_1",
-        "kind": "paid",
-        "order_id": "ord_1",
-        "amount_idr": 5_000,
-        "currency": "IDR",
-        "paid_at": "2026-10-12T09:10:00Z",
-    })
-    .to_string();
-
-    let secret = b"test-callback-token";
-    let hex_value = hex::encode(hmac_sha256(secret, body.as_bytes()));
-    let base64_value = {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(hmac_sha256(secret, body.as_bytes()))
-    };
-
-    for (scheme, header_value) in [
-        ("hmac_sha256_hex", hex_value.as_str()),
-        ("hmac_sha256_base64", base64_value.as_str()),
-        ("shared_token", "test-callback-token"),
-    ] {
-        let config = config_at("http://127.0.0.1:1", scheme);
-        let gateway =
-            QrisGateway::from_config(config.qris.as_ref().expect("a gateway config")).unwrap();
-        let headers = signed_headers("X-Callback-Signature", header_value);
-
-        gateway
-            .parse_and_verify_webhook(&headers, body.as_bytes())
-            .unwrap_or_else(|error| panic!("{scheme} must verify its own shape: {error}"));
-
-        // The same headers over a different body. For the two HMAC schemes this is the
-        // assertion that matters, because a gateway that signed nothing would pass the
-        // check above. `shared_token` deliberately does not bind the body — a shared token
-        // is not a signature, which is exactly why it is the scheme an operator should stop
-        // using the day B1 names something better.
-        if scheme != "shared_token" {
-            let tampered = body.replace("5000", "1");
-            assert!(
-                matches!(
-                    gateway.parse_and_verify_webhook(&headers, tampered.as_bytes()),
-                    Err(PaymentError::Signature)
-                ),
-                "{scheme} must reject a body swapped under a valid header"
-            );
-        }
-
-        // A header from another secret does not verify either.
-        let foreign = signed_headers(
-            "X-Callback-Signature",
-            &hex::encode(hmac_sha256(b"another-secret", body.as_bytes())),
-        );
-        assert!(
-            matches!(
-                gateway.parse_and_verify_webhook(&foreign, body.as_bytes()),
-                Err(PaymentError::Signature)
-            ),
-            "{scheme} must reject a signature it did not make"
-        );
-
-        // And a missing header is a failure, never an empty-string match.
-        assert!(matches!(
-            gateway.parse_and_verify_webhook(&axum::http::HeaderMap::new(), body.as_bytes()),
-            Err(PaymentError::Signature)
-        ));
-    }
-}
-
-/// A scheme we do not know must stop the process, because the alternative is a default
-/// that verifies everything.
+/// A bridge with no `QRIS_MERCHANT_ID` must not boot: the reconciliation sweep is the only
+/// thing that notices money the gateway took with no row behind it, and a sweep that cannot
+/// name a merchant silently learns nothing (A301).
 #[test]
-fn an_unknown_signature_scheme_fails_startup() {
+fn a_bridge_with_no_merchant_id_fails_startup() {
     let error = AppConfig::from_env_at(
         &root(),
         &[
             ("APP_ENV", "dev"),
-            ("QRIS_BASE_URL", "https://gateway.example"),
-            ("QRIS_API_KEY", "k"),
-            ("QRIS_CALLBACK_TOKEN", "t"),
-            ("QRIS_SIGNATURE_SCHEME", "md5"),
+            ("QRIS_BASE_URL", "http://gopay-bridge:8787"),
         ],
     )
-    .expect_err("an unknown scheme must not boot");
+    .expect_err("a bridge with no merchant id must not boot");
     assert!(
-        error.to_string().contains("QRIS_SIGNATURE_SCHEME"),
+        error.to_string().contains("QRIS_MERCHANT_ID"),
         "the boot error must name the key, got {error}"
     );
 
-    // A gateway with no callback token must not boot either: the token is the HMAC key,
-    // and an empty one verifies anything an attacker can compute.
-    let error = AppConfig::from_env_at(
+    // No gateway at all is a supported deployment: nothing to sell, and the checkout route
+    // answers the honest 502 rather than minting an invoice against a double.
+    let none = AppConfig::from_env_at(&root(), &[("APP_ENV", "dev"), ("QRIS_BASE_URL", "")])
+        .expect("the default config loads");
+    assert!(none.qris.is_none());
+
+    // And a merchant id with no gateway is not a gateway: the config is driven by the base
+    // URL, so a stray id changes nothing.
+    let stray = AppConfig::from_env_at(
         &root(),
         &[
             ("APP_ENV", "dev"),
-            ("QRIS_BASE_URL", "https://gateway.example"),
-            ("QRIS_API_KEY", "k"),
-            ("QRIS_CALLBACK_TOKEN", ""),
+            ("QRIS_BASE_URL", ""),
+            ("QRIS_MERCHANT_ID", "merchant-1"),
         ],
     )
-    .expect_err("a gateway with no callback token must not boot");
-    assert!(error.to_string().contains("QRIS_CALLBACK_TOKEN"), "{error}");
-
-    // The scheme is parsed even with no gateway at all: a typo is an operator who believes
-    // a scheme is in force.
-    assert!(
-        AppConfig::from_env_at(
-            &root(),
-            &[
-                ("APP_ENV", "dev"),
-                ("QRIS_BASE_URL", ""),
-                ("QRIS_SIGNATURE_SCHEME", "hmac"),
-            ],
-        )
-        .is_err()
-    );
-
-    // The three documented spellings parse, and no gateway means no `qris` config.
-    for scheme in SignatureScheme::ALL {
-        assert_eq!(SignatureScheme::parse(scheme.as_str()), Some(scheme));
-    }
-    let default = AppConfig::from_env_at(&root(), &[("APP_ENV", "dev"), ("QRIS_BASE_URL", "")])
-        .expect("the default config loads");
-    assert!(default.qris.is_none());
+    .expect("the default config loads");
+    assert!(stray.qris.is_none());
 }
 
 /// An unset `QRIS_BASE_URL` is a supported deployment: the server has no gateway, and
@@ -327,23 +381,35 @@ async fn a_deployment_with_no_gateway_has_none_and_says_so(pool: PgPool) {
     assert!(harness.state.qris().is_err());
 }
 
-/// The transactions list the reconciliation sweep reads, against the wire.
+/// The transaction list the reconciliation sweep reads: a **bare array** of settled money,
+/// bounded by the merchant and a window in minutes.
 #[sqlx::test(migrations = "../../migrations")]
-async fn the_transaction_list_is_read_from_the_gateway(pool: PgPool) {
+async fn the_transaction_list_is_the_bridges_bare_array(pool: PgPool) {
     let _ = pool;
     let stub = stub_http_json(
         200,
-        serde_json::json!({
-            "transactions": [
-                {
-                    "order_id": "ord_1",
-                    "status": "paid",
-                    "amount_idr": 5_000,
-                    "paid_at": "2026-10-12T09:10:00Z",
-                },
-                { "order_id": "ord_2", "status": "pending", "amount_idr": 10_000 },
-            ]
-        })
+        serde_json::json!([
+            {
+                "id": "tx-1",
+                "orderId": "gopay-99",
+                "status": "settlement",
+                "paymentType": "qris",
+                "amount": 5_137,
+                "realAmount": 5_037,
+                "currency": "IDR",
+                "time": "2026-10-12T09:10:00Z",
+            },
+            {
+                "id": "tx-2",
+                "orderId": "gopay-100",
+                "status": "capture",
+                "paymentType": "gopay",
+                "amount": 10_004,
+                "realAmount": 10_004,
+                "currency": "IDR",
+                "time": "2026-10-12T09:11:00Z",
+            },
+        ])
         .to_string(),
     )
     .await;
@@ -354,13 +420,31 @@ async fn the_transaction_list_is_read_from_the_gateway(pool: PgPool) {
         .expect("the stub answers a list");
 
     assert_eq!(listed.len(), 2);
-    assert_eq!(listed[0].order_id, "ord_1");
-    assert_eq!(listed[1].order_id, "ord_2");
+    assert_eq!(listed[0].transaction_id, "tx-1");
     assert_eq!(
-        stub.requests()[0].path,
-        "/transactions?since_hours=48",
-        "the window is what bounds the sweep"
+        listed[0].amount_idr, 5_137,
+        "the gross amount is what the buyer transferred, which is the join key"
     );
+    assert_eq!(
+        listed[1].amount_idr, 10_004,
+        "the fee is the provider's business; the join is on the gross"
+    );
+
+    // Hours become minutes, because the bridge bounds its own window that way, and the
+    // merchant is named: a sweep with no merchant has nothing to compare against.
+    let path = &stub.requests()[0].path;
+    assert!(path.starts_with("/transactions?"), "{path}");
+    assert!(path.contains("merchant_id=merchant-1"), "{path}");
+    assert!(path.contains("minutes=2880"), "{path}");
+
+    // The internal contract's wrapper is not this gateway's shape, so it is refused rather
+    // than read as an empty list — an empty list would mean "the gateway has no
+    // transactions", which is the one answer the sweep must not invent.
+    let wrapped = stub_http_json(200, serde_json::json!({ "transactions": [] }).to_string()).await;
+    assert!(matches!(
+        gateway_at(wrapped.base_url()).recent_transactions(48).await,
+        Err(PaymentError::Invalid(_))
+    ));
 }
 
 /// The fee the gateway reports is used where it reports one, and the configured rate is
@@ -369,7 +453,7 @@ async fn the_transaction_list_is_read_from_the_gateway(pool: PgPool) {
 async fn the_fee_falls_back_to_the_configured_rate_only_when_configured(pool: PgPool) {
     let _ = pool;
     let stub = stub_http_json(200, "{}").await;
-    let config = config_at(stub.base_url(), "hmac_sha256_hex");
+    let config = config_at(stub.base_url());
     let qris = config.qris.as_ref().unwrap().clone();
 
     assert_eq!(
@@ -383,8 +467,7 @@ async fn the_fee_falls_back_to_the_configured_rate_only_when_configured(pool: Pg
         &[
             ("APP_ENV", "dev"),
             ("QRIS_BASE_URL", stub.base_url()),
-            ("QRIS_API_KEY", "k"),
-            ("QRIS_CALLBACK_TOKEN", "t"),
+            ("QRIS_MERCHANT_ID", "merchant-1"),
             ("QRIS_FEE_PERCENT", "0.7"),
             ("QRIS_FEE_FIXED_IDR", "100"),
         ],
@@ -402,28 +485,10 @@ async fn the_fee_falls_back_to_the_configured_rate_only_when_configured(pool: Pg
         &[
             ("APP_ENV", "dev"),
             ("QRIS_BASE_URL", stub.base_url()),
-            ("QRIS_API_KEY", "k"),
-            ("QRIS_CALLBACK_TOKEN", "t"),
+            ("QRIS_MERCHANT_ID", "merchant-1"),
             ("QRIS_FEE_FIXED_IDR", "500"),
         ],
     )
     .expect("a fixed fee loads");
     assert_eq!(config.qris.as_ref().unwrap().fee_idr_for(10_000), Some(500));
-}
-
-fn hmac_sha256(secret: &[u8], message: &[u8]) -> Vec<u8> {
-    use hmac::digest::KeyInit;
-    use hmac::{Hmac, Mac};
-    let mut mac = <Hmac<sha2::Sha256> as KeyInit>::new_from_slice(secret).expect("a key");
-    mac.update(message);
-    mac.finalize().into_bytes().to_vec()
-}
-
-fn signed_headers(name: &str, value: &str) -> axum::http::HeaderMap {
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
-        axum::http::HeaderName::from_bytes(name.as_bytes()).expect("a header name"),
-        axum::http::HeaderValue::from_str(value).expect("a header value"),
-    );
-    headers
 }

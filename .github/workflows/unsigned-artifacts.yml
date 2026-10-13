@@ -37,7 +37,7 @@ on:
           `http://localhost:8080`, which is why this is a required input rather than a
           default nobody looks at. It must also be in the server's `WEB_ORIGIN` allowlist.
         required: true
-        default: http://168.110.202.106:8080
+        default: https://stvdy.ztvn.my.id
       visibility:
         description: What to do with the GitHub Release once the artifacts are built.
         type: choice

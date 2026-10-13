@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -119,7 +119,7 @@ fn local_midnight(tz: Tz, date: NaiveDate) -> Option<DateTime<Utc>> {
 /// `GET /dashboard`: time per course, review activity, and the totals.
 pub async fn read(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<DashboardQuery>,
 ) -> AppResult<Json<Value>> {
     let tz: Tz = user.timezone.parse().unwrap_or(chrono_tz::UTC);
@@ -221,7 +221,7 @@ pub async fn read(
 /// which is the same rule the weak list follows.
 pub async fn topics(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<DashboardQuery>,
 ) -> AppResult<Json<Value>> {
     crate::entitlements::require(&state, &user, Feature::AdvancedAnalytics).await?;

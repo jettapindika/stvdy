@@ -374,7 +374,7 @@ below name it rather than repeating it, so the two cannot drift.
 | 8 | EULA/privacy reviewed and published | **user** | `docs/EULA.md` is a marked draft; legal review, `HANDOVER.md` B2 |
 | 9 | Tax/PPN treatment settled, invoices carry the line items | **user** | B2 (`HANDOVER.md`); invoices currently carry no tax lines |
 | 10 | SMTP credentials set; a real verification email arrives | **user** | B3 (`HANDOVER.md`) |
-| 11 | QRIS gateway integrated against its real docs | **blocked** | B1 (`HANDOVER.md`); Phase 13 is implemented against an env-driven internal contract |
+| 11 | QRIS gateway integrated and **one payment settled end to end** | **blocked** | B1 resolved 2026-10-13 to the self-hosted `gopay-bridge` over a GoPay merchant account, and the server speaks its API (`docs/OPERATIONS.md` § Payments). What is left is a human: the bridge needs a phone-OTP login to the merchant account, and no real payment has been taken through it yet — until one settles, the gateway's own claim is untested against money |
 | 12 | Production host provisioned and `/health` green there | **user** | A330, A45 (`HANDOVER.md`); the Batam VPS is a 1-month trial and is staging only |
 | 13 | R2 bucket live and a presigned URL works | **user** | A15/A331 (`HANDOVER.md`) |
 | 14 | Restore drill run against the production backup | **user** | `scripts/restore-drill.sh` exists and runs; running it against **production** needs the host in row 12, so the production claim is the user's |
@@ -591,11 +591,21 @@ two replicas starting together race, and the one that loses serves traffic again
 not verified.
 
 ```bash
-docker run --rm --network host -e DATABASE_URL="$DATABASE_URL" stvdy-server:<tag> --migrate-only
-docker run -d --name stvdy --shm-size=1g --tmpfs /tmp <env…> -p 8080:8080 stvdy-server:<tag>
+# The migration step carries the same environment as the replica: the image sets
+# `APP_ENV=prod`, `--migrate-only` validates the whole config before it touches the database,
+# and prod requires `JWT_SECRET` (≥32 chars), a non-zero `ENCRYPTION_KEY_HEX` **and**
+# `WEB_ORIGIN` — so `-e DATABASE_URL` alone exits before migrating anything.
+docker run --rm --network host \
+  -e DATABASE_URL="$DATABASE_URL" -e APP_ENV=prod -e JWT_SECRET="$JWT_SECRET" \
+  -e ENCRYPTION_KEY_HEX="$ENCRYPTION_KEY_HEX" -e WEB_ORIGIN="$WEB_ORIGIN" \
+  stvdy-server:<tag> --migrate-only
+docker run -d --name stvdy --shm-size=1g --tmpfs /tmp --security-opt seccomp=unconfined <env…> -p 8080:8080 stvdy-server:<tag>
 ```
 
-`--shm-size` and a writable `/tmp` are both required by Chromium's sandbox (A338).
+`--shm-size` and a writable `/tmp` are both required by Chromium's sandbox (A338), and so is
+`--security-opt seccomp=unconfined`: Docker's default seccomp profile blocks the namespace the
+sandbox moves into, and a browser that dies there leaves the boot **hung** with no error and no
+bound port. `--cap-add SYS_ADMIN` is the broader alternative and `--no-sandbox` is not an option.
 
 **The reverse proxy.** TLS termination, `WEB_ORIGIN` pointed at the web build's origin, **buffering
 off on the SSE route** (the heartbeat exists precisely because proxies close idle streams), and
@@ -691,22 +701,23 @@ The `data-math-ready` guard is unchanged and is still the gate: an unreachable a
 than shipping a document full of LaTeX source (A340).
 
 
-### The webhook URL needs a host with the product's lifetime
+### The gateway needs no public address, and that is why it is admissible on a trial host
 
-`POST /webhooks/qris` is a **public** route (its authorisation is the signature, not a session), so
-its URL is registered with the gateway and is the gateway's retry target for every payment. It must
-**not** be hosted on the staging VPS: A45 makes that host a one-month trial, and a webhook URL that
-dies with the trial takes the callback path with it — a gateway retrying into a 502 is a payment the
-student made and the plan that never activated. The same requirement applies to the Google OAuth
-redirect URI and the updater manifests, for the same reason and in the same sentence: all three are
-addresses a third party has been told about, and none of them can move without coordination.
+Phase 13 shipped a **public** `POST /webhooks/qris` whose URL had to be registered with the gateway
+and therefore had to outlive the staging VPS (A45 makes that host a one-month trial). B1 resolved to
+a gateway that never pushes, so that route and its URL are gone: the server reaches the bridge over
+the compose network at `http://gopay-bridge:8787`, and the bridge publishes no port at all. Nothing
+about the payment path is an address a third party has been told about, which leaves the Google
+OAuth redirect URI and the updater manifests as the two things that still need a host with the
+product's lifetime.
 
-The two mitigations that exist are not substitutes for a durable host. `poll_payment` recovers a
-callback that was never delivered, and `reconcile_payments` flags the ones that disagree — both run
-inside the server, so a deployment with no reachable webhook URL still activates payments, just more
-slowly and with more `review` rows. `QRIS_WEBHOOK_IPS` is opt-in and reads `X-Forwarded-For`'s last
-hop, so a deployment behind a load balancer needs its own extractor before that allowlist means
-anything; the signature is required either way.
+What a dead gateway costs is now bounded differently. The server reads the outcome itself, so a
+bridge that is down leaves payments `pending` rather than mis-activating them: the checkout screen's
+poll logs the failure and answers from the row, `poll_payment` asks again five minutes later, and
+`reconcile_payments` flags anything the two disagree about. The one thing that is **not** recovered
+automatically is the bridge's own GoPay session — an expired refresh token means every status read
+answers `AUTH_REQUIRED` until a human logs in again (see `docs/OPERATIONS.md` § Payments, which has
+the procedure and the symptom).
 
 ## Tax and PPN
 
@@ -740,7 +751,7 @@ check.** As of v0.1.2 the places are:
 | `src-tauri/gen/apple/project.yml.template`, both blocks | `src-tauri/tests/share_group.rs::the_extension_version_matches_the_apps` |
 | `src-tauri/gen/apple/project.yml`, both blocks | nothing — it is XcodeGen's committed output, so it is byte-compared to the template by hand |
 | the two committed lock files (`Cargo.lock`, `src-tauri/Cargo.lock`) | `cargo metadata` rewrites them; the local packages' versions live there. `src-tauri/plugins/mobile/Cargo.lock` carries none, so it does not move |
-| `README.md`'s `/health` line, `docs/API.md`'s Phase 0 section | nothing — a documented response body that disagrees with the response is a false example |
+| `CONTRIBUTING.md`'s `/health` line (moved there from `README.md`), `docs/API.md`'s Phase 0 section | nothing — a documented response body that disagrees with the response is a false example |
 
 The iOS blocks' **`CFBundleVersion`** is deliberately not in that list: it is `"0.1.0"` and
 `"1"`, it was already stale at v0.1.1, and `a96a31d` recorded why moving it would be a guess —

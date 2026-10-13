@@ -18,7 +18,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use axum::http::StatusCode;
@@ -62,6 +62,19 @@ struct Row {
     feature: &'static str,
     /// The `(status, code)` an account whose every limit is used must get.
     refusal: Option<(u16, &'static str)>,
+    /// Whether an unverified account is admitted (A359).
+    ///
+    /// The second axis, and it is orthogonal to [`Class`]: `/workspaces` is swept (it counts
+    /// against `CreateWorkspace`) *and* refuses an unverified account, while `/usage` is
+    /// `ReadOnly` for the entitlement sweep and still refuses one, and `/devices` is
+    /// `ReadOnly` and admits one.
+    ///
+    /// It exists because the extractor a handler takes is otherwise invisible to any test: the
+    /// route table's own comment claimed for several phases that "`route_sweep.rs` asserts that
+    /// statically" about `VerifiedUser` and nothing did. A new route that forgets the gate
+    /// would be a hole nothing noticed — which is exactly how the workspace came to be
+    /// reachable by an unverified account in the first place.
+    verified: bool,
 }
 
 /// Every authenticated route that is not swept, and why.
@@ -73,33 +86,49 @@ fn read_only_rows() -> Vec<Row> {
         reason,
         feature: "",
         refusal: None,
+        verified: true,
+    };
+
+    // The account's own administrative surface: reachable with an unverified address, so a
+    // student whose mail never arrives can still revoke a device, change a setting, take their
+    // data out and leave (A359). Marked by its own constructor rather than by a field on every
+    // row, so "this one is open" is visible at the call site and a new row is gated by default
+    // — the safe direction for a table whose whole purpose is to catch a forgotten gate.
+    let open = |method: &'static str, path: &'static str, reason: &'static str| Row {
+        method,
+        path,
+        class: Class::ReadOnly,
+        reason,
+        feature: "",
+        refusal: None,
+        verified: false,
     };
 
     vec![
-        ro("GET", "/auth/me", "reads the caller's own account row"),
-        ro(
+        open("GET", "/auth/me", "reads the caller's own account row"),
+        open(
             "POST",
             "/auth/logout-all",
             "revoking sessions frees a device slot",
         ),
-        ro(
+        open(
             "POST",
             "/auth/resend-verification",
             "must work while locked out by A43",
         ),
-        ro(
+        open(
             "POST",
             "/auth/google/set-password",
             "an account action, not a plan feature",
         ),
-        ro("GET", "/devices", "reads the caller's own devices"),
-        ro("PATCH", "/devices/{id}", "renaming a device spends nothing"),
-        ro(
+        open("GET", "/devices", "reads the caller's own devices"),
+        open("PATCH", "/devices/{id}", "renaming a device spends nothing"),
+        open(
             "DELETE",
             "/devices/{id}",
             "revoking a device is the remedy a device refusal names",
         ),
-        ro(
+        open(
             "PUT",
             "/devices/{id}/push-token",
             "registering a token is not a plan feature",
@@ -214,7 +243,7 @@ fn read_only_rows() -> Vec<Row> {
             "/cheatsheets/{id}/re-render",
             "re-rendering is a pure function of stored blocks and charges nothing",
         ),
-        ro(
+        open(
             "GET",
             "/usage",
             "reads the caller's own plan, counters and cost table; no decision and nothing spent (A149/A159)",
@@ -226,14 +255,14 @@ fn read_only_rows() -> Vec<Row> {
         // out — and `DELETE /account` is required by app store rules for any app that can
         // create an account, so refusing it to an exhausted or downgraded student would be
         // refusing the one remedy the store rule exists to guarantee.
-        ro(
+        open(
             "DELETE",
             "/account",
             "deleting one's own account is a right, not a plan feature: the app store rules \
              require it for any app that can create an account, and an over-limit account must \
              still be able to leave",
         ),
-        ro(
+        open(
             "GET",
             "/account/export",
             "the spec's `Export my data`, on every plan; `ExportFormat` gates the report and \
@@ -335,7 +364,7 @@ fn read_only_rows() -> Vec<Row> {
             "/dashboard",
             "reads the caller's own sessions, reviews and due count",
         ),
-        ro("GET", "/settings", "reads the caller's own settings"),
+        open("GET", "/settings", "reads the caller's own settings"),
         // Phase 12's action surface. Both of these are reads in the sweep's sense: the list
         // reads the caller's own proposals, and a rejection spends nothing and frees the
         // student from a card. Reject is deliberately **not** plan-gated — a downgraded
@@ -352,7 +381,7 @@ fn read_only_rows() -> Vec<Row> {
             "/actions/{id}/reject",
             "rejecting spends nothing and is the remedy a stuck card needs",
         ),
-        ro(
+        open(
             "PUT",
             "/settings",
             "a channel the plan does not grant is refused per channel by the engine, which \
@@ -384,17 +413,17 @@ fn read_only_rows() -> Vec<Row> {
         // an account whose plan no longer grants BYOK — that is exactly when a student needs
         // to see what is stored. `PUT` is the one that is gated, by the plan *and* the
         // platform, and both are asserted in tests/byok.rs.
-        ro(
+        open(
             "GET",
             "/settings/api-key",
             "reads whether the caller has a key, never the key",
         ),
-        ro(
+        open(
             "DELETE",
             "/settings/api-key",
             "removing one's own key is a remedy, not a spend",
         ),
-        ro(
+        open(
             "PUT",
             "/settings/api-key",
             "the plan gate (Feature::Byok) and the platform refusal are asserted in \
@@ -404,7 +433,7 @@ fn read_only_rows() -> Vec<Row> {
         // them: **buying is the remedy an exhausted account needs**, so gating checkout on
         // a plan or a balance would lock the door the refusal points at. The platform rule
         // is a different check (`checkout_allowed`), and `tests/billing.rs` drives it.
-        ro(
+        open(
             "GET",
             "/plans",
             "reads the matrix the caller's own screen shows; a locked plan must still be \
@@ -416,12 +445,12 @@ fn read_only_rows() -> Vec<Row> {
             "buying is the remedy a refusal names; the platform refusal (A151) and the \
              verified-email rule (A43) are asserted in tests/billing.rs",
         ),
-        ro(
+        open(
             "GET",
             "/billing/payments/{id}",
             "reads the caller's own payment row, scoped by user_id in the statement",
         ),
-        ro(
+        open(
             "GET",
             "/billing/invoices",
             "reads the caller's own payment history; `payments` is not synced, so there is \
@@ -439,13 +468,13 @@ fn read_only_rows() -> Vec<Row> {
             "a downgrade records an intent and changes nothing until the period end (A296); \
              refusing it would trap a student on a plan they cannot leave",
         ),
-        ro(
+        open(
             "POST",
             "/billing/student/verify",
             "sends a verification link; the suffix list bounds the content and the rate \
              limiter bounds the volume (A299)",
         ),
-        ro(
+        open(
             "POST",
             "/billing/student/confirm",
             "spends a single-use token the caller holds; the token is the authorisation",
@@ -467,6 +496,7 @@ fn swept_rows() -> Vec<Row> {
         reason: "",
         feature,
         refusal: Some((status, code)),
+        verified: true,
     };
 
     vec![
@@ -642,6 +672,7 @@ fn exempt_rows() -> Vec<Row> {
         reason,
         feature: "",
         refusal: None,
+        verified: true,
     };
 
     vec![
@@ -739,7 +770,7 @@ fn exempt_rows() -> Vec<Row> {
         exempt(
             "POST",
             "/admin/payments/{id}/mark-paid",
-            "AdminUser only, and it runs the webhook's own `apply_paid` rather than a second \
+            "AdminUser only, and it runs the poller's own `apply_paid` rather than a second \
              activation path (A308); tests/admin_margin.rs asserts both the activation and the \
              404 a non-admin sees",
         ),
@@ -754,14 +785,6 @@ fn exempt_rows() -> Vec<Row> {
             "/admin/subscriptions/{user_id}",
             "AdminUser only: the extractor answers 404 for a non-admin (A7). A manual \
              extension recomputes the read-only flags through the same path the rollover uses",
-        ),
-        exempt(
-            "POST",
-            "/webhooks/qris",
-            "the gateway's callback: no session and no bearer token, and the signature over \
-             the raw body is the authorisation (A292/A309). Its refusals — 401 on a bad \
-             signature, 404 on an unknown order, 502 with no gateway — are asserted in \
-             tests/webhooks.rs",
         ),
     ]
 }
@@ -783,6 +806,7 @@ fn per_mutation_rows() -> Vec<Row> {
         reason: "a batch is admitted for any plan; the refusal is per mutation, and all six pushable entities are free (R1)",
         feature: "",
         refusal: None,
+        verified: true,
     }]
 }
 
@@ -1088,6 +1112,407 @@ fn every_registered_route_is_classified() {
             row.path
         );
     }
+}
+
+/// Every route's handler takes the extractor the table's `verified` column claims (A359).
+///
+/// This is the assertion the route table's own comment used to *claim* existed: "the four
+/// routes are the four that take `VerifiedUser`, and `route_sweep.rs` asserts that statically".
+/// Nothing did, so the extractor a handler took was invisible to every test — which is how
+/// `POST /workspaces` came to be reachable by an unverified account while the table described
+/// it as a normal authenticated route.
+///
+/// It reads the handler out of each `.route(...)` call and looks the signature up in the file
+/// that registered it (a module names its own handlers), falling back to a whole-tree search
+/// when the name is unique. The rule is exact in both directions:
+///
+///   * a handler taking `user: VerifiedUser` must be a row with `verified: true`;
+///   * one taking `user: AuthUser` must be a row with `verified: false`;
+///   * one taking neither has no account at all, so its row must be `Exempt`.
+///
+/// A handler the table cannot see fails rather than passing quietly, because the alternative —
+/// skipping what it cannot resolve — is a test that reports success for the routes it
+/// understands and silence for the one that was just added.
+#[test]
+fn every_route_takes_the_extractor_the_table_names() {
+    let rows_by_route = table();
+    let rows: BTreeMap<(String, String), &Row> = rows_by_route
+        .iter()
+        .map(|row| ((row.method.to_string(), row.path.to_string()), row))
+        .collect();
+
+    let mut unresolved = Vec::new();
+    let mut mismatched = Vec::new();
+
+    for (file, method, path, handler) in registered_route_handlers() {
+        let Some(row) = rows.get(&(method.clone(), path.clone())) else {
+            // `every_registered_route_is_classified` reports this; do not report it twice.
+            continue;
+        };
+        match handler_gate(&handler, &file) {
+            Some(Gate::Verified) if !row.verified => mismatched.push(format!(
+                "{method} {path} → {handler} takes `VerifiedUser` but the row is open"
+            )),
+            Some(Gate::Account) if row.verified => mismatched.push(format!(
+                "{method} {path} → {handler} takes `AuthUser` but the row claims a gate"
+            )),
+            Some(Gate::NoUser) if row.class != Class::Exempt => mismatched.push(format!(
+                "{method} {path} → {handler} takes no user, so the row must be Exempt"
+            )),
+            Some(_) => {}
+            None => unresolved.push(format!("{method} {path} → {handler} ({})", file.display())),
+        }
+    }
+
+    assert_eq!(
+        mismatched,
+        Vec::<String>::new(),
+        "the table and the handlers disagree about the verification gate"
+    );
+    assert_eq!(
+        unresolved,
+        Vec::<String>::new(),
+        "these handlers could not be read, so their extractor is unverified — name the module \
+         explicitly in the `.route(...)` call, or check the name"
+    );
+}
+
+/// What a handler's own signature says about who may call it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    /// `user: VerifiedUser` — the workspace (A359).
+    Verified,
+    /// `user: AuthUser` — the account's own administrative surface.
+    Account,
+    /// No `user` parameter at all: a public or signature-authorized route.
+    NoUser,
+}
+
+/// The `user` extractor a handler declares, read from its own signature.
+///
+/// A handler is named either bare (`get(list)` in the module that declares `list`) or
+/// qualified (`get(ics_in::list)`, `get(calendar::oauth::callback)`), so the qualified path is
+/// resolved against the file that registered the route: `ics_in::list` in `calendar/mod.rs` is
+/// `calendar/ics_in.rs`. Resolving it rather than searching by name matters because `list`,
+/// `remove`, `connect` and `stream` each exist in several modules, and a name-only lookup would
+/// read whichever came first — making this assertion pass for the wrong signature.
+///
+/// Both visibilities are accepted: a route table registers private handlers (`billing/routes.rs`
+/// keeps its five behind `async fn`), and requiring `pub` would report them as unreadable.
+fn handler_gate(handler: &str, in_file: &Path) -> Option<Gate> {
+    let leaf = handler.rsplit("::").next().unwrap_or(handler);
+    let needles = [
+        format!("pub async fn {leaf}("),
+        format!("async fn {leaf}("),
+    ];
+
+    let read = |text: &str| -> Option<Gate> {
+        for needle in &needles {
+            let Some(found) = text.find(needle.as_str()) else {
+                continue;
+            };
+            let start = found + needle.len();
+            let args = &text[start..matching_paren(text.as_bytes(), start)];
+            // The `user:` parameter's own type, not "does this signature mention
+            // `AuthUser` anywhere": `VerifiedUser` derefs to `AuthUser`, and a signature
+            // could name either through a path (`crate::auth::extract::AuthUser`), which is
+            // exactly how one route kept the looser extractor through a bulk rename and went
+            // unnoticed until this test existed.
+            let Some(parameter) = args
+                .split(',')
+                .map(str::trim)
+                .find(|part| part.starts_with("user:"))
+            else {
+                return Some(Gate::NoUser);
+            };
+            let named = parameter
+                .rsplit(':')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .rsplit("::")
+                .next()
+                .unwrap_or_default();
+            return Some(match named {
+                "VerifiedUser" => Gate::Verified,
+                "AuthUser" => Gate::Account,
+                _ => Gate::NoUser,
+            });
+        }
+        None
+    };
+
+    if let Some(gate) = resolve_module_file(handler, in_file)
+        .into_iter()
+        .find_map(|path| std::fs::read_to_string(&path).ok().and_then(|text| read(&text)))
+    {
+        return Some(gate);
+    }
+
+    // A bare name in a module whose handlers live elsewhere, or a module layout this resolver
+    // does not model. Only when the name is unambiguous tree-wide, because a second match
+    // could be a different `list`.
+    let mut found = source_files()
+        .into_iter()
+        .filter_map(|path| std::fs::read_to_string(&path).ok())
+        .filter(|text| read(text).is_some());
+    let first = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    read(&first)
+}
+
+/// Every file a possibly-qualified handler name could resolve to, given the file that names it.
+///
+/// A route table writes the path the way Rust resolves it, and that depends on how the module
+/// reached the name: `ics_in::list` inside `calendar/mod.rs` is the child module
+/// (`calendar/ics_in.rs`), while `calendar::oauth::callback` inside `routes/mod.rs` goes
+/// through a `use crate::calendar;` and so resolves from the **crate root**
+/// (`src/calendar/oauth.rs`). Modelling `use` statements is not worth it, so both anchors are
+/// walked and the caller takes the first file that actually declares the function — a wrong
+/// anchor simply does not contain it.
+///
+/// The walk follows `rustc`'s layout: `q1::q2` from `D` is `D/q1.rs` or `D/q1/mod.rs`, then
+/// `D/q1/q2.rs` or `D/q1/q2/mod.rs`.
+fn resolve_module_file(handler: &str, in_file: &Path) -> Vec<PathBuf> {
+    let segments: Vec<&str> = handler.split("::").collect();
+    let qualifier = &segments[..segments.len().saturating_sub(1)];
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    let mut candidates = Vec::new();
+    for anchor in [in_file.parent(), Some(root.as_path())] {
+        let Some(mut dir) = anchor.map(Path::to_path_buf) else {
+            continue;
+        };
+        let mut current = in_file.to_path_buf();
+        let mut complete = true;
+
+        for segment in qualifier {
+            let as_file = dir.join(format!("{segment}.rs"));
+            let as_dir = dir.join(segment);
+            if as_file.exists() {
+                current = as_file;
+                dir = as_dir;
+            } else if as_dir.join("mod.rs").exists() {
+                current = as_dir.join("mod.rs");
+                dir = as_dir;
+            } else {
+                complete = false;
+                break;
+            }
+        }
+
+        if complete && !candidates.contains(&current) {
+            candidates.push(current);
+        }
+    }
+
+    candidates
+}
+
+/// `(file, method, path, handler)` for every `.route(...)` call under `src`.
+///
+/// [`registered_routes`] answers "which paths exist"; this answers "and which function serves
+/// each", which is what makes the extractor checkable. Both read the same `.route(` argument
+/// text so they cannot disagree about what is registered.
+fn registered_route_handlers() -> Vec<(PathBuf, String, String, String)> {
+    let mut found = Vec::new();
+    for file in source_files() {
+        let source = std::fs::read_to_string(&file).expect("a readable source file");
+        for arguments in route_arguments(&source) {
+            let (path, handlers) = split_route_handlers(&arguments);
+            let Some(path) = path else { continue };
+            for (method, handler) in handlers {
+                found.push((file.clone(), method, path.clone(), handler));
+            }
+        }
+    }
+    found
+}
+
+/// The `(METHOD, handler)` pairs in a `.route(...)` argument list.
+///
+/// Same walk as [`split_route_arguments`], which reports only the methods: this keeps the name
+/// that follows `post(`/`get(`/… so the signature can be looked up. A qualified path
+/// (`auth::routes::signup`) keeps its last segment, because that is the function declared in
+/// the module the route table names.
+fn split_route_handlers(arguments: &str) -> (Option<String>, Vec<(String, String)>) {
+    let bytes = arguments.as_bytes();
+    let mut index = 0;
+    let mut path = None;
+
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            let end = skip_token(bytes, index);
+            path = Some(arguments[index + 1..end - 1].to_string());
+            index = end;
+            break;
+        }
+        index += 1;
+    }
+
+    let mut handlers = Vec::new();
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = index;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            let word = &arguments[start..index];
+            let mut lookahead = index;
+            while lookahead < bytes.len() && bytes[lookahead].is_ascii_whitespace() {
+                lookahead += 1;
+            }
+            if bytes.get(lookahead) == Some(&b'(') {
+                let method = match word {
+                    "get" => Some("GET"),
+                    "post" => Some("POST"),
+                    "put" => Some("PUT"),
+                    "patch" => Some("PATCH"),
+                    "delete" => Some("DELETE"),
+                    _ => None,
+                };
+                if let Some(method) = method {
+                    // The first identifier inside the call is the handler.
+                    let mut inner = lookahead + 1;
+                    while inner < bytes.len() && bytes[inner].is_ascii_whitespace() {
+                        inner += 1;
+                    }
+                    let name_start = inner;
+                    while inner < bytes.len()
+                        && (bytes[inner].is_ascii_alphanumeric()
+                            || bytes[inner] == b'_'
+                            || bytes[inner] == b':')
+                    {
+                        inner += 1;
+                    }
+                    let name = arguments[name_start..inner].to_string();
+                    handlers.push((method.to_string(), name));
+                }
+            }
+        } else if byte == b'"' {
+            index = skip_token(bytes, index);
+        } else {
+            index += 1;
+        }
+    }
+
+    (path, handlers)
+}
+
+/// A359: an unverified account reaches its own administrative surface and nothing else.
+///
+/// Driven over the whole table, in **both** directions, because each direction catches a
+/// different failure and only one of them is a security failure:
+///
+///   * a route marked `verified` that answers anything but `403 email_not_verified` is the gate
+///     not firing — a workspace an unverified account should not have;
+///   * a route marked open that answers `email_not_verified` is a student **trapped**: their
+///     address cannot receive mail, and the routes that would let them revoke a device, take
+///     their data out or delete the account are the ones refusing them. A one-directional test
+///     passes while that student has no way out.
+///
+/// Every request carries a fresh UUID where the path has a parameter and an empty body where it
+/// takes one, which is enough because the gate runs in the extractor, before the handler parses
+/// anything. A route that reads its path parameter first would fail here as a 404 rather than a
+/// 403, which is also a mismatch worth seeing.
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_unverified_account_reaches_only_its_own_surface(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let email = "unverified-sweep@example.test";
+    let (status, body) = json(
+        &app,
+        "POST",
+        "/auth/signup",
+        "",
+        serde_json::json!({
+            "email": email,
+            "password": "correct horse battery",
+            "device": { "name": "Laptop", "platform": "macos" }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let token = body["access_token"]
+        .as_str()
+        .expect("an access token")
+        .to_string();
+    assert_eq!(
+        body["user"]["email_verified"], false,
+        "this test is about an unverified account: {body}"
+    );
+
+    // The two routes that end the session or the account, run last: `logout-all` revokes the
+    // token every later row would need, and `DELETE /account` marks the account, which would
+    // make the rest of the table answer `account_deleted` instead of what it is being asked
+    // about. Both are still exercised, and both are the two a trapped student most needs.
+    const ENDS_THE_SESSION: [(&str, &str); 2] = [("POST", "/auth/logout-all"), ("DELETE", "/account")];
+
+    let rows = table();
+    let ordered = rows
+        .iter()
+        .filter(|row| row.class != Class::Exempt)
+        .filter(|row| !ENDS_THE_SESSION.contains(&(row.method, row.path)))
+        .chain(rows.iter().filter(|row| {
+            row.class != Class::Exempt && ENDS_THE_SESSION.contains(&(row.method, row.path))
+        }));
+
+    for row in ordered {
+        let path = substitute_ids(row.path);
+        let request = if row.method == "GET" {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!({})
+        };
+        let (status, body) = json(&app, row.method, &path, &token, request).await;
+
+        if row.verified {
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{} {} must refuse an unverified account (A359), got {status} {body}",
+                row.method,
+                row.path
+            );
+            assert_eq!(
+                body["code"], "email_not_verified",
+                "{} {} must name the reason: {body}",
+                row.method, row.path
+            );
+        } else {
+            assert_ne!(
+                body["code"], "email_not_verified",
+                "{} {} must stay reachable for an unverified account, or a student whose mail \
+                 never arrives cannot get out: {status} {body}",
+                row.method,
+                row.path
+            );
+        }
+    }
+}
+
+/// The path with every `{...}` segment replaced by a fresh UUID.
+///
+/// A real id is unnecessary: the gate runs in the extractor, before the handler reads its
+/// parameters, and for the open rows the assertion is only that the gate did not fire.
+fn substitute_ids(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            if segment.starts_with('{') && segment.ends_with('}') {
+                Uuid::now_v7().to_string()
+            } else {
+                segment.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Every route the spend cap covers is also a `Swept` row.

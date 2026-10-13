@@ -9,8 +9,10 @@ import { api } from '../client'
  *
  * **The amount is the server's.** `PaymentView.amount_idr` is what
  * `billing::price` computed from `config/plans.toml`, the student price and any
- * discount code, and it is the number the webhook later checks the payment
- * against (A294). Nothing here adds, subtracts or rounds: a client-side total that
+ * discount code, and `PaymentView.payable_amount_idr` is what the QRIS charge
+ * actually asks for — the same figure, or that figure plus the gateway's own
+ * unique-amount offset when it matches the settlement by amount alone (A294).
+ * Nothing here adds, subtracts or rounds: a client-side total that
  * disagrees with the charge is a support ticket at best, and `checkout.ts`'s
  * `orderLines` reads the row's own itemisation rather than re-deriving it.
  *
@@ -107,6 +109,16 @@ export interface PaymentView {
   credits: number | null
   /** The amount to pay, computed by `billing::price`. Never re-derived on the client. */
   amount_idr: number
+  /**
+   * The amount the student must transfer, verbatim from the server.
+   *
+   * Equals `amount_idr` unless the gateway assigned a unique amount — a 1..999 IDR
+   * offset on top of the price — so a transfer can be matched to this invoice by
+   * amount alone. The QRIS charge carries this figure, so it is the one the screen
+   * shows and the one a student will see on their statement. Never re-derived on
+   * the client.
+   */
+  payable_amount_idr: number
   /** The list price before the discount, so the screen can itemise the charge. */
   amount_before_discount_idr: number
   discount_percent: number
@@ -159,10 +171,10 @@ export function usePlans() {
  * screen's own state is derived from the row rather than from the poll.
  *
  * **A row the server has not answered yet does keep polling**, and that is the
- * lost-webhook path rather than an oversight: the state a student sits in when a
- * callback went missing is `pending` with a live expiry, and the polling fallback
- * (A301) is the only thing that moves it. So the interval is keyed on the row
- * being *open*, not on the client's countdown.
+ * point rather than an oversight: the gateway never pushes, so this poll is what
+ * asks it, and the state a student sits in before a settlement is read is
+ * `pending` with a live expiry (A301). So the interval is keyed on the row being
+ * *open*, not on the client's countdown.
  */
 export function usePayment(id: string | undefined) {
   return useQuery({

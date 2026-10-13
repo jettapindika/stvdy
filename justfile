@@ -341,36 +341,38 @@ smoke-server-phase12:
 smoke-phase12:
     BASE=http://localhost:8099 bash scripts/smoke-phase12.sh
 
-# --- Phase 13 smoke: the QRIS money path, against the stub gateway ---
+# --- Phase 13 smoke: the QRIS money path, against a scripted gateway ---
 #
-# **The gateway is a stub, and this is the honest consequence of B1.** The real gateway has
-# no identity, no docs, no response shapes and no fee rates, so nothing here can exercise a
-# live one: `scripts/stub-qris.py` speaks the internal contract
-# `crates/server/src/integrations/payment/mapping.rs` defines, and the run prints which
-# gateway it used in its first line. Pointing `QRIS_BASE_URL` somewhere other than loopback
-# switches the run to "sandbox" mode, where it signs callbacks and reads back the invoice the
-# server stored but cannot mint one at a gateway it does not control.
+# **The gateway is real and the stub stands in for it, not for a guess.** B1 resolved to a
+# self-hosted QRIS bridge (`gopay-bridge`) that is *polled*: it publishes no host port,
+# authenticates nothing and never pushes, so the server's only ingress is its own status reads
+# (A292/A301). A local run can therefore only produce "the buyer paid" by being the thing the
+# server asks, which is what `scripts/stub-qris.py` is: it speaks the surface
+# `crates/server/src/integrations/payment/mapping.rs` maps, field for field, and the run
+# scripts its answers through the stub's `/_control` routes.
 #
-# The three `QRIS_*` values are dummy strings, and the signature scheme is named explicitly so
-# the run's signing matches the server's verification regardless of a developer's `.env`: a
-# mismatch there would look like a forged callback rather than a configuration difference.
+# The env below is what the server needs to speak it, and nothing more: the bridge's base URL,
+# the merchant whose transaction feed the reconciliation sweep reads — `QRIS_MERCHANT_ID` is a
+# **boot failure** when a base URL is set, because a sweep that cannot name a merchant learns
+# nothing (A301) — and a stub LLM so a boot does not reach for a real provider. There are no
+# gateway secrets: the bridge holds its own GoPay session and authenticates nothing (A292), so
+# the API key, the callback token and the signature scheme these recipes used to set are gone
+# with the callback path.
 #
-# It reads the database back (the payment row, the subscription, the ledger and the audit
-# rows), so it needs `DATABASE_URL`, which it reads out of `.env` itself, and it prunes
-# `signup_attempts` for 127.0.0.1 at the start because A154's window is 24h.
+# It reads the database back (the payment row, the subscription, the ledger and the
+# `gateway_events` audit rows), so it needs `DATABASE_URL`, which it reads out of `.env`
+# itself, and it prunes `signup_attempts` for 127.0.0.1 at the start because A154's window is
+# 24h.
 smoke-qris:
-    python3 scripts/stub-qris.py --port 8200 --api-key smoke-qris-key \
-      --log var/stub-phase13-requests.jsonl
+    python3 scripts/stub-qris.py --port 8200 --log var/stub-phase13-requests.jsonl
 
 smoke-server-phase13:
-    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_API_KEY=smoke-qris-key \
-      QRIS_CALLBACK_TOKEN=smoke-callback-token QRIS_SIGNATURE_SCHEME=hmac_sha256_hex \
+    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_MERCHANT_ID=smoke-merchant \
       LLM_BASE_URL=http://127.0.0.1:8100/v1 LLM_API_KEY=stub LLM_MODEL=stub \
       BIND_ADDR=127.0.0.1:8099 cargo run -p stvdy-server
 
 smoke-phase13:
-    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_API_KEY=smoke-qris-key \
-      QRIS_CALLBACK_TOKEN=smoke-callback-token QRIS_SIGNATURE_SCHEME=hmac_sha256_hex \
+    QRIS_BASE_URL=http://127.0.0.1:8200 QRIS_MERCHANT_ID=smoke-merchant \
       BASE=http://localhost:8099 bash scripts/smoke-phase13.sh
 
 # --- release (Phase 15) ---
@@ -383,9 +385,9 @@ smoke-phase13:
 # and `IMAGE=stvdy-server:v0.2.0 just image-check` are the same artifact.
 image_tag := env("IMAGE", "stvdy-server:local")
 
-# Build the server image. `--shm-size` and a writable `/tmp` are the *run* flags Chromium's
-# sandbox needs (A338), not build flags; `just image-check` and `docs/OPERATIONS.md` carry
-# them.
+# Build the server image. `--shm-size`, a writable `/tmp` and `--security-opt
+# seccomp=unconfined` are the *run* flags Chromium's sandbox needs (A338), not build flags;
+# `just image-check` and `docs/OPERATIONS.md` carry them.
 image:
     docker build -t {{image_tag}} .
 

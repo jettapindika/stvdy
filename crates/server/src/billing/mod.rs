@@ -2,10 +2,17 @@
 //!
 //! Two layers, and the split is the point. `crates/core/src/billing/` is **pure** —
 //! `price()`, `apply_payment()`, `upgrade_delta()` — and knows nothing about a database.
-//! This module owns the `payments` row, the checkout route, the webhook and the period
-//! rules; `crates/server/src/integrations/payment/` owns the wire. The amount a student
-//! is quoted and the amount the webhook checks come out of the same pure function, so
-//! they cannot disagree.
+//! This module owns the `payments` row, the checkout route, the poller and the period
+//! rules; `crates/server/src/integrations/payment/` owns the wire. The price a student is
+//! quoted comes out of that pure function, so the number charged and the number recorded
+//! cannot disagree — and the gateway's own unique offset is stored beside it rather than
+//! replacing it (`payments.payable_amount_idr`).
+//!
+//! **The gateway never pushes**, so there is no callback module here: the client's poll
+//! ([`poll::refresh_pending`], called from `checkout::show`) and the five-minute sweep
+//! ([`poll::poll_pending`]) are the two readers, and both apply through
+//! [`apply::apply_paid`]. One activation path is what makes a payment recovered by a poll
+//! and one recovered by the sweep indistinguishable.
 //!
 //! [`checkout_allowed`] is Phase 7's platform refusal (A151). It lives here rather than
 //! in `checkout` because the *control* is testable without a route, and because a second
@@ -18,7 +25,6 @@ pub mod periods;
 pub mod poll;
 pub mod routes;
 pub mod student;
-pub mod webhook;
 
 use stvdy_core::config::{BillingPolicy, Platform};
 

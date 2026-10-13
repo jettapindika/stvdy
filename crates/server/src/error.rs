@@ -54,11 +54,23 @@ pub enum AppError {
     /// is a *promise*: a generic 401 tells a student their password is wrong, and the remedy
     /// they reach for — reset it, try again — cannot work, because the account they are
     /// typing at is going away. The message names the purge date, which is the only fact the
-    /// student needs and the one thing a 401 could not carry.
-    #[error("this account was deleted at your request; its data is removed on {purges_at}")]
+    /// student needs and the one thing a 401 could not carry, and it says what that date does
+    /// to the address, because "my address is refused" is what brings them to signup and the
+    /// purge is what gives it back (`purge_accounts` anonymizes the row, which releases it).
+    ///
+    /// **This is one of the two messages the client renders rather than replaces** (the other
+    /// is `Validation`), so it is written as a sentence a student reads: capitalised, and the
+    /// date at minute precision rather than `chrono`'s sub-second `Display`. The purge date
+    /// exists nowhere else — the envelope's fixed five keys have no field for it — so a
+    /// composed client sentence could only say "after a while" about the one date the student
+    /// is waiting for.
+    #[error(
+        "This account was deleted at your request; its data is removed on {}, \
+         which releases this address for a new account",
+        .purges_at.format("%Y-%m-%d %H:%M UTC")
+    )]
     AccountDeleted {
-        /// When `purge_deleted_accounts` will remove the data. Rendered RFC 3339 in the
-        /// message, because the client shows the server's sentence rather than composing one.
+        /// When `purge_deleted_accounts` will remove the data.
         purges_at: DateTime<Utc>,
     },
 
@@ -76,7 +88,7 @@ pub enum AppError {
         used: Option<i64>,
     },
 
-    /// A verified email is required before any action that costs money (A43).
+    /// A verified email is required before the workspace opens (A43, A359).
     /// Distinct from `Forbidden` because the remedy is "check your inbox", not
     /// "upgrade".
     #[error("email verification required")]

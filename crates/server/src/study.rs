@@ -25,7 +25,7 @@ use uuid::Uuid;
 use stvdy_core::study::check_session;
 use stvdy_sync::proto::Entity;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::tasks::Reject;
@@ -172,7 +172,7 @@ pub struct SessionView {
 /// is the mechanical defence against "a timer that logs a session twice on restart".
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let client_ts: DateTime<Utc> = body
@@ -243,7 +243,7 @@ pub async fn create(
 /// `GET /sessions?from=&to=`: the caller's own sessions, newest first.
 pub async fn list(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<WindowQuery>,
 ) -> AppResult<Json<Value>> {
     let (from, to) = window(query)?;
@@ -273,7 +273,7 @@ pub async fn list(
 /// a second answer to "how many days in a row".
 pub async fn activity(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<WindowQuery>,
 ) -> AppResult<Json<Value>> {
     let (from, to) = window(query)?;

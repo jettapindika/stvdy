@@ -41,12 +41,13 @@ const BOUNDARY_KINDS: [&str; 2] = ["reset_counters", "monthly_grant"];
 
 /// How often the payment passes are enqueued (A301).
 ///
-/// Five minutes is the resolution of a lost webhook: the checkout screen polls the server,
-/// the server polls the gateway, and a student who paid should see their plan inside a
-/// coffee break rather than at the next quarter hour. It is deliberately its own ticker
-/// rather than the boundary pass's 900 seconds — a per-account boundary job is a monthly
-/// event and does not want to run three times as often, and a payment is a minute-scale
-/// event that must not wait fifteen.
+/// Five minutes is the resolution of the *sweep*, which is the backstop for a client that is
+/// not watching. The fast path is the checkout screen's own poll: the gateway never pushes,
+/// so `GET /billing/payments/:id` asks the bridge on every tick and a student who has paid
+/// sees their plan within a couple of seconds. This pass covers the student who paid and
+/// closed the tab, so it is a minute-scale event rather than a quarter-hourly one. It is
+/// deliberately its own ticker rather than the boundary pass's 900 seconds — a per-account
+/// boundary job is a monthly event and does not want to run three times as often.
 pub const PAYMENT_TICK: Duration = Duration::from_secs(300);
 
 /// How often the reminder pass runs (A287).

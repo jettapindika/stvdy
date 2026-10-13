@@ -20,11 +20,11 @@ import { platform } from '@/platform'
  * Five rules live here, and each is a rule rather than a step.
  *
  *  * **The total is the server's.** The order summary's amount is `orderLines(view)`'s
- *    own total, which reads `amount_idr`, `amount_before_discount_idr`,
- *    `discount_percent` and `discount_code` off the payment row. Nothing here adds
- *    or subtracts: A298 makes the student promo and a discount code one decision,
- *    made once by `billing::price`, and a client that re-derived it would be a
- *    second implementation of the money rule.
+ *    own total, which reads `payable_amount_idr`, `amount_idr`,
+ *    `amount_before_discount_idr`, `discount_percent` and `discount_code` off the
+ *    payment row. Nothing here adds or subtracts: A298 makes the student promo and
+ *    a discount code one decision, made once by `billing::price`, and a client that
+ *    re-derived it would be a second implementation of the money rule.
  *  * **The countdown is the server's `expires_at` against this client's clock.**
  *    `checkout.ts` takes `now` as a parameter and reads no clock, so the ticking is
  *    here and the arithmetic is there. The server re-checks expiry on every poll,
@@ -41,9 +41,10 @@ import { platform } from '@/platform'
  *    this is `/billing/checkout/:paymentId`, so it takes the modal's content idiom
  *    at `max-w-2xl` — a screen that owns its width says so itself.
  *
- * The screen polls through `usePayment`, which is what recovers a lost webhook
- * (A301): the server applies the same handler the webhook calls when the gateway
- * says paid, so the state moves without the student doing anything.
+ * The screen polls through `usePayment`, and that poll is the **fast ingress**
+ * (A301): the gateway never pushes, so each poll asks it once and the server
+ * applies the answer through the one function that activates a payment — the state
+ * moves without the student doing anything, and without waiting for the sweep.
  *
  * **The payment id arrives as a prop**, not through `useParams`, and the router's
  * `CheckoutRoute` is what reads the path. It is the same shape `BillingRoute` and
@@ -123,7 +124,7 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
   // component-level one there.
   if (!policy.allowPurchaseUi) {
     return (
-      <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('checkout.title')} subtitle={t('plan.subtitle')} />
         <p className="max-w-prose text-body text-muted">{t('plan.mobile.noPurchase')}</p>
       </div>
@@ -170,7 +171,7 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
   // than an exception to this one: `break-normal` on the value and the `<wbr />`
   // inside `LineValue`, below.
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 py-8 wrap-anywhere">
+    <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6 px-5 md:px-[32px] py-8 wrap-anywhere">
       <PageHeader title={t('checkout.title')} subtitle={t('checkout.subtitle')} />
 
       {payment.isPending && <SkeletonRows rows={3} label={t('checkout.loading')} />}
@@ -181,7 +182,7 @@ export function CheckoutScreen({ paymentId }: { paymentId: string }) {
         <>
           {/* The order summary: the amount the student is about to pay, its
               itemisation, and the reference a student quotes to support. The
-              amount is `orderLines`' own total — the same number the webhook
+              amount is `orderLines`' own total — the same number the server
               checks the gateway's claim against (A294). */}
           <div className="raised flex flex-col gap-4 rounded-field p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">

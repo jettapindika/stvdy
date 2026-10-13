@@ -17,7 +17,7 @@ use sqlx::PgConnection;
 use stvdy_sync::proto::{Change, CursorKind, Entity, Op, PullQuery, PullResponse, is_stale};
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -45,7 +45,7 @@ pub struct Page {
 /// `GET /sync/pull`.
 pub async fn pull(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(params): Query<PullParams>,
 ) -> AppResult<Json<PullResponse>> {
     let started = Instant::now();

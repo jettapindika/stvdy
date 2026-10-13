@@ -16,7 +16,7 @@ use futures::Stream;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::chat::sse::HEARTBEAT;
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -40,7 +40,7 @@ pub fn seq_event(seq: i64) -> Event {
 /// `GET /sync/stream`.
 pub async fn stream(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let pool = state.pool.clone();
     let user_id = user.user_id;

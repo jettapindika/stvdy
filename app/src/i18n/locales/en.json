@@ -264,6 +264,7 @@
       "beforeDiscount": "Price before discount",
       "discountStudent": "Student discount",
       "discountCode": "Code {{code}}",
+      "uniqueAmount": "Unique amount for automatic matching",
       "total": "Total"
     },
     "state": {
@@ -486,6 +487,9 @@
       "sentTo": "We sent a verification link to {{email}}. Open it to confirm that address.",
       "needLink": "This page needs the link from your verification email. Open the newest one, or sign in to request another.",
       "goToWorkspaces": "Go to your workspaces",
+      "lockedUntilVerified": "Your workspace opens as soon as this address is confirmed. Until then it stays closed, so nothing can be added to an account nobody has proven they own.",
+      "useAnotherAddress": "Use a different address",
+      "refreshingSession": "Finishing your sign-in",
       "checking": "Checking this verification link",
       "verifiedSignedIn": "Your email address is verified.",
       "verifiedSignedOut": "Your email address is verified. Sign in to continue.",
@@ -796,6 +800,14 @@
       "title": "Not available on this plan or device",
       "reason": "This is not included in your current plan, or this device is over the plan's limit."
     },
+    "account_deleted": {
+      "title": "Account deleted",
+      "reason": "This account was deleted at your request. Its data is removed at the end of the deletion window, and this address can be registered again after that."
+    },
+    "forbidden": {
+      "title": "Not allowed",
+      "reason": "You do not have access to this. If you are signed in, it may belong to another account."
+    },
     "email_not_verified": {
       "title": "Email not verified",
       "reason": "Verify your email address first. Check your inbox for the link."
@@ -815,6 +827,10 @@
     "link_expired": {
       "title": "Link expired",
       "reason": "This link has expired. Open the source again to get a fresh one."
+    },
+    "resync_required": {
+      "title": "Local copy out of date",
+      "reason": "This device's copy is too far behind to catch up. Reset local data and sync again from the start."
     },
     "insufficient_credits": {
       "title": "Not enough credits",

@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use stvdy_core::calendar::feed::{FeedEvent, FeedKind, render_feed};
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -113,7 +113,7 @@ pub async fn feed(
 /// URL could not be revoked without rotating a server-wide key.
 pub async fn regenerate_token(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
 ) -> AppResult<Json<Value>> {
     let token = feed_token();
     sqlx::query("update users set ics_feed_token = $2 where id = $1")
@@ -151,7 +151,7 @@ fn feed_token() -> String {
 ///
 /// It returns the caller's own token to the caller's own session and nothing else, which is
 /// why it is a `ReadOnly` row in the route sweep.
-pub async fn token(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
+pub async fn token(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<Value>> {
     let token: Option<String> =
         sqlx::query_scalar("select ics_feed_token from users where id = $1 and deleted_at is null")
             .bind(user.user_id)

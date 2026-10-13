@@ -23,7 +23,7 @@ use stvdy_sync::proto::{
     Entity, ErrorCode, Mutation, MutationResult, Op, PushRequest, PushResponse,
 };
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::{AuthUser, VerifiedUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -193,7 +193,7 @@ pub fn decide(
 /// `POST /sync/push`: one transaction for the whole batch, one savepoint per mutation.
 pub async fn push(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<PushRequest>,
 ) -> AppResult<Json<PushResponse>> {
     let started = Instant::now();

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::planner::{goal_topics, topic_attempts, topics_for};
 use crate::state::AppState;
@@ -90,7 +90,7 @@ pub struct ListQuery {
 /// that is nearest.
 pub async fn list(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Query(query): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     let limit = query.limit.unwrap_or(MAX_LIMIT).clamp(1, MAX_LIMIT);
@@ -116,7 +116,7 @@ pub async fn list(
 /// `GET /goals/:id`. 404 for another account's goal or a tombstone.
 pub async fn one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
     let goal = owned_goal(&state, user.user_id, id).await?;
@@ -130,7 +130,7 @@ pub async fn one(
 /// an exam to prepare for.
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<GoalBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let title = validated_title(body.title.as_deref())?;
@@ -174,7 +174,7 @@ pub async fn create(
 /// — clearing a goal's sources and not mentioning them are different edits.
 pub async fn update(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
     Json(body): Json<GoalBody>,
 ) -> AppResult<Json<Value>> {
@@ -223,7 +223,7 @@ pub async fn update(
 /// in their calendar.
 pub async fn delete_one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let affected = sqlx::query(
@@ -249,7 +249,7 @@ pub async fn delete_one(
 /// goal has no attempts, because `0%` is a claim the app cannot make from nothing.
 pub async fn progress(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
     let goal = owned_goal(&state, user.user_id, id).await?;

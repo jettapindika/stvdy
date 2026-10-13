@@ -682,10 +682,13 @@ async fn the_signed_file_url_works_without_a_bearer_token(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-/// A43: ingestion is one of the four things an unverified account cannot do, and
-/// it is the first route in the project that spends provider money on embedding
-/// calls. The check must happen before anything is stored, or a scripted account
-/// can fill the bucket without ever confirming its address.
+/// A43/A359: ingestion is behind a verified address, and it is the first route in the project
+/// that spends provider money on embedding calls. The check must happen before anything is
+/// stored, or a scripted account can fill the bucket without ever confirming its address.
+///
+/// The workspace this test would upload into cannot be created either (A359): the gate starts
+/// at the workspace now, not at the spend. Both refusals are asserted, and the id for the
+/// upload is arbitrary because the extractor refuses before the path is read.
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unverified_account_cannot_ingest(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -711,8 +714,17 @@ async fn an_unverified_account_cannot_ingest(pool: PgPool) {
         .expect("access token")
         .to_string();
 
-    // Creating a workspace is allowed: only spending is gated.
-    let workspace = create_workspace(&app, &token, "Unverified").await;
+    // Creating a workspace is refused too: only the account's own surface is open.
+    let (status, refused) = json(
+        &app,
+        "POST",
+        "/workspaces",
+        &token,
+        serde_json::json!({ "name": "Unverified" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["code"], "email_not_verified");
 
     let (content_type, body) = multipart(&[
         ("kind", "text", None),
@@ -721,7 +733,7 @@ async fn an_unverified_account_cannot_ingest(pool: PgPool) {
     let (status, rejected) = send(
         &app,
         "POST",
-        &format!("/workspaces/{workspace}/sources"),
+        &format!("/workspaces/{}/sources", uuid::Uuid::now_v7()),
         &token,
         Some(&content_type),
         body,

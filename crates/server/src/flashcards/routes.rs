@@ -87,7 +87,7 @@ const UNDO_WINDOW_MINUTES: i64 = 5;
 ///    idempotent from the student's side — a retried tap is not an error.
 pub async fn undo_review(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(review_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let now = state.clock.now();
@@ -467,7 +467,7 @@ pub(crate) async fn enqueue_generation(
 /// page reload, which makes the phase's own exit gate untestable by hand (A81).
 pub async fn list_decks(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     workspaces::owned_name(&state, user.user_id, workspace_id).await?;
@@ -504,7 +504,7 @@ pub async fn list_decks(
 /// `GET /decks/:id`: the deck, its cards, and its generation state.
 pub async fn get_deck(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(deck_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let deck = owned_deck(&state, user.user_id, deck_id).await?;
@@ -538,7 +538,7 @@ pub struct DueQuery {
 /// return a thousand cards in one response.
 pub async fn due_cards(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(deck_id): Path<Uuid>,
     Query(query): Query<DueQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -618,7 +618,7 @@ const FUTURE_REVIEW_TOLERANCE_SECS: i64 = 24 * 60 * 60;
 /// whichever wrote last.
 pub async fn review_card(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(card_id): Path<Uuid>,
     Json(body): Json<ReviewBody>,
 ) -> AppResult<Json<serde_json::Value>> {

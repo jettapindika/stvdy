@@ -1,0 +1,119 @@
+# Staging, on the A45 trial host. NOT production.
+#
+# A45: that host exists for one month, so nothing a third party has been told about — the QRIS
+# webhook URL, the Google OAuth redirect URI, the Tauri updater manifest — and no user data may
+# live there. It is the integration environment: the compose stack, SearXNG, the real server
+# image, the SPA. `docs/OPERATIONS.md` § Staging is the procedure and states what is
+# deliberately absent.
+#
+# This file is deployed as `<deployment root>/docker-compose.staging.yml`, beside the host's
+# own `docker-compose.yml` (the SearXNG stack A45 provisioned). Both resolve to the same
+# compose project name, so they share `stvdy_default`. See `docs/OPERATIONS.md` § Staging.
+#
+# `searxng` is **not** here. It is a service of the repository's own `docker-compose.yml`, which
+# resolves to the same compose project name (`stvdy`), so it is already on `stvdy_default` and
+# the server reaches it as `http://searxng:8080/`. Nothing publishes its port (A344: it is
+# internal-only).
+#
+# The migration is a separate step, run before the replica (A346). `scripts/staging-deploy.sh`
+# does both.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: stvdy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: stvdy
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    # Loopback only, and for one caller: `scripts/release-image.sh` runs the image's own
+    # `--migrate-only` and boots it with `--network host`, so it reaches Postgres on
+    # `127.0.0.1:5432`. Nothing external can reach this port even if a firewall rule
+    # appears, because the bind address is not the host's public one.
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stvdy -d stvdy"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  server:
+    image: ${SERVER_IMAGE:-stvdy-server:0.1.2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Chromium's sandbox needs three things and each is a distinct mechanism (A338):
+    # `shm_size` and a writable `/tmp` are the resources it needs, and
+    # `security_opt: seccomp:unconfined` is the permission — Docker's default seccomp profile
+    # blocks the namespace the sandbox moves into, and a browser that dies there leaves the
+    # boot **hung** with no error and no bound port. It grants no capability; `--cap-add
+    # SYS_ADMIN` is the broader alternative and `--no-sandbox` is not an option.
+    shm_size: 1g
+    tmpfs: /tmp
+    security_opt:
+      - seccomp:unconfined
+    env_file: .env.staging
+    volumes:
+      # Local object storage. R2 is the production backend (A331) and staging is not worth a
+      # bucket; `OBJECTS_PUBLIC_BASE_URL` points the presigned reads back here.
+      #
+      # Bind mounts rather than named volumes, because the server runs as `stvdy` (uid 10001,
+      # A338) and a named volume arrives root-owned with no way to chown it before the process
+      # starts. These host directories are chowned to 10001.
+      - ./data/objects:/data/objects
+      # The dev mail sink. With `SMTP_URL` unset the verification link is a file rather than an
+      # inbox (B3), which is the only way to complete a signup on a host that receives no mail.
+      - ./data/mail:/data/mail
+    # **No published port, deliberately.** `web` proxies `/api/` to this service over the
+    # compose network, so the API has exactly one public entry point and it is the one behind
+    # TLS. Publishing 8080 as well would be a second cleartext surface carrying the same
+    # passwords and bearer tokens. Reach it directly with `docker exec`, or
+    # `ssh -L 8080:localhost:8080` after `docker compose port`-style plumbing.
+    expose: ["8080"]
+    restart: unless-stopped
+
+  # The QRIS payment bridge: it mints the per-payment dynamic QRIS the buyer scans, then watches
+  # the merchant transaction feed to settle or expire it. The server calls it by service name
+  # (`http://gopay-bridge:8787/`) over the compose network.
+  #
+  # **No `ports:` and no `expose:` at all, deliberately.** Nothing outside this host may reach a
+  # gateway holding live merchant tokens, and the host's firewall admits only 22, so a published
+  # port would be a listener nothing could reach anyway. Reachability is container-to-container,
+  # like `searxng`'s. Unlike `server` there is no reverse-proxied path to it either: it has no
+  # public entry point and is not meant to have one.
+  #
+  # `command` overrides three binary defaults: the bind address (the default is `127.0.0.1`, which
+  # a sibling container cannot reach) and the session and state paths, which move onto the bind
+  # mount below.
+  #
+  # Bind mount rather than a named volume, for `server`'s reason: the bridge runs as nonroot
+  # (uid 65532, distroless) and a named volume arrives root-owned with no way to chown it before
+  # the process starts. `gopay-state.json` is what makes payment state durable — it holds every
+  # pending payment, so a bridge restart no longer strands a buyer's QR. Both files live at 0600.
+  gopay-bridge:
+    build: ./gopay-bridge-src
+    image: stvdy-gopay-bridge:0.1.0
+    command:
+      - -addr=0.0.0.0:8787
+      - -session=/data/gopay-session.json
+      - -state=/data/gopay-state.json
+    volumes:
+      - ./data/gopay:/data
+    restart: unless-stopped
+
+  # The SPA, and the origin's single public port. Cloudflare terminates TLS for the hostname and
+  # proxies to this server, which serves the bundle and forwards `/api/` to `server`.
+  web:
+    image: nginx:alpine
+    depends_on:
+      # For DNS resolution of `server` at startup and so a boot race cannot serve 502s.
+      - server
+    volumes:
+      - ./web/dist:/usr/share/nginx/html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports: ["80:80"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

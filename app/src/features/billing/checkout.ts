@@ -13,12 +13,16 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * discipline the planner and `features/planner/localSchedule` follow.
  *
  * **Nothing here computes a total.** `orderLines` reads `amount_idr`,
- * `amount_before_discount_idr`, `discount_percent` and `discount_code` off the
- * payment row the server sent, and the itemisation is the server's own. `A298`
- * makes the student promo and a discount code one decision (the larger percentage
- * wins, they never stack), made once by `billing::price`; a client that re-derived
- * the arithmetic would be a second implementation of that rule, and a client-side
- * total that disagrees with the charge is a support ticket at best.
+ * `payable_amount_idr`, `amount_before_discount_idr`, `discount_percent` and
+ * `discount_code` off the payment row the server sent, and the itemisation is the
+ * server's own: the total it prints is the row's `payable_amount_idr`, the figure
+ * the QRIS charge carries. The one subtraction here is the gateway's unique-amount
+ * offset (the payable amount minus the price) shown as a line of its own, never a
+ * total this module derived. `A298` makes the student promo and a discount code
+ * one decision (the larger percentage wins, they never stack), made once by
+ * `billing::price`; a client that re-derived the arithmetic would be a second
+ * implementation of that rule, and a client-side total that disagrees with the
+ * charge is a support ticket at best.
  *
  * This is a `.ts` module rather than part of the screen because the screen cannot
  * be asked these questions: "is the poll still running", "does this state offer a
@@ -34,9 +38,9 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * request that did not reach the server.
  *
  * `waiting` is the one that carries the weight. It is the state a student sits in
- * when the webhook is lost, when the gateway is slow, and when the money has
- * genuinely not arrived — three different situations with one honest sentence
- * between them, and the polling fallback (A301) is what moves it. It must not read
+ * when the server has not read a settlement yet, when the gateway is slow, and
+ * when the money has genuinely not arrived — three different situations with one
+ * honest sentence between them, and the server's own poll (A301) is what moves it. It must not read
  * as failure (the student has a live code and may still pay it) or as success (no
  * payment has been confirmed), and neither of those may be said in colour alone.
  */
@@ -67,7 +71,7 @@ export function canStartOver(state: CheckoutState): boolean {
  * The state, from the server's row and the client's clock.
  *
  * The server's status decides first, in every case: `paid` outranks a past expiry
- * (a webhook that arrived after the code died is still a payment), and `review`
+ * (a settlement the server read after the code died is still a payment), and `review`
  * outranks the clock (a mismatch is a fact about the money, not about time). Only
  * a row the server still holds open is decided by the clock, and then only in one
  * direction — `now >= expires_at` means the code is dead.
@@ -183,9 +187,11 @@ export interface OrderLine {
  * somehow carries both is itemised as the code — the student promo is the one the
  * screen can explain from the account.
  *
- * The total is `amount_idr` **verbatim**. That is the number the webhook checks the
- * gateway's claim against (A294) and the number the student will see on their
- * statement.
+ * The total is `payable_amount_idr` **verbatim**: the figure the QRIS charge asks
+ * for and the one the server matches the settlement against (A294). When the
+ * gateway assigned a unique amount so the transfer could be matched by amount
+ * alone, one more line sits above it showing the difference — the offset the
+ * student would otherwise have no explanation for.
  */
 export function orderLines(view: PaymentView, language: string): OrderLine[] {
   const lines: OrderLine[] = []
@@ -218,6 +224,16 @@ export function orderLines(view: PaymentView, language: string): OrderLine[] {
     }
   }
 
-  lines.push({ labelKey: 'total', value: formatAmount(view.amount_idr, language) })
+  // The gateway's unique amount, when it assigned one: the charge is larger than
+  // the quoted price, and this line is where a student sees by how much and why.
+  // The subtraction is a display of the row's own two figures, not a total.
+  if (view.payable_amount_idr !== view.amount_idr) {
+    lines.push({
+      labelKey: 'uniqueAmount',
+      value: formatAmount(view.payable_amount_idr - view.amount_idr, language),
+    })
+  }
+
+  lines.push({ labelKey: 'total', value: formatAmount(view.payable_amount_idr, language) })
   return lines
 }

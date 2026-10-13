@@ -51,8 +51,10 @@ export function GoogleCallbackScreen({
     if (ticket === null || started.current) return
     started.current = true
     google.mutate(ticket, {
-      onSuccess: () => {
-        void navigate('/workspaces', { replace: true })
+      onSuccess: (response) => {
+        // Same split as the password path: a Google account whose address this product has
+        // not seen confirmed lands on the screen that offers the link (A359).
+        void navigate(response.user.email_verified ? '/workspaces' : '/verify', { replace: true })
         onLeave?.()
       },
     })

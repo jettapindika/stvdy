@@ -247,7 +247,7 @@ fn payment(cfg: &AppConfig) -> anyhow::Result<Option<Arc<dyn payment::PaymentGat
     let gateway = payment::QrisGateway::from_config(qris)?;
     tracing::info!(
         base_url = %qris.base_url,
-        scheme = qris.signature_scheme.as_str(),
+        merchant_id = %qris.merchant_id,
         fee_percent = qris.fee_percent,
         "payment gateway ready"
     );

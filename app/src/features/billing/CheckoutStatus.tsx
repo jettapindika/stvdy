@@ -19,7 +19,7 @@ import type { CheckoutState } from '@/features/billing/checkout'
  * are the point:
  *
  * - **`waiting`** is the one that carries the weight. It is what a student sees
- *   when the webhook was lost, when the gateway is slow, and when the money has
+ *   when the server has not read a settlement yet, when the gateway is slow, and when the money has
  *   genuinely not moved — and it must not read as either of the other two. The
  *   copy says the fact ("we have not heard from the bank yet"), that the page
  *   updates itself, and nothing about failure or success.

@@ -19,7 +19,7 @@ use uuid::Uuid;
 use stvdy_core::entitlements::Feature;
 use stvdy_core::traits::search::{FetchError, PageFetcher};
 
-use crate::auth::extract::{AuthUser, VerifiedUser};
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::integrations::fetch;
 use crate::integrations::storage as storage_integration;
@@ -254,7 +254,7 @@ pub(crate) async fn owned_workspace(
 /// `GET /workspaces/:id/sources`
 pub async fn list(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     owned_workspace(&state, user.user_id, workspace_id).await?;
@@ -422,10 +422,10 @@ async fn prepare(
 
 /// `POST /workspaces/:id/sources` (multipart: `kind`, then `file`, `text` or `url`).
 ///
-/// Takes `VerifiedUser`, not `AuthUser`: ingestion is one of the four things A43
-/// keeps locked until the address is confirmed ("chat, generation, search and
-/// ingestion stay locked until `email_verified`"), and it is the first route in
-/// the project that spends provider money on embedding calls.
+/// Takes `VerifiedUser` (A359), like every route that touches the student's study data: the
+/// gate is the surface rather than the price now, so this is no longer the exception it was
+/// when A43 stopped at spending. It is still the first route in the project that spends
+/// provider money on embedding calls.
 ///
 /// The six kinds divide into three shapes, and the difference is deliberate:
 ///   * `pdf`, `pptx`, `docx` — an original file, stored, charged against storage;
@@ -690,7 +690,7 @@ pub(crate) async fn delete_objects(state: &AppState, keys: &[String]) {
 /// still appears in the list.
 pub async fn remove(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(source_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let mut tx = state
@@ -741,7 +741,7 @@ pub async fn remove(
 /// already have.
 pub async fn preview_url(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(source_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let row = sqlx::query_as::<_, (Option<String>,)>(
@@ -777,7 +777,7 @@ pub async fn preview_url(
 /// `GET /sources/:id/file`: a short-lived URL for the original.
 pub async fn file_url(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(source_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     let row = sqlx::query_as::<_, (Option<String>,)>(

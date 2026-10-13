@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -99,7 +99,7 @@ impl From<WorkspaceRow> for WorkspaceView {
 /// into the statement; a shared string would have to be `AssertSqlSafe`'d, which
 /// disables exactly the check that keeps a caller from reaching the query text.
 /// The three copies are the price, and they are three lines apart in this file.
-pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<WorkspaceList>> {
+pub async fn list(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<WorkspaceList>> {
     let rows = sqlx::query_as::<_, WorkspaceRow>(
         "select w.id, w.name, w.created_at, w.updated_at, w.course_code, w.color, w.exam_date,
                 (select count(*) from sources s
@@ -134,12 +134,15 @@ pub struct CreateRequest {
 
 /// `POST /workspaces`
 ///
-/// `AuthUser`, not `VerifiedUser`: creating a workspace spends nothing and costs no
-/// provider call, so A43 — which gates *spending* — does not apply. The sweep table
-/// records that decision per route rather than applying it globally.
+/// `VerifiedUser` (A359). This route is the one that used to argue the other way — creating a
+/// workspace spends nothing and costs no provider call, so A43's spending rule did not reach
+/// it — and that argument was the hole: an unverified account could hold a workspace and use
+/// every read route around it. The gate is now on the surface, not the price, so the workspace
+/// is where it starts. `route_sweep.rs` carries the classification for every route rather than
+/// applying the rule globally: the account's own administrative routes are still `AuthUser`.
 pub async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<CreateRequest>,
 ) -> AppResult<(StatusCode, Json<WorkspaceResponse>)> {
     let name = validate_name(&body.name)?;
@@ -196,7 +199,7 @@ pub async fn create(
 /// `GET /workspaces/:id`
 pub async fn get_one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<WorkspaceResponse>> {
     let row = fetch_workspace(&state, user.user_id, workspace_id).await?;
@@ -240,7 +243,7 @@ where
 /// writes. Deleting it is still allowed — that is the remedy the refusal names.
 pub async fn update(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<UpdateRequest>,
 ) -> AppResult<Json<WorkspaceResponse>> {
@@ -298,7 +301,7 @@ pub async fn update(
 /// deleted workspace's material resurface through a source endpoint.
 pub async fn delete_one(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let mut tx =

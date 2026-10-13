@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use stvdy_core::traits::search::FetchError;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::error::{AppError, AppResult};
 use crate::integrations::fetch::{GuardedText, Validators, fetch_guarded_text};
 use crate::state::AppState;
@@ -72,7 +72,7 @@ pub struct AddIcsRequest {
 /// have no way to tell which row to delete.
 pub async fn add(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Json(body): Json<AddIcsRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let url = body.url.trim();
@@ -116,7 +116,7 @@ pub async fn add(
 /// The spec lists connect/callback/ics/delete/sync/regenerate/feed and no list, so without
 /// this a connection made in one page load is invisible in the next and the settings screen
 /// cannot show its status — the same reasoning as A81.
-pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
+pub async fn list(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<Value>> {
     let connections = crate::calendar::sync::load_for_user(&state.pool, user.user_id).await?;
     let views: Vec<Value> = connections
         .iter()
@@ -138,7 +138,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Js
 /// leaves every device showing the event forever, with no change-log entry to correct it.
 pub async fn remove(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     let mut tx = state.pool.begin().await.map_err(|error| {

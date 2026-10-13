@@ -667,7 +667,7 @@ struct MessageRow {
 /// client reads what the first one wrote.
 pub async fn list_messages(
     State(state): State<AppState>,
-    user: crate::auth::extract::AuthUser,
+    user: VerifiedUser,
     Path(workspace_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     // The workspace check is separate from the message query so that a workspace

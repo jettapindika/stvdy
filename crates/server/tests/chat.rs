@@ -306,7 +306,12 @@ async fn a_fabricated_citation_label_is_dropped(pool: PgPool) {
     assert!(stored.contains("[1]"), "the real label stays: {stored}");
 }
 
-/// A43: chat is one of the four actions an unverified account cannot take.
+/// A43/A359: chat is behind a verified address, and so is the workspace it would be sent to.
+///
+/// The workspace creation used to succeed here, because creating one spends nothing and A43
+/// stopped at spending. A359 put the gate on the surface, so the fixture the test needs cannot
+/// be built at all — which is the point of the change, and it is asserted rather than worked
+/// around.
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_unverified_account_cannot_chat(pool: PgPool) {
     let harness = TestState::new(pool);
@@ -328,7 +333,7 @@ async fn an_unverified_account_cannot_chat(pool: PgPool) {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let token = body["access_token"].as_str().unwrap().to_string();
 
-    let (status, workspace) = json(
+    let (status, rejected) = json(
         &app,
         "POST",
         "/workspaces",
@@ -336,13 +341,13 @@ async fn an_unverified_account_cannot_chat(pool: PgPool) {
         serde_json::json!({ "name": "Unverified" }),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let workspace_id = workspace["workspace"]["id"].as_str().unwrap().to_string();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{rejected}");
+    assert_eq!(rejected["code"], "email_not_verified");
 
     let (status, rejected) = json(
         &app,
         "POST",
-        &format!("/workspaces/{workspace_id}/chat"),
+        &format!("/workspaces/{}/chat", uuid::Uuid::now_v7()),
         &token,
         chat_body("hello"),
     )

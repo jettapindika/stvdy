@@ -1,16 +1,14 @@
 //! The billing route table.
 //!
-//! Two groups, because they carry different guarantees:
+//! One authenticated group: `/billing/checkout`, the payment poll, the student
+//! verification pair and `GET /plans`. Each takes `AuthUser` or `VerifiedUser`, so "is
+//! this scoped to a real account" is decided by the extractor rather than by a line in a
+//! handler.
 //!
-//!  * [`routes`] is the authenticated group: `/billing/checkout`, the payment poll, the
-//!    student verification pair and `GET /plans`. Each takes `AuthUser` or `VerifiedUser`,
-//!    so "is this scoped to a real account" is decided by the extractor rather than by a
-//!    line in a handler.
-//!  * [`public_routes`] is the gateway's callback. It carries **no bearer token** — the
-//!    gateway has no session — and the signature is its authorisation. It is deliberately
-//!    not merged into the authenticated group: a route that authenticates by HMAC and one
-//!    that authenticates by session are different things, and putting them in one
-//!    `.merge()` is how the wrong one gets a layer it must not have.
+//! **There is no public group, and that is the gateway's shape.** The bridge never
+//! pushes, so there is no callback route to mount and no HMAC-authenticated surface at
+//! all: every fact about a payment is read by the server, with the client's poll and the
+//! five-minute sweep as its two readers (A306/A301).
 
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
@@ -23,7 +21,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 use super::checkout::{self, CheckoutBody, PaymentView};
-use super::{student, webhook};
+use super::student;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -49,11 +47,6 @@ pub fn limited_routes() -> Router<AppState> {
     Router::new()
         .route("/billing/student/verify", post(student_verify))
         .route("/billing/student/confirm", post(student_confirm))
-}
-
-/// The callback. Mounted in `routes::router`'s public group.
-pub fn public_routes() -> Router<AppState> {
-    Router::new().route("/webhooks/qris", post(webhook::handle))
 }
 
 /// `GET /plans` — the matrix, platform-aware (A305).

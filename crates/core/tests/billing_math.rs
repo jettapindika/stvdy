@@ -3,7 +3,7 @@
 //! Both halves are here because both halves are money. A quote computed in one place
 //! and a charge checked in another is how a customer gets charged one number and
 //! activated against a different one, so `price` is the only function that answers
-//! "what does this cost" and the webhook compares against its own stored result.
+//! "what does this cost" and the settlement is compared against its own stored result.
 //!
 //! The period cases are the two ways a renewal goes wrong: an extension that starts
 //! from today instead of the period end silently deletes the days a student paid for

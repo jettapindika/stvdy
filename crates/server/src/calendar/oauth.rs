@@ -35,7 +35,7 @@ use uuid::Uuid;
 
 use stvdy_core::entitlements::Feature;
 
-use crate::auth::extract::AuthUser;
+use crate::auth::extract::VerifiedUser;
 use crate::auth::oauth_state::{
     Purpose, StatePayload, decrypt_state, encrypt_state, pkce_pair, random_token, state_expiry,
 };
@@ -78,7 +78,7 @@ const DEEP_LINK: &str = "stvdy://oauth/calendar";
 /// account cap. A free account has `google_calendar = false` **and** `google_accounts_max = 0`,
 /// and "Google Calendar is not included in your current plan" is the useful of the two —
 /// "0 of 0 Google accounts" reads like a bug rather than a refusal.
-pub async fn connect(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
+pub async fn connect(State(state): State<AppState>, user: VerifiedUser) -> AppResult<Json<Value>> {
     let Some(google) = &state.config.google_calendar else {
         return Err(AppError::NotFound);
     };

@@ -26,8 +26,8 @@ pub use llm::{
 };
 pub use mailer::{Email, MailError, Mailer};
 pub use payment::{
-    GatewayStatus, Invoice, InvoiceRequest, PaymentError, PaymentProvider, WebhookEvent,
-    WebhookKind,
+    GatewayEvent, GatewayEventKind, GatewayStatus, Invoice, InvoiceRequest, PaymentError,
+    PaymentProvider,
 };
 pub use push::{PushError, PushMessage, PushPlatform, PushProvider};
 pub use search::{

@@ -13,9 +13,20 @@ are JSON unless noted.
   `min_plan`, `limit` and `used`, so the UI can render "3 of 3 devices" rather
   than only "upgrade".
 - **Status codes**: 401 unauthorized/expired token, 402 insufficient credits,
-  403 plan required, feature locked, or `email_not_verified`, 404 not found,
-  409 conflict, 410 `resync_required` or `link_expired`, 422 limit reached
-  (`limit_reached`), 429 rate limited, 502 provider error.
+  403 `plan_required`, `feature_locked`, `email_not_verified`, `account_deleted`
+  or `forbidden`, 404 not found, 409 conflict, 410 `resync_required` or
+  `link_expired`, 422 limit reached (`limit_reached`), 429 rate limited, 502
+  provider error.
+  **403 is the one status that carries several facts, so `code` is the only
+  thing that distinguishes them** — a plan gate can be lifted by paying, a
+  deleted account cannot, and a client that guesses from the status offers the
+  wrong remedy. A client must therefore have an arm for every code it can be
+  sent, including the ones it cannot act on.
+- **`message` is rendered, not just logged, for two codes.** It is normally a log
+  line the client replaces with its own copy in the reader's language. Two
+  exceptions: `validation`, where it is the only statement of what was rejected,
+  and `account_deleted`, where it is the only carrier of the purge date — the
+  envelope's fixed five keys have no field for it.
 - **Expired versus tampered links**: a signed URL past its expiry is 410
   `link_expired`, because the remedy is to fetch a fresh one; a signature that
   does not match is 403. They are separated so a client can tell a retryable
@@ -91,9 +102,17 @@ Body: `{ "email", "password", "device": { "name", "platform", "app_version?" } }
 `platform` is one of `web`, `macos`, `windows`, `ios`, `android`. Creates the
 user, the device and a session, and mails a verification link.
 
+**The account exists, and nothing else does.** Until the address is confirmed, every route that
+reads or writes the student's study data answers `403 email_not_verified`; the account's own
+administrative surface — the session, `/devices`, `/settings`, `/usage`, `/account/export` and
+`DELETE /account` — stays reachable so a student whose mail never arrives can revoke a device,
+take their data out and leave (A43, A359). The table under *The routes this document
+classifies* lists both columns.
+
 201 `AuthResponse`. 400 `validation` for a malformed email, a short password or
 an unknown platform. 409 `conflict` when the email already exists. 429
-`rate_limited`.
+`rate_limited`. 403 `account_deleted` when the address belongs to an account inside its
+deletion window (A355), with the purge date in `message`.
 
 ### `POST /auth/login`
 
@@ -131,6 +150,8 @@ succeed. 400 `validation` when the link is invalid or expired.
 
 Auth. No body. 204. A no-op (204) when the address is already verified; a resend
 invalidates any earlier unused token, so only one live link exists per account.
+It stays reachable to an unverified account — which is the only state it is useful in — and it
+is the remedy the `403 email_not_verified` refusal names (A43, A359).
 
 ### `GET /auth/me`
 
@@ -405,8 +426,8 @@ stored, so an over-quota file never occupies the bucket.
 
 ### `POST /workspaces/:id/chat`
 
-Auth (and the email must be verified: chat is one of the four actions A43 keeps
-locked until then, so an unverified account gets 403 `email_not_verified`).
+Auth, and the email must be verified: the workspace is closed to an unverified account
+(A43, A359), so this answers 403 `email_not_verified`.
 Answers `text/event-stream`.
 
 Body: `{"message": string, "source_ids"?: [uuid], "use_web"?: bool,
@@ -496,8 +517,8 @@ was not in the prompt's context: the card is kept and only its link is lost (A17
 
 ### `POST /workspaces/:id/decks`
 
-Auth, and the email must be verified: generation is one of the four actions A43
-keeps locked until then, so an unverified account gets 403 `email_not_verified`.
+Auth, and the email must be verified (A43, A359): an unverified account gets 403
+`email_not_verified`.
 
 Body: `{"title": string, "source_ids": [uuid], "count": number}`. `count` is how
 many cards to ask for; the generator may return fewer and is told never to pad.
@@ -614,8 +635,8 @@ context: the question is kept and only its link is lost (A17).
 
 ### `POST /workspaces/:id/quizzes`
 
-Auth, and the email must be verified: generation is one of the four actions A43
-keeps locked until then, so an unverified account gets 403 `email_not_verified`.
+Auth, and the email must be verified (A43, A359): an unverified account gets 403
+`email_not_verified`.
 
 Body: `{"title": string, "source_ids": [uuid], "count": number, "difficulty":
 "easy"|"medium"|"hard", "types": "mcq"|"short"|"mixed"}`. `count` is how many
@@ -984,6 +1005,27 @@ entitlement decision: `every_registered_route_is_classified` fails when a regist
 route is in neither its `ROUTES` nor its `EXEMPT`. The tables below carry that
 classification for the routes listed here — **62 rows**, each with its class and, for
 a swept route, the `(status, code)` an exhausted account must get.
+
+**A second axis cuts across both tables: the verified-email gate** (A43, A359). Every route
+that reads or writes the student's study data takes `VerifiedUser`, so an unverified account
+gets `403 email_not_verified` from it; the account's own administrative surface takes
+`AuthUser` and stays reachable. The open column is not a convenience — a student who typed an
+address they cannot receive mail at must still be able to revoke a device, take their data out
+and delete the account, or the gate is a trap:
+
+| Reachable unverified | Refused unverified |
+|---|---|
+| `/auth/me`, `/auth/logout-all`, `/auth/resend-verification`, `/auth/google/set-password` | every workspace route, and everything under it |
+| `/devices` (all four) | chat, decks, quizzes, reports, cheatsheets, study |
+| `GET`/`PUT /settings`, the api-key triple | tasks, events, calendar, planner, goals, actions |
+| `GET /usage`, `GET /plans`, the billing reads | sources, chunks, syllabus, reminders, dashboard |
+| `GET /account/export`, `DELETE /account` | sync (pull, push, stream), billing checkout/upgrade/downgrade |
+
+`route_sweep.rs` asserts this in both directions: `every_route_takes_the_extractor_the_table_names`
+reads each handler's own signature and compares it with the row, and
+`an_unverified_account_reaches_only_its_own_surface` drives every route, failing both when a gate
+does not fire and when an open route refuses. The client mirrors it: an unverified session is
+held at `/verify` outside `/settings`.
 
 **Swept** — calls the engine for a `Feature`, and an account whose limits are all
 used gets exactly the `(status, code)` in the last column:
@@ -1954,8 +1996,10 @@ job for the account marked `failed` with `error = 'account deleted'`. A window i
 signed-in device still worked would make the confirmation a lie.
 
 **Login, signup and Google sign-in refuse a marked account** with `403 account_deleted` and the
-purge date, after the password check rather than before (A355c). Signing up again with the same
-address meets the same refusal until the purge anonymizes the row and releases the address.
+purge date, after the password check rather than before (A355c). The sentence also says the purge
+releases the address, because signup is where a student meets it and "can I register again" is
+the question that brought them there. Signing up again with the same address meets the same
+refusal until the purge anonymizes the row and releases the address.
 
 ### `GET /account/export?format=json|md|ics`
 
@@ -1992,24 +2036,33 @@ tax position survive.
 
 ## Billing (Phase 13)
 
-Auth, verified email for the routes that cost money, and — for the callback — no bearer
-token at all.
+Auth, verified email for the routes that cost money, and **no public route at all**: the
+gateway is polled, so there is no callback to expose.
 
 `GET /plans`, `POST /billing/checkout`, `GET /billing/payments/:id`, `GET /billing/invoices`,
 `POST /billing/upgrade`, `POST /billing/downgrade`, `POST /billing/student/verify`,
-`POST /billing/student/confirm`, `POST /webhooks/qris`.
+`POST /billing/student/confirm`.
 
 **Every price is the server's, and there is one function that computes it.** The amount a
-student is quoted comes from `billing::price` over `config/plans.toml`, and the amount the
-webhook checks the payment against is `payments.amount_idr` — the column the quote was
+student is quoted comes from `billing::price` over `config/plans.toml`, and the amount a
+settlement is checked against is `payments.payable_amount_idr` — the column the quote was
 written to. Nothing on the client adds, subtracts or rounds, which is why `PaymentView`
 carries `amount_before_discount_idr` and `discount_percent` as well: the screen itemises the
 charge from the row rather than re-deriving it.
 
+**`payable_amount_idr` is the one figure the server does not compute.** The gateway assigns
+every invoice a *unique* payable amount — the price plus an offset in 1..999 — so that it can
+match an incoming settlement to one order by amount alone, with no per-order callback. So
+`PaymentView` carries both numbers: `amount_idr` is what was bought (the price, and the
+margin report's base), and `payable_amount_idr` is what the student must transfer and what
+the QR encodes. They differ by at most 999 IDR, and the checkout screen shows the difference
+as its own line so the student can see why the figure is not the price.
+
 ```json
 { "id": "uuid", "order_id": "stvdy_01j0…", "kind": "subscription",
   "plan_id": "pro", "billing_period": "monthly", "credits": null,
-  "amount_idr": 10000, "amount_before_discount_idr": 10000, "discount_percent": 0,
+  "amount_idr": 10000, "payable_amount_idr": 10137,
+  "amount_before_discount_idr": 10000, "discount_percent": 0,
   "discount_code": null, "student_discount": false,
   "qr_string": "…", "expires_at": "2026-10-12T07:15:00Z",
   "status": "pending", "paid_at": null }
@@ -2038,6 +2091,11 @@ charge from the row rather than re-deriving it.
   `user_id` in the statement rather than checked after the read. **Expiry is re-checked here**,
   so a client whose clock is wrong cannot extend its own invoice by not noticing: a `pending`
   row past its expiry reads `expired`. 404 for another account's payment.
+  **And the gateway is asked, once, before the row is read.** The bridge never pushes, so this
+  request is the fast ingress: without it a student who has paid waits up to five minutes for
+  the sweep, staring at "waiting for confirmation" in front of money that already moved. A
+  gateway that cannot answer is swallowed — the row stays `pending`, the sweep asks again, and
+  a bridge that is down does not turn this poll into an error page.
 - `GET /billing/invoices` → `{ "invoices": [PaymentView…] }`, the caller's own newest 50.
   It does **not** re-check expiry, unlike the single-payment read: this is a read of what
   happened, and a list that quietly rewrote rows while the student was looking at their
@@ -2061,34 +2119,35 @@ charge from the row rather than re-deriving it.
   checkout from `plans.<id>.student_percent_off`, and the student promo and a discount code
   **do not stack**: the larger percentage wins and a tie goes to the student promo, which needs
   no redemption.
-- `POST /webhooks/qris` — the gateway's callback, and the only route in the API with **no
-  bearer token**. Its authorisation is the signature over the **raw bytes** in
-  `QRIS_SIGNATURE_HEADER`, one of three schemes (`hmac_sha256_hex`, `hmac_sha256_base64`,
-  `shared_token`), and the order of operations is the whole security story: the IP allowlist
-  (when `QRIS_WEBHOOK_IPS` is set), then the signature, then the parse, then the idempotency
-  insert, then the guarded transition and the apply. A body that fails the signature is never
-  parsed and a request that fails any step writes nothing — an unknown `order_id` is 404 with
-  the `webhook_events` row rolled back, so an unauthenticated caller cannot write rows with a
-  guessed order id. **401** for a bad signature, **404** for an order we do not have, **502**
-  where no gateway is configured (so the gateway retries rather than reading a valid callback
-  as forged), and **200** with `{ "duplicate": bool, "status": string }` otherwise.
 
-  **Idempotency has two defences because there are two replays** (A293). The *same* event id
-  twice is caught by `webhook_events`' `unique (provider, event_id)` with
-  `on conflict do nothing returning id`: no row back means already handled, and the answer is
-  `{ "duplicate": true, "status": "duplicate" }`. The *same payment* under a **new** event id —
-  which is what a real gateway does when it re-sends — is caught by the transition itself
-  being `update payments set status = 'paid' … where id = $1 and status = 'pending'`, so a
-  second report updates zero rows and the answer is `"already_paid"`. A defence against one
-  does nothing against the other.
+**There is no callback route, and that is the gateway's shape rather than an omission.** The
+bridge reports an outcome only through its own status route, so the server reads every fact
+about a payment: the checkout screen's poll while the screen is open, and `poll_payment` every
+five minutes as the backstop for a client that closed the tab. Both apply through the same
+`billing::apply::apply_paid`, which is what makes a payment recovered by either path
+indistinguishable. The consequence for the threat model is in `docs/THREAT_MODEL.md`: with no
+push there is no unauthenticated write path at all, and the gateway's own control is that it
+publishes no port and is reachable only from the compose network (A292).
 
-  **The amount is checked after the transition, deliberately**: a mismatch is marked
-  paid-but-under-review rather than left `pending` for a retry loop, and both directions (over-
-  and under-payment) are the same outcome, `"review"`, with the two numbers written to
-  `review_reason` for the operator who reads the queue. A non-IDR currency is refused the same
-  way. A payment made **after** the invoice expired is `review` unconditionally; a payment made
-  before the expiry whose *confirmation* arrived late is honoured when `QRIS_HONOR_LATE_PAYMENT`
-  (default true) is set, because the lateness is ours and must not cost the student their plan.
-  The money moves in **one transaction**: mark paid, extend or start the period, grant the
-  credits, record the fee, notify — all of it, or none of it.
+**Idempotency has two defences because there are two replays** (A293). The *same* answer read
+twice is caught by `gateway_events`' `unique (provider, event_id)` with
+`on conflict do nothing returning id`: no row back means already handled. The *same payment*
+under a **new** event id is caught by the transition itself being `update payments set status =
+'paid' … where id = $1 and status = 'pending'`, so a second report updates zero rows. A defence
+against one does nothing against the other, and both matter without a push: the checkout
+screen's poll and the five-minute sweep can be in flight at once, so the same answer genuinely
+arrives twice. The synthesised event id is `gateway:<provider_payment_id>:<paid_at>` — stable,
+so two reads of one settlement collide on the unique key exactly as two callbacks would.
+
+**The amount is checked after the transition, deliberately**: a mismatch is marked
+paid-but-under-review rather than left `pending` for a retry loop, and both directions (over-
+and under-payment) are the same outcome, `"review"`, with the two numbers written to
+`review_reason` for the operator who reads the queue. The comparison is against
+`payable_amount_idr`, not the price: the gateway's offset is what the buyer was told to
+transfer, and comparing against the price would flag every real payment. A non-IDR currency is
+refused the same way. A payment made **after** the invoice expired is `review` unconditionally;
+a payment made before the expiry whose *confirmation* arrived late is honoured when
+`QRIS_HONOR_LATE_PAYMENT` (default true) is set, because the lateness is ours and must not cost
+the student their plan. The money moves in **one transaction**: mark paid, extend or start the
+period, grant the credits, record the fee, notify — all of it, or none of it.
 

@@ -51,7 +51,7 @@ These need **you**, not code, and they block a public launch rather than a phase
 
 | # | What is needed | Why it cannot be automated |
 |---|---|---|
-| B1 | QRIS gateway identity + API docs, and a PJP to settle through | Phase 13 can implement against an env-driven internal contract (`QRIS_BASE_URL`, `QRIS_API_KEY`, `QRIS_CALLBACK_TOKEN`, `QRIS_SIGNATURE_SCHEME`), but no revenue is possible without the real gateway, and perorangan onboarding (KTP + NPWP + a bank account matching the business name) is lead-time work that must run in parallel with development |
+| B1 | QRIS gateway identity + API docs, and a PJP to settle through | **Resolved 2026-10-13:** the gateway is the self-hosted `gopay-bridge` over a GoPay merchant account, and the server speaks its API (`crates/server/src/integrations/payment/mapping.rs`). What still needs you is a **phone**: the bridge logs in to the merchant account by SMS OTP and that session expires, so it must be renewed by hand (`docs/OPERATIONS.md` § Payments has the symptom and the two commands). And no real payment has been taken through it yet — launch checklist row 11 stays blocked until one settles |
 | B2 | Tax/PPN treatment and store privacy-label text | Legal, not technical. Invoices must be correct and the UU PDP privacy notice must be true |
 | B3 | SMTP host/user/password and a From address | Every AI action is gated on a verified email, so with the dev file sink no real account can be onboarded. The provider swap is config-only once the credentials exist |
 
@@ -98,23 +98,33 @@ all (verified against the workflow at `a28ed56`), so that artifact cannot reach 
 server. The dmg and the APK attached to v0.1.2 were rebuilt locally against the staging host.
 
 `unsigned-artifacts.yml` now takes `api_base_url` as a **required** input, exports it
-job-wide, and refuses the development fallback before building. A re-run with
-`api_base_url=http://168.110.202.106:8080` produces three correct artifacts in one pass.
+job-wide, and refuses the development fallback before building. Its default is
+`https://stvdy.ztvn.my.id` — the tunnel's origin, which is the only address that survives the
+trial host being replaced (it was replaced on 2026-10-13; see A45). A re-run with
+`api_base_url=https://stvdy.ztvn.my.id` produces three correct artifacts in one pass.
 
 **What the CORS allowlist does and does not require.** The server always allows the three
 Tauri webview origins (`tauri://localhost`, `https://tauri.localhost`,
 `http://tauri.localhost` — `crates/server/src/routes/mod.rs`), so a **desktop or mobile**
 installer needs nothing added to `WEB_ORIGIN`; that variable is for a browser serving the SPA.
-The API origin still has to be reachable: on this host that means the Oracle **VCN** ingress
-rule for TCP 8080, which is the console step `docs/OPERATIONS.md` § Staging names as not done.
+The API origin still has to be reachable. **That is now the domain rather than the raw IP**: the
+previous instance was published on `:8080` behind an Oracle VCN ingress rule for that port, and
+the current one publishes nothing — nginx serves the SPA and `/api/` on `:80` and the tunnel
+carries it. So an artifact built against the domain is the one that keeps working, and it is
+**TLS** rather than cleartext, which retires the operator-only caveat this paragraph used to
+carry: a dmg or APK pointing at `https://stvdy.ztvn.my.id` is still a staging build against a
+trial host, but the hop is no longer in the clear. Row 7 is about the *production* host's
+certificate and is unaffected.
 
-## Staging on the Batam trial host, and the one thing that needs you
+## Staging on the Batam trial host, and it is live
 
-The A45 host (`168.110.202.106`) now runs the real stack — Postgres + pgvector, the server image,
-the SPA, with SearXNG beside it on the same compose project — and `docs/OPERATIONS.md` § Staging is
-the procedure. **Three image-build defects were found by building it there, and all three are
-fixed**; none was visible from the repository, which is the whole reason the build is worth running
-on a host with a Docker daemon:
+The A45 host (`129.225.10.139`) runs the real stack — Postgres + pgvector, the server image,
+the SPA, with SearXNG beside it on the same compose project — **and it is reachable from outside**:
+both firewall layers are open and the SPA signs a student up, verifies the address and logs in
+through a real browser. `docs/OPERATIONS.md` § Staging is the procedure. **Eleven defects were found
+by building and running it there, and every one of them is
+fixed or recorded for a decision**; none was visible from the repository, which is the whole reason
+the image is worth building and the stack worth running on a host with a Docker daemon:
 
 1. **`cargo build` could not link `ort-sys`'s prebuilt ONNX Runtime** on `rust:1.94.1-bookworm`
    (glibc 2.36 against the `GLIBC_2.38` symbols `__isoc23_strtoll`, `__isoc23_strtoull`,
@@ -133,28 +143,142 @@ on a host with a Docker daemon:
    Found by `scripts/release-image.sh`'s own `test -f "$PDFIUM_LIB_PATH"` on the built image, and
    the fix is verified by extracting the pinned tarball (checksum matches the committed
    `PDFIUM_SHA256`) and confirming `lib/libpdfium.so`.
+4. **The pin assertion could never pass, and it was written twice — in `scripts/release-image.sh`
+   and in `.github/workflows/ci.yml`'s `image` job.** Both compared
+   `chromium --version`'s output to `ARG CHROMIUM_VERSION`, and those are two different strings:
+   the binary reports its **upstream** version (`Chromium 154.0.8037.92 built on Debian GNU/Linux
+   13 (trixie)`) while the `ARG` is Debian's **package** version (`154.0.8037.92-1~deb13u1`). So
+   the check was an unsatisfiable one wearing a green-looking name — the exact "a control that is
+   configured but not enforced" failure mode this project has recorded before. Both now read the
+   installed package version with `dpkg-query` (for `chromium` **and** `chromium-common`, which is
+   the pair the Dockerfile pins together) and additionally assert the binary's upstream version is
+   the prefix of it. The first version of that fix expanded `${Version}` in the container's own
+   shell and answered `dpkg-query: error in show format: may not be empty string`, so the format
+   string is escaped twice over and the comment says why.
 
-Two facts about the staging environment itself:
+5. **The `ARG CHROMIUM_VERSION` pin went stale between two builds of the same commit.** Debian
+   superseded the browser — `154.0.8037.92-1~deb13u1` was current when the first image was built
+   and `155.0.8059.39-1~deb13u1` replaced it a few hours later — and `trixie-security` **keeps only
+   the current version**, so `apt-get install "chromium=154.0.8037.92-1~deb13u1"` answered
+   `Version '…' was not found` and the build stopped. That is the pin working as designed (a
+   superseded browser fails the build rather than silently changing every PDF), but it means the
+   pin is a **weekly-rebuild chore, not a constant**, and a rebuild of an older commit will fail
+   once its pin is superseded. Re-pinned to `155.0.8059.39-1~deb13u1` with the behaviour stated in
+   the `Dockerfile`, and the PDF acceptance test is what proves the new browser still renders the
+   six-page document. A337's "pinned base digest plus a weekly rebuild" is the mitigation this
+   belongs to; a genuinely reproducible pin would need `snapshot.debian.org` URLs rather than the
+   live archive, which is a larger change than this deployment.
 
-- **The Oracle VCN security list still admits only port 22, and that is yours to change.** The
-  host's own layer now admits 80 and 8080 (persisted in `/etc/iptables/rules.v4`, with
-  `iptables-persistent` installed and enabled, and `ufw` agreeing), but the VCN is a console
-  setting rather than a machine one and there are no OCI credentials on this laptop or on the host.
-  Until an ingress rule for TCP 80 and TCP 8080 exists, the stack answers only over an SSH tunnel
-  (`ssh -L 8080:localhost:8080 -L 8081:localhost:80 ubuntu@168.110.202.106`). **The symptom is the
-  one A45 predicted and it is worth recognising**: everything is listening, `curl` works on the
-  host, and the port is still closed from outside.
+6. **The runtime stage shipped no `config/`, so the server could not boot at all.** `AppConfig::from_env`
+   resolves `PLANS_CONFIG` and `BILLING_POLICY_CONFIG` against the process's working directory
+   (`crates/server/src/config.rs`), and the image's `WORKDIR` is `/app` — so `/app/config/plans.toml`
+   was simply absent and the process exited with `loading plans config at
+   /app/config/plans.toml: No such file or directory`. It took `--migrate-only` with it, so a
+   deployment could not even migrate. **This is a boot failure, not a degraded feature**, and it
+   survived because `prompts/` and `templates/` are `include_str!` and `migrations/` is
+   `sqlx::migrate!` — everything else the server needs is compiled in, which makes the two
+   filesystem-read config files look like they must be too. `COPY config /app/config` is the fix,
+   and the Dockerfile now says which files are embedded and which are read.
+
+7. **The documented `--migrate-only` command could never migrate.** Both `docs/OPERATIONS.md` and
+   `docs/RELEASE.md` gave `docker run … -e DATABASE_URL="$DATABASE_URL" stvdy-server:<tag>
+   --migrate-only`, and `scripts/release-image.sh` did the same. But the **image sets
+   `APP_ENV=prod`** (its own `ENV`, not the caller's) and `--migrate-only` loads and validates the
+   whole `AppConfig` before it touches the database, so it exited on `JWT_SECRET must be set to at
+   least 32 characters when APP_ENV=prod` and then, once that was supplied, on `WEB_ORIGIN must be
+   set when APP_ENV=prod` — without ever running a migration. The fix is that the migration step
+   carries the same environment as the replica (`APP_ENV`, `JWT_SECRET`, `ENCRYPTION_KEY_HEX`,
+   `WEB_ORIGIN`), and all three places now say so. **This one is the most dangerous of the six**:
+   the step exits non-zero, but an operator who read "it exits 0 and binds nothing" as the
+   contract and sequenced the replica anyway would have deployed against an unmigrated schema.
+
+8. **The image had no `chromium-sandbox`, so the browser could not start — and the server hung
+   rather than failing.** Debian ships the setuid sandbox helper as its own package and `chromium`
+   does not depend on it, so the browser answered `No usable sandbox! If this is a Debian system,
+   please install the chromium-sandbox package to solve this problem` and died. A338's whole point
+   is that the sandbox stays on outside dev, so this is a missing prerequisite rather than a flag
+   to add. **The failure mode is the worst of the eight:** the renderer is launched during boot
+   (`crates/server/src/render/chrome.rs::launch_browser` → `Browser::new`), that call has no
+   timeout, and a browser that dies mid-launch leaves the process alive at 1.6 GB RSS with
+   `[chromium] <defunct>` in its process table, **no error logged and no port bound** — the check's
+   symptom was a bare `curl: (7) Failed to connect to localhost port 18080`. `chromium-sandbox` is
+   now installed and pinned with the browser. **The unbounded launch is fixed too**: `LAUNCH_TIMEOUT`
+   (30 s) in `crates/server/src/render/chrome.rs` runs `Browser::new` on its own thread and gives it
+   a deadline, so a browser that dies during startup now yields the absent-renderer policy this
+   project already documents — the server starts, serves everything except PDFs, and the log names
+   the launch — instead of a process that is alive, silent and listening on nothing. Verified both
+   ways with a `CHROME_PATH` pointing at a script that sleeps forever: unbounded it prints
+   `has been running for over 60 seconds` and never finishes, bounded it returns
+   `could not launch the browser: the browser did not start within 30 seconds` in 30.00 s. The cost
+   is one leaked thread per failed launch, stated at the function.
+
+9. **The runtime stage copied the whole release profile, which made the image unbuildable on this
+   host.** `COPY --from=build /src/target/release/ /opt/tests/` brought 6.4 GB of *other* test
+   binaries, their rlibs and cargo's `build/`/`.fingerprint/` bookkeeping into a runtime image where
+   nothing runs any of it. The acceptance run needs one binary, and `tests/pdf.rs` is
+   self-contained — no `include_str!`, no `File::open`, no `CARGO_MANIFEST_DIR` — so `deps/pdf-*`
+   plus the build's shared objects is the whole requirement. The cost was not only image size:
+   BuildKit holds the build stage's `target/` **and** the runtime image's copy at once, so the peak
+   was ~37 GB and a 45 GB host with ~9 GB of OS and other images **ran out of disk mid-export**
+   (`copy file range failed: no space left on device`), twice. Now the image carries
+   `/opt/tests/deps/pdf-*` and `deps/*.so` only, and A337's wording was narrowed to match.
+
+10. **The documented `docker run` stanza had no `--security-opt seccomp=unconfined`, so the sandbox
+    could not start even with `chromium-sandbox` installed.** Docker's default seccomp profile
+    blocks the namespace the renderer's sandbox moves into: the browser answers `Failed to move to
+    new namespace … errno = Operation not permitted` and `Zygote process exited prematurely with
+    exit code 1`. `--shm-size` and `--tmpfs /tmp` are the sandbox's *resources*; this flag is its
+    *permission*, and it was missing from every one of the four places the container is started —
+    `docs/OPERATIONS.md`, `docs/RELEASE.md`, `.github/workflows/ci.yml`'s `image` job and
+    `scripts/release-image.sh`. All four now carry it, `deploy/staging/docker-compose.staging.yml`
+    has `security_opt: [seccomp:unconfined]`, and `--cap-add SYS_ADMIN` is recorded as the broader
+    alternative the setuid helper path needs where unprivileged user namespaces are unavailable.
+    Confirmed both ways: with the flag, Chromium logs `Activated seccomp-bpf sandbox for process
+    type …` and renders; without it, the zygote dies. **The failure mode was the hang described in
+    item 8** — no error, no port bound — which is what made the image look unbuildable rather than
+    unrunnable; `LAUNCH_TIMEOUT` (item 8) is what now makes it a missing renderer instead.
+
+11. **A partial build context produced a runtime 500, and the migration step could not repair it.**
+    I rsynced `crates/` before a rebuild but not `migrations/`, so the image carried the session's
+    new `workspaces.course_code` query without `0038_workspace_course_fields.sql`. `sqlx::migrate!`
+    embeds migrations at **compile** time, so `--migrate-only` ran *that image's* embedded set, which
+    did not contain the migration, and the schema stayed behind the code. The symptom was narrow and
+    misleading: `/health` green, signup and login green, and
+    `GET /workspaces` → `500 internal error: listing workspaces: error returned from database:
+    column w.course_code does not exist`. `scripts/staging-sync.sh` now owns the sync-and-build step
+    with the full compiled-in list, and `docs/OPERATIONS.md` § Staging names the trap and this
+    symptom.
+
+What the staging environment itself is:
+
+- **Both firewall layers are open, and the stack is reachable from outside.** The host's own layer
+  admits 80 and 8080 (persisted in `/etc/iptables/rules.v4`, with `iptables-persistent` installed
+  and enabled, and `ufw` agreeing) and the Oracle **VCN** now carries the ingress rule for TCP 80
+  and TCP 8080 from `0.0.0.0/0`. **The two layers fail identically from outside**, which is why
+  the pair is worth naming: with only the host layer open, everything is listening, `curl` works on
+  the machine, and every port is still closed to a laptop.
+- **Verified end to end through a real browser over the public origin, not just with `curl`.**
+  `http://129.225.10.139/` → the sign-in screen; *Create an account* → `POST /auth/signup` **201**;
+  the verification link read out of the mail sink and opened → `POST /auth/verify-email` **200** and
+  "Email verified"; sign in → `/workspaces` with `GET /settings`, `/tasks`, `/events`, `/workspaces`
+  all **200**; *New workspace* → `POST /workspaces` **201**; sign out and back in → the workspace is
+  still listed. Every request is cross-origin (`Origin: http://129.225.10.139` against the API on
+  `:8080`), so this is also the CORS path, and the preflight answers
+  `access-control-allow-origin: http://129.225.10.139`.
 - **TLS, R2, billing and Google are deliberately absent** there, and the table in
   `docs/OPERATIONS.md` § Staging says why for each. None of it is a gap in the production
   checklist: the host is a one-month trial, so nothing a third party was told about may point at it
-  (A45).
+  (A45). **The one that needs saying out loud is TLS**: the host has no DNS name, so no public CA
+  will issue it a certificate, and `POST /auth/login` therefore carries a password in cleartext over
+  the public internet. Treat `http://129.225.10.139/` as an operator-only surface — do not hand it
+  to a student, and scope the VCN ingress rule to one source address if it has to be shared.
 
 ## Credentials needed as the later phases land
 
 | Phase | What |
 |---|---|
 | 10 (calendar) | A Google Cloud OAuth client for **Calendar** (id, secret, registered redirect URI). The same client serves sign-in-with-Google from Phase 1, but the calendar connection asks for `calendar.app.created` + `calendar.events.readonly` and may want its own client |
-| 13 (payments) | The B1 values |
+| 13 (payments) | **Done, and re-cut for the real gateway.** The trait, the pure billing math, the checkout, the one `apply_paid` every ingress shares, the periods, BYOK, the margin report and the Jakarta money gate all shipped. **B1 then resolved and the wire was rewritten against the actual gateway (2026-10-13):** the bridge is polled rather than pushing, so the callback route, its three signature schemes and its two secrets are deleted; it assigns a unique payable amount, so `payments.payable_amount_idr` was added and the settlement check reads it; and the checkout screen's own poll became the fast ingress, because without it a student who had paid waited five minutes for the sweep. One real hole found and fixed earlier and still closed: the checkout screen never consulted `billing_policy`, so a phone build had a purchase screen |
 | 14 (mobile) | An Apple Developer account (APNs `.p8` key + key id + team id) and a Firebase project (`google-services.json` + an FCM v1 service account). The push-receive, share-extension and background-scheduler steps need a **physical device** to verify; they degrade to a simulator for everything except the push and background cases |
 | 15 (release) | An Apple Developer ID certificate for notarization, a Windows code-signing certificate, and a **production host** (A45: the current VPS is a 1-month trial and must never be production). Also a Cloudflare R2 bucket + credentials for production object storage (A15) |
 | 15 (release) | A decision on the updater signing key: where it lives and who holds it. A signed manifest whose key sits on a laptop means an update can be forged |
