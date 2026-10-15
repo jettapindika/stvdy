@@ -53,7 +53,7 @@ const MAX_SOURCES: usize = 20;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/decks", post(create_deck).get(list_decks))
-        .route("/decks/{id}", get(get_deck).delete(delete_deck))
+        .route("/decks/{id}", get(get_deck).delete(delete_deck).patch(rename_deck))
         .route("/decks/{id}/due", get(due_cards))
         .route("/flashcards/{id}/review", post(review_card))
         .route("/flashcard-reviews/{id}", delete(undo_review))
@@ -508,6 +508,15 @@ pub async fn list_decks(
 /// nothing to say. The deck's cards are tombstoned alongside it — a card
 /// without a deck is unreachable, and leaving them live would keep counting
 /// them against the monthly limit while the student cannot see them.
+///
+/// **No refund.** The credits were spent when the generation was requested.
+/// Deleting the result is the student's choice; it does not undo the cost.
+/// A `generating` deck carries `credits_spent > 0`, and `fail_and_refund`
+/// claims on that column without a `deleted_at` filter, so zeroing it here
+/// is what prevents the job from refunding a deck the student chose to delete.
+/// A `failed` deck with `credits_spent > 0` is an owed refund the boot sweep
+/// has not processed yet — zeroing that would erase a debt the system still
+/// owes, so only `generating` decks are touched.
 pub async fn delete_deck(
     State(state): State<AppState>,
     user: VerifiedUser,
@@ -521,8 +530,14 @@ pub async fn delete_deck(
             AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
         })?;
 
+    // Tombstone the deck. A generating deck's charge is zeroed so `fail_and_refund`
+    // (which claims on `credits_spent > 0` without checking `deleted_at`) cannot
+    // refund a deck the student deliberately deleted. A failed deck's charge is left
+    // intact: it is a refund the boot sweep still owes.
     sqlx::query(
-        "update decks set deleted_at = now(), updated_at = now()
+        "update decks
+            set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
           where id = $1 and user_id = $2 and deleted_at is null",
     )
     .bind(deck_id)
@@ -786,6 +801,45 @@ pub async fn review_card(
             "due_at": due_at,
         }
     })))
+}
+
+#[derive(Deserialize)]
+struct RenameDeckBody {
+    title: String,
+}
+
+/// `PATCH /decks/:id`: rename a deck.
+async fn rename_deck(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(deck_id): Path<Uuid>,
+    Json(body): Json<RenameDeckBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err(AppError::Validation("title must not be empty".to_string()));
+    }
+    if title.chars().count() > 200 {
+        return Err(AppError::Validation(
+            "title must be at most 200 characters".to_string(),
+        ));
+    }
+
+    owned_deck(&state, user.user_id, deck_id).await?;
+
+    sqlx::query(
+        "update decks set title = $3, updated_at = now()
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(deck_id)
+    .bind(user.user_id)
+    .bind(&title)
+    .execute(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("renaming the deck: {error}")))?;
+
+    let deck = owned_deck(&state, user.user_id, deck_id).await?;
+    Ok(Json(serde_json::json!({ "deck": deck })))
 }
 
 /// The deck, or 404 when it is not this user's. Tombstones are excluded, so a

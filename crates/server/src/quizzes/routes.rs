@@ -64,7 +64,7 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/quizzes",
             post(create_quiz).get(list_quizzes),
         )
-        .route("/quizzes/{id}", get(get_quiz).delete(delete_quiz))
+        .route("/quizzes/{id}", get(get_quiz).delete(delete_quiz).patch(rename_quiz))
         .route("/quizzes/{id}/attempts", post(record_attempt))
         .route("/quizzes/{id}/results", get(quiz_results))
 }
@@ -700,6 +700,45 @@ pub async fn delete_quiz(
     })?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RenameQuizBody {
+    title: String,
+}
+
+/// `PATCH /quizzes/:id`: rename a quiz.
+async fn rename_quiz(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(quiz_id): Path<Uuid>,
+    Json(body): Json<RenameQuizBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err(AppError::Validation("title must not be empty".to_string()));
+    }
+    if title.chars().count() > 200 {
+        return Err(AppError::Validation(
+            "title must be at most 200 characters".to_string(),
+        ));
+    }
+
+    owned_quiz(&state, user.user_id, quiz_id).await?;
+
+    sqlx::query(
+        "update quizzes set title = $3, updated_at = now()
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(quiz_id)
+    .bind(user.user_id)
+    .bind(&title)
+    .execute(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("renaming the quiz: {error}")))?;
+
+    let quiz = owned_quiz(&state, user.user_id, quiz_id).await?;
+    Ok(Json(serde_json::json!({ "quiz": quiz })))
 }
 
 /// The quiz, or 404 when it is not this user's. Tombstones are excluded, so a deleted

@@ -71,7 +71,7 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/cheatsheets",
             post(create_cheatsheet).get(list_cheatsheets),
         )
-        .route("/cheatsheets/{id}", get(get_cheatsheet).delete(delete_cheatsheet))
+        .route("/cheatsheets/{id}", get(get_cheatsheet).delete(delete_cheatsheet).patch(rename_cheatsheet))
         // The document itself, not a JSON envelope: the free plan prints the HTML it already
         // has, which only works if this route serves something a browser can open, and the
         // preview frame consumes it as `srcdoc`.
@@ -546,6 +546,45 @@ pub async fn delete_cheatsheet(
     })?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RenameCheatsheetBody {
+    title: String,
+}
+
+/// `PATCH /cheatsheets/:id`: rename a cheatsheet.
+async fn rename_cheatsheet(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(cheatsheet_id): Path<Uuid>,
+    Json(body): Json<RenameCheatsheetBody>,
+) -> AppResult<Json<serde_json::Value>> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err(AppError::Validation("title must not be empty".to_string()));
+    }
+    if title.chars().count() > 200 {
+        return Err(AppError::Validation(
+            "title must be at most 200 characters".to_string(),
+        ));
+    }
+
+    owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
+
+    sqlx::query(
+        "update cheatsheets set title = $3, updated_at = now()
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(cheatsheet_id)
+    .bind(user.user_id)
+    .bind(&title)
+    .execute(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("renaming the cheatsheet: {error}")))?;
+
+    let cheatsheet = owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
+    Ok(Json(serde_json::json!({ "cheatsheet": cheatsheet })))
 }
 
 /// The cheatsheet, or 404 when it is not this user's. Tombstones are excluded, so a deleted
