@@ -37,6 +37,13 @@ use crate::state::AppState;
 /// is the *second* line of defence; the account-level cap in A43 is the first.
 const AUTH_PER_MINUTE: u32 = 30;
 
+/// How long one auth request's token takes to come back.
+///
+/// `60s / AUTH_PER_MINUTE`, so the steady-state allowance is the documented 30 per
+/// minute rather than one per minute: the governor's `period` replenishes a single
+/// token, and a web page load spends one on `/auth/refresh` (A56).
+const AUTH_PERIOD: Duration = Duration::from_secs(60 / AUTH_PER_MINUTE as u64);
+
 /// The client's IP as the rate limiters count it.
 ///
 /// The socket peer is not the client behind a proxy. `deploy/staging/nginx.conf`
@@ -109,6 +116,15 @@ where
 /// than governor's plain-text default: the client's error mapper only knows the
 /// `{code, message, ...}` contract.
 ///
+/// `AUTH_PER_MINUTE` is a *sustained* rate, and the governor's `period` is the
+/// interval for **one** token, not for the whole burst — `period(60s)` with
+/// `burst_size(30)` would mean "30 at once, then one per minute", which is not
+/// what the constant says and not enough for the cookie flow: a web page load
+/// spends one `POST /auth/refresh`, so a student reloading a few times would
+/// refill at one a minute and be locked out of signing in. `AUTH_PERIOD` is
+/// therefore `60s / AUTH_PER_MINUTE`, which makes the steady-state rate the
+/// documented 30 per minute while keeping the same burst.
+///
 /// A `Result` rather than a panic: the builder returns `None` only for a zero
 /// period or burst, and a process that cannot rate-limit its auth endpoints
 /// should fail to start rather than run unprotected.
@@ -116,13 +132,13 @@ pub fn auth_layer()
 -> anyhow::Result<GovernorLayer<PeerIp, governor::middleware::NoOpMiddleware, axum::body::Body>> {
     let config = GovernorConfigBuilder::default()
         .key_extractor(PeerIp)
-        .period(Duration::from_secs(60))
+        .period(AUTH_PERIOD)
         .burst_size(AUTH_PER_MINUTE)
         .finish()
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "the auth rate limiter's period and burst size must be non-zero \
-                 (period 60s, burst {AUTH_PER_MINUTE})"
+                 (period {AUTH_PERIOD:?}, burst {AUTH_PER_MINUTE})"
             )
         })?;
 
