@@ -346,13 +346,27 @@ pub async fn chat(
     // is what makes the cache visible in the margin report, and `search_tier` plus
     // `unresponsive_engines` is the A3 health signal that turns silent degradation
     // of the free path into something an operator can see.
+    //
+    // The two lists are not interchangeable and the row takes the engine one: the
+    // column is SearXNG's own report of the engines that failed (migration `0020`),
+    // which is the signal that catches a degraded tier *answering*. Tiers that
+    // failed to answer are the composite's, and they are logged below rather than
+    // written here.
+    if !web.unresponsive.is_empty() {
+        tracing::info!(
+            tiers = ?web.unresponsive,
+            answered_by = ?web.answered_by,
+            "search tiers that did not answer"
+        );
+    }
+
     if body.use_web
         && let Err(error) = credits::record_search(
             &state.pool,
             user.user_id,
             search_cost,
             web.answered_by.as_deref(),
-            &web.unresponsive,
+            &web.unresponsive_engines,
             web.cache_hit,
         )
         .await

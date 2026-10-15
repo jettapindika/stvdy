@@ -1034,12 +1034,18 @@ pub fn search_cost(state: &AppState) -> i64 {
 /// never-run search look identical. `search_tier` and `unresponsive_engines` are
 /// the A3 health signal, so silent degradation of the free path shows up in the
 /// report rather than being discovered by a user.
+///
+/// `unresponsive_engines` is **SearXNG's own engine list**, not the list of tiers
+/// that failed to answer (migration `0020`): one engine dying degrades a tier
+/// without failing it, and an empty result set that is really "seven of eight
+/// engines are down" must not read as "the web had nothing". A tier-level failure
+/// is a different signal and belongs to the caller's logs.
 pub async fn record_search(
     pool: &PgPool,
     user_id: Uuid,
     credits: i64,
     answered_by: Option<&str>,
-    unresponsive: &[String],
+    unresponsive_engines: &[String],
     cache_hit: bool,
 ) -> AppResult<()> {
     sqlx::query(
@@ -1050,7 +1056,7 @@ pub async fn record_search(
     .bind(user_id)
     .bind(i32::try_from(credits).unwrap_or(i32::MAX))
     .bind(answered_by)
-    .bind(unresponsive)
+    .bind(unresponsive_engines)
     .bind(cache_hit)
     .execute(pool)
     .await

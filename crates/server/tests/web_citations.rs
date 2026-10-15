@@ -17,6 +17,7 @@ use sqlx::PgPool;
 use stvdy_core::traits::search::{SearchError, SearchHit, SearchProvider, SourceKind};
 use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::integrations::search::composite::CompositeSearch;
+use stvdy_server::integrations::search::searxng::SearxngSearch;
 use stvdy_server::testing::TestState;
 
 mod common;
@@ -259,6 +260,94 @@ async fn a_repeated_query_bills_one_search_and_reports_a_cache_hit(pool: PgPool)
     .await
     .unwrap();
     assert_eq!(tier.as_deref(), Some("stub_academic"));
+}
+
+/// The A3 health signal on the row is SearXNG's **engine** list, not the list of
+/// tiers that failed to answer.
+///
+/// The two are one word apart in the struct and were swapped at the call site: the
+/// column took `WebContext::unresponsive` (tiers) and the engine list was dropped,
+/// so a tier answering with a dead engine looked perfectly healthy in the margin
+/// report. The composite here is a failing tier *followed by* a stub SearXNG that
+/// reports one dead engine, so the two lists differ and only one of them can be
+/// what lands in the row.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_search_row_carries_the_engines_searxng_reported(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "engines@example.test").await;
+    let (workspace_id, _) =
+        workspace_with_text(&app, &harness, &token, "Notes", "Notes", NOTES).await;
+
+    let body = serde_json::json!({
+        "query": "anything",
+        "results": [{
+            "url": "https://example.org/a",
+            "title": "A result",
+            "content": "A snippet.",
+            "publishedDate": null,
+            "score": 0.7,
+            "engine": "google cse"
+        }],
+        "unresponsive_engines": [["wikipedia", "Suspended: too many requests"]]
+    })
+    .to_string();
+    let server = common::stub_http_json(200, body).await;
+    let searxng = Arc::new(SearxngSearch::new(server.base_url()).unwrap());
+
+    // The failing tier is first, so `unresponsive` (tiers) is `["broken"]` while the
+    // engine list is the stub's.
+    let composite = CompositeSearch::with_tiers(
+        vec![Arc::new(FailingTier), searxng.clone()],
+        harness.state.pool.clone(),
+        std::time::Duration::from_secs(3600),
+    )
+    .with_searxng(searxng);
+
+    let llm = Arc::new(ScriptedLlm::new(vec!["A web claim [W1].".to_string()]));
+    let harness = harness.with_llm(llm).with_search(Arc::new(composite));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let (status, events) = sse_events(
+        &app,
+        &format!("/workspaces/{workspace_id}/chat"),
+        &token,
+        serde_json::json!({ "message": "anything", "use_web": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events:?}");
+
+    let (tier, engines): (Option<String>, Vec<String>) = sqlx::query_as(
+        "select search_tier, unresponsive_engines from usage_events
+          where action = 'web_search' order by created_at limit 1",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(tier.as_deref(), Some("searxng"));
+    assert_eq!(
+        engines,
+        vec!["wikipedia: Suspended: too many requests".to_string()],
+        "the row must carry SearXNG's engine list, not the tier that failed"
+    );
+}
+
+/// A tier that never answers, so the composite's tier list is non-empty.
+struct FailingTier;
+
+#[async_trait::async_trait]
+impl SearchProvider for FailingTier {
+    fn name(&self) -> &'static str {
+        "broken"
+    }
+
+    async fn search(&self, _q: &str, _max_results: u8) -> Result<Vec<SearchHit>, SearchError> {
+        Err(SearchError::Unavailable(
+            "the stub tier is down".to_string(),
+        ))
+    }
 }
 
 /// A tier with no DOI must not invent one.
