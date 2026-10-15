@@ -1288,6 +1288,158 @@
     gap: 1rem;
   }
 
+  /* --- Chat: answer rich blocks ------------------------------------------ */
+
+  .answer-heading {
+    margin-top: 0.25rem;
+  }
+
+  .answer-code-block {
+    position: relative;
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-field);
+    overflow: hidden;
+  }
+  .answer-code-block pre {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .answer-code-block code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.375rem;
+    color: var(--text);
+    white-space: pre;
+  }
+  .answer-code-lang {
+    display: block;
+    padding: 0.25rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background-color: var(--surface-raised);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .answer-ol {
+    list-style-type: decimal;
+    padding-left: 1.5rem;
+  }
+  .answer-ol li {
+    padding-left: 0.25rem;
+  }
+
+  .answer-blockquote {
+    border-left: 3px solid var(--border-strong);
+    padding-left: 1rem;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .answer-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-field);
+  }
+  .answer-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+  .answer-table th {
+    background-color: var(--surface-raised);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .answer-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .answer-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* --- Chat: callout / admonition blocks --------------------------------- */
+
+  .answer-callout {
+    --callout-color: var(--text-muted);
+    --callout-bg: var(--surface-raised);
+    border-left: 3px solid var(--callout-color);
+    background-color: var(--callout-bg);
+    border-radius: var(--radius-field);
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .answer-callout-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--callout-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .answer-callout-title {
+    flex: 1;
+  }
+  .answer-callout-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    color: var(--text);
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+  }
+
+  /* Callout kinds — WCAG-safe token pairs, no --source (reserved for citations) */
+  .callout-note,
+  .callout-definition,
+  .callout-highlight,
+  .callout-summary,
+  .callout-question {
+    --callout-color: var(--primary-text);
+    --callout-bg: var(--primary-tint);
+  }
+  .callout-tip,
+  .callout-success,
+  .callout-memorize {
+    --callout-color: var(--success);
+    --callout-bg: var(--success-tint);
+  }
+  .callout-important,
+  .callout-warning,
+  .callout-step {
+    --callout-color: var(--warning);
+    --callout-bg: var(--warning-tint);
+  }
+  .callout-caution,
+  .callout-trap {
+    --callout-color: var(--danger);
+    --callout-bg: var(--danger-tint);
+  }
+  .callout-example,
+  .callout-formula,
+  .callout-code,
+  .callout-analogy,
+  .callout-quote {
+    --callout-color: var(--text-muted);
+    --callout-bg: var(--surface-raised);
+  }
+
   /* The streaming cursor: a 2px-wide bar at the primary colour, sitting at the
      end of the last word while the answer arrives. It blinks on the `working`
      keyframe the app already defines. */
