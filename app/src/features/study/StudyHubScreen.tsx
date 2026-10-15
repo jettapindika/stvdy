@@ -194,9 +194,11 @@ export function StudyHubScreen() {
                 <li key={deck.id} className="border-b border-border last:border-b-0">
                   <Link
                     to={`/study/${deck.id}`}
-                    className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
+                    className="flex min-h-[4.625rem] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
                   >
-                    <Icon name="cards" className="shrink-0 text-primary-text" />
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-field bg-surface-raised">
+                      <Icon name="cards" className="text-primary-text" />
+                    </span>
                     {/* `min-w-28` is load-bearing, and it is the fix for a real squeeze:
                         the row is icon + text + a status chip, and at 200% text the chip
                         grew enough to leave this column **25px** wide — a title rendered
@@ -204,7 +206,7 @@ export function StudyHubScreen() {
                         what makes `flex-wrap` on the row put the chip on its own line
                         instead of shrinking the text to nothing. `min-w-0` alone (the
                         usual rule here) is the opposite: it permits exactly that. */}
-                    <span className="flex min-w-28 flex-1 flex-col">
+                    <span className="flex min-w-[min(7rem,100%)] flex-1 flex-col gap-1">
                       <span className="truncate text-label font-medium" title={deck.title}>
                         {deck.title}
                       </span>
@@ -240,11 +242,13 @@ export function StudyHubScreen() {
                 <li key={quiz.id} className="border-b border-border last:border-b-0">
                   <Link
                     to={`/quiz/${quiz.id}`}
-                    className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
+                    className="flex min-h-[4.625rem] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
                   >
-                    <Icon name="list-checks" className="shrink-0 text-primary-text" />
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-field bg-surface-raised">
+                      <Icon name="list-checks" className="text-primary-text" />
+                    </span>
                     {/* The same `min-w-28` as the deck row above, for the same reason. */}
-                    <span className="flex min-w-28 flex-1 flex-col">
+                    <span className="flex min-w-[min(7rem,100%)] flex-1 flex-col gap-1">
                       <span className="truncate text-label font-medium" title={quiz.title}>
                         {quiz.title}
                       </span>

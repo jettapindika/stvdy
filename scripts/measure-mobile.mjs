@@ -630,10 +630,34 @@ const QUIZ = {
   source_ids: ['s1', 's2'],
   status: 'ready',
   error: null,
-  requested_count: 10,
-  question_count: 10,
+  requested_count: 2,
+  question_count: 2,
   created_at: '2026-10-11T08:00:00Z',
 }
+
+const QUIZ_QUESTIONS = [
+  {
+    id: 'q-mcq', quiz_id: 'q1', kind: 'mcq',
+    prompt: 'Apa fungsi kunci publik dalam tanda tangan digital?',
+    options: [
+      'Memverifikasi keaslian tanda tangan.',
+      'Menyimpan kata sandi pengguna.',
+      'Menggantikan kunci privat penanda tangan.',
+      'Menghapus isi dokumen setelah ditandatangani.',
+    ],
+    answer: 'Memverifikasi keaslian tanda tangan.',
+    explanation: 'Penerima memakai kunci publik untuk memverifikasi tanda tangan dari kunci privat.',
+    key_points: null, chunk_id: 'k1', attempt: null,
+  },
+  {
+    id: 'q-short', quiz_id: 'q1', kind: 'short',
+    prompt: 'Mengapa ringkasan dokumen digunakan pada tanda tangan digital?',
+    options: null,
+    answer: 'Ringkasan menghubungkan tanda tangan dengan isi dokumen dan mendeteksi perubahan.',
+    explanation: 'Perubahan dokumen menghasilkan ringkasan yang berbeda.',
+    key_points: ['integritas', 'mendeteksi perubahan'], chunk_id: 'k1', attempt: null,
+  },
+]
 
 /** One ready report, with an outline, so the row renders its count and its link. */
 const REPORT = {
@@ -1231,7 +1255,18 @@ const SURFACES = [
       { nav: 'Work' },
       { link: WORKSPACE.name },
       { tab: 'Studio' },
-      { tab: 'Quiz' },
+      { tab: 'Quizzes' },
+    ],
+  },
+  {
+    name: 'quiz',
+    expect: 'Apa fungsi kunci publik dalam tanda tangan digital?',
+    steps: [
+      { nav: 'Work' },
+      { link: WORKSPACE.name },
+      { tab: 'Studio' },
+      { tab: 'Quizzes' },
+      { link: 'Take quiz' },
     ],
   },
   {
@@ -1240,7 +1275,7 @@ const SURFACES = [
       { nav: 'Work' },
       { link: WORKSPACE.name },
       { tab: 'Studio' },
-      { tab: 'Report' },
+      { tab: 'Reports' }
     ],
   },
   // Reached from Settings, the way a phone reaches it, and the one screen on this
@@ -1449,6 +1484,17 @@ const ROUTES = {
   '/workspaces/w1/quizzes': () => ({
     quizzes: [QUIZ],
     cost: { per_batch: 6, batch_size: 10, max_questions: 20 },
+  }),
+  '/quizzes/q1': () => ({
+    quiz: QUIZ,
+    questions: QUIZ_QUESTIONS,
+  }),
+  '/quizzes/q1/results': () => ({
+    summary: { total: 2, answered: 0, graded: 0, correct: 0, score: null, topics: [] },
+    questions: [],
+  }),
+  '/quizzes/q1/attempts': () => ({
+    applied: true, attempt: { id: 'qa1', question_id: 'q-mcq', correct: true },
   }),
   '/workspaces/w1/reports': () => ({ reports: [REPORT] }),
   // The two Phase 12 screens' reads. `/dashboard` is requested with a query string
@@ -2315,6 +2361,20 @@ async function openSurface(page, surface, scale = 100) {
   // it runs before the first step touches the page.
   if (typeof surface.set === 'function') surface.set()
   for (const step of surface.steps) {
+    // A focused review deliberately has no global navigation. Leave through its
+    // real End session control before choosing another app destination.
+    if (step.nav !== undefined) {
+      const exited = await page.evaluate(() => {
+        if (document.querySelector('nav[aria-label="Main"]') !== null) return false
+        const exit = document.querySelector('a[aria-label="End session"]')
+        if (exit === null) return false
+        exit.click()
+        return true
+      })
+      if (exited) {
+        await page.waitForSelector('nav[aria-label="Main"]', { timeout: STEP_TIMEOUT_MS })
+      }
+    }
     // A `remount` step gives the surface a **fresh JS context**: it navigates to the app
     // root and signs in again, which is the only way a surface can be measured under a
     // fixture its `set` chose.
@@ -3107,4 +3167,5 @@ export {
   root,
   routeFor,
   signIn,
+  todayFixture,
 }

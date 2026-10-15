@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SyncStatus } from '@/features/sync/SyncStatus'
@@ -44,6 +44,24 @@ afterEach(() => {
 })
 
 describe('the sync status control', () => {
+  it('keeps pending and rejected writes visible until the device is settled', async () => {
+    const { sync } = installFakePlatform('android')
+    const settled = { state: 'synced' as const, code: null, lastSyncedAt: STORED, outbox: 0 }
+    sync.set({ ...settled, outbox: 2 })
+    renderWithProviders(<SyncStatus variant="notice" />)
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Syncing')
+    expect(screen.getByText('2 changes waiting to sync')).toBeInTheDocument()
+    act(() => sync.emit({ ...settled, state: 'needs_attention', code: 'read_only_entity', outbox: 2 }))
+    expect(screen.getByRole('status')).toHaveTextContent('Needs attention')
+    expect(screen.getByText(/Not saved/)).toHaveTextContent('read_only_entity')
+    act(() => sync.emit(settled))
+    expect(screen.queryByRole('link', { name: /Devices and sync/ })).not.toBeInTheDocument()
+    act(() => sync.emit({ ...settled, state: 'offline' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Offline')
+    expect(screen.getByRole('link', { name: /Devices and sync/ })).toHaveAttribute('href', '/devices')
+  })
+
   it('never says Synced while the outbox has a pending write', async () => {
     const { sync } = installFakePlatform('macos')
     // The shell claiming `synced` with three queued writes is exactly the report

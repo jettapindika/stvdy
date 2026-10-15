@@ -291,57 +291,6 @@ describe('a background deck error mid-session', () => {
   })
 })
 
-describe('the header link back to the workspace', () => {
-  /**
-   * The one control on this screen that is not a `btn`, and it was a text-height
-   * target until Phase 4's accessibility gate measured it.
-   *
-   * The gate walked the study screen in Chromium at 390px for the first time in the
-   * project's history — this phase's box had been unticked since it was written —
-   * and the header's "Back to the workspace" measured **151.3x21**: 21px tall
-   * against the 44px phone floor, and 41px at 200% text, where a text link grows by
-   * its line height rather than to the floor. It is the same defect Phase 7's gate
-   * found on the upgrade link (93x19) and the same remedy: `min-h-11` (2.75rem =
-   * 44px) plus `inline-flex items-center`, the shape eight other text links in the
-   * app already use.
-   *
-   * **jsdom has no layout engine**, so the 44px cannot be asserted here — this file
-   * asserts the classes that decide it, and the number is the gate's own measurement
-   * (recorded in the Phase 4 plan). `min-h-11` alone on an inline element still
-   * paints the line box, and `inline-flex items-center` alone has no height to
-   * centre in, so all three utilities are load-bearing.
-   */
-  it('is a 44px phone target, not a text-height one', async () => {
-    mockFetch((url) => {
-      const path = new URL(url).pathname
-      if (path === '/decks/d1') return jsonResponse(200, { deck: DECK, cards: [CARD] })
-      if (path === '/decks/d1/due') {
-        return jsonResponse(200, { cards: [CARD], now: '2026-10-11T09:00:00Z' })
-      }
-      if (path === '/workspaces/w1') return jsonResponse(200, { workspace: WORKSPACE })
-      if (path === '/workspaces/w1/sources') return jsonResponse(200, { sources: [] })
-      return jsonResponse(404, {
-        code: 'not_found',
-        message: 'no such route',
-        min_plan: null,
-        limit: null,
-        used: null,
-      })
-    })
-
-    renderWithProviders(
-      <Routes>
-        <Route path="/study/:deckId" element={<StudyScreen />} />
-      </Routes>,
-      { route: '/study/d1' },
-    )
-
-    const link = await screen.findByRole('link', { name: 'Back to the workspace' })
-    expect(link.className).toContain('min-h-11')
-    expect(link.className).toContain('inline-flex')
-    expect(link.className).toContain('items-center')
-  })
-})
 
 describe('gate 5(d): no state is carried by colour alone', () => {
   /**

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { useSyncStatus } from '@/api/queries/sync'
+import { CreditMeter } from '@/features/billing/CreditMeter'
 import { PageFooter, PageHeader, Section, WidgetHeading } from '@/components/layout/Section'
 import { displayNameOf } from '@/components/layout/TopBar'
 import { Icon } from '@/components/ui/Icon'
@@ -112,7 +113,7 @@ export function TodayScreen() {
   )
 
   return (
-    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
+    <div className="flex w-full flex-col gap-6 px-5 py-6 md:px-[32px] md:py-8">
       {offline ? (
         <div className="note flex flex-wrap items-center gap-3" role="status">
           <Icon name="alert" className="shrink-0 text-warning" />
@@ -133,7 +134,7 @@ export function TodayScreen() {
         title={t('nav.today')}
         subtitle={name.length > 0 ? t(`today.greeting.${period}`, { name }) : t('today.subtitle')}
         action={
-          <Link to="/planner?view=calendar" className="btn btn-secondary shrink-0">
+          <Link to="/planner?view=calendar" className="btn btn-secondary hidden shrink-0 md:inline-flex">
             <Icon name="calendar" />
             <span aria-hidden="true">
               {formatInZone(now, timeZone, { day: 'numeric', month: 'short' })}
@@ -144,6 +145,10 @@ export function TodayScreen() {
           </Link>
         }
       />
+      <div className="account-timezone-row flex flex-wrap items-center justify-between gap-3 md:hidden">
+        <CreditMeter />
+        <span className="meta">{timeZone.toUpperCase()}</span>
+      </div>
 
       {isNewUser ? (
         <Section title={t('today.setup.title')}>
@@ -242,55 +247,16 @@ export function TodayScreen() {
             )}
           </div>
         </div>
-
-        {/* --- Rhythm --------------------------------------------------------- */}
-        <div className="order-6 lg:col-start-2 lg:row-start-1">
-          <div className="card flex flex-col gap-4 p-6">
-            {data.loading ? (
-              <LoadingState label={t('today.activity.loading')} />
-            ) : buckets.streakDays > 0 ? (
-              <>
-                {/* The frame's card is three blocks: the streak as a heading with
-                    the flame, the strip, and the encouragement. No eyebrow above it
-                    and no second count below it — the minutes are already stated
-                    once, in the timeline's summary line, and stating them twice on
-                    one screen is two answers to one question. */}
-                <h3 className="flex items-center gap-3">
-                  <Icon name="streak" size={24} className="shrink-0 text-warning" />
-                  {t('today.activity.streak', { count: buckets.streakDays })}
-                </h3>
-                {/* The strip spreads across the card, which is the frame's
-                    arrangement; `flex-wrap` keeps the five cells from being squeezed
-                    at 200% text, where they move to a second row instead. */}
-                <ol className="flex flex-wrap justify-between gap-2">
-                  {buckets.recentDays.map((day) => (
-                    <RecentDayCell key={day.key} day={day} />
-                  ))}
-                </ol>
-                <p className="text-small text-subtle">{t('today.streak.encouragement')}</p>
-              </>
-            ) : (
-              // No streak renders the empty state, and **no count line at all**:
-              // "0-day study streak" would be the app using a number to tell a
-              // student they have nothing, and a student who has not started has
-              // lost nothing.
-              <EmptyState
-                title={t('today.streak.emptyTitle')}
-                reason={t('today.streak.emptyReason')}
-                padded={false}
-                action={
-                  <Link to="/study" className="btn btn-secondary">
-                    {t('today.streak.emptyAction')}
-                  </Link>
-                }
-              />
-            )}
-          </div>
+        {/* --- Quick capture --------------------------------------------------- */}
+        <div className="order-2 flex flex-col gap-2 lg:col-start-2 lg:row-start-3">
+          <QuickCapture />
+          {offline ? <p className="meta text-warning">{t('today.capture.offline')}</p> : null}
         </div>
+
 
         {/* --- Today's timeline ----------------------------------------------- */}
         <div className="order-3 lg:col-start-1 lg:row-start-2">
-          <div className="card flex flex-col gap-4 p-6">
+          <div className="card flex flex-col gap-4 p-4 md:p-6">
             <WidgetHeading title={t('today.timeline.title')} />
             {/* The frame's summary row: what the day holds on the left, the zone it
                 is read in on the right, both in the uppercase mono form the design
@@ -322,7 +288,7 @@ export function TodayScreen() {
 
         {/* --- The week's deadlines ------------------------------------------- */}
         <div className="order-4 lg:col-start-2 lg:row-start-2">
-          <div className="card flex flex-col gap-4 p-6">
+          <div className="card flex flex-col gap-4 p-4 md:p-6">
             <WidgetHeading
               title={t('today.exams.title')}
               meta={buckets.thisWeek.length > 0 ? String(buckets.thisWeek.length) : undefined}
@@ -345,7 +311,7 @@ export function TodayScreen() {
                 padded={false}
               />
             ) : (
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-4">
                 {buckets.thisWeek.map((event) => {
                   const course = courses.get(event.workspace_id ?? '')
                   const offset = dayOffset(
@@ -418,12 +384,51 @@ export function TodayScreen() {
         <div className="order-5 lg:col-start-1 lg:row-start-3">
           <FocusTimer />
         </div>
-
-        {/* --- Quick capture --------------------------------------------------- */}
-        <div className="order-2 flex flex-col gap-2 lg:col-start-2 lg:row-start-3">
-          <QuickCapture />
-          {offline ? <p className="meta text-warning">{t('today.capture.offline')}</p> : null}
+        {/* --- Rhythm --------------------------------------------------------- */}
+        <div className="order-6 lg:col-start-2 lg:row-start-1">
+          <div className="card flex flex-col gap-4 p-6">
+            {data.loading ? (
+              <LoadingState label={t('today.activity.loading')} />
+            ) : buckets.streakDays > 0 ? (
+              <>
+                {/* The frame's card is three blocks: the streak as a heading with
+                    the flame, the strip, and the encouragement. No eyebrow above it
+                    and no second count below it — the minutes are already stated
+                    once, in the timeline's summary line, and stating them twice on
+                    one screen is two answers to one question. */}
+                <h3 className="flex items-center gap-3">
+                  <Icon name="streak" size={24} className="shrink-0 text-warning" />
+                  {t('today.activity.streak', { count: buckets.streakDays })}
+                </h3>
+                {/* The strip spreads across the card, which is the frame's
+                    arrangement; `flex-wrap` keeps the five cells from being squeezed
+                    at 200% text, where they move to a second row instead. */}
+                <ol className="flex flex-wrap justify-between gap-2">
+                  {buckets.recentDays.map((day) => (
+                    <RecentDayCell key={day.key} day={day} />
+                  ))}
+                </ol>
+                <p className="text-small text-subtle">{t('today.streak.encouragement')}</p>
+              </>
+            ) : (
+              // No streak renders the empty state, and **no count line at all**:
+              // "0-day study streak" would be the app using a number to tell a
+              // student they have nothing, and a student who has not started has
+              // lost nothing.
+              <EmptyState
+                title={t('today.streak.emptyTitle')}
+                reason={t('today.streak.emptyReason')}
+                padded={false}
+                action={
+                  <Link to="/study" className="btn btn-secondary">
+                    {t('today.streak.emptyAction')}
+                  </Link>
+                }
+              />
+            )}
+          </div>
         </div>
+
       </div>
 
       {buckets.overdue.length > 0 ? (
@@ -636,7 +641,7 @@ function timelineRows(rows: TimelineRow[], now: Date, timeZone: string, t: TFunc
       placed = true
     }
     out.push(
-      <li key={row.id} className="flex flex-wrap gap-4">
+      <li key={row.id} className="flex flex-wrap gap-3 md:gap-4">
         <div className="flex w-13 shrink-0 flex-col">
           <span className="meta">{clock(row.at, timeZone)}</span>
           {row.endAt !== null ? <span className="meta">{clock(row.endAt, timeZone)}</span> : null}

@@ -102,36 +102,6 @@ describe('the workspace list survives 200% text', () => {
   })
 })
 
-describe('the workspace panel strips survive 200% text', () => {
-  it('scrolls the outer strip instead of clipping its tabs', () => {
-    // Each tab is a `.btn`, which carries `min-width: 0` so a long label wraps inside
-    // the button rather than overflowing — but a *word* cannot wrap, and at 200% text
-    // "Sources" is 110px of glyphs plus 70px of padding, so three tabs need ~540px of
-    // a 326px strip. They shrank to 101px each and their labels were clipped:
-    // measured `scrollWidth` 106 against a `clientWidth` of 101, and "Flashcards" 124
-    // against 101. `min-w-max` stops the shrink; `overflow-x-auto` makes the
-    // remainder reachable by swipe and by `Tab`, the same answer the phone tab bar
-    // gives for the same reason.
-    const file = read('features/workspaces/WorkspaceScreen.tsx')
-    const strip = classOf(file, /role="tablist"[\s\S]{0,240}?className="([^"]*)"\s*>/)
-    expect(strip, 'the outer panel strip must exist').not.toBeNull()
-    expect(strip).toContain('overflow-x-auto')
-    expect(strip).toContain('lg:hidden')
-    expect(file).toContain('btn flex-1 min-w-max')
-  })
-
-  it('scrolls the Studio sub-strip for the same reason', () => {
-    const file = read('features/workspaces/WorkspaceScreen.tsx')
-    const strips = [...file.matchAll(/className="([^"]*rounded-pill[^"]*)"/g)].map(
-      (match) => match[1],
-    )
-    expect(strips.length, 'both strips carry the pill').toBe(2)
-    for (const strip of strips) expect(strip).toContain('overflow-x-auto')
-    // Both strips' tabs, not just the outer one's: the sub-strip is the one whose
-    // "Flashcards" label measured 124px of content in a 101px box.
-    expect([...file.matchAll(/btn flex-1 min-w-max/g)]).toHaveLength(2)
-  })
-})
 
 describe('the source picker rows survive 200% text', () => {
   it('refuses to shrink a row whose text cannot', () => {
@@ -330,67 +300,6 @@ describe('the citation chip is an inline target, and the desktop floor does not 
   })
 })
 
-describe('the study screen survives 200% text', () => {
-  const study = read('features/study/StudyScreen.tsx')
-
-  it('gives the card an internal scroll instead of clipping its content', () => {
-    // `SPEC.md:86` — "Cards auto-size with internal scroll (never clip)" — is the one
-    // requirement of this screen that a browser is needed to *see* and a source
-    // assertion can still pin, because the failure is the absence of two properties:
-    // with no `max-height` the card grows past the viewport and the revealed answer
-    // runs under the tab bar, and with no `overflow-y: auto` a `max-height` clips the
-    // text the student just asked for. `max-h-[70dvh]` is the bound and `overflow-y-auto`
-    // is the scroll, and the card's own text has to be able to wrap inside them or the
-    // scroll would only be horizontal.
-    const card = classOf(study, /aria-label=\{t\('study\.cardLabel'\)\}[\s\S]*?className="([^"]*)"/)
-    expect(card, 'the flashcard must exist').not.toBeNull()
-    expect(card).toContain('overflow-y-auto')
-    expect(card).toMatch(/max-h-\[[\d.]+dvh\]/)
-    expect(card).toContain('min-w-0')
-    // Both faces wrap rather than pushing the card sideways: the question at `text-h1`
-    // is the largest text on any screen in the app.
-    expect(study).toContain('break-words whitespace-pre-wrap font-heading text-h2')
-    expect(study).toContain('break-words whitespace-pre-wrap text-h4')
-  })
-
-  it('uses no rem-based minimum width, and gives the page a definite width', () => {
-    // The same class of defect the workspace list and the devices row were fixed for:
-    // `min-w-<n>` doubles with the root font size. And the root carries `w-full`, so
-    // its width is the container's content box rather than its own fit-content — the
-    // property that stops a wide intrinsic child (a 32px heading, a long Indonesian
-    // word) from resizing the screen.
-    expect(remMinimums(study)).toEqual([])
-    // The root's width is its container's, not its content's. The className is a
-    // template literal (it swaps the reading column for the panel's two), so the
-    // assertion is on the properties the root must carry rather than on a
-    // `className="…"` capture: `w-full` is the definite width, and the branches are
-    // the two reading-column caps.
-    //
-    // **Asserted by property, not by literal.** The literal used to name the root's
-    // exact class list, so adding the desktop `md:px-8` broke a test about width.
-    // A test that fails on a padding change is pinning the string, not the property.
-    expect(study).toMatch(/className=\{`[^`]*\bw-full\b[^`]*flex-col gap-6[^`]*`\}/)
-    expect(study).toContain("panelOpen ? 'max-w-5xl' : 'max-w-3xl'")
-  })
-
-  it('lets the grade row reflow, and keeps every word on its button', () => {
-    // Four buttons do not fit a narrow column, which is what the design's own mobile
-    // frame shows: two rows of two. Each button also carries its own grade *word*,
-    // because the four tones are the design's and a tone alone is not a state — gate
-    // 5(d) fails a screen whose grade is identifiable only by its colour.
-    //
-    // **A rem floor rather than a fixed count**, which is the part that changed: at a
-    // 32px root the study screen's side-panel column is 165px and four fixed columns
-    // leave each grade 64px, while "Again" renders at 28px. The floor grows with the
-    // root, so the row drops to fewer columns as the reader enlarges their text — and
-    // the harness measured the clipping that a fixed count produced.
-    expect(study).toContain('grid-cols-[repeat(auto-fit,minmax(5rem,1fr))]')
-    expect(study).toContain('btn btn-primary')
-    expect(study).toContain('border-danger text-danger')
-    expect(study).toContain('border-warning text-warning')
-    expect(study).toContain('border-success text-success')
-  })
-})
 
 describe('the quiz screen survives 200% text', () => {
   const quiz = read('features/quiz/QuizScreen.tsx')

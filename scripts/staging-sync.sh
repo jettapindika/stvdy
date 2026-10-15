@@ -27,7 +27,7 @@
 set -euo pipefail
 
 host="${1:-ubuntu@129.225.10.139}"
-tag="${2:-stvdy-server:0.1.3}"
+tag="${2:-stvdy-server:0.1.4}"
 ref="${3:-main}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 

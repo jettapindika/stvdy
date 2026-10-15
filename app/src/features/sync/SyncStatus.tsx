@@ -7,15 +7,10 @@ import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
 import { platform, type SyncStatus as SyncState } from '@/platform'
 
 /**
- * What sync is doing, in one control, rendered by the shell in both form factors.
- *
- * The placement is A189's, and it is not a style choice: Devices is reached from
- * here rather than from a sixth nav item, because the sidebar and the phone tab bar
- * are both built from the same five labels, and a sixth would cost every item its
- * 44px target at 200% text scale. So the control is one component with two layouts
- * — a row at the foot of the sidebar and a chip above the tab bar — and both link
- * to `/devices`, which carries the device list, the "Last synced" detail and
- * "Reset local data and resync".
+ * One sync state control with detailed, compact, and attention-only presentations.
+ * Desktop uses the compact top-bar form. A phone renders a normal-flow notice only
+ * while work is pending, the connection is offline, or the device needs attention.
+ * Each presentation links to the real device list at `/devices`.
  *
  * **The honesty rules are enforced here, at the last place before the user reads
  * them** (roadmap gate 7, A187). Three of them, and each is a real defect if it
@@ -39,7 +34,7 @@ import { platform, type SyncStatus as SyncState } from '@/platform'
 export function SyncStatus({
   variant = 'sidebar',
 }: {
-  variant?: 'sidebar' | 'chip' | 'compact'
+  variant?: 'sidebar' | 'compact' | 'notice'
 }) {
   const { t } = useTranslation()
   const { report, failed } = useSyncStatus()
@@ -77,6 +72,7 @@ export function SyncStatus({
 
   const word = failed ? t('sync.unavailable') : state === null ? t('states.loading') : words[state]
   const tone = failed || state === null ? 'chip' : tones[state]
+  if (variant === 'notice' && !failed && (state === null || state === 'synced')) return null
 
 
   // Rules 2 and 3. The lines are built in the order of how much they matter: a
@@ -125,19 +121,17 @@ export function SyncStatus({
     <Link
       to="/devices"
       className={
-        variant === 'compact'
-          ? // The top bar's: the state word, plus the two lines `essentials` keeps.
-            // It is a row rather than a column so the ordinary case is one line tall.
-            'flex min-h-11 flex-wrap items-center gap-x-2 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
-          : variant === 'chip'
-            ? 'flex min-h-11 max-w-64 flex-col items-end justify-center gap-0.5 rounded-card border border-border bg-surface px-2 py-1 text-right hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
+        variant === 'notice'
+          ? 'note mx-5 my-3 flex min-h-11 flex-wrap items-center gap-2 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
+          : variant === 'compact'
+            ? 'flex min-h-11 flex-wrap items-center gap-x-2 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
             : 'flex min-h-11 flex-col justify-center gap-1 rounded-field px-2 py-1 hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring'
       }
     >
       <span className={tone} role="status">
         {word}
       </span>
-      {(variant === 'compact' ? essentials : details).map((detail, index) => (
+      {(variant === 'sidebar' ? details : essentials).map((detail, index) => (
         <span key={index} className="meta">
           {detail}
         </span>

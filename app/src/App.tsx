@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Navigate, Outlet, useLocation } from 'react-router'
 
@@ -53,6 +53,7 @@ export function App() {
   const signedIn = session.status === 'signed-in'
   const location = useLocation()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const previousPath = useRef(location.pathname)
   // The local schedule is mounted here rather than on a screen, because it is a
   // property of *this device* and not of any one route: a reminder has to be
   // scheduled whether or not the student opens Today. The hook gates itself to
@@ -86,6 +87,13 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  useEffect(() => {
+    if (previousPath.current === location.pathname) return
+    previousPath.current = location.pathname
+    if (!signedIn) return
+    document.getElementById('main')?.focus({ preventScroll: true })
+  }, [location.pathname, signedIn])
+
   if (session.status === 'loading') {
     return (
       <div className="flex min-h-[100dvh] items-start justify-center bg-bg pt-safe-top">
@@ -106,7 +114,9 @@ export function App() {
 
   return (
     <Shell onOpenPalette={openPalette}>
-      <Outlet />
+      <div key={location.pathname} className="motion-entrance flex min-w-0 flex-1 flex-col">
+        <Outlet />
+      </div>
       <CommandPalette open={paletteOpen} onClose={closePalette} />
     </Shell>
   )

@@ -303,7 +303,7 @@ export function CalendarScreen({ now, timeZone }: { now: Date; timeZone: string 
   const nextCourse = next === null ? undefined : workspaceNames[next.workspace_id]
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
+    <div className="@container flex w-full min-w-0 flex-col gap-6">
       {error !== null ? (
         <ApiErrorNotice error={error} noun={t('planner.noun')} action={t('actions.retry')} />
       ) : null}
@@ -339,7 +339,7 @@ export function CalendarScreen({ now, timeZone }: { now: Date; timeZone: string 
         />
       </Section>
 
-      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid min-w-0 grid-cols-1 gap-6 @min-[64rem]:grid-cols-[minmax(0,1fr)_18rem]">
       {/* Wrapped rather than classed: `Section` is frozen and its root is a flex
           column, so as a grid item its automatic minimum could exceed the track
           the `minmax(0, …)` declares. `min-w-0` on the wrapper is the permission
@@ -451,7 +451,7 @@ export function CalendarScreen({ now, timeZone }: { now: Date; timeZone: string 
       {/* The exam context, beside the grid on a desktop and below it on a phone:
           the prep card for the selected goal, the day's planned load, and the
           exams ahead. It is the design's right-hand column. */}
-      <aside className="flex min-w-0 flex-col gap-6">
+      <aside className="flex min-w-0 flex-col gap-6 wrap-anywhere">
         {active !== null ? (
           <PrepProgress goalId={active.id} title={active.title} />
         ) : null}
@@ -470,7 +470,7 @@ export function CalendarScreen({ now, timeZone }: { now: Date; timeZone: string 
           title={t('planner.goals.title')}
           count={goalRows.length > 0 ? goalRows.length : undefined}
         >
-          <div className="card p-4">
+          <div className="card min-w-0 p-4">
             {goals.isPending ? (
               <LoadingState label={t('planner.goals.loading')} />
             ) : goalRows.length === 0 ? (
@@ -507,7 +507,7 @@ export function CalendarScreen({ now, timeZone }: { now: Date; timeZone: string 
             )}
             {goalRows.length > 0 ? (
               <div className="mt-3">
-                <Link to="/syllabus" className="link inline-flex min-h-11 items-center">
+                <Link to="/syllabus" className="link inline-flex min-h-11 max-w-full items-center wrap-anywhere">
                   {t('planner.goals.importAnother')}
                 </Link>
               </div>
@@ -867,7 +867,7 @@ function GoalRowItem({
         type="button"
         aria-pressed={selected}
         onClick={onSelect}
-        className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-field px-2 py-2 text-left hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+        className="flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-field px-2 py-2 text-left wrap-anywhere hover:bg-surface-raised focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
       >
         <span className="flex min-w-0 flex-col gap-0.5">
           {course === undefined ? null : (
@@ -877,12 +877,10 @@ function GoalRowItem({
             {goal.title}
           </span>
         </span>
-        <span className="meta shrink-0">
-          {formatInZone(new Date(goal.target_date), timeZone, { dateStyle: 'medium' })}
-        </span>
+        <span className="meta min-w-0 max-w-full wrap-anywhere">{formatInZone(new Date(goal.target_date), timeZone, { dateStyle: 'medium' })}</span>
         {/* Days rather than a countdown in hours: the planner works in local days,
             and the exam's own local day is what the student counts to. */}
-        <span className="meta shrink-0">
+        <span className="meta min-w-0 max-w-full wrap-anywhere">
           {days < 0 ? t('planner.goals.past') : t('planner.goals.daysLeft', { count: days })}
         </span>
       </button>

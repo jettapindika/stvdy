@@ -15,6 +15,7 @@ import { useWorkspace } from '@/api/queries/workspaces'
 import { Icon } from '@/components/ui/Icon'
 import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
+import { SyncStatus } from '@/features/sync/SyncStatus'
 import { dueCards, previewInterval, type StudyCard } from './due'
 
 /**
@@ -326,16 +327,8 @@ export function StudyScreen() {
   const panelOpen = revealed && sourceOpen && card !== null && card.chunk_id !== null
 
   return (
-    // `w-full` is load-bearing on this screen as it is on `WorkspaceListScreen`: the
-    // root's width is otherwise its fit-content, which cannot go below its content's
-    // min-content, and a card whose text is long would push the page sideways instead
-    // of wrapping inside it.
-    <div
-      className={`mx-auto flex w-full flex-col gap-6 px-5 md:px-[32px] py-6 ${
-        panelOpen ? 'max-w-5xl' : 'max-w-3xl'
-      }`}
-    >
-      <header className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex w-full min-w-0 flex-1 flex-col gap-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
+      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-5 py-2 pt-[calc(0.5rem+env(safe-area-inset-top,0px))] md:min-h-20 md:px-10 md:py-4">
         {workspaceId.length > 0 && (
           // `min-h-11 inline-flex items-center` — the shape every other text link in the
           // app uses (`TodayScreen`, `SettingsScreen`, `States.tsx`), and the one gate 5
@@ -346,19 +339,25 @@ export function StudyScreen() {
           // element.
           <Link
             to={`/workspaces/${workspaceId}`}
-            className="link inline-flex min-h-11 items-center gap-2 text-label"
+            aria-label={`${t('app.name')}: ${t('study.backToWorkspace')}`}
+            className="inline-flex min-h-11 min-w-0 items-center gap-3 rounded-field text-label text-primary-text"
           >
-            <Icon name="arrow-left" />
-            {t('study.backToWorkspace')}
+            <span className="flex size-11 shrink-0 items-center justify-center"><Icon name="arrow-left" /></span>
+            <span className="font-heading text-h2 font-semibold leading-[1.25] text-text md:text-[1.75rem]">{t('app.name')}</span>
+            <span className="hidden sm:inline">{t('study.backToWorkspace')}</span>
           </Link>
         )}
         {/* Ending the session is leaving the deck, not a second "back": the hub is
             where a session is chosen, so it is where the student lands when they are
             done with this one. Every review is already recorded when this is pressed. */}
-        <Link to="/study" className="btn btn-secondary ml-auto">
-          {t('study.endSession')}
+        <Link to="/study" aria-label={t('study.endSession')} className="btn btn-quiet ml-auto min-w-11">
+          <span className="hidden sm:inline">{t('study.endSession')}</span>
+          <Icon name="close" />
         </Link>
+        <SyncStatus variant="notice" />
       </header>
+
+      <div className={`@container mx-auto flex w-full min-w-0 flex-col gap-6 px-5 md:px-10 ${panelOpen ? 'max-w-[76rem]' : 'max-w-[52.5rem]'}`}>
 
       <div className="flex flex-col gap-2">
         {courseLabel !== null && <p className="eyebrow eyebrow-primary">{courseLabel}</p>}
@@ -438,8 +437,8 @@ export function StudyScreen() {
         // foot — while a desktop reads card | passage down the right and the grades
         // under the card.
         <div
-          className={`grid min-w-0 gap-6 lg:items-start ${
-            panelOpen ? 'lg:grid-cols-[minmax(0,1fr)_20rem]' : ''
+          className={`grid min-w-0 gap-6 @min-[64rem]:items-start ${
+            panelOpen ? '@min-[64rem]:grid-cols-[minmax(0,1fr)_20rem]' : ''
           }`}
         >
           {/* The card auto-sizes and scrolls *inside* itself: at 200% text a long
@@ -456,7 +455,7 @@ export function StudyScreen() {
             aria-label={t('study.cardLabel')}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className="card flex max-h-[70dvh] min-w-0 touch-pan-y flex-col gap-4 overflow-y-auto p-5 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring lg:col-start-1 lg:row-start-1"
+            className="card flex min-h-[min(20rem,55dvh)] max-h-[70dvh] min-w-0 touch-pan-y flex-col gap-4 overflow-y-auto p-6 sm:min-h-[min(26.25rem,55dvh)] sm:p-10 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring @min-[64rem]:col-start-1 @min-[64rem]:row-start-1"
           >
             <p className="eyebrow">
               {revealed ? t('study.answerLabel') : t('study.questionLabel')}
@@ -488,7 +487,7 @@ export function StudyScreen() {
                 </div>
               </div>
             ) : (
-              <div className="flex min-w-0 flex-col gap-3">
+              <div className="flex min-w-0 flex-1 flex-col justify-center gap-4">
                 {/* The design's largest text on the screen: 24/32 on a phone and
                     32/43 on a desktop. It is not a heading — the deck's title above
                     is the page's `h1` — it is the one thing the student is reading,
@@ -502,17 +501,17 @@ export function StudyScreen() {
           </div>
 
           {panelOpen && card.chunk_id !== null && (
-            <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+            <aside className="min-w-0 @min-[64rem]:col-start-2 @min-[64rem]:row-span-2 @min-[64rem]:row-start-1">
               <SourcePassage chunkId={card.chunk_id} sources={sources.data ?? []} />
             </aside>
           )}
 
-          <div className="flex min-w-0 flex-col gap-4 lg:col-start-1 lg:row-start-2">
+          <div className="flex min-w-0 flex-col gap-4 @min-[64rem]:col-start-1 @min-[64rem]:row-start-2">
             {!revealed && (
               <div className="flex flex-col items-center gap-3">
                 <button
                   type="button"
-                  className="btn btn-primary w-full sm:max-w-[17.5rem]"
+                  className="btn btn-primary min-h-12 w-full sm:max-w-[17.5rem]"
                   onClick={reveal}
                 >
                   {t('study.showAnswer')}
@@ -538,12 +537,12 @@ export function StudyScreen() {
                     that column** (165px at a 32px root), because a floor larger than the
                     container makes the single remaining track wider than the grid —
                     which is what a 6rem floor did here. */}
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(5rem,1fr))] sm:gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(5rem,1fr))]">
                   {grades.map((option) => (
                     <button
                       key={option.rating}
                       type="button"
-                      className={`${gradeClass(option.rating)} flex-wrap text-center`}
+                      className={`${gradeClass(option.rating)} min-h-12 flex-wrap text-center`}
                       aria-keyshortcuts={option.key}
                       disabled={review.isPending}
                       onClick={() => {
@@ -611,6 +610,7 @@ export function StudyScreen() {
           own line at a phone width in Indonesian rather than pushing the page sideways. */}
       {receipt !== null && (
         <div className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-4">
+          <Icon name="undo" />
           {/* The live region is the text, not the card: `role="status"` around a control
               announces the button as part of the message (see `States.tsx`). */}
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1" role="status">
@@ -677,6 +677,7 @@ export function StudyScreen() {
           />
         </div>
       )}
+      </div>
     </div>
   )
 }

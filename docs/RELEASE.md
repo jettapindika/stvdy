@@ -476,6 +476,28 @@ deployment artefact rather than code and it needs the production host (launch ch
 the page must state the same window the code implements. The remaining gap is that page, not the
 feature.
 
+## v0.1.4 public test release
+
+The owner requested public source visibility and public installer downloads for
+the current Figma/mobile layout update before the separate Settings/Musicfy pass.
+The repository remains proprietary/all-rights-reserved; public visibility is not
+a change of licence. History and tracked-source credential scans found only the
+documented test keys in `tests/push.rs`, the synthetic JWT secret in
+`tests/config.rs`, and the idempotency fixture in `tests/admin.rs`.
+
+This release uses `unsigned-artifacts.yml` with `visibility=public` and
+`apk_signing=operator-keystore`: macOS is universal, unsigned and unnotarized;
+Windows is unsigned; Android uses the existing direct-channel key. No updater
+manifest is produced, and the hosted endpoint remains staging. Release notes must
+retain those warnings rather than presenting this as a signed production launch.
+
+Pre-publication verification: `just check` succeeds, including the workspace and
+shell Rust checks and the frontend suite/build. The manual store build, the
+purchase-UI absence check, and the 19 artifact-check regression cases also pass.
+`verify-release-artifacts.sh --version --tag v0.1.4` confirms the coordinated
+version; both iOS project descriptions are identical. Browser evidence for the
+layout update remains recorded in `docs/DESIGN.md`.
+
 ## Release process
 
 The sequence, with the commands. **A release is a tag, not a branch**: tags are not commits, and a
@@ -591,7 +613,7 @@ inconvenience in it — so the two are separate files, and this one says on ever
 missing.
 
 ```bash
-gh workflow run unsigned-artifacts.yml -f version=0.1.3 \
+gh workflow run unsigned-artifacts.yml -f version=0.1.4 \
   -f visibility=prerelease -f apk_signing=operator-keystore
 ```
 
@@ -794,7 +816,7 @@ single user sees it. The service is not launched publicly until rows 8 and 9 are
 `tauri.conf.json`. Mobile build numbers are bumped per submission.
 
 **A bump touches more than those three, and the ones it misses are the ones nothing used to
-check.** As of v0.1.3 the places are:
+check.** As of v0.1.4 the places are:
 
 | Place | Bound by |
 |---|---|

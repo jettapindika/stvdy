@@ -93,7 +93,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
         {messages.isPending && <SkeletonRows rows={3} label={t('chat.list.loading')} />}
 
         {listError !== null && (
-          <div className="px-4 py-4">
+          <div className="px-5 py-4 md:px-6">
             <ApiErrorNotice
               error={listError}
               noun={t('errors.nouns.messages')}
@@ -139,7 +139,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
       )}
 
       <form
-        className="flex flex-col gap-3 border-t border-border px-4 py-3"
+        className="flex flex-col gap-3 border-t border-border px-5 py-3 md:px-6"
         onSubmit={(event) => {
           event.preventDefault()
           submit()

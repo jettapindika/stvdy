@@ -44,7 +44,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { t } = useTranslation()
 
   return (
-    <header className="topbar hidden md:flex">
+    <header className="@container/topbar topbar hidden md:flex">
       <div className="drag-region" aria-hidden="true" />
       {/* `flex-wrap` is the 200%-text accommodation: at a 32px root the search field
           and the account group together need more than the bar's width, and the
@@ -58,15 +58,12 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             second one 32px away would be noise. */}
         <button type="button" onClick={onOpenPalette} className="search-field max-w-xl">
           <Icon name="search" className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-muted">{t('palette.searchPlaceholder')}</span>
-          <kbd className="kbd shrink-0">{platform.shortcutLabel('K')}</kbd>
+          <span className="min-w-0 flex-1 truncate text-muted" title={t('palette.searchPlaceholder')}>{t('palette.searchPlaceholder')}</span>
+          <kbd className="kbd shrink-0 @max-[20rem]/topbar:hidden">{platform.shortcutLabel('K')}</kbd>
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-4">
-          {/* The chip variant is the phone's, where it sits above the tab bar with
-              a row to itself. In the bar it is rendered compact: the full control
-              carries "Last synced …" and a pending count, which is three lines in a
-              80px bar and made the whole header twice its height. */}
+          {/* Pending writes and refusal codes remain visible in the compact form. */}
           <SyncStatus variant="compact" />
           <CreditMeter />
           <AccountMenu />
@@ -79,11 +76,10 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
 /**
  * The phone's app header.
  *
- * The design's phone frames carry a 72px bar with the wordmark, a search action
- * and the avatar, and a separate 54px row under it holding the credit meter. The
- * two are separate rows because the credit pill is wide: at 390px it takes most of
- * a row, and squeezing it beside the wordmark is what pushed the header past the
- * viewport in the earlier layout.
+ * The design's phone frames carry a 72px bar with only the wordmark, a search
+ * action, and the avatar. The credit meter belongs to the page content below this
+ * chrome, where its placement can follow the screen's own hierarchy without
+ * consuming the header's narrow width.
  *
  * The status bar the design draws above this ("10:30", signal, battery) is OS
  * chrome and is not built.
@@ -101,9 +97,9 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
           the controls on a second line: a taller header, and every control still
           reachable, which is the trade the alternatives do not offer (shrinking the
           avatar clips its initials; letting it overflow scrolls the page sideways). */}
-      <div className="flex flex-wrap items-center gap-3 px-5 py-3 pt-safe-top">
+      <div className="flex min-h-18 flex-wrap items-center gap-3 px-5 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))]">
         <Wordmark />
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={onOpenPalette}
@@ -114,13 +110,6 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
           </button>
           <AccountMenu compact />
         </div>
-      </div>
-      {/* Its own row, left-aligned, so the pill does not compete with the header
-          controls for width on a narrow phone. The frame draws the capsule here too
-          (`Account and timezone` → `Credit meter`, 153x34), so it is the same control
-          as the desktop bar's. */}
-      <div className="px-5 pb-3">
-        <CreditMeter />
       </div>
     </div>
   )
@@ -149,7 +138,7 @@ function AccountMenu({ compact = false }: { compact?: boolean }) {
   return (
     <Link
       to="/settings/account"
-      className="flex min-h-11 items-center gap-3 rounded-field px-1 hover:bg-surface-raised"
+      className={`flex min-h-11 items-center gap-3 rounded-field hover:bg-surface-raised ${compact ? 'justify-center' : 'px-1'}`}
     >
       {!compact && display.length > 0 && (
         <span className="hidden max-w-40 truncate text-label text-text lg:block" title={display}>

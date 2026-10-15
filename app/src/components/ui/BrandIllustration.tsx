@@ -15,7 +15,7 @@ export function Wordmark({ className }: { className?: string }) {
 
   return (
     <span
-      className={`font-heading text-[28px] leading-[normal] font-semibold text-text ${className ?? ''}`}
+      className={`font-heading text-[1.75rem] leading-[1.25] font-semibold text-text ${className ?? ''}`}
     >
       {t('app.name')}
     </span>

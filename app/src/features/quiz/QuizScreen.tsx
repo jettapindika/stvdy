@@ -112,7 +112,7 @@ function OptionRow({
 }) {
   return (
     <label
-      className={`flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-field border px-4 py-2.5 has-[:focus-visible]:border-primary ${
+      className={`flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-field border px-4 py-6 has-[:focus-visible]:border-primary ${
         ROW_TONE[state]
       } ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
     >
@@ -222,7 +222,7 @@ export function QuizScreen() {
   // `w-full` is load-bearing on both: a root whose width is its fit-content cannot go
   // below its content's min-content, so one long word would push the page sideways
   // instead of wrapping inside it.
-  const pageClass = 'mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 md:px-[32px] py-8'
+  const pageClass = '@container/quiz flex w-full flex-col gap-6 px-5 md:px-[32px] py-8'
   const stateClass = 'mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 md:px-[32px] py-8'
 
   if (quiz.isPending) {
@@ -463,10 +463,10 @@ export function QuizScreen() {
       {phase === 'results' ? (
         <Results quizId={quizId} />
       ) : (
-        <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="flex flex-col gap-6 @min-[64rem]/quiz:flex-row">
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             {question !== undefined && (
-              <div ref={questionRef} tabIndex={-1} className="card flex flex-col gap-6 p-6">
+              <div ref={questionRef} tabIndex={-1} className="card flex flex-col gap-6 p-6 @min-[64rem]/quiz:p-8">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                   <p className="eyebrow">
                     {t('quiz.questionProgress', { current: index + 1, total })}
@@ -657,7 +657,7 @@ export function QuizScreen() {
             <p className="meta">{t('quiz.generatedNote')}</p>
           </div>
 
-          <div className="flex min-w-0 flex-col gap-4 lg:w-70 lg:shrink-0">
+          <div className="flex min-w-0 flex-col gap-4 @min-[64rem]/quiz:w-70 @min-[64rem]/quiz:shrink-0">
             <div className="card flex flex-col gap-4 p-6">
               <WidgetHeading title={t('quiz.session.title')} />
               <p className="eyebrow">
@@ -805,7 +805,7 @@ function Results({ quizId }: { quizId: string }) {
   const missed = summary.graded - summary.correct
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid gap-6 @min-[64rem]/quiz:grid-cols-3">
       <div className="card flex flex-col gap-6 p-6">
         <p className="eyebrow">{t('quiz.results.score')}</p>
 
@@ -855,7 +855,7 @@ function Results({ quizId }: { quizId: string }) {
         </Link>
       </div>
 
-      <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
+      <div className="flex min-w-0 flex-col gap-6 @min-[64rem]/quiz:col-span-2">
         {summary.topics.length > 0 && (
           <Section title={t('quiz.results.topics')} count={summary.topics.length}>
             <div className="card">

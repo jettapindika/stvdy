@@ -578,6 +578,9 @@
     color: var(--text-muted);
     text-decoration: none;
     min-height: 2.75rem;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
   }
   .nav-item:hover {
     background-color: var(--surface-raised);
@@ -601,8 +604,9 @@
     gap: 0.25rem;
     border-radius: 0;
     padding: 0.4rem 0.25rem;
-    /* 44px minimum touch target. */
-    min-height: 2.75rem;
+    /* 56px visual row from the Figma bottom tabs; padding around the nav keeps
+       the 44px touch requirement while leaving room for icon and label. */
+    min-height: 3.5rem;
     flex: 1;
     font-size: 0.625rem;
     line-height: 0.75rem;
@@ -635,25 +639,77 @@
     min-width: 0;
   }
 
-  /* The phone shell is a **column**: `main` takes the remaining space and the tab
+  /* The phone shell is a column: `main` takes the remaining space and the tab
      bar's band is a flow sibling below it, so the band reserves its own height by
-     being in the flow rather than by a number in a `padding-bottom`.
-
-     It used to be a fixed overlay with `padding-bottom: calc(2.75rem + 1px + 3rem +
-     env(safe-area-inset-bottom, 0px))` on `main`, and the `3rem` was the defect the
-     Phase 8 accessibility gate found: it was meant to cover the sync chip's row,
-     whose real height is **73px at 100% text and 176px at 200%** (the chip wraps,
-     because `max-w-64` caps it at 256px in a 390px viewport). Measured at 390x844
-     with 200% text, the last line box of the Devices screen's reset sentence sat
-     **32.4px behind the opaque band** and `document.elementFromPoint` at that point
-     returned the chip. The band also grows with a longer string, so no constant
-     would have been right at every scale and every language. In flow there is no
-     arithmetic left to get wrong.
-
-     The safe-area inset is still honoured: it is the tab bar nav's own
-     `pb-safe-bottom`, so it is part of the band's measured height. */
+     being in the flow rather than by a number in `padding-bottom`. The bar carries
+     only the five navigation links and its safe-area inset; the Today page owns
+     the credit meter row in content. */
   .shell-phone {
     flex-direction: column;
+  }
+  .auth-layout {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+    background-color: var(--bg);
+    color: var(--text);
+  }
+
+  .auth-header {
+    display: flex;
+    min-height: 6rem;
+    flex-shrink: 0;
+    align-items: center;
+    padding: env(safe-area-inset-top, 0px) 3rem 0;
+  }
+
+  .auth-main {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1.5rem;
+  }
+
+  .auth-footer {
+    min-height: 6.25rem;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .auth-footer .page-footer {
+    min-height: 100%;
+    box-sizing: border-box;
+    padding: 2.5rem 3rem 1rem;
+    border-top: 0;
+  }
+
+  @media (max-width: 767px) {
+    .auth-header {
+      min-height: calc(4.5rem + env(safe-area-inset-top, 0px));
+      padding-inline: 1.5rem;
+    }
+
+    .auth-main {
+      align-items: flex-start;
+      padding: 1.25rem 1.5rem 2rem;
+    }
+
+    .auth-footer {
+      min-height: 4.875rem;
+    }
+
+    .auth-footer .page-footer {
+      padding: 1.875rem 1.5rem 1rem;
+    }
+  }
+  .account-timezone-row {
+    min-width: 0;
+  }
+
+  .account-timezone-row > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   /* --- Identity: the citation mark ---------------------------------------- */
@@ -882,20 +938,9 @@
     align-items: center;
     gap: 0.75rem;
     width: 100%;
-    /* `min-width: 0` is load-bearing, and it is the same defect `phoneLayout.test.ts`
-       documents for `min-w-60`: a flex item's automatic minimum size is its
-       *content-based* minimum, so `width: 100%` does not lower it. Without it the
-       control's floor was icon + the whole placeholder + the `⌘K` badge — wider than
-       the column at 200% text — and the shell scrolled sideways at **both** viewports
-       (390 and 1440), with the overflow reported by an ancestor rather than by this
-       element, which is what makes it hard to attribute.
-
-       `min-width` is then raised again to a **floor of its own**, because zero is too
-       low in the other direction: with the row's other children unable to shrink, a
-       zero minimum let this control be squeezed to 71px and its own text clipped. The
-       floor is what the icon and the badge need with room for a few characters; below
-       it, the bar wraps. */
-    min-width: 12rem;
+    /* Keep the useful search floor while bounding it by the content column at
+       enlarged text sizes; a rem floor alone can exceed a tablet's whole header. */
+    min-width: min(12rem, 100%);
     border: 1px solid var(--border);
     border-radius: var(--radius-field);
     background-color: var(--surface);
@@ -933,6 +978,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
+    max-width: 100%;
     border: 1px solid var(--border);
     border-radius: var(--radius-pill);
     background-color: var(--surface-raised);
@@ -1160,10 +1207,31 @@
 }
 
 @layer utilities {
+  .motion-entrance {
+    animation: motion-entrance var(--duration-base) var(--ease-out);
+  }
+
+  @keyframes motion-entrance {
+    from {
+      opacity: 0;
+      transform: translateY(0.375rem);
+      filter: blur(0.375rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+
   /* Motion is limited to state transitions. One exception with a written
      purpose: a running job genuinely is working, so its indicator may pulse.
      Nothing else loops. */
   @media (prefers-reduced-motion: reduce) {
+    .motion-entrance {
+      animation: none;
+    }
+
     *,
     *::before,
     *::after {

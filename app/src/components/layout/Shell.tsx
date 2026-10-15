@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useMatch } from 'react-router'
 
+import { CreditMeter } from '@/features/billing/CreditMeter'
+import { SyncStatus } from '@/features/sync/SyncStatus'
 import { useSyncEngine } from '@/features/sync/useSyncEngine'
 import { useFormFactor } from '@/lib/useFormFactor'
 import { Sidebar } from './Sidebar'
@@ -26,14 +29,10 @@ import { PhoneHeader, TopBar } from './TopBar'
  * already scroll internally, plus a last row hidden behind the bar.
  *
  * **On a phone the shell root is a column** (`.shell-phone`) and the tab bar is a
- * flow sibling *below* `main`, not a fixed overlay above it. That is the fix for
- * the defect the Phase 8 gate found: a fixed band is painted over the content, so
- * the content has to reserve the band's height with a number in the stylesheet,
- * and the band's height is not a number — the sync chip above the five labels
- * measures 73px at 100% text and 176px at 200%, because `max-w-64` makes it wrap.
- * Any reserved constant is therefore wrong at some text scale. In flow the band
- * takes the height it needs and `main` takes the rest, so there is no arithmetic
- * to get wrong.
+ * flow sibling *below* `main`, not a fixed overlay above it. The bar now contains
+ * only the five navigation links and its own safe-area inset, so its height is
+ * stable and content is never painted beneath a second status row. The Today page
+ * owns its credit meter in content, matching the mobile frame's hierarchy.
  *
  * The skip link is not optional (R-32): a keyboard user should not have to tab
  * through the whole nav to reach content, and `<main>` is the landmark to skip to.
@@ -61,6 +60,8 @@ export function Shell({
 }) {
   const { t } = useTranslation()
   const isPhone = useFormFactor() === 'phone'
+  const focusedSession = useMatch('/study/:deckId') !== null
+  const workspaceDirectory = useMatch('/workspaces') !== null
   useSyncEngine()
 
   return (
@@ -74,21 +75,25 @@ export function Shell({
         {t('shell.skipToContent')}
       </a>
 
-      {!isPhone && <Sidebar />}
+      {!isPhone && !focusedSession && <Sidebar />}
 
       {/* The content column. On a desktop the top bar is inside it, so the bar
           starts where the sidebar ends rather than spanning the window — which is
           what the design draws, and what keeps the sidebar's own wordmark at the
           window's top-left corner. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {isPhone ? <PhoneHeader onOpenPalette={onOpenPalette} /> : <TopBar onOpenPalette={onOpenPalette} />}
+        {!focusedSession && (isPhone ? <PhoneHeader onOpenPalette={onOpenPalette} /> : <TopBar onOpenPalette={onOpenPalette} />)}
+        {isPhone && !focusedSession && <SyncStatus variant="notice" />}
+        {isPhone && workspaceDirectory && (
+          <div className="px-5 pt-5"><CreditMeter /></div>
+        )}
 
-        <main id="main" className="shell-main">
+        <main id="main" tabIndex={-1} className="shell-main">
           {children}
         </main>
       </div>
 
-      {isPhone && <TabBar />}
+      {isPhone && !focusedSession && <TabBar />}
     </div>
   )
 }

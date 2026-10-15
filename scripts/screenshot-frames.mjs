@@ -35,6 +35,7 @@ import {
   root,
   routeFor,
   signIn,
+  todayFixture,
 } from './measure-mobile.mjs'
 
 const OUT = join(root, process.env.OUT ?? 'var/frames')
@@ -96,7 +97,7 @@ const FRAMES = [
     height: 1466,
     surface: 'today-populated',
   },
-  { name: 'today-mobile', figma: '411:27057', width: 390, height: 2965, surface: 'today' },
+  { name: 'today-mobile', figma: '411:27057', width: 390, height: 2965, surface: 'today-populated' },
   {
     name: 'workspaces-desktop',
     figma: '411:43639',
@@ -197,7 +198,7 @@ const FRAMES = [
     figma: '411:58354',
     width: 1440,
     height: 1080,
-    surface: 'workspace-studio-quiz',
+    surface: 'quiz',
   },
   {
     name: 'reports-outline-desktop',
@@ -331,6 +332,7 @@ async function main() {
   })
 
   for (const frame of frames) {
+    todayFixture(false)
     const page = await browser.newPage()
     /**
      * The viewport is the frame's own size, **not clamped**.

@@ -251,7 +251,7 @@ export function MessageList({
 
   if (messages.length === 0 && turn === null) {
     return (
-      <div className="flex flex-col items-start gap-2 px-4 py-6">
+      <div className="flex flex-col items-start gap-2 px-5 py-6 md:px-6">
         <p className="font-medium">{t('chat.empty.title')}</p>
         <p className="max-w-prose text-sm text-muted">{emptyReason}</p>
       </div>
@@ -264,7 +264,7 @@ export function MessageList({
       aria-live="polite"
       aria-busy={streaming}
       aria-label={t('chat.list.label')}
-      className="flex flex-col gap-5 px-4 py-4"
+      className="flex flex-col gap-5 px-5 py-4 md:px-6"
     >
       {messages.map((message) => (
         <Turn key={message.id} role={message.role}>

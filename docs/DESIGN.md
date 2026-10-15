@@ -163,6 +163,14 @@ mid-sentence. Every layout must survive 200% text scaling and Indonesian strings
   `prefers-reduced-motion` turns the flashcard flip into a crossfade and stops
   every transition. No looping animation except a working indicator.
 
+Route entry adapts Magic UI's **Blur Fade** mechanism, inspected through its MCP
+registry: one 200ms opacity/6px-offset/6px-blur entrance, using the existing easing
+token. It runs on the route content or auth card, not on every widget. The command
+palette stays outside the animated wrapper so its fixed scrim remains viewport-sized.
+There is no retained transform/filter after the entrance, and reduced motion disables
+it entirely. No animation runtime or remote asset is added.
+
+
 ## Accessibility
 
 WCAG 2.2 AA, checked in CI rather than asserted:
@@ -240,6 +248,83 @@ the same ground as the card it usually sits on — so the hairline was its *only
 boundary, and a low-vision user could not find the button. `contrast.test.ts`'s
 `PAIRS` carries the pair for both, at the 3:1 UI floor, so the next person who
 reaches for `--border` on a control fails the build rather than shipping it.
+
+### Responsive fidelity follow-up
+
+- **Phone chrome:** a 72px wordmark/search/account header, safe-area padding added
+  rather than substituted, and one full-width bottom navigation row. Its five tabs
+  use the frame's 56px visual height with 8px surrounding padding and the real bottom
+  safe area. The credit meter belongs beside the timezone inside Today, and in the
+  directory's account-summary row, not in every phone header.
+- **Sync:** settled devices no longer reserve a second sticky phone row. Pending
+  writes, offline state, unreadable status, and server refusals still appear as a
+  normal-flow notice linking to `/devices`; a refusal retains its server code and
+  takes precedence over pending work. Desktop retains the compact top-bar control.
+- **Today:** DOM order follows the phone reading order (review, capture, timeline,
+  deadlines, timer, streak); explicit desktop grid placement preserves the frame's
+  two-column arrangement. Timeline/deadline cards use 16px phone insets and 24px
+  desktop insets. The desktop date control is not repeated in the phone introduction.
+- **Workspace:** the desktop source/chat/studio proportions are 280:532:400; mobile
+  workspace tabs remain segmented, while Studio section tabs are underlined. Source
+  cards use 16px insets, phone workspace titles use 24/32, and source-kind choices
+  reflow into readable grid cells instead of five squeezed text columns.
+- **Study:** `/study/:deckId` uses the focused session frame without global chrome.
+  A 760px desktop reading column, 350px phone card at the reference width, 24px/40px
+  card insets, and 48px reveal/rating actions keep the question dominant. Both Back
+  and End session remain real navigation; the source passage stacks when needed.
+- **Quiz and Planner:** the quiz uses the full frame column with a 280px session
+  rail; the planner's exam context is 288px at the reference viewport, and task
+  columns use the frame's 644:128:96:80:184:148 proportions. Search is bounded rather
+  than stretched across the task directory.
+- **Reflow follows available text space:** named 64rem container thresholds switch
+  Workspace, Quiz, study-source, and planner panels to their wide layouts. At 200%
+  text or intermediate widths they stack/switch panels instead of shrinking their
+  content into narrow strips. The tablet top-bar search floor is capped by its
+  available width; its shortcut hint yields before the search action does.
+
+The auth frames' Help/Privacy/recovery links remain absent until their real
+destinations exist. No unpublished legal notice, fake control, review-duration
+estimate, or Figma sample account data is introduced for visual completeness.
+
+
+### Verification of the responsive follow-up
+
+`npm --prefix app test`: 75 files, 761 tests passed. Web and store builds pass;
+`check:no-purchase-ui` finds no purchase path in the three shipped store files.
+Vite still reports the existing large-entry-chunk warning; no warning threshold
+was changed to suppress it.
+
+| Browser layout run | Surfaces | Theme/text combinations | Lowest text contrast | Clipped / overlapped / undersized / missing focus rings |
+|---|---:|---:|---:|---|
+| Phone 390×844 | 31 | 124 | 4.71:1 | 0 / 0 / 0 / 0 |
+| Desktop 1365×900 | 32 | 128 | 4.71:1 | 0 / 0 / 0 / 0 |
+
+Both runs use light/dark and 100%/200% text. Reports are
+`var/gate-fidelity-final-phone.json` and `var/gate-fidelity-final-desktop.json`.
+Post-review rechecks cover the ten affected surfaces at both viewports, followed
+by the three focused-review states after the final header change; all pass. These
+filtered rechecks are not represented as additional whole-app runs.
+
+Browser smoke additionally exercises all five phone destinations, account and
+billing links, search/Escape, quiz submission with correct-answer feedback, and
+the focused review's reveal/source/exit path. Page errors on those paths: zero.
+The Quiz/Workspace width sweep covers 320, 390, 768, 1024, 1365 and 1440px at
+100%/200% text with exact page width and readable upload choices. Reduced motion
+reports no animation, transform or filter; ordinary route entry reports 200ms
+and the shared ease-out curve. Route changes move focus to the main landmark.
+
+Figma comparison captures are in `var/frames/fidelity-final/`. The quiz mapping
+now photographs `/quiz/q1`, not its generation form. Each frame resets Today
+fixtures before mounting, so a populated Today capture cannot change the data of
+later planner/task captures. These are browser/fixture checks, not a native-device
+or production-backend claim.
+
+Delivery gate: Hard Gate PASS (measured reflow, contrast, targets and keyboard;
+no invented controls or account content). Purpose Gate PASS (Figma-derived
+palette, type, spacing, shapes and a single route-entry motion). Liveliness PASS
+(ENERGY 1 / RHYTHM 2 / MOTION 2, review as the focal action). Craftsmanship PASS
+(real routes and states retained, both themes checked, two code-review fix rounds
+closed). No new visual assets or decorative loops were introduced.
 
 ## What the design does not cover
 

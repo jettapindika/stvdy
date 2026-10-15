@@ -34,7 +34,7 @@ export function SourcePassage({
       : null
 
   return (
-    <section aria-label={label ?? t('sources.passage.label')} className="note flex flex-col gap-2">
+    <section aria-label={label ?? t('sources.passage.label')} className="note flex min-w-0 max-w-full flex-col gap-2 wrap-anywhere">
       {chunk.isPending && <p className="text-sm text-muted">{t('sources.passage.loading')}</p>}
 
       {error !== null && (
@@ -59,7 +59,7 @@ export function SourcePassage({
             {title}
             {chunk.data.page !== null && ` ${t('sources.page', { page: String(chunk.data.page) })}`}
           </p>
-          <p className="whitespace-pre-wrap break-words text-sm text-muted">
+          <p className="min-w-0 max-w-full whitespace-pre-wrap break-words wrap-anywhere text-sm text-muted">
             {chunk.data.content}
           </p>
         </>

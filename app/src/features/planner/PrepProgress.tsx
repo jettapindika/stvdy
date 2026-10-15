@@ -64,12 +64,12 @@ export function PrepProgress({ goalId, title }: { goalId: string; title: string 
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <p className="text-label text-text">{t('planner.prep.coverage')}</p>
-            <p className="meta text-primary-text">
+            <p className="min-w-0 wrap-anywhere text-label text-text">{t('planner.prep.coverage')}</p>
+            <p className="meta min-w-0 wrap-anywhere text-primary-text">
               {t('planner.prep.percent', { percent: data.topic_coverage_pct })}
             </p>
           </div>
-          <p className="text-small text-text">
+          <p className="min-w-0 wrap-anywhere text-small text-text">
             {t('planner.prep.topicsReviewed', { done: reviewed, total: data.topics.length })}
           </p>
           {/* The bar is decorative: the percentage above it is the fact, and the
@@ -86,7 +86,7 @@ export function PrepProgress({ goalId, title }: { goalId: string; title: string 
         </div>
       )}
 
-      <dl className="flex flex-wrap gap-x-8 gap-y-4">
+      <dl className="flex flex-wrap gap-x-4 gap-y-4">
         <div className="flex min-w-0 flex-col">
           <dt className="text-h2 min-w-0 break-words">
             {data.quiz_accuracy_pct === null

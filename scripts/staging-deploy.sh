@@ -39,7 +39,7 @@ set -euo pipefail
 root="${1:-$HOME/stvdy}"
 cd "$root"
 
-export SERVER_IMAGE="${SERVER_IMAGE:-stvdy-server:0.1.3}"
+export SERVER_IMAGE="${SERVER_IMAGE:-stvdy-server:0.1.4}"
 compose=(docker compose -f docker-compose.staging.yml)
 
 echo "=== image"

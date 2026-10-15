@@ -41,8 +41,8 @@ import { formatInZone } from '@/lib/time'
  * part of the same pattern: roving tabindex (only the active tab is a tab stop)
  * and Left/Right/Home/End, per the WAI-ARIA authoring practices.
  *
- * The strip is `lg:hidden`: below `lg` the panels are one at a time, at and above
- * it all three are visible and there is no tab interface at all.
+ * The strip yields to three columns only once the workspace has 64rem of usable
+ * text space; narrower containers and enlarged text keep one panel at a time.
  *
  * The root fills the space the shell gives it (`min-h-0 flex-1`) rather than the
  * viewport, so panels scroll internally without an outer page scroll.
@@ -154,15 +154,15 @@ export function WorkspaceScreen() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex flex-col gap-2 border-b border-border bg-surface px-5 py-4">
+    <div className="@container/workspace flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex flex-col gap-2 border-b border-border bg-surface px-5 py-5 md:px-6 md:py-6">
         {/* A link that is a control needs its own target: `inline-flex min-h-11
             items-center` (see the `.link` rule in styles.css). */}
         <Link to="/workspaces" className="link inline-flex min-h-11 items-center gap-2 self-start">
           <Icon name="arrow-left" size={20} />
           {t('nav.workspaces')}
         </Link>
-        <h1 className="min-w-0 wrap-anywhere">
+        <h1 className="text-h2 md:text-h1 min-w-0 wrap-anywhere">
           {detail?.name ?? t('workspaces.detail.titleFallback')}
         </h1>
         {facts.length > 0 && <p className="meta uppercase wrap-anywhere">{facts.join(' · ')}</p>}
@@ -190,7 +190,7 @@ export function WorkspaceScreen() {
             role="tablist"
             aria-label={t('workspaces.panels.label')}
             onKeyDown={onKeyDown}
-            className="mx-3 my-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 lg:hidden"
+            className="mx-5 my-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 @min-[64rem]/workspace:hidden"
           >
             {panels.map((panel) => {
               const selected = active === panel.id
@@ -218,14 +218,14 @@ export function WorkspaceScreen() {
             })}
           </div>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(200px,1fr)_minmax(320px,2fr)_minmax(220px,1fr)]">
+          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 @min-[64rem]/workspace:grid-cols-[minmax(0,280fr)_minmax(0,532fr)_minmax(0,400fr)]">
             {PANEL_ORDER.map((id) => (
               <section
                 key={id}
                 id={`panel-${id}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${id}`}
-                className={`min-h-0 flex-col border-border lg:flex lg:border-r lg:last:border-r-0 ${
+                className={`min-h-0 min-w-0 flex-col border-border @min-[64rem]/workspace:flex @min-[64rem]/workspace:border-r @min-[64rem]/workspace:last:border-r-0 ${
                   active === id ? 'flex' : 'hidden'
                 }`}
               >
@@ -236,7 +236,7 @@ export function WorkspaceScreen() {
                       so an `h3` here would skip a level and fail the accessibility
                       gate. The panel is named by its tab on a phone and by its
                       column on a desktop, and the label carries the same word. */}
-                  <span className="label">{labels[id]}</span>
+                  <span className="text-h3 min-w-0 wrap-anywhere">{labels[id]}</span>
                 </div>
                 {/* `wrap-anywhere` (`overflow-wrap: anywhere`) on the container
                     rather than on each text box: it inherits, and it is the
@@ -311,7 +311,7 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
         role="tablist"
         aria-label={t('workspaces.studio.sections')}
         onKeyDown={onKeyDown}
-        className="mx-3 mt-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1"
+        className="mx-5 mt-3 flex overflow-x-auto overscroll-x-contain border-b border-border md:mx-4"
       >
         {sections.map((entry) => {
           const selected = entry.id === section
@@ -330,9 +330,13 @@ function StudioPanel({ workspaceId }: { workspaceId: string }) {
               onClick={() => {
                 setSection(entry.id)
               }}
-              className={`btn flex-1 min-w-max ${selected ? 'btn-secondary' : 'btn-quiet'}`}
+              className="flex min-h-11 flex-1 min-w-max items-center justify-center px-1"
             >
-              {entry.label}
+              <span
+                className={`flex min-h-11 items-center border-b-2 px-1 text-label ${selected ? 'border-primary font-semibold text-primary-text' : 'border-transparent text-muted hover:text-text'}`}
+              >
+                {entry.label}
+              </span>
             </button>
           )
         })}
@@ -365,7 +369,7 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
   const listError = asApiError(sources.error)
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-4 px-5 py-5 md:px-4 md:py-4">
       {sources.isPending && (
         <SkeletonRows rows={2} label={t('workspaces.sources.loading')} />
       )}
@@ -393,7 +397,7 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {sources.data !== undefined && sources.data.length > 0 && (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-4">
           {sources.data.map((source) => (
             <SourceRow key={source.id} workspaceId={workspaceId} source={source} />
           ))}
@@ -464,7 +468,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
   const openable = status === 'ready' && source.url !== null
 
   return (
-    <li className="panel flex flex-col gap-3 p-3">
+    <li className="panel flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="chip chip-source shrink-0" aria-hidden="true">
           <Icon name={KIND_ICON[source.kind]} size={20} />
@@ -606,7 +610,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
 
   return (
     <form
-      className="panel flex flex-col gap-3 p-3"
+      className="panel flex flex-col gap-3 p-4"
       onSubmit={(event) => {
         event.preventDefault()
         if (!ready) return
@@ -639,11 +643,11 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
 
       <fieldset className="flex flex-col gap-1">
         <legend className="label">{t('workspaces.upload.legend')}</legend>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))] gap-2">
           {UPLOAD_KINDS.map((option) => (
             <label
               key={option}
-              className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 rounded-field border border-border px-3 py-2 text-small has-[:focus-visible]:border-primary has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 rounded-field border border-border-strong px-3 py-2 text-small has-[:checked]:border-primary has-[:checked]:bg-primary-tint has-[:checked]:text-primary-text has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
             >
               <input
                 type="radio"
@@ -654,7 +658,7 @@ function UploadForm({ workspaceId }: { workspaceId: string }) {
                   setKind(option)
                 }}
               />
-              {kindLabel[option]}
+              <span className="min-w-0 wrap-anywhere">{kindLabel[option]}</span>
             </label>
           ))}
         </div>

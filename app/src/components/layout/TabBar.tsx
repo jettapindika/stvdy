@@ -2,7 +2,6 @@ import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
 
 import { Icon, type IconName } from '@/components/ui/Icon'
-import { SyncStatus } from '@/features/sync/SyncStatus'
 
 /**
  * Bottom navigation for phones.
@@ -23,18 +22,15 @@ import { SyncStatus } from '@/features/sync/SyncStatus'
  * design's visual density does not cost the touch target (R-03).
  *
  * **The band is `sticky bottom-0`, not `fixed`.** It is a flow sibling below
- * `main` (the shell root is a column on a phone, `.shell-phone`), so it takes the
- * height it needs and the content above it can never be painted over at the end of
- * the scroll — which is what the Phase 8 gate found when this was `fixed` and the
- * content reserved a hardcoded `3rem` for it. Both rows stay opaque, so content
- * scrolling *under* the band during a scroll is still hidden rather than showing
- * through.
+ * `main` (the shell root is a column on a phone), so it takes the height it needs
+ * and the content above it can never be painted over at the end of the scroll.
+ * Safe-area padding belongs to the nav itself, and the five destinations remain
+ * the only links in this band.
  *
- * **The sync status chip sits in this band, above the five tabs, and not among
- * them** (A189): the sidebar and this bar are built from the same five labels, and
- * a sixth item would take width from every one of them. The chip is therefore a
- * sibling of the `nav`, which is also why `within(bar).getAllByRole('link')` still
- * counts five.
+ * The sync status is deliberately not rendered here. On desktop it remains in the
+ * top bar; on phone it is reachable through the existing Devices destination rather
+ * than consuming a second row above the tabs. The Today screen owns its credit row
+ * in content, matching the mobile frame's hierarchy.
  */
 export function TabBar() {
   const { t } = useTranslation()
@@ -49,12 +45,7 @@ export function TabBar() {
   ]
 
   return (
-    <div className="sticky bottom-0 z-40 flex flex-col md:hidden">
-      {/* Its own row, opaque like the bar below it, so a line of content scrolling
-          under the band is hidden rather than showing through the chip's row. */}
-      <div className="flex justify-end bg-surface px-3 pt-2">
-        <SyncStatus variant="chip" />
-      </div>
+    <div className="sticky bottom-0 z-40 flex md:hidden">
 
       <nav
         aria-label={t('shell.nav.main')}
@@ -66,7 +57,7 @@ export function TabBar() {
         // type who lost it. At 100% nothing scrolls, so the visual is unchanged. A
         // focused item is scrolled into view by the browser, which keeps it reachable
         // by `Tab` as well as by swipe.
-        className="flex overflow-x-auto overscroll-x-contain border-t border-border bg-surface pb-safe-bottom"
+        className="flex w-full overflow-x-auto overscroll-x-contain border-t border-border bg-surface p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]"
       >
         {items.map((item) => (
           <NavLink

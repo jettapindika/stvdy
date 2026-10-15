@@ -145,7 +145,7 @@ function SidebarFooter() {
   const zone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="mt-auto flex flex-col gap-2">
       <Icon name="help" size={20} className="shrink-0" />
       <p className="text-caption text-muted">{t('shell.railNote')}</p>
       <p className="meta uppercase">{zone}</p>

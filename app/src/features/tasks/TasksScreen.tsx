@@ -370,7 +370,7 @@ function TaskFilters({ query, onQuery }: { query: string; onQuery: (value: strin
 
   return (
     <div className="flex flex-wrap items-start gap-4">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex w-full min-w-0 max-w-full flex-col gap-1 sm:w-78 sm:shrink-0">
         <label className="text-label text-text" htmlFor="task-search">
           {t('tasks.find.label')}
         </label>
@@ -386,7 +386,7 @@ function TaskFilters({ query, onQuery }: { query: string; onQuery: (value: strin
             longest word at 200% text, and without this it overflowed by 13px. */}
         <p className="text-caption text-muted break-words">{t('tasks.find.helper')}</p>
       </div>
-      <p className="meta flex min-h-11 items-center self-end">{t('tasks.sort.due')}</p>
+      <p className="meta ml-auto flex min-h-11 items-center self-end">{t('tasks.sort.due')}</p>
     </div>
   )
 }
@@ -451,7 +451,7 @@ function TaskList({
   }
 
   return (
-    <div className="card flex flex-col">
+    <div className="@container/tasks card flex min-w-0 flex-col">
       {/* The header row is a grid of the same six fractions the rows use, so a
           column heading cannot drift away from the column under it. It is
           `aria-hidden`: every cell below carries its own content, and a screen
@@ -460,7 +460,7 @@ function TaskList({
           nested lists, which is exactly the content a table cell cannot carry). */}
       <div
         aria-hidden="true"
-        className="raised grid grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))] gap-4 rounded-b-none border-b border-border px-5 py-2"
+        className="raised hidden grid-cols-[minmax(0,644fr)_minmax(0,128fr)_minmax(0,96fr)_minmax(0,80fr)_minmax(0,184fr)_minmax(0,148fr)] gap-4 rounded-b-none border-b border-border px-5 py-2 @min-[64rem]/tasks:grid"
       >
         {columns.map((column) => (
           <span key={column} className="eyebrow min-w-0 break-words">
@@ -517,7 +517,7 @@ function TaskTableRow({
 
   return (
     <div className="flex min-w-0 flex-col gap-3 px-5 py-4">
-      <div className="grid grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))] items-start gap-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(8rem,100%),1fr))] items-start gap-4 @min-[64rem]/tasks:grid-cols-[minmax(0,644fr)_minmax(0,128fr)_minmax(0,96fr)_minmax(0,80fr)_minmax(0,184fr)_minmax(0,148fr)]">
         <div className="flex min-w-0 flex-col gap-1">
           <span className="min-w-0 break-words text-label text-text">
             {task.status === 'done' ? t('tasks.done', { title: task.title }) : task.title}

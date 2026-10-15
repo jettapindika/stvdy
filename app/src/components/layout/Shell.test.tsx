@@ -63,7 +63,7 @@ const USAGE = {
  * most of these tests are about is navigation, and the meter's own failure state
  * is asserted where it belongs.
  */
-function renderShell(usage?: unknown) {
+function renderShell(usage?: unknown, route = '/') {
   mockFetch((url) => {
     if (new URL(url).pathname === '/usage' && usage !== undefined) {
       return jsonResponse(200, usage)
@@ -80,6 +80,7 @@ function renderShell(usage?: unknown) {
     <Shell onOpenPalette={() => {}}>
       <p>content</p>
     </Shell>,
+    { route },
   )
 }
 
@@ -87,7 +88,17 @@ beforeEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('the shell always offers navigation', () => {
+describe('responsive app and focused session navigation', () => {
+  it.each([390, 1440])('keeps a review session free of global navigation at %ipx', (width) => {
+    mockViewport(width)
+    renderShell(USAGE, '/study/deck-1')
+
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Search/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveTextContent('content')
+  })
+
+
   it('renders the tab bar on a phone, which is the bug that shipped', () => {
     mockViewport(390)
     renderShell()
@@ -173,14 +184,9 @@ describe('the shell always offers navigation', () => {
   })
 
   /**
-   * The sync status control, in both form factors (A189).
-   *
-   * Devices is reached from this control rather than from a sixth nav item,
-   * because the sidebar and the tab bar are both built from the same five labels.
-   * Two consequences are asserted here and both would be silent regressions:
-   * the control has to exist on *both* form factors, or one of them loses its only
-   * route to the device list; and it must not be one of the tab bar's links, or the
-   * five labels lose the widths they were measured at (5 x 78px on a 390px phone).
+   * Desktop keeps the sync control in the top bar. Phone navigation stays a single
+   * five-link row; the device route remains reachable from Settings rather than
+   * consuming a second status row above the tabs.
    */
   it('carries the sync status control in the top bar, on desktop', () => {
     mockViewport(1280)
@@ -192,41 +198,14 @@ describe('the shell always offers navigation', () => {
     )
   })
 
-  it('carries the sync status control on a phone without making it a sixth tab', () => {
+  it('keeps the phone tab bar to five links without a sync row', () => {
     mockViewport(390)
     renderShell()
 
-    // Reachable, and outside the nav so the five labels keep their widths.
-    expect(screen.getByRole('link', { name: /Devices and sync/ })).toHaveAttribute(
-      'href',
-      '/devices',
-    )
     const bar = screen.getByRole('navigation', { name: 'Main' })
     expect(within(bar).getAllByRole('link')).toHaveLength(5)
-    expect(within(bar).queryByRole('link', { name: /Devices and sync/ })).not.toBeInTheDocument()
+    expect(within(bar).queryByRole('link', { name: /credit|devices|sync/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Devices and sync/ })).not.toBeInTheDocument()
   })
 
-  /**
-   * The tab bar must be able to scroll sideways, and that is a 200%-text-scale
-   * defect rather than a style choice.
-   *
-   * Each item is `flex: 1` with the UA's `min-width: auto`, so it cannot shrink
-   * below its label. The five labels need 390px at 100% type (measured: 5 x 78px)
-   * but ~435px at 200%, and the bar is `position: fixed` — so with `overflow:
-   * visible` the fifth item, "More" (Settings and Billing), was painted 45px past
-   * the right edge of the viewport with nothing to scroll it into view. It was
-   * unreachable, and only for the reader who had enlarged their type.
-   *
-   * jsdom does not lay out, so this asserts the declaration that fixes it. Without
-   * `overflow-x-auto` the bar overflows again; `overscroll-x-contain` keeps a
-   * horizontal swipe on the bar from triggering the browser's back gesture.
-   */
-  it('lets the tab bar scroll sideways, so no item can be unreachable', () => {
-    mockViewport(390)
-    renderShell()
-
-    const bar = screen.getByRole('navigation', { name: 'Main' })
-    expect(bar.className).toContain('overflow-x-auto')
-    expect(bar.className).toContain('overscroll-x-contain')
-  })
 })

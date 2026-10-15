@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Route, Routes } from 'react-router'
+import { Link, Route, Routes } from 'react-router'
 
 import { App } from './App'
 import { installFakePlatform, jsonResponse, mockFetch, stubViewport } from './test/harness'
@@ -49,6 +50,24 @@ function renderApp() {
 }
 
 describe('the session gate', () => {
+  it('moves keyboard focus to new content after a route change removes the active control', async () => {
+    mockFetch(() => jsonResponse(200, USER))
+    setAccessToken('access-1')
+    const user = userEvent.setup()
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<App />}>
+          <Route index element={<Link to="/settings">Open account settings</Link>} />
+          <Route path="settings" element={<h1>Account settings</h1>} />
+        </Route>
+      </Routes>,
+    )
+
+    await user.click(await screen.findByRole('link', { name: 'Open account settings' }))
+    expect(await screen.findByRole('heading', { name: 'Account settings' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveFocus()
+  })
+
   it('shows the sign-in screen when there is nothing stored', async () => {
     const calls = mockFetch(() => jsonResponse(200, {}))
 

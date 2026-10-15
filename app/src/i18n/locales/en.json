@@ -655,8 +655,8 @@
     "studio": {
       "sections": "Studio sections",
       "flashcards": "Flashcards",
-      "quiz": "Quiz",
-      "report": "Report"
+      "quiz": "Quizzes",
+      "report": "Reports"
     },
     "sources": {
       "loading": "Loading this workspace's sources",

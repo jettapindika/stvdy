@@ -40,13 +40,13 @@ export function AuthCard({
   const { t } = useTranslation()
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-bg px-6 pt-safe-top pb-safe-bottom">
-      <header className="flex min-h-16 items-center sm:min-h-24">
+    <div className="auth-layout bg-bg text-text">
+      <header className="auth-header">
         <Wordmark />
       </header>
 
-      <main className="flex flex-1 flex-col justify-center py-8">
-        <div className="card mx-auto flex w-full max-w-[27.5rem] flex-col gap-5 p-6 sm:gap-6 sm:p-8">
+      <main className="auth-main">
+        <div className="auth-card card motion-entrance flex w-full max-w-[27.5rem] flex-col gap-5 p-6 sm:gap-6 sm:p-8">
           <div className="flex flex-col gap-2">
             <h1 className="text-h2 sm:text-h1">{title}</h1>
             <p className="text-body text-muted">{subtitle}</p>
@@ -66,7 +66,9 @@ export function AuthCard({
         </div>
       </main>
 
-      <PageFooter left={t('auth.metadata')} />
+      <div className="auth-footer">
+        <PageFooter left={t('auth.metadata')} />
+      </div>
     </div>
   )
 }

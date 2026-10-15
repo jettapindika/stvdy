@@ -180,12 +180,13 @@ plan applies to every device you sign in on.
 
 ## Get the app
 
-Installers are attached to each release on the
-[Releases page](https://github.com/jettapindika/stvdy/releases): a signed and
-notarized macOS disk image, and the Android APK for direct install. Windows
-builds come from the same release pipeline, and iOS builds go to TestFlight; the
-current pre-release carries the macOS and Android artifacts only. The web app
-runs at the address you were given.
+Installer downloads are published on the
+[Releases page](https://github.com/jettapindika/stvdy/releases). The v0.1.4 public
+test build uses the existing unsigned-artifact channel: macOS universal DMG and
+Windows x64 EXE are unsigned (macOS is also unnotarized); the Android APK uses the
+operator's direct-channel signing key. These builds do not publish an updater
+manifest. Read the warnings and checksums attached to the release before installing.
+The hosted service is still staging, not a public production launch.
 
 ## Questions and support
 

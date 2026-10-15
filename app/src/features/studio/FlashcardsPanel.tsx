@@ -49,9 +49,9 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
   const cost = decks.data?.cost
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-5 px-5 py-5 md:px-4 md:py-4">
       <form
-        className="panel flex flex-col gap-3 px-3 py-3"
+        className="panel flex flex-col gap-3 px-4 py-4"
         onSubmit={(event) => {
           event.preventDefault()
           if (!ready) return

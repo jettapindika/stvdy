@@ -24,10 +24,8 @@ import { INTL_LOCALE, isLanguage } from '@/i18n'
  * carries no colour of its own — the state is in the words ("No credits left"),
  * so nothing is conveyed by colour alone.
  *
- * **One shape, in both form factors.** The capsule is what the design draws in the
- * desktop top bar's account group *and* in the phone header's own row under the
- * controls (`411:27057` → `Account and timezone` → `Credit meter`, 153x34), so there
- * is no second variant to keep in step.
+ * The capsule is shared by the desktop top bar and the mobile content summary.
+ * At enlarged text sizes its label wraps rather than hiding any part of a balance.
  */
 
 /**
@@ -95,10 +93,7 @@ export function CreditMeter({ className = '' }: { className?: string }) {
       className={`credit-pill hover:border-border-strong focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring ${className}`}
     >
       <Icon name="sparkles" size={16} className="shrink-0 text-primary-text" />
-      {/* `whitespace-nowrap`: the balance is two words at most in either
-          language, and a capsule that wrapped "60 credits left" onto two lines
-          made the whole top bar twice its height. */}
-      <span className="meta whitespace-nowrap text-text">{label}</span>
+      <span className="meta min-w-0 wrap-anywhere text-text">{label}</span>
       {/* The frame's 24x4 level bar, omitted rather than zero-filled when either number
           is absent — `Shell.test.tsx` answers `/usage` with `limits: {}`, and a bar drawn
           from an undefined allowance would be a figure nothing measured. */}

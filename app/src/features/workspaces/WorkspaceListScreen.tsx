@@ -125,7 +125,7 @@ export function WorkspaceListScreen() {
     // pushed the root to **502px inside a 390px viewport** with 25 elements past the right
     // edge and the page scrolling sideways. The class is content-dependent, which is why it
     // is worth the paragraph: a screen that fits today is one field away from not fitting.
-    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-8">
+    <div className="flex w-full flex-col gap-6 px-5 md:px-[32px] py-5 md:py-8">
       <PageHeader
         eyebrow={t('workspaces.list.eyebrow')}
         title={t('nav.workspaces')}
@@ -258,7 +258,7 @@ export function WorkspaceListScreen() {
             <p className="max-w-prose text-body text-muted wrap-anywhere">{t('workspaces.list.reviewReason')}</p>
           </div>
           {due > 0 && (
-            <Link to="/study" className="btn btn-secondary">
+            <Link to="/study" className="btn btn-secondary w-full sm:w-auto">
               {t('workspaces.list.reviewAction')}
             </Link>
           )}
@@ -325,7 +325,7 @@ export function WorkspaceListScreen() {
               3 x 370.667 + 2 x 24 = 1160. At `gap-4` the cards were 376 wide, 5.3px
               too wide with the gaps 8px too narrow. The vertical pitch agrees: rows sit
               at y=0 and y=356 against a 332px card, which is the same 24. */}
-          <ul className="grid list-none grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid list-none grid-cols-1 gap-4 md:gap-6 md:grid-cols-2 xl:grid-cols-3">
             {ordered.map((workspace) => (
               <WorkspaceCard key={workspace.id} workspace={workspace} />
             ))}
@@ -375,7 +375,7 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
           the colour is never the only thing that identifies the course. */}
       <span className="course-marker" aria-hidden="true" />
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           {/* A real count from the list response, never a placeholder. Sky is the
               source pair, and this is a fact about the workspace's sources. */}
@@ -538,7 +538,7 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
             wrong on exactly the day it mattered. A workspace with no date omits
             the line rather than showing a dash. */}
         {typeof exam === 'string' && exam.length > 0 && mode !== 'renaming' && (
-          <p className="meta uppercase wrap-anywhere border-t border-border pt-3">
+          <p className="meta uppercase wrap-anywhere">
             {t('workspaces.list.examLine', {
               date: formatInZone(new Date(`${exam}T00:00:00Z`), 'UTC', {
                 day: '2-digit',
