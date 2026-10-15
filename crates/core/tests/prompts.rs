@@ -283,12 +283,13 @@ fn sections_in(text: &str) -> Vec<String> {
     let mut names = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
-        if let Some(inner) = trimmed.strip_prefix('<') {
-            if let Some(name) = inner.strip_suffix('>') {
-                if !name.is_empty() && !name.starts_with('/') && !name.contains([' ', '\t', '<']) {
-                    names.push(name.to_string());
-                }
-            }
+        if let Some(inner) = trimmed.strip_prefix('<')
+            && let Some(name) = inner.strip_suffix('>')
+            && !name.is_empty()
+            && !name.starts_with('/')
+            && !name.contains([' ', '\t', '<'])
+        {
+            names.push(name.to_string());
         }
     }
     names
