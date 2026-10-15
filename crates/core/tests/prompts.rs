@@ -9,13 +9,13 @@ use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, resolve};
 use stvdy_core::prompts::registry::{
-    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, BASE_V3, BASE_V3_VERSION, NO_EXAM_DATE,
-    NO_OTHER_SECTIONS, NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
+    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, BASE_V3, BASE_V3_VERSION, BASE_V4,
+    BASE_V4_VERSION, NO_EXAM_DATE, NO_OTHER_SECTIONS, NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
 };
 use stvdy_core::prompts::{
     ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, UNTRUSTED_VARIABLES, VarKind,
-    base_v2_variables, base_v3_variables, base_variable_kind, base_variables, compose_chat,
-    compose_task, module_variables,
+    base_v2_variables, base_v3_variables, base_v4_variables, base_variable_kind, base_variables,
+    compose_chat, compose_task, module_variables,
 };
 
 /// The base prompt file, read from disk by the same relative path the registry
@@ -30,6 +30,10 @@ const BASE_V2_FILE: &str = include_str!("../../../prompts/base.v2.md");
 /// The v3 base prompt file. v3 is v2 plus `<output_quality>` and two
 /// `<language_and_tone>` rules (anti-slop quality filter).
 const BASE_V3_FILE: &str = include_str!("../../../prompts/base.v3.md");
+
+/// The v4 base prompt file. v4 is v3 plus expanded `<language_and_tone>`
+/// formatting instructions (callout blocks, rich Markdown).
+const BASE_V4_FILE: &str = include_str!("../../../prompts/base.v4.md");
 
 /// The flashcards module file, for the documented-schema check.
 const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
@@ -155,6 +159,8 @@ fn the_registry_compiles_the_base_file_verbatim() {
     assert_eq!(BASE_V2_VERSION, "base.v2");
     assert_eq!(BASE_V3, BASE_V3_FILE);
     assert_eq!(BASE_V3_VERSION, "base.v3");
+    assert_eq!(BASE_V4, BASE_V4_FILE);
+    assert_eq!(BASE_V4_VERSION, "base.v4");
 }
 
 /// v2's declared variables are v1's plus the one toggle, so a future edit that
@@ -278,6 +284,73 @@ fn base_v3_differs_from_v2_only_in_language_tone_and_output_quality() {
     );
 }
 
+/// v4's variable table is identical to v3's: the new formatting instructions
+/// add no template variables.
+#[test]
+fn base_v4_variables_equal_v3() {
+    assert_eq!(base_v4_variables(), base_v3_variables());
+}
+
+/// v4's variable table covers every `{{variable}}` that literally appears in
+/// `base.v4.md`, and vice versa.
+#[test]
+fn base_v4_variables_covers_every_variable_in_the_file() {
+    let declared: Vec<&str> = base_v4_variables().iter().map(|(name, _)| *name).collect();
+
+    for name in variables_in(BASE_V4_FILE) {
+        assert!(
+            declared.contains(&name.as_str()),
+            "prompts/base.v4.md uses {{{{{name}}}}} but base_v4_variables() does not declare it"
+        );
+    }
+    for name in &declared {
+        assert!(
+            variables_in(BASE_V4_FILE).iter().any(|used| used == name),
+            "base_v4_variables() declares {name} but prompts/base.v4.md never uses it"
+        );
+    }
+}
+
+/// v4 differs from v3 only in `<language_and_tone>` (expanded formatting
+/// instructions for rich Markdown and callout blocks). Every other section is
+/// byte-identical and the section set is unchanged.
+#[test]
+fn base_v4_differs_from_v3_only_in_language_tone() {
+    let v3_sections = sections_in(BASE_V3_FILE);
+    let v4_sections = sections_in(BASE_V4_FILE);
+
+    // Same sections, same count.
+    assert_eq!(
+        v3_sections, v4_sections,
+        "v4 must have exactly the same sections as v3"
+    );
+
+    // Every section that exists in both must be identical except language_and_tone.
+    for name in &v3_sections {
+        let v3_sec = section(BASE_V3_FILE, name);
+        let v4_sec = section(BASE_V4_FILE, name);
+        if name == "language_and_tone" {
+            assert_ne!(
+                v3_sec, v4_sec,
+                "v4's <language_and_tone> must differ from v3's (formatting instructions added)"
+            );
+        } else {
+            assert_eq!(
+                v3_sec, v4_sec,
+                "section <{name}> must be identical between v3 and v4"
+            );
+        }
+    }
+
+    // The identity line (before the first section) must be identical.
+    let v3_preamble = BASE_V3_FILE.split("<context>").next().unwrap();
+    let v4_preamble = BASE_V4_FILE.split("<context>").next().unwrap();
+    assert_eq!(
+        v3_preamble, v4_preamble,
+        "the identity line must be identical"
+    );
+}
+
 /// Every section name in a prompt file, in order.
 fn sections_in(text: &str) -> Vec<String> {
     let mut names = Vec::new();
@@ -340,10 +413,10 @@ fn the_plan_gate_instruction_is_declared_derived() {
 
 #[test]
 fn a_missing_caller_variable_is_an_error_named_after_it() {
-    // The chat composer renders v3, so the sweep is over v3's table (which
-    // equals v2's): a caller variable only v2/v3 uses (`sources_only`) must be
+    // The chat composer renders v4, so the sweep is over v4's table (which
+    // equals v3/v2's): a caller variable only v2+ uses (`sources_only`) must be
     // checked too.
-    for (name, kind) in base_v3_variables() {
+    for (name, kind) in base_v4_variables() {
         if *kind != VarKind::Caller || *name == "allow_upgrade_hint" {
             // The boolean is always supplied; a string cannot represent "absent".
             continue;
@@ -393,7 +466,7 @@ fn the_composed_prompt_has_no_unfilled_variable() {
         !composed.text.contains("{{"),
         "an unfilled variable must never reach a model"
     );
-    assert_eq!(composed.prompt_version, "base.v3");
+    assert_eq!(composed.prompt_version, "base.v4");
     assert!(composed.text.contains("Jetta"));
     assert!(composed.text.contains("Jaringan Komputer"));
 }

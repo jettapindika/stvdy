@@ -38,6 +38,18 @@ pub const BASE_V3: &str = include_str!("../../../../prompts/base.v3.md");
 /// The version stored with every request composed from [`BASE_V3`].
 pub const BASE_V3_VERSION: &str = "base.v3";
 
+/// The chat base prompt, v4. Supersedes [`BASE_V3`] with expanded
+/// `<language_and_tone>` formatting instructions: the renderer now supports
+/// fenced code blocks, headings, tables, ordered lists, blockquotes, and
+/// 18 callout/admonition block types (`> [!TYPE] title`). Variables are
+/// identical to v3.
+///
+/// A38: a shipped version is never edited, only superseded.
+pub const BASE_V4: &str = include_str!("../../../../prompts/base.v4.md");
+
+/// The version stored with every request composed from [`BASE_V4`].
+pub const BASE_V4_VERSION: &str = "base.v4";
+
 /// The shared strict-JSON preamble every task module is followed by.
 pub const JSON_CONTRACT_V1: &str = include_str!("../../../../prompts/json_contract.v1.md");
 

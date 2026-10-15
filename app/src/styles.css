@@ -1544,6 +1544,64 @@
   @media (max-width: 767px) {
     h1 { font-size: 2.125rem; line-height: 2.75rem; }
   }
+
+  /* --- Panel resize handle ------------------------------------------------ */
+
+  /* The drag handle between resizable columns on desktop. It is a `div` with
+     `role="separator"`. The hit target is 32px wide (the desktop floor), with
+     a 2px visible bar centred inside. `margin: 0 -1rem` pulls the handle into
+     the panel edges so it takes no layout width — the panels' percentages sum
+     to 100% of the container and the drag math has no offset to account for.
+     Hidden on phone (panels are tabs). */
+  .panel-resize-handle {
+    display: none;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    margin: 0 -1rem;
+    cursor: col-resize;
+    background: transparent;
+    border: none;
+    padding: 0;
+    touch-action: none;
+    position: relative;
+    z-index: 1;
+  }
+  .panel-resize-bar {
+    width: 2px;
+    height: 100%;
+    border-radius: 1px;
+    background-color: var(--border);
+    transition: background-color 0.15s;
+  }
+  .panel-resize-handle:hover .panel-resize-bar,
+  .panel-resize-handle:focus-visible .panel-resize-bar {
+    background-color: var(--primary);
+  }
+  .panel-resize-handle:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+    border-radius: 2px;
+  }
+
+  /* Desktop panel widths. `width` is used (not `flex-basis`) so it does not
+     fight Tailwind's `flex-*` utilities. The sections carry
+     `@min-[64rem]/workspace:flex-none` which gives `flex: 0 0 auto` —
+     `auto` resolves to `width`. The percentages sum to 100% because the
+     handles take no layout space (negative margins). */
+  @container workspace (min-width: 64rem) {
+    .panel-resize-handle { display: flex; }
+    .workspace-panel-sources {
+      width: calc(var(--ws-sources, 0.23) * 100%);
+    }
+    .workspace-panel-chat {
+      width: calc(var(--ws-chat, 0.44) * 100%);
+    }
+    .workspace-panel-studio {
+      width: calc(var(--ws-studio, 0.33) * 100%);
+    }
+  }
 }
 
 @layer utilities {

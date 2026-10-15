@@ -659,6 +659,10 @@
     "panels": {
       "label": "Panel ruang belajar"
     },
+    "resize": {
+      "sourcesChat": "Ubah ukuran Sumber dan Chat",
+      "chatStudio": "Ubah ukuran Chat dan Studio"
+    },
     "panel": {
       "sources": "Sumber",
       "chat": "Chat",

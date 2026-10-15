@@ -154,6 +154,15 @@ pub fn base_v3_variables() -> &'static [(&'static str, VarKind)] {
     base_v2_variables()
 }
 
+/// Every `{{variable}}` in `base.v4.md`, in first-appearance order.
+///
+/// v4 is v3 plus expanded `<language_and_tone>` formatting instructions
+/// (callout blocks, rich Markdown). No new template variables, so this
+/// table is identical to v3's.
+pub fn base_v4_variables() -> &'static [(&'static str, VarKind)] {
+    base_v3_variables()
+}
+
 /// The declared kind of a variable, or `None` if the name is not declared.
 pub fn base_variable_kind(name: &str) -> Option<VarKind> {
     variable_kind(base_variables(), name)
@@ -247,7 +256,7 @@ pub fn compose_chat(
     web: &[PromptWebHit],
 ) -> Result<Composed, PromptError> {
     let values = values_of(vars);
-    let mut text = render(registry::BASE_V3, &values)?;
+    let mut text = render(registry::BASE_V4, &values)?;
     text.push_str("\n\n");
     text.push_str(&render_sources(chunks));
     text.push_str("\n\n");
@@ -258,7 +267,7 @@ pub fn compose_chat(
     Ok(Composed {
         text,
         labels,
-        prompt_version: registry::BASE_V3_VERSION.to_string(),
+        prompt_version: registry::BASE_V4_VERSION.to_string(),
     })
 }
 
@@ -440,10 +449,10 @@ pub fn compose_task(
 /// contradictory pair (permissive instruction with `allow_upgrade_hint: false`)
 /// cannot be constructed.
 ///
-/// The table is `base.v3.md`'s: the chat composer renders v3, and a task module
+/// The table is `base.v4.md`'s: the chat composer renders v4, and a task module
 /// passes its own table to [`render_with`] instead.
 fn render(template: &str, values: &BTreeMap<&'static str, String>) -> Result<String, PromptError> {
-    render_with(template, values, base_v3_variables())
+    render_with(template, values, base_v4_variables())
 }
 
 /// Fills a template's variables from an explicit declaration table.

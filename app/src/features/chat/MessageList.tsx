@@ -5,7 +5,7 @@ import type { Message } from '@/api/queries/chat'
 import type { ChatCitation, ChunkCitation } from '@/api/sse'
 import { ApiErrorNotice } from '@/components/ui/States'
 import { WebCitationMark } from '@/components/ui/Citation'
-import { Icon } from '@/components/ui/Icon'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import { AGENT_CREDITS } from '@/features/billing/plans'
 import { CitationChip } from './CitationChip'
 import type { ChatTurn } from './useChatStream'
@@ -30,16 +30,15 @@ import type { ChatTurn } from './useChatStream'
  */
 
 /**
- * The inline markup the answers actually use. Nothing else is interpreted.
+ * Inline markup the answers use. Extended to handle strikethrough and links.
  *
- * Both label families are recognised, and recognised *exactly* as the server
- * parses them: `[1]`..`[999]` for chunks and `[W1]`..`[W99]` for web results, no
- * leading zero. The strictness is load-bearing rather than tidiness. The wire
- * carries no labels, so the mapping below is positional, and a marker this regex
- * counted that the server did not would shift every citation after it onto the
- * wrong claim. `[0]`, `[01]` and `[1000]` are therefore text, not markers.
+ * Every group inside the outer capture MUST be non-capturing (`(?:…)`).
+ * `String.split` splices capture-group matches into the result array, so a
+ * capturing group leaks its match as a separate literal-text entry beside the
+ * full match. The link pattern uses `(?:…)` for both its label and URL parts.
  */
-const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\])/g
+const INLINE =
+  /(\[(?:[^\]]+)\]\((?:https?:\/\/[^\s)]+)\)|~~[^~\n]+~~|`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\])/g
 const MARKER = /^\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\]$/
 
 /**
@@ -81,8 +80,28 @@ function inlineNodes(
 ): ReactNode[] {
   return text.split(INLINE).map((part, index) => {
     const key = `${keyPrefix}-${String(index)}`
-    if (part.length === 0) return null
+    if (part === undefined || part.length === 0) return null
 
+    // Link: [text](url) — the INLINE groups are non-capturing, so split
+    // yields only the full `[text](url)` match. We extract parts with exec.
+    const linkMatch = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part)
+    if (linkMatch !== null) {
+      return (
+        <a
+          key={key}
+          href={linkMatch[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary-text underline underline-offset-2"
+        >
+          {linkMatch[1]}
+        </a>
+      )
+    }
+    // Strikethrough: ~~text~~
+    if (part.startsWith('~~') && part.endsWith('~~') && part.length > 3) {
+      return <del key={key}>{part.slice(2, -2)}</del>
+    }
     if (part.startsWith('`') && part.endsWith('`') && part.length > 1) {
       return <code key={key}>{part.slice(1, -1)}</code>
     }
@@ -94,7 +113,6 @@ function inlineNodes(
     }
     if (MARKER.test(part)) {
       const citation = markers.get(part.toUpperCase())
-      // A marker whose citation is the other kind is left as text.
       if (citation === undefined) return <Fragment key={key}>{part}</Fragment>
       if (citation.type === 'web') return <WebCitationMark key={key} citation={citation} />
       if (part.toUpperCase().startsWith('[W')) return <Fragment key={key}>{part}</Fragment>
@@ -111,12 +129,113 @@ function inlineNodes(
   })
 }
 
+// ---------------------------------------------------------------------------
+// Callout types — the `> [!TYPE]` admonition blocks
+// ---------------------------------------------------------------------------
+
+type CalloutKind =
+  | 'note'
+  | 'tip'
+  | 'important'
+  | 'warning'
+  | 'caution'
+  | 'example'
+  | 'definition'
+  | 'formula'
+  | 'memorize'
+  | 'step'
+  | 'analogy'
+  | 'trap'
+  | 'question'
+  | 'summary'
+  | 'quote'
+  | 'success'
+  | 'highlight'
+  | 'code'
+
+const CALLOUT_META: Record<CalloutKind, { icon: IconName; className: string }> = {
+  note:       { icon: 'help',         className: 'callout-note' },
+  tip:        { icon: 'sparkles',     className: 'callout-tip' },
+  important:  { icon: 'alert',        className: 'callout-important' },
+  warning:    { icon: 'alert',        className: 'callout-warning' },
+  caution:    { icon: 'alert',        className: 'callout-caution' },
+  example:    { icon: 'list-checks',  className: 'callout-example' },
+  definition: { icon: 'study',        className: 'callout-definition' },
+  formula:    { icon: 'chart',        className: 'callout-formula' },
+  memorize:   { icon: 'bookmark',     className: 'callout-memorize' },
+  step:       { icon: 'play',         className: 'callout-step' },
+  analogy:    { icon: 'link',         className: 'callout-analogy' },
+  trap:       { icon: 'alert',        className: 'callout-trap' },
+  question:   { icon: 'help',         className: 'callout-question' },
+  summary:    { icon: 'layers',       className: 'callout-summary' },
+  quote:      { icon: 'file-text',    className: 'callout-quote' },
+  success:    { icon: 'circle-check', className: 'callout-success' },
+  highlight:  { icon: 'sparkles',     className: 'callout-highlight' },
+  code:       { icon: 'presentation', className: 'callout-code' },
+}
+
 /**
- * The answer, as much of Markdown as a language model's prose needs.
+ * Detect if a line is a callout header: `> [!TYPE] optional title`
  *
- * Paragraphs, bullet lists, bold, italic and inline code, and nothing else. A
- * full Markdown renderer would accept raw HTML and links the model invented,
- * both of which are risks this renderer does not take.
+ * Aliases cover common model drift: `[!INFO]` → note, `[!DANGER]` → caution,
+ * `[!WARN]` → warning, `[!HINT]` → tip, `[!BUG]` → trap, `[!ABSTRACT]` → summary,
+ * `[!CHECK]` → success, `[!FAQ]` → question, `[!CITE]` → quote, `[!MEMO]` → memorize,
+ * `[!CONCEPT]` → definition, `[!MATH]` → formula, `[!NOTICE]` → note,
+ * `[!PITFALL]` → trap, `[!REMEMBER]` → memorize, `[!SNIPPET]` → code.
+ */
+const CALLOUT_ALIASES: Record<string, CalloutKind> = {
+  info: 'note',
+  notice: 'note',
+  danger: 'caution',
+  warn: 'warning',
+  hint: 'tip',
+  bug: 'trap',
+  pitfall: 'trap',
+  abstract: 'summary',
+  tldr: 'summary',
+  check: 'success',
+  done: 'success',
+  faq: 'question',
+  cite: 'quote',
+  citation: 'quote',
+  memo: 'memorize',
+  remember: 'memorize',
+  concept: 'definition',
+  math: 'formula',
+  equation: 'formula',
+  snippet: 'code',
+}
+
+function parseCalloutHeader(line: string): { kind: CalloutKind; title: string } | null {
+  const m = /^>\s*\[!(\w+)\]\s*(.*)$/.exec(line)
+  if (m === null) return null
+  const raw = m[1]!.toLowerCase()
+  const kind: CalloutKind | undefined =
+    (raw in CALLOUT_META ? raw as CalloutKind : undefined) ?? CALLOUT_ALIASES[raw]
+  if (kind === undefined) return null
+  return { kind, title: m[2]!.trim() }
+}
+
+/**
+ * The answer body, now handling the full range of Markdown a language model
+ * produces for educational content.
+ *
+ * Supported block types (in parse priority order):
+ * 1. Fenced code blocks (``` with optional language)
+ * 2. Callout/admonition blocks (> [!TYPE] title)
+ * 3. Headings (## .. ####, no h1 — the answer card is the h1)
+ * 4. Horizontal rules (--- or ***)
+ * 5. Tables (| col | col |)
+ * 6. Ordered lists (1. / 2. / ...)
+ * 7. Unordered lists (- / * prefix)
+ * 8. Blockquotes (> prefix, plain, non-callout)
+ * 9. Paragraphs (everything else)
+ *
+ * Inline: bold, italic, inline code, strikethrough, links, citation markers.
+ *
+ * Security: no raw HTML. Links are sanitised to https? only. The renderer
+ * cannot be tricked into executing a `javascript:` URL or rendering markup
+ * from a source document.
  */
 function AnswerText({
   text,
@@ -129,52 +248,355 @@ function AnswerText({
   sourceTitle: (sourceId: string) => string
   onOpenCitation: (citation: ChunkCitation) => void
 }) {
+  const { t } = useTranslation()
   const markers = markersFor(text, citations)
-  const blocks = text.split(/\n{2,}/)
 
-  return (
-    <>
-      {blocks.map((block, blockIndex) => {
-        const lines = block.split('\n')
-        const isList = lines.every((line) => /^\s*[-*]\s+/.test(line))
+  const renderInline = (s: string, kp: string) =>
+    inlineNodes(s, markers, sourceTitle, onOpenCitation, kp)
 
-        if (isList) {
-          return (
-            <ul key={`b${String(blockIndex)}`} className="list-disc pl-5">
-              {lines.map((line, lineIndex) => (
-                <li key={`b${String(blockIndex)}-${String(lineIndex)}`}>
-                  {inlineNodes(
-                    line.replace(/^\s*[-*]\s+/, ''),
-                    markers,
-                    sourceTitle,
-                    onOpenCitation,
-                    `b${String(blockIndex)}-${String(lineIndex)}`,
-                  )}
-                </li>
-              ))}
-            </ul>
-          )
+  // Split into raw lines for block-level parsing
+  const rawLines = text.split('\n')
+  const elements: ReactNode[] = []
+  let i = 0
+
+  while (i < rawLines.length) {
+    const line = rawLines[i]!
+
+    // --- Fenced code block ---
+    const fenceMatch = /^(`{3,}|~{3,})(\w*)/.exec(line)
+    if (fenceMatch !== null) {
+      const fence = fenceMatch[1]!
+      const lang = fenceMatch[2] ?? ''
+      const codeLines: string[] = []
+      i += 1
+      while (i < rawLines.length && !rawLines[i]!.startsWith(fence)) {
+        codeLines.push(rawLines[i]!)
+        i += 1
+      }
+      i += 1 // skip closing fence
+      elements.push(
+        <div key={`code-${String(elements.length)}`} className="answer-code-block">
+          {lang.length > 0 && (
+            <span className="answer-code-lang">{lang}</span>
+          )}
+          <pre><code>{codeLines.join('\n')}</code></pre>
+        </div>,
+      )
+      continue
+    }
+
+    // --- Callout block: > [!TYPE] title, then > body lines ---
+    const calloutHeader = parseCalloutHeader(line)
+    if (calloutHeader !== null) {
+      const { kind, title } = calloutHeader
+      const meta = CALLOUT_META[kind]
+      const bodyLines: string[] = []
+      i += 1
+      while (i < rawLines.length) {
+        const cl = rawLines[i]!
+        // Continuation: starts with > or is blank (inside callout)
+        if (/^>\s?/.test(cl)) {
+          bodyLines.push(cl.replace(/^>\s?/, ''))
+          i += 1
+        } else if (cl.trim() === '' && i + 1 < rawLines.length && /^>\s?/.test(rawLines[i + 1]!)) {
+          // Blank line between callout paragraphs
+          bodyLines.push('')
+          i += 1
+        } else {
+          break
         }
+      }
+      const displayTitle = title.length > 0 ? title : t(`chat.callout.${kind}`)
+      elements.push(
+        <div key={`callout-${String(elements.length)}`} className={`answer-callout ${meta.className}`}>
+          <div className="answer-callout-header">
+            <Icon name={meta.icon} size={18} />
+            <span className="answer-callout-title">{displayTitle}</span>
+          </div>
+          {bodyLines.length > 0 && (
+            <div className="answer-callout-body">
+              {renderInnerBlocks(bodyLines, renderInline, elements.length)}
+            </div>
+          )}
+        </div>,
+      )
+      continue
+    }
 
-        return (
-          <p key={`b${String(blockIndex)}`} className="whitespace-pre-wrap">
-            {lines.map((line, lineIndex) => (
-              <Fragment key={`b${String(blockIndex)}-${String(lineIndex)}`}>
-                {lineIndex > 0 && '\n'}
-                {inlineNodes(
-                  line,
-                  markers,
-                  sourceTitle,
-                  onOpenCitation,
-                  `b${String(blockIndex)}-${String(lineIndex)}`,
-                )}
-              </Fragment>
-            ))}
-          </p>
-        )
-      })}
-    </>
-  )
+    // --- Heading (## to ####) ---
+    const headingMatch = /^(#{2,4})\s+(.+)$/.exec(line)
+    if (headingMatch !== null) {
+      const level = headingMatch[1]!.length as 2 | 3 | 4
+      const Tag = `h${String(level)}` as 'h2' | 'h3' | 'h4'
+      elements.push(
+        <Tag key={`h-${String(elements.length)}`} className="answer-heading">
+          {renderInline(headingMatch[2]!, `h-${String(elements.length)}`)}
+        </Tag>,
+      )
+      i += 1
+      continue
+    }
+
+    // --- Horizontal rule ---
+    if (/^(?:[-*_]){3,}\s*$/.test(line)) {
+      elements.push(<hr key={`hr-${String(elements.length)}`} className="border-border" />)
+      i += 1
+      continue
+    }
+
+    // --- Table: requires a header row + separator row (|---|) minimum ---
+    if (
+      line.trim().startsWith('|') &&
+      i + 1 < rawLines.length &&
+      /^[|\s:-]+$/.test(rawLines[i + 1]!.trim())
+    ) {
+      const tableLines: string[] = [line]
+      i += 1
+      while (i < rawLines.length && rawLines[i]!.trim().startsWith('|')) {
+        tableLines.push(rawLines[i]!)
+        i += 1
+      }
+      const parseRow = (row: string) =>
+        row.split('|').slice(1, -1).map((c) => c.trim())
+      const headers = parseRow(tableLines[0]!)
+      // Skip separator line (|---|---|)
+      const rows = tableLines.slice(2).map(parseRow)
+      elements.push(
+        <div key={`tbl-${String(elements.length)}`} className="answer-table-wrap">
+          <table className="answer-table">
+            <thead>
+              <tr>
+                {headers.map((h, hi) => (
+                  <th key={`th-${String(hi)}`}>
+                    {renderInline(h, `th-${String(elements.length)}-${String(hi)}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={`tr-${String(ri)}`}>
+                  {row.map((cell, ci) => (
+                    <td key={`td-${String(ci)}`}>
+                      {renderInline(cell, `td-${String(elements.length)}-${String(ri)}-${String(ci)}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
+    // --- Ordered list ---
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      const items: string[] = []
+      while (i < rawLines.length && /^\s*\d+[.)]\s+/.test(rawLines[i]!)) {
+        items.push(rawLines[i]!.replace(/^\s*\d+[.)]\s+/, ''))
+        i += 1
+      }
+      elements.push(
+        <ol key={`ol-${String(elements.length)}`} className="answer-ol">
+          {items.map((item, li) => (
+            <li key={`ol-${String(elements.length)}-${String(li)}`}>
+              {renderInline(item, `ol-${String(elements.length)}-${String(li)}`)}
+            </li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    // --- Unordered list ---
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items: string[] = []
+      while (i < rawLines.length && /^\s*[-*+]\s+/.test(rawLines[i]!)) {
+        items.push(rawLines[i]!.replace(/^\s*[-*+]\s+/, ''))
+        i += 1
+      }
+      elements.push(
+        <ul key={`ul-${String(elements.length)}`} className="list-disc pl-5">
+          {items.map((item, li) => (
+            <li key={`ul-${String(elements.length)}-${String(li)}`}>
+              {renderInline(item, `ul-${String(elements.length)}-${String(li)}`)}
+            </li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    // --- Plain blockquote (not a callout) ---
+    if (/^>\s?/.test(line)) {
+      const quoteLines: string[] = []
+      while (i < rawLines.length && /^>\s?/.test(rawLines[i]!)) {
+        quoteLines.push(rawLines[i]!.replace(/^>\s?/, ''))
+        i += 1
+      }
+      elements.push(
+        <blockquote key={`bq-${String(elements.length)}`} className="answer-blockquote">
+          {quoteLines.map((ql, qi) => (
+            <p key={`bq-${String(elements.length)}-${String(qi)}`}>
+              {renderInline(ql, `bq-${String(elements.length)}-${String(qi)}`)}
+            </p>
+          ))}
+        </blockquote>,
+      )
+      continue
+    }
+
+    // --- Blank line: skip ---
+    if (line.trim() === '') {
+      i += 1
+      continue
+    }
+
+    // --- Paragraph: collect consecutive non-special lines ---
+    const paraLines: string[] = []
+    while (
+      i < rawLines.length &&
+      rawLines[i]!.trim() !== '' &&
+      !/^(`{3,}|~{3,})/.test(rawLines[i]!) &&
+      !/^#{2,4}\s+/.test(rawLines[i]!) &&
+      !/^(?:[-*_]){3,}\s*$/.test(rawLines[i]!) &&
+      !/^\s*[-*+]\s+/.test(rawLines[i]!) &&
+      !/^\s*\d+[.)]\s+/.test(rawLines[i]!) &&
+      !/^>\s?/.test(rawLines[i]!)
+    ) {
+      paraLines.push(rawLines[i]!)
+      i += 1
+    }
+    if (paraLines.length > 0) {
+      elements.push(
+        <p key={`p-${String(elements.length)}`} className="whitespace-pre-wrap">
+          {paraLines.map((pl, pi) => (
+            <Fragment key={`p-${String(elements.length)}-${String(pi)}`}>
+              {pi > 0 && '\n'}
+              {renderInline(pl, `p-${String(elements.length)}-${String(pi)}`)}
+            </Fragment>
+          ))}
+        </p>,
+      )
+    } else {
+      // Safety: a line matched no block branch and the paragraph exclusions
+      // rejected it (e.g. a partial heading `## ` mid-stream). Advance past
+      // it so the outer loop cannot spin forever.
+      i += 1
+    }
+  }
+
+  return <>{elements}</>
+}
+
+/**
+ * Renders inner blocks within a callout body (supports paragraphs, lists,
+ * code blocks inside callouts).
+ */
+function renderInnerBlocks(
+  lines: string[],
+  inline: (t: string, kp: string) => ReactNode[],
+  parentKey: number,
+): ReactNode[] {
+  const out: ReactNode[] = []
+  let j = 0
+  while (j < lines.length) {
+    const ln = lines[j]!
+
+    // Fenced code inside callout
+    const fenceM = /^(`{3,}|~{3,})(\w*)/.exec(ln)
+    if (fenceM !== null) {
+      const fence = fenceM[1]!
+      const lang = fenceM[2] ?? ''
+      const codeLines: string[] = []
+      j += 1
+      while (j < lines.length && !lines[j]!.startsWith(fence)) {
+        codeLines.push(lines[j]!)
+        j += 1
+      }
+      j += 1
+      out.push(
+        <div key={`ic-${String(parentKey)}-${String(out.length)}`} className="answer-code-block">
+          {lang.length > 0 && <span className="answer-code-lang">{lang}</span>}
+          <pre><code>{codeLines.join('\n')}</code></pre>
+        </div>,
+      )
+      continue
+    }
+
+    // Ordered list inside callout
+    if (/^\s*\d+[.)]\s+/.test(ln)) {
+      const items: string[] = []
+      while (j < lines.length && /^\s*\d+[.)]\s+/.test(lines[j]!)) {
+        items.push(lines[j]!.replace(/^\s*\d+[.)]\s+/, ''))
+        j += 1
+      }
+      out.push(
+        <ol key={`io-${String(parentKey)}-${String(out.length)}`} className="answer-ol">
+          {items.map((item, li) => (
+            <li key={`io-${String(parentKey)}-${String(out.length)}-${String(li)}`}>
+              {inline(item, `io-${String(parentKey)}-${String(out.length)}-${String(li)}`)}
+            </li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    // Bullet list inside callout
+    if (/^\s*[-*+]\s+/.test(ln)) {
+      const items: string[] = []
+      while (j < lines.length && /^\s*[-*+]\s+/.test(lines[j]!)) {
+        items.push(lines[j]!.replace(/^\s*[-*+]\s+/, ''))
+        j += 1
+      }
+      out.push(
+        <ul key={`iu-${String(parentKey)}-${String(out.length)}`} className="list-disc pl-5">
+          {items.map((item, li) => (
+            <li key={`iu-${String(parentKey)}-${String(out.length)}-${String(li)}`}>
+              {inline(item, `iu-${String(parentKey)}-${String(out.length)}-${String(li)}`)}
+            </li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    // Blank line
+    if (ln.trim() === '') {
+      j += 1
+      continue
+    }
+
+    // Paragraph
+    const pLines: string[] = []
+    while (
+      j < lines.length &&
+      lines[j]!.trim() !== '' &&
+      !/^(`{3,}|~{3,})/.test(lines[j]!) &&
+      !/^\s*[-*+]\s+/.test(lines[j]!) &&
+      !/^\s*\d+[.)]\s+/.test(lines[j]!)
+    ) {
+      pLines.push(lines[j]!)
+      j += 1
+    }
+    if (pLines.length > 0) {
+      out.push(
+        <p key={`ip-${String(parentKey)}-${String(out.length)}`} className="whitespace-pre-wrap">
+          {pLines.map((pl, pi) => (
+            <Fragment key={`ip-${String(parentKey)}-${String(out.length)}-${String(pi)}`}>
+              {pi > 0 && '\n'}
+              {inline(pl, `ip-${String(parentKey)}-${String(out.length)}-${String(pi)}`)}
+            </Fragment>
+          ))}
+        </p>,
+      )
+    } else {
+      j += 1
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------

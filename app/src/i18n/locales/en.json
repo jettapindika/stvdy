@@ -676,6 +676,10 @@
     "panels": {
       "label": "Workspace panels"
     },
+    "resize": {
+      "sourcesChat": "Resize Sources and Chat",
+      "chatStudio": "Resize Chat and Studio"
+    },
     "panel": {
       "sources": "Sources",
       "chat": "Chat",
