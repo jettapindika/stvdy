@@ -45,10 +45,11 @@ fn signup_body(email: &str) -> serde_json::Value {
 
 /// A request carrying an explicit peer address.
 ///
-/// The limiter reads the address from the connection (`ConnectInfo`), never from a
-/// header, so a test that needs a second IP has to supply one the way a listener
-/// would. This is also the assertion that `X-Forwarded-For` is ignored: the header
-/// is set to a different address and the limiter must not believe it.
+/// The limiter counts `x-real-ip` when it is present (what nginx sets from the
+/// address its `real_ip` module resolved) and the connection's `ConnectInfo`
+/// otherwise. A test that needs a second IP supplies `ConnectInfo` the way a
+/// listener would. This is also the assertion that `X-Forwarded-For` is ignored:
+/// the header is set to a different address and the limiter must not believe it.
 async fn signup_from(app: &axum::Router, ip: &str, email: &str) -> (StatusCode, serde_json::Value) {
     let body = serde_json::to_vec(&signup_body(email)).expect("serialize");
     let mut request = Request::builder()

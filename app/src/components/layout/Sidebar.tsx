@@ -18,6 +18,8 @@ import { DEFAULT_TIMEZONE } from '@/lib/time'
 import { useFormFactor } from '@/lib/useFormFactor'
 import { useDockMagnification } from './TabBar'
 
+const MotionNavLink = motion.create(NavLink)
+
 const STORAGE_KEY = 'stvdy.sidebar'
 const EXPANDED_W = 216
 const COLLAPSED_W = 64
@@ -156,7 +158,7 @@ export function Sidebar() {
         {!collapsed && (
           <motion.div
             key="secondary"
-            className="flex w-full flex-1 flex-col gap-8"
+            className="flex w-full min-h-0 flex-1 flex-col gap-8"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
@@ -196,14 +198,19 @@ function SidebarItem({
   const scale = useDockMagnification(pointerY, ref, disableMagnification, 'y')
 
   return (
-    <NavLink
+    <MotionNavLink
       ref={ref}
       to={to}
       end={end}
       className={'nav-item' + (collapsed ? ' sidebar-item-collapsed' : '')}
       aria-label={collapsed ? label : undefined}
+      animate={{
+        padding: collapsed ? '10px' : '12px 16px',
+        gap: collapsed ? 0 : 12,
+      }}
+      transition={spring}
     >
-      {({ isActive }) => (
+      {({ isActive }: { isActive: boolean }) => (
         <>
           {isActive && (
             <motion.span
@@ -214,24 +221,25 @@ function SidebarItem({
             />
           )}
           <motion.span
-            className="dock-icon-sizer"
+            className="dock-icon-sizer shrink-0"
             style={collapsed && !disableMagnification ? { scale } : undefined}
           >
             <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
           </motion.span>
           <motion.span
-            className="relative z-10 whitespace-nowrap overflow-hidden"
+            className="relative z-10 whitespace-nowrap"
             animate={{
               opacity: collapsed ? 0 : 1,
-              maxWidth: collapsed ? 0 : EXPANDED_W - 40,
+              width: collapsed ? 0 : 'auto',
             }}
             transition={spring}
+            style={{ overflow: 'hidden' }}
           >
             {label}
           </motion.span>
         </>
       )}
-    </NavLink>
+    </MotionNavLink>
   )
 }
 
@@ -249,7 +257,7 @@ function SemesterCourses() {
   return (
     <>
       <div className="h-px w-full bg-border" />
-      <div className="flex w-full flex-col gap-5">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-5 overflow-y-auto">
         <p className="eyebrow">{t('shell.semester')}</p>
         {rows.map((workspace) => (
           <NavLink

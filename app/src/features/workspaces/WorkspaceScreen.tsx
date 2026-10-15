@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
@@ -20,6 +20,7 @@ import {
 import { useWorkspace } from '@/api/queries/workspaces'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
+import { PanelResizeHandle } from '@/components/layout/PanelResizeHandle'
 import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
@@ -63,13 +64,6 @@ import { formatInZone } from '@/lib/time'
 type Panel = 'sources' | 'chat' | 'studio'
 
 /**
- * The desktop grid's columns, left to right: the source rail, the chat, the
- * reference panel. The design draws exactly that order, and the widths below are
- * its proportions.
- */
-const PANEL_ORDER: Panel[] = ['sources', 'chat', 'studio']
-
-/**
  * The phone strip's order, which is the design's and is **not** the grid's: the
  * segmented control reads `Chat | Sources | Studio` in every mobile frame, with the
  * active panel filled, whichever panel is open. One array for both would put the
@@ -96,6 +90,12 @@ const KIND_ICON: Record<SourceKind, IconName> = {
   text: 'file-text',
 }
 
+/** Initial panel width fractions (sources / chat / studio), summing to 1. */
+const INITIAL_WIDTHS: [number, number, number] = [0.23, 0.44, 0.33]
+
+/** Minimum fraction any panel can shrink to. */
+const MIN_FRACTION = 0.10
+
 export function WorkspaceScreen() {
   const { t } = useTranslation()
   const { workspaceId = '' } = useParams()
@@ -105,6 +105,61 @@ export function WorkspaceScreen() {
   // The citation the student last opened in the chat. Lifted here so the
   // reference panel's viewer tab can show the cited passage.
   const [viewedCitation, setViewedCitation] = useState<ChunkCitation | null>(null)
+
+  // --- Resizable panel widths (desktop only) ---
+  // Raw fractions summing to 1, fed as CSS custom properties to the flex
+  // container. During a drag the properties are written directly to the DOM
+  // (no re-render); on pointerup/keyboard they are committed to state.
+  const [widths, setWidths] = useState(INITIAL_WIDTHS)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  function clampLeft(clientX: number, prev: [number, number, number]): [number, number, number] {
+    const el = gridRef.current
+    if (el === null) return prev
+    const rect = el.getBoundingClientRect()
+    const frac = (clientX - rect.left) / rect.width
+    const sum01 = prev[0] + prev[1]
+    const s = Math.max(MIN_FRACTION, Math.min(sum01 - MIN_FRACTION, frac))
+    return [s, sum01 - s, prev[2]]
+  }
+
+  function clampRight(clientX: number, prev: [number, number, number]): [number, number, number] {
+    const el = gridRef.current
+    if (el === null) return prev
+    const rect = el.getBoundingClientRect()
+    const frac = (clientX - rect.left) / rect.width
+    const sum12 = prev[1] + prev[2]
+    const c = Math.max(MIN_FRACTION, Math.min(sum12 - MIN_FRACTION, frac - prev[0]))
+    return [prev[0], c, sum12 - c]
+  }
+
+  function applyWidths(w: [number, number, number]) {
+    const el = gridRef.current
+    if (el === null) return
+    el.style.setProperty('--ws-sources', String(w[0]))
+    el.style.setProperty('--ws-chat', String(w[1]))
+    el.style.setProperty('--ws-studio', String(w[2]))
+  }
+
+  const widthsRef = useRef(widths)
+  widthsRef.current = widths
+
+  const onDragLeft = useCallback((cx: number) => {
+    applyWidths(clampLeft(cx, widthsRef.current))
+  }, [])
+  const onDragEndLeft = useCallback((cx: number) => {
+    const next = clampLeft(cx, widthsRef.current)
+    applyWidths(next)
+    setWidths(next)
+  }, [])
+  const onDragRight = useCallback((cx: number) => {
+    applyWidths(clampRight(cx, widthsRef.current))
+  }, [])
+  const onDragEndRight = useCallback((cx: number) => {
+    const next = clampRight(cx, widthsRef.current)
+    applyWidths(next)
+    setWidths(next)
+  }, [])
 
   // The strip's labels are copy, so they are resolved per render rather than
   // kept in a module-scope table that would have no language to read from.
@@ -158,9 +213,8 @@ export function WorkspaceScreen() {
 
   return (
     <div className="@container/workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-surface px-5 py-5 md:px-6 md:py-6">
-        {/* A link that is a control needs its own target: `inline-flex min-h-11
-            items-center` (see the `.link` rule in styles.css). */}
+      {/* Phone heading — hidden on desktop via container query. */}
+      <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-surface px-5 py-5 md:px-6 md:py-6 @min-[64rem]/workspace:hidden">
         <Link to="/workspaces" className="link inline-flex min-h-11 items-center gap-2 self-start">
           <Icon name="arrow-left" size={20} />
           {t('nav.workspaces')}
@@ -179,16 +233,7 @@ export function WorkspaceScreen() {
 
       {workspaceError === null && (
         <>
-          {/* The strip scrolls, the same answer the phone tab bar gives and for the
-              same measured reason: each tab is a `.btn`, which carries
-              `min-width: 0` so a long label wraps inside the button instead of
-              overflowing — but a *word* cannot wrap, and at 200% text "Sources" is
-              110px of glyphs plus 70px of padding, so three tabs need ~540px of a
-              326px strip. They shrank to 101px each and their labels were clipped
-              (`scrollWidth` 106 against a `clientWidth` of 101; "Flashcards" 124
-              against 101). `min-w-max` stops the shrink and `overflow-x-auto` makes
-              the remainder reachable by swipe and by `Tab`; at 100% nothing scrolls,
-              so the visual is unchanged. */}
+          {/* Phone tab strip — hidden on desktop. */}
           <div
             role="tablist"
             aria-label={t('workspaces.panels.label')}
@@ -208,7 +253,6 @@ export function WorkspaceScreen() {
                   type="button"
                   aria-selected={selected}
                   aria-controls={`panel-${panel.id}`}
-                  // Roving tabindex: only the active tab is in the tab order.
                   tabIndex={selected ? 0 : -1}
                   onClick={() => {
                     setActive(panel.id)
@@ -221,63 +265,105 @@ export function WorkspaceScreen() {
             })}
           </div>
 
-          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 @min-[64rem]/workspace:grid-cols-[minmax(0,280fr)_minmax(0,532fr)_minmax(0,400fr)]">
-            {PANEL_ORDER.map((id) => (
-              <section
-                key={id}
-                id={`panel-${id}`}
-                role="tabpanel"
-                aria-labelledby={`tab-${id}`}
-                className={`min-h-0 min-w-0 flex-col border-border @min-[64rem]/workspace:flex @min-[64rem]/workspace:border-r @min-[64rem]/workspace:last:border-r-0 ${
-                  active === id ? 'flex' : 'hidden'
-                }`}
-              >
-                <div className="shrink-0 border-b border-border px-4 py-2">
-                  {/* Not a heading: the design draws a 20/26 panel title, and the
-                      frozen scale maps that size to `h3` — but this screen's only
-                      `h1` is the workspace's name and there is no `h2` above these,
-                      so an `h3` here would skip a level and fail the accessibility
-                      gate. The panel is named by its tab on a phone and by its
-                      column on a desktop, and the label carries the same word. */}
-                  <span className="text-h3 min-w-0 wrap-anywhere">{labels[id]}</span>
+          {/* The panel container. On phone it is a flex column (one panel
+              visible at a time). On desktop it is a flex row whose children
+              are sized by `.workspace-panel-*` CSS rules reading the custom
+              properties below. */}
+          <div
+            ref={gridRef}
+            className="flex min-h-0 min-w-0 flex-1 flex-col @min-[64rem]/workspace:flex-row"
+            style={{
+              '--ws-sources': String(widths[0]),
+              '--ws-chat': String(widths[1]),
+              '--ws-studio': String(widths[2]),
+            } as React.CSSProperties}
+          >
+            {/* --- Sources column --- */}
+            <section
+              id="panel-sources"
+              role="tabpanel"
+              aria-labelledby="tab-sources"
+              className={`workspace-panel-sources min-h-0 min-w-0 flex-1 flex-col border-border @min-[64rem]/workspace:flex @min-[64rem]/workspace:flex-none @min-[64rem]/workspace:border-r ${
+                active === 'sources' ? 'flex' : 'hidden'
+              }`}
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
+                {/* Desktop heading inside the sources scroll area. A <div>
+                    (not <header>) so it does not create a second banner
+                    landmark — the phone <header> above is the page banner. */}
+                <div className="hidden @min-[64rem]/workspace:flex shrink-0 flex-col gap-2 border-b border-border bg-surface px-4 py-4">
+                  <Link to="/workspaces" className="link inline-flex min-h-11 items-center gap-2 self-start">
+                    <Icon name="arrow-left" size={20} />
+                    {t('nav.workspaces')}
+                  </Link>
+                  <h1 className="text-h2 min-w-0 wrap-anywhere">
+                    {detail?.name ?? t('workspaces.detail.titleFallback')}
+                  </h1>
+                  {facts.length > 0 && <p className="meta uppercase wrap-anywhere">{facts.join(' · ')}</p>}
                 </div>
-                {/* `wrap-anywhere` (`overflow-wrap: anywhere`) on the container
-                    rather than on each text box: it inherits, and it is the
-                    *container's* width that these boxes were failing on. At 200%
-                    text on a 1365px window each panel track resolves to ~221px and
-                    its content box to 106px, while a word like `workspace's` at
-                    `text-xs` is ~130px of glyphs — so a paragraph that fits at 100%
-                    has an unbreakable word wider than its box. `break-words`
-                    (`overflow-wrap: break-word`) is **not** enough: it only lowers a
-                    box's *content* width, not its min-content size, so the word hangs
-                    out of the box and is cut off — the panel scrolls vertically and
-                    the overflow is horizontal, where nothing can reach it.
+                <SourcesPanel workspaceId={workspaceId} />
+              </div>
+            </section>
 
-                    `anywhere` is the value that also affects min-content sizing,
-                    which is the property these boxes are failing on — the same
-                    reasoning `crates/core`'s week grid records. The cost is honest:
-                    a word may break mid-glyph at 200% text. At 100% nothing
-                    overflows, so nothing breaks. */}
-                <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
-                  {id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
-                  {id === 'chat' && (
-                    <ChatScreen
-                      workspaceId={workspaceId}
-                      onViewCitation={(citation) => {
-                        setViewedCitation(citation)
-                        setActive('studio')
-                      }}
-                    />
-                  )}
-                  {id === 'studio' && (
-                    <ReferencePanel
-                      workspaceId={workspaceId}
-                      citation={viewedCitation}
-                    />
-                  )}
-                </div>
-              </section>
-            ))}
+            {/* Drag handle: sources ↔ chat */}
+            <PanelResizeHandle
+              onDrag={onDragLeft}
+              onDragEnd={onDragEndLeft}
+              label={t('workspaces.resize.sourcesChat')}
+              valueNow={widths[0] * 100}
+              valueMin={MIN_FRACTION * 100}
+              valueMax={(widths[0] + widths[1] - MIN_FRACTION) * 100}
+            />
+
+            {/* --- Chat column --- */}
+            <section
+              id="panel-chat"
+              role="tabpanel"
+              aria-labelledby="tab-chat"
+              className={`workspace-panel-chat min-h-0 min-w-0 flex-1 flex-col border-border @min-[64rem]/workspace:flex @min-[64rem]/workspace:flex-none @min-[64rem]/workspace:border-r ${
+                active === 'chat' ? 'flex' : 'hidden'
+              }`}
+            >
+              <div className="shrink-0 border-b border-border px-4 py-2">
+                <span className="text-h3 min-w-0 wrap-anywhere">{labels.chat}</span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
+                <ChatScreen
+                  workspaceId={workspaceId}
+                  onViewCitation={(citation) => {
+                    setViewedCitation(citation)
+                    setActive('studio')
+                  }}
+                />
+              </div>
+            </section>
+
+            {/* Drag handle: chat ↔ studio */}
+            <PanelResizeHandle
+              onDrag={onDragRight}
+              onDragEnd={onDragEndRight}
+              label={t('workspaces.resize.chatStudio')}
+              valueNow={(widths[0] + widths[1]) * 100}
+              valueMin={(widths[0] + MIN_FRACTION) * 100}
+              valueMax={(1 - MIN_FRACTION) * 100}
+            />
+
+            {/* --- Studio / Reference column --- */}
+            <section
+              id="panel-studio"
+              role="tabpanel"
+              aria-labelledby="tab-studio"
+              className={`workspace-panel-studio min-h-0 min-w-0 flex-1 flex-col border-border @min-[64rem]/workspace:flex @min-[64rem]/workspace:flex-none @min-[64rem]/workspace:last:border-r-0 ${
+                active === 'studio' ? 'flex' : 'hidden'
+              }`}
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
+                <ReferencePanel
+                  workspaceId={workspaceId}
+                  citation={viewedCitation}
+                />
+              </div>
+            </section>
           </div>
         </>
       )}

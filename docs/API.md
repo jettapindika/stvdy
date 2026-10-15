@@ -95,6 +95,12 @@ and rotated on every use.
   "expires_at": "2026-10-11T00:15:00Z", "device_id": "uuid" }
 ```
 
+All three `AuthResponse` routes and `POST /auth/refresh` also set a
+`Set-Cookie: stvdy_session=…; HttpOnly; SameSite=Lax; Path=/` header carrying
+the refresh token and device id. Web clients use this cookie for session
+persistence across reloads; native clients ignore it and use the body fields.
+`Secure` is added in production.
+
 ### `POST /auth/signup`
 
 Body: `{ "email", "password", "device": { "name", "platform", "app_version?" } }`.
@@ -125,16 +131,20 @@ does not count against the limit.
 
 ### `POST /auth/refresh`
 
-Body: `{ "refresh_token" }`. 200
+Body: `{ "refresh_token"? }`. The token may also be read from the `stvdy_session`
+cookie when the body field is absent (the web client's path). 200
 `{ "access_token", "refresh_token", "expires_at" }`. Rotates: the presented token
-is revoked and a new one is issued in the same `family_id`. Presenting an
-already-rotated token is treated as theft and revokes the whole family (401
-`unauthorized`); an unknown or expired token is 401 as well.
+is revoked and a new one is issued in the same `family_id`. The response sets a
+new `Set-Cookie` with the rotated token. Presenting an already-rotated token is
+treated as theft and revokes the whole family (401 `unauthorized`); an unknown or
+expired token is 401 as well.
 
 ### `POST /auth/logout`
 
-Body: `{ "refresh_token" }`. 204. Revokes the token's session family. Idempotent,
-so logging out twice is not an error.
+Body: `{ "refresh_token"? }`. The token may also be read from the `stvdy_session`
+cookie. 204. Revokes the token's session family and clears the session cookie
+(`Max-Age=0`). Idempotent: a call with no credential (body or cookie) is a no-op
+204, so logging out twice is not an error.
 
 ### `POST /auth/logout-all`
 
@@ -565,6 +575,16 @@ Auth. 200 `{"deck": Deck, "cards": [Flashcard]}`, cards ordered `(created_at,
 id)`. Another account's deck is 404. `Deck.status` is `generating | ready |
 failed`; a `failed` deck carries a readable `error` and its credits are refunded
 (A87).
+
+### `DELETE /decks/:id`
+
+Auth. Soft-deletes the deck and all its cards (sets `deleted_at`). The deck
+disappears from `GET /workspaces/:id/decks` and `GET /decks/:id` returns 404.
+
+204 No Content on success.
+
+- 404 for another account's deck, one that does not exist, or one already
+  deleted. A second call is 404, so the operation is idempotent.
 
 ### `GET /decks/:id/due?limit=N`
 
@@ -1065,6 +1085,7 @@ exportable (A149).
 | GET | `/workspaces/{id}/messages` | reads the caller's own thread |
 | GET | `/workspaces/{id}/decks` | reads the caller's own decks |
 | GET | `/decks/{id}` | reads the caller's own deck |
+| DELETE | `/decks/{id}` | soft-deletes the caller's own deck and its cards |
 | GET | `/decks/{id}/due` | reads the caller's own due cards |
 | POST | `/flashcards/{id}/review` | a review is free (R1): studying never costs credits |
 | DELETE | `/flashcard-reviews/{id}` | undoing a review is free (R1): a delete plus a replay of the remaining history, not an inverse calculation |

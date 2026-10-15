@@ -138,6 +138,7 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
 function DeckRow({ deck, workspaceId }: { deck: Deck; workspaceId: string }) {
   const { t } = useTranslation()
   const remove = useDeleteDeck(workspaceId)
+  const removeError = asApiError(remove.error)
   const [confirming, setConfirming] = useState(false)
   // Resolved here rather than at module scope: a constant holding copy is
   // evaluated before there is a language, so it could only ever ship one of them.
@@ -234,6 +235,10 @@ function DeckRow({ deck, workspaceId }: { deck: Deck; workspaceId: string }) {
             </button>
           </div>
         </div>
+      )}
+
+      {removeError !== null && (
+        <ApiErrorNotice error={removeError} noun={t('errors.nouns.deck')} />
       )}
 
       {deck.error !== null && deck.error.length > 0 && (

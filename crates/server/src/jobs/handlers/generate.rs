@@ -239,7 +239,7 @@ async fn insert_cards(
     let claimed: Option<Uuid> = sqlx::query_scalar(
         "update decks
             set status = 'ready', error = null, credits_spent = 0, updated_at = now()
-          where id = $1 and status = 'generating'
+          where id = $1 and status = 'generating' and deleted_at is null
          returning id",
     )
     .bind(deck.id)

@@ -1721,3 +1721,210 @@ async fn a_review_can_be_undone_inside_the_window_and_not_after(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// A deleted deck is gone from the list, and its cards are tombstoned with it.
+///
+/// The test creates a deck, generates its cards, deletes it, and then checks:
+///
+///  * The DELETE returns 204 (no content).
+///  * The deck no longer appears in `GET /workspaces/:id/decks`.
+///  * `GET /decks/:id` returns 404 — `owned_deck` excludes tombstones.
+///  * A second DELETE is also 404 (idempotent from the caller's side).
+///  * A stranger cannot delete it (404, same as any scoped read).
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deleted_deck_is_gone_from_the_list_and_its_cards_are_tombstoned(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply(
+        "Apa itu TCP?",
+        "Protokol.",
+        1,
+    )]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "deleter@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (_, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    // Sanity: the deck is listed and has one card.
+    let (status, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/decks"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["decks"].as_array().unwrap().len(), 1);
+    assert_eq!(list["decks"][0]["card_count"], 1);
+
+    // A stranger cannot delete it.
+    let stranger = signed_up(&app, &harness, "stranger@example.test").await;
+    let (status, body) = json(
+        &app,
+        "DELETE",
+        &format!("/decks/{deck_id}"),
+        &stranger,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // Delete it.
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // The deck is gone from the list.
+    let (status, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/decks"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["decks"].as_array().unwrap().len(), 0);
+
+    // GET the deck itself returns 404.
+    let (status, body) = json(
+        &app,
+        "GET",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // A second delete is 404 (idempotent).
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The cards are tombstoned in the database (not visible, but rows remain).
+    let live_cards: i64 = sqlx::query_scalar(
+        "select count(*) from flashcards where deck_id = $1::uuid and deleted_at is null",
+    )
+    .bind(&deck_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_cards, 0, "cards must be tombstoned with the deck");
+
+    let all_cards: i64 =
+        sqlx::query_scalar("select count(*) from flashcards where deck_id = $1::uuid")
+            .bind(&deck_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        all_cards, 1,
+        "card rows must survive as tombstones, not be hard-deleted"
+    );
+}
+
+/// Deleting a deck that is still generating does not refund the credits.
+///
+/// The credits were spent when the generation was requested. Deleting is the
+/// student's choice; it does not undo the cost. The test creates a deck
+/// (status `generating`, `credits_spent > 0`), deletes it without draining
+/// the job, and asserts:
+///
+///  * The ledger balance is unchanged (no refund row was written).
+///  * `credits_spent` on the tombstoned row is 0 — so `fail_and_refund`, which
+///    claims on `credits_spent > 0` without checking `deleted_at`, cannot
+///    refund a deck the student deliberately deleted.
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_a_generating_deck_does_not_refund_credits(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    // A scripted reply that will never be consumed: the job is never drained.
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Q", "A", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "nodelete-refund@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+
+    // Snapshot the ledger balance before the deck is created.
+    let before_create: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = (select id from users where email = 'nodelete-refund@example.test')",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = deck_created(&app, &workspace_id, &token, &source_id, 10).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    assert_eq!(body["deck"]["status"], "generating");
+
+    // The deck was charged. Snapshot the balance after creation.
+    let after_create: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = (select id from users where email = 'nodelete-refund@example.test')",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert!(
+        after_create < before_create,
+        "creating the deck must spend credits: before={before_create}, after={after_create}"
+    );
+
+    // The deck is still generating (job not drained). Delete it.
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // The ledger balance must be unchanged from after_create: no refund row.
+    let after_delete: i64 = sqlx::query_scalar(
+        "select coalesce(sum(delta), 0)::bigint from credit_ledger
+          where user_id = (select id from users where email = 'nodelete-refund@example.test')",
+    )
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        after_delete, after_create,
+        "deleting a generating deck must not refund credits"
+    );
+
+    // credits_spent must be zeroed on the tombstoned row, so fail_and_refund
+    // cannot refund it later.
+    let credits_spent: i32 =
+        sqlx::query_scalar("select credits_spent from decks where id = $1::uuid")
+            .bind(&deck_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        credits_spent, 0,
+        "credits_spent must be zeroed so fail_and_refund cannot refund a deleted deck"
+    );
+}

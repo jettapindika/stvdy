@@ -118,25 +118,30 @@ async function sourcesPanel(): Promise<HTMLElement> {
 }
 
 describe('the workspace heading', () => {
+  // The heading is rendered twice (phone + desktop inside sources column)
+  // and CSS hides one at each breakpoint. jsdom applies no CSS, so both
+  // are in the DOM. Queries are scoped to the first <header>.
+  async function heading(): Promise<HTMLElement> {
+    await screen.findAllByRole('heading', { name: /Data Structures/i })
+    const headers = document.querySelectorAll('header')
+    expect(headers.length).toBeGreaterThanOrEqual(1)
+    return headers[0] as HTMLElement
+  }
+
   it('names the course, the source count and the exam date from the workspace row', async () => {
     serve()
     renderWorkspace()
 
-    expect(await screen.findByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
-    // One mono line of the facts the server holds, joined: the code, the count and
-    // the exam date, in that order.
-    expect(await screen.findByText('CS 401 · 1 source · exam 26 Oct 2026')).toBeInTheDocument()
-    // And the way back to the list, which is the design's breadcrumb.
-    expect(screen.getByRole('link', { name: 'Workspaces' })).toHaveAttribute(
+    const hdr = await heading()
+    expect(within(hdr).getByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
+    expect(within(hdr).getByText('CS 401 · 1 source · exam 26 Oct 2026')).toBeInTheDocument()
+    expect(within(hdr).getByRole('link', { name: 'Workspaces' })).toHaveAttribute(
       'href',
       '/workspaces',
     )
   })
 
   it('omits each fact the workspace does not have rather than filling it in', async () => {
-    // `course_code` and `exam_date` are nullable, and a heading that printed a
-    // placeholder would be stating something no row holds. The source count is
-    // always real, so it is the one fact that survives.
     const bare = {
       id: 'w1',
       name: 'Data Structures',
@@ -158,12 +163,11 @@ describe('the workspace heading', () => {
     })
     renderWorkspace()
 
-    expect(await screen.findByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
-    expect(await screen.findByText('3 sources')).toBeInTheDocument()
-    // Neither the code nor the date, anywhere on the screen: the heading line is the
-    // only place either could appear.
-    expect(screen.queryByText(/CS 401/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/26 Oct 2026/)).not.toBeInTheDocument()
+    const hdr = await heading()
+    expect(within(hdr).getByRole('heading', { name: 'Data Structures' })).toBeInTheDocument()
+    expect(within(hdr).getByText('3 sources')).toBeInTheDocument()
+    expect(within(hdr).queryByText(/CS 401/)).not.toBeInTheDocument()
+    expect(within(hdr).queryByText(/26 Oct 2026/)).not.toBeInTheDocument()
   })
 })
 

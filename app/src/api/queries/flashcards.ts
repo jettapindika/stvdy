@@ -169,6 +169,12 @@ export function useDeleteDeck(workspaceId: string) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (deckId: string) => api.delete(`/decks/${deckId}`),
-    onSuccess: () => client.invalidateQueries({ queryKey: flashcardKeys.decks(workspaceId) }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: flashcardKeys.decks(workspaceId) })
+      // The dashboard's due count includes cards from this deck, so it must
+      // refresh too — otherwise the hub's "N cards due" headline disagrees
+      // with the deck list below it.
+      await client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
   })
 }
