@@ -809,6 +809,26 @@
       "heading": "Lanjutkan topik",
       "workedExample": "Tunjukkan contoh penyelesaian",
       "flashcards": "Buat flashcard dari ini"
+    },
+    "callout": {
+      "note": "Catatan",
+      "tip": "Tips",
+      "important": "Penting",
+      "warning": "Peringatan",
+      "caution": "Hati-hati",
+      "example": "Contoh",
+      "definition": "Definisi",
+      "formula": "Rumus",
+      "memorize": "Hafalkan",
+      "step": "Langkah",
+      "analogy": "Analogi",
+      "trap": "Jebakan",
+      "question": "Pertanyaan",
+      "summary": "Ringkasan",
+      "quote": "Kutipan",
+      "success": "Berhasil",
+      "highlight": "Sorotan",
+      "code": "Kode"
     }
   },
   "error": {

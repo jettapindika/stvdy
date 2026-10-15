@@ -831,6 +831,26 @@
       "heading": "Continue the thread",
       "workedExample": "Show a worked example",
       "flashcards": "Make flashcards from this"
+    },
+    "callout": {
+      "note": "Note",
+      "tip": "Tip",
+      "important": "Important",
+      "warning": "Warning",
+      "caution": "Caution",
+      "example": "Example",
+      "definition": "Definition",
+      "formula": "Formula",
+      "memorize": "Memorize",
+      "step": "Step",
+      "analogy": "Analogy",
+      "trap": "Trap",
+      "question": "Question",
+      "summary": "Summary",
+      "quote": "Quote",
+      "success": "Success",
+      "highlight": "Highlight",
+      "code": "Code"
     }
   },
   "error": {
