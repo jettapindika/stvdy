@@ -137,7 +137,7 @@ One transaction:
 4. Same credit-zeroing for generating rows
 5. Commit, 204
 
-Validation: any id not belonging to the workspace is silently skipped (idempotent — already deleted or wrong workspace).
+Validation: any id not belonging to the workspace is silently skipped (idempotent — already deleted or wrong workspace). This matches `delete_deck`'s idempotency: a second DELETE on the same id returns 404 from `owned_*`, but bulk delete does not fail the whole batch over one stale id.
 
 ## 5. Backend — Reorder
 
@@ -165,7 +165,7 @@ Body:
 }
 ```
 
-Sets `sort_order` from array index (0-based). One transaction. Ownership verified. Any item not in the array keeps its current `sort_order`.
+Sets `sort_order` from array index (0-based). One transaction. Ownership verified. Items not in the array are left untouched — their existing `sort_order` stays. When all rows start at 0, newly reordered items sort first (lower indices), and unreordered items group after them by `created_at DESC`. A full reorder sends every live item, so partial reorders are only for "move one item" cases.
 
 ### List query changes
 
@@ -239,14 +239,14 @@ Add delete to each detail screen's header/actions area:
 
 | Screen | Location | On success |
 |---|---|---|
-| `QuizScreen` | Header area beside quiz title | `navigate('/study')` |
-| `ReportScreen` | Header area beside report title | `navigate(-1)` or workspace |
-| `CheatsheetScreen` | Actions area (beside re-render + export) | `navigate(-1)` or workspace |
+| `QuizScreen` | Header area beside quiz title | `navigate(`/workspaces/${workspaceId}`)` |
+| `ReportScreen` | Header area beside report title | `navigate(`/workspaces/${workspaceId}`)` |
+| `CheatsheetScreen` | Actions area (beside re-render + export) | `navigate(`/workspaces/${workspaceId}`)` |
 | `StudyScreen` | Already exists ✅ | Already navigates to `/study` |
 
 Same inline confirm pattern. On QuizScreen, placed after the title and before the question list. On ReportScreen, in the header. On CheatsheetScreen, in `CheatsheetActions`.
 
-Rename on detail screens: add an inline editable title (click to edit, enter to save) or a rename button that switches to an input. Follows the same form pattern.
+Rename on detail screens: a rename button that switches the title to an inline `<input>` form (enter to save, escape to cancel). Same form pattern as the list view rows.
 
 ## 9. Frontend — Bulk Delete
 
