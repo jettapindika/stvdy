@@ -24,16 +24,19 @@ pub fn session_cookie(
     let value = format!(
         "{COOKIE_NAME}={refresh_token}:{device_id}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}{secure}"
     );
-    // The value is ASCII-safe (base64url + UUID + cookie attributes).
+    // The value is ASCII-safe: base64url tokens, a UUID, and fixed cookie
+    // attributes produce no non-visible-ASCII byte. A non-ASCII refresh token
+    // from a broken issuer is a server bug, not a user input, so the panic in
+    // debug and the allow in release are both acceptable.
+    #[allow(clippy::expect_used)]
     HeaderValue::from_str(&value).expect("cookie value is valid ASCII")
 }
 
 /// Builds a `Set-Cookie` that clears the session cookie.
 pub fn clear_cookie(is_dev: bool) -> HeaderValue {
     let secure = if is_dev { "" } else { "; Secure" };
-    let value = format!(
-        "{COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{secure}"
-    );
+    let value = format!("{COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{secure}");
+    #[allow(clippy::expect_used)]
     HeaderValue::from_str(&value).expect("cookie value is valid ASCII")
 }
 
