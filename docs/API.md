@@ -95,7 +95,7 @@ and rotated on every use.
   "expires_at": "2026-10-11T00:15:00Z", "device_id": "uuid" }
 ```
 
-All four `AuthResponse` routes and `POST /auth/refresh` also set a
+All three `AuthResponse` routes and `POST /auth/refresh` also set a
 `Set-Cookie: stvdy_session=…; HttpOnly; SameSite=Lax; Path=/` header carrying
 the refresh token and device id. Web clients use this cookie for session
 persistence across reloads; native clients ignore it and use the body fields.
