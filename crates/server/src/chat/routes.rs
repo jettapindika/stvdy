@@ -49,6 +49,13 @@ const ACTION: &str = "chat_message";
 /// because a read loop produces no proposals at all and would otherwise never stop.
 const MAX_TOOL_ROUNDS: usize = 4;
 
+/// How many recent messages (user + assistant) to include as conversation
+/// history in the LLM request. Each message is roughly 100-300 tokens, so 20
+/// messages ≈ 2-6K tokens of history, leaving room for sources and the system
+/// prompt in a 16-32K context window. The messages table stores them per
+/// workspace, so history is workspace-scoped (the chat thread the student is in).
+const MAX_HISTORY_TURNS: i64 = 20;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/chat", post(chat))
@@ -316,27 +323,39 @@ pub async fn chat(
         tracing::error!(%error, "recording the search usage failed");
     }
 
-    // History is deliberately just the prompt plus the user's turn: the prompt
-    // carries the sources, and replaying prior turns would send a second copy of
-    // the whole context on every request.
-    //
+    // Recent conversation history, so the model has session context. Capped at
+    // MAX_HISTORY_TURNS to keep the request within provider context limits:
+    // each prior turn is a user message + assistant reply, and the sources
+    // already consume most of the budget.
+    let history = recent_history(&state, user.user_id, workspace_id, user_message_id, MAX_HISTORY_TURNS).await?;
+
     // The tool list is the plan's (A272): four READ tools always, the six WRITE ones only
     // with `Feature::AgentAction`. Sending no tools at all — which is what this route did
     // before this phase — is not a safer default: it means a paid account's model cannot
     // read the student's own tasks either.
     let tools = agent::tool_specs(&state, &user).await;
+
+    let mut messages = Vec::with_capacity(2 + history.len());
+    messages.push(ChatMsg {
+        role: Role::System,
+        content: composed.text,
+    });
+    // Prior turns, oldest first, as alternating user/assistant pairs.
+    for turn in &history {
+        messages.push(ChatMsg {
+            role: if turn.role == "user" { Role::User } else { Role::Assistant },
+            content: turn.content.clone(),
+        });
+    }
+    // The current user message, last.
+    messages.push(ChatMsg {
+        role: Role::User,
+        content: message,
+    });
+
     let mut request = ChatRequest {
         model: String::new(),
-        messages: vec![
-            ChatMsg {
-                role: Role::System,
-                content: composed.text,
-            },
-            ChatMsg {
-                role: Role::User,
-                content: message,
-            },
-        ],
+        messages,
         tools,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
@@ -611,6 +630,49 @@ pub async fn chat(
     };
 
     Ok(Sse::new(events))
+}
+
+/// The most recent messages in this workspace's chat thread, for session context.
+///
+/// Returns up to `limit` messages (both roles), oldest first, so the model sees
+/// the conversation in chronological order. The current user message is excluded
+/// because it is appended separately by the caller.
+#[derive(sqlx::FromRow)]
+struct HistoryRow {
+    role: String,
+    content: String,
+}
+
+async fn recent_history(
+    state: &AppState,
+    user_id: Uuid,
+    workspace_id: Uuid,
+    exclude_id: Uuid,
+    limit: i64,
+) -> AppResult<Vec<HistoryRow>> {
+    // Inner query selects the N most recent (newest first) excluding the
+    // just-inserted current user message, outer reverses to oldest first,
+    // which is the order the model needs.
+    let rows = sqlx::query_as::<_, HistoryRow>(
+        "select role, content from (
+           select role, content, created_at, id
+             from messages
+            where workspace_id = $1 and user_id = $2 and deleted_at is null
+              and id != $4
+            order by created_at desc, id desc
+            limit $3
+         ) as recent
+         order by created_at asc, id asc",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(limit)
+    .bind(exclude_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("loading chat history: {error}")))?;
+
+    Ok(rows)
 }
 
 pub(crate) async fn insert_message(
