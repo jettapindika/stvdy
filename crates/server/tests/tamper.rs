@@ -1419,9 +1419,13 @@ async fn the_forwarded_client_address_is_what_the_limiter_counts(pool: PgPool) {
     let limit = stvdy_server::ratelimit::SIGNUP_PER_IP_PER_DAY;
     // Burn the limit from one forwarded address, always over the same socket peer.
     for index in 0..limit {
-        let (status, body) =
-            signup_forwarded_from(&app, "203.0.113.9", "198.51.100.1", &format!("real{index}@ugm.ac.id"))
-                .await;
+        let (status, body) = signup_forwarded_from(
+            &app,
+            "203.0.113.9",
+            "198.51.100.1",
+            &format!("real{index}@ugm.ac.id"),
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED, "attempt {index}: {body}");
     }
 
@@ -1433,7 +1437,8 @@ async fn the_forwarded_client_address_is_what_the_limiter_counts(pool: PgPool) {
     // A different forwarded address over the same peer is a different client and is
     // still allowed, which is the property that keeps one student's retries from
     // spending another's budget.
-    let (status, body) = signup_forwarded_from(&app, "203.0.113.10", "198.51.100.1", "other@ugm.ac.id").await;
+    let (status, body) =
+        signup_forwarded_from(&app, "203.0.113.10", "198.51.100.1", "other@ugm.ac.id").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
 }
 

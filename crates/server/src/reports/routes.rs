@@ -65,7 +65,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/reports", get(list_reports))
         .route("/workspaces/{id}/reports/outline", post(create_outline))
-        .route("/reports/{id}", get(get_report).patch(patch_report).delete(delete_report))
+        .route(
+            "/reports/{id}",
+            get(get_report).patch(patch_report).delete(delete_report),
+        )
         .route("/reports/{id}/generate", post(generate_section))
         .route("/reports/{id}/export", get(export_report))
 }

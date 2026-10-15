@@ -53,7 +53,10 @@ const MAX_SOURCES: usize = 20;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/decks", post(create_deck).get(list_decks))
-        .route("/decks/{id}", get(get_deck).delete(delete_deck).patch(rename_deck))
+        .route(
+            "/decks/{id}",
+            get(get_deck).delete(delete_deck).patch(rename_deck),
+        )
         .route("/decks/{id}/due", get(due_cards))
         .route("/flashcards/{id}/review", post(review_card))
         .route("/flashcard-reviews/{id}", delete(undo_review))

@@ -71,7 +71,12 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/cheatsheets",
             post(create_cheatsheet).get(list_cheatsheets),
         )
-        .route("/cheatsheets/{id}", get(get_cheatsheet).delete(delete_cheatsheet).patch(rename_cheatsheet))
+        .route(
+            "/cheatsheets/{id}",
+            get(get_cheatsheet)
+                .delete(delete_cheatsheet)
+                .patch(rename_cheatsheet),
+        )
         // The document itself, not a JSON envelope: the free plan prints the HTML it already
         // has, which only works if this route serves something a browser can open, and the
         // preview frame consumes it as `srcdoc`.

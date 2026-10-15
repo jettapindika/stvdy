@@ -64,7 +64,10 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/quizzes",
             post(create_quiz).get(list_quizzes),
         )
-        .route("/quizzes/{id}", get(get_quiz).delete(delete_quiz).patch(rename_quiz))
+        .route(
+            "/quizzes/{id}",
+            get(get_quiz).delete(delete_quiz).patch(rename_quiz),
+        )
         .route("/quizzes/{id}/attempts", post(record_attempt))
         .route("/quizzes/{id}/results", get(quiz_results))
 }
@@ -693,7 +696,9 @@ pub async fn delete_quiz(
     .bind(quiz_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the quiz's questions: {error}")))?;
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("deleting the quiz's questions: {error}"))
+    })?;
 
     tx.commit().await.map_err(|error| {
         AppError::Internal(anyhow::anyhow!("committing quiz deletion: {error}"))

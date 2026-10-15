@@ -161,6 +161,7 @@ fn read_only_rows() -> Vec<Row> {
             "reads the caller's own decks",
         ),
         ro("GET", "/decks/{id}", "reads the caller's own deck"),
+        ro("PATCH", "/decks/{id}", "renaming a deck spends nothing"),
         ro(
             "DELETE",
             "/decks/{id}",
@@ -187,6 +188,13 @@ fn read_only_rows() -> Vec<Row> {
             "reads the caller's own quizzes",
         ),
         ro("GET", "/quizzes/{id}", "reads the caller's own quiz"),
+        ro("PATCH", "/quizzes/{id}", "renaming a quiz spends nothing"),
+        ro(
+            "DELETE",
+            "/quizzes/{id}",
+            "soft-deletes the caller's own quiz and its questions — a tombstone, and the \
+             generation's charge is not refunded",
+        ),
         ro(
             "POST",
             "/quizzes/{id}/attempts",
@@ -230,9 +238,26 @@ fn read_only_rows() -> Vec<Row> {
             "editing an outline spends nothing",
         ),
         ro(
+            "DELETE",
+            "/reports/{id}",
+            "soft-deletes the caller's own report — a tombstone, and the generation's \
+             charge is not refunded",
+        ),
+        ro(
             "GET",
             "/cheatsheets/{id}",
             "reads the caller's own cheatsheet",
+        ),
+        ro(
+            "PATCH",
+            "/cheatsheets/{id}",
+            "renaming a cheatsheet spends nothing",
+        ),
+        ro(
+            "DELETE",
+            "/cheatsheets/{id}",
+            "soft-deletes the caller's own cheatsheet — a tombstone, and the \
+             generation's charge is not refunded",
         ),
         ro(
             "GET",
