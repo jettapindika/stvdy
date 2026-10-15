@@ -9,9 +9,8 @@ use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, resolve};
 use stvdy_core::prompts::registry::{
-    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, BASE_V3, BASE_V3_VERSION,
-    NO_EXAM_DATE, NO_OTHER_SECTIONS,
-    NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
+    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, BASE_V3, BASE_V3_VERSION, NO_EXAM_DATE,
+    NO_OTHER_SECTIONS, NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
 };
 use stvdy_core::prompts::{
     ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, UNTRUSTED_VARIABLES, VarKind,
@@ -251,7 +250,15 @@ fn base_v3_differs_from_v2_only_in_language_tone_and_output_quality() {
             );
             // v3's language_and_tone must contain v2's (it adds lines, not removes).
             assert!(
-                v3_sec.contains(v2_sec.trim_end_matches("</language_and_tone>").trim_end().lines().last().unwrap().trim()),
+                v3_sec.contains(
+                    v2_sec
+                        .trim_end_matches("</language_and_tone>")
+                        .trim_end()
+                        .lines()
+                        .last()
+                        .unwrap()
+                        .trim()
+                ),
                 "v3's <language_and_tone> must contain v2's last rule"
             );
         } else {
@@ -265,7 +272,10 @@ fn base_v3_differs_from_v2_only_in_language_tone_and_output_quality() {
     // The identity line (before the first section) must be identical.
     let v2_preamble = BASE_V2_FILE.split("<context>").next().unwrap();
     let v3_preamble = BASE_V3_FILE.split("<context>").next().unwrap();
-    assert_eq!(v2_preamble, v3_preamble, "the identity line must be identical");
+    assert_eq!(
+        v2_preamble, v3_preamble,
+        "the identity line must be identical"
+    );
 }
 
 /// Every section name in a prompt file, in order.

@@ -26,6 +26,37 @@ use crate::credits;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+/// Strips citation markers ([1], [12], [W1], [W3]) from a historical assistant
+/// reply. Labels are per-request, so a prior turn's [2] would silently bind to
+/// a different chunk in the current request's context.
+fn strip_citation_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        // Check for optional 'W' prefix then digits then ']'.
+        let mut i = 0;
+        if after.as_bytes().get(i) == Some(&b'W') {
+            i += 1;
+        }
+        let digit_start = i;
+        while i < after.len() && after.as_bytes()[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i > digit_start && after.as_bytes().get(i) == Some(&b']') {
+            // Skip the marker entirely.
+            rest = &after[i + 1..];
+        } else {
+            // Not a citation marker; keep the '['.
+            out.push('[');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Low, because a study answer should be grounded rather than inventive. Not
 /// zero: a fully deterministic model re-reads the same source identically and
 /// produces stilted prose.
@@ -50,11 +81,11 @@ const ACTION: &str = "chat_message";
 const MAX_TOOL_ROUNDS: usize = 4;
 
 /// How many recent messages (user + assistant) to include as conversation
-/// history in the LLM request. Each message is roughly 100-300 tokens, so 20
-/// messages ≈ 2-6K tokens of history, leaving room for sources and the system
-/// prompt in a 16-32K context window. The messages table stores them per
-/// workspace, so history is workspace-scoped (the chat thread the student is in).
-const MAX_HISTORY_TURNS: i64 = 20;
+/// history in the LLM request. Kept low to bound token cost: each user message
+/// can be up to 8000 chars (~2K tokens) and each assistant reply up to 1500
+/// tokens, so 10 messages ≈ 7-15K tokens, roughly half a 32K context window
+/// after sources and the system prompt.
+const MAX_HISTORY_TURNS: i64 = 10;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -198,6 +229,14 @@ pub async fn chat(
     let labels = composed.labels.clone();
     let prompt_version = composed.prompt_version.clone();
 
+    // Conversation history, loaded before the spend so a DB failure here leaves
+    // no credit spent and no message written (the contract at lines 3-7).
+    // Citation markers are stripped from historical assistant turns because labels
+    // are per-request: a prior turn's [2] points at a different chunk than this
+    // turn's [2], and strip_unknown would silently bind it to the wrong passage.
+    let history_rows =
+        recent_history(&state, user.user_id, workspace_id, MAX_HISTORY_TURNS).await?;
+
     // A search is charged only when it actually called a provider. A cache hit
     // writes its usage row below without a ledger entry (A40), because re-billing
     // a repeated query would burn the user's daily allowance on a question already
@@ -323,28 +362,33 @@ pub async fn chat(
         tracing::error!(%error, "recording the search usage failed");
     }
 
-    // Recent conversation history, so the model has session context. Capped at
-    // MAX_HISTORY_TURNS to keep the request within provider context limits:
-    // each prior turn is a user message + assistant reply, and the sources
-    // already consume most of the budget.
-    let history = recent_history(&state, user.user_id, workspace_id, user_message_id, MAX_HISTORY_TURNS).await?;
-
     // The tool list is the plan's (A272): four READ tools always, the six WRITE ones only
     // with `Feature::AgentAction`. Sending no tools at all — which is what this route did
     // before this phase — is not a safer default: it means a paid account's model cannot
     // read the student's own tasks either.
     let tools = agent::tool_specs(&state, &user).await;
 
-    let mut messages = Vec::with_capacity(2 + history.len());
+    let mut messages = Vec::with_capacity(2 + history_rows.len());
     messages.push(ChatMsg {
         role: Role::System,
         content: composed.text,
     });
-    // Prior turns, oldest first, as alternating user/assistant pairs.
-    for turn in &history {
+    // Prior turns, oldest first. Citation markers ([1], [W2]) are stripped from
+    // assistant replies because labels are per-request and a prior turn's [2]
+    // would silently bind to whatever chunk 2 is in *this* request's context.
+    for turn in &history_rows {
+        let content = if turn.role == "assistant" {
+            strip_citation_markers(&turn.content)
+        } else {
+            turn.content.clone()
+        };
         messages.push(ChatMsg {
-            role: if turn.role == "user" { Role::User } else { Role::Assistant },
-            content: turn.content.clone(),
+            role: if turn.role == "user" {
+                Role::User
+            } else {
+                Role::Assistant
+            },
+            content,
         });
     }
     // The current user message, last.
@@ -635,8 +679,8 @@ pub async fn chat(
 /// The most recent messages in this workspace's chat thread, for session context.
 ///
 /// Returns up to `limit` messages (both roles), oldest first, so the model sees
-/// the conversation in chronological order. The current user message is excluded
-/// because it is appended separately by the caller.
+/// the conversation in chronological order. Called before `insert_message`, so
+/// the current user message is not yet in the table.
 #[derive(sqlx::FromRow)]
 struct HistoryRow {
     role: String,
@@ -647,18 +691,15 @@ async fn recent_history(
     state: &AppState,
     user_id: Uuid,
     workspace_id: Uuid,
-    exclude_id: Uuid,
     limit: i64,
 ) -> AppResult<Vec<HistoryRow>> {
-    // Inner query selects the N most recent (newest first) excluding the
-    // just-inserted current user message, outer reverses to oldest first,
-    // which is the order the model needs.
+    // Inner query selects the N most recent (newest first), outer reverses to
+    // oldest first, which is the order the model needs.
     let rows = sqlx::query_as::<_, HistoryRow>(
         "select role, content from (
            select role, content, created_at, id
              from messages
             where workspace_id = $1 and user_id = $2 and deleted_at is null
-              and id != $4
             order by created_at desc, id desc
             limit $3
          ) as recent
@@ -667,7 +708,6 @@ async fn recent_history(
     .bind(workspace_id)
     .bind(user_id)
     .bind(limit)
-    .bind(exclude_id)
     .fetch_all(&state.pool)
     .await
     .map_err(|error| AppError::Internal(anyhow::anyhow!("loading chat history: {error}")))?;
