@@ -71,7 +71,7 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/cheatsheets",
             post(create_cheatsheet).get(list_cheatsheets),
         )
-        .route("/cheatsheets/{id}", get(get_cheatsheet))
+        .route("/cheatsheets/{id}", get(get_cheatsheet).delete(delete_cheatsheet))
         // The document itself, not a JSON envelope: the free plan prints the HTML it already
         // has, which only works if this route serves something a browser can open, and the
         // preview frame consumes it as `srcdoc`.
@@ -511,6 +511,41 @@ pub async fn re_render(
 
     let cheatsheet = owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
     Ok(Json(serde_json::json!({ "cheatsheet": cheatsheet })))
+}
+
+/// `DELETE /cheatsheets/:id`: tombstone the cheatsheet. Credits for a `generating`
+/// cheatsheet are zeroed so `fail_and_refund` cannot refund a deliberately deleted item;
+/// a `failed` cheatsheet's charge is left for the boot sweep.
+pub async fn delete_cheatsheet(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(cheatsheet_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    // Verify ownership first (returns 404 for missing/other-account/already-deleted).
+    owned_cheatsheet(&state, user.user_id, cheatsheet_id).await?;
+
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
+
+    sqlx::query(
+        "update cheatsheets
+            set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(cheatsheet_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the cheatsheet: {error}")))?;
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing cheatsheet deletion: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The cheatsheet, or 404 when it is not this user's. Tombstones are excluded, so a deleted

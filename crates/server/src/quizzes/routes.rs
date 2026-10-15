@@ -64,7 +64,7 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}/quizzes",
             post(create_quiz).get(list_quizzes),
         )
-        .route("/quizzes/{id}", get(get_quiz))
+        .route("/quizzes/{id}", get(get_quiz).delete(delete_quiz))
         .route("/quizzes/{id}/attempts", post(record_attempt))
         .route("/quizzes/{id}/results", get(quiz_results))
 }
@@ -656,6 +656,50 @@ pub async fn quiz_results(
         },
         "questions": detail,
     })))
+}
+
+/// `DELETE /quizzes/:id`: tombstone the quiz and its questions. Credits for a
+/// `generating` quiz are zeroed so `fail_and_refund` cannot refund a deliberately
+/// deleted item; a `failed` quiz's charge is left for the boot sweep.
+pub async fn delete_quiz(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(quiz_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    // Verify ownership first (returns 404 for missing/other-account/already-deleted).
+    owned_quiz(&state, user.user_id, quiz_id).await?;
+
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
+
+    sqlx::query(
+        "update quizzes
+            set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(quiz_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the quiz: {error}")))?;
+
+    sqlx::query(
+        "update quiz_questions set deleted_at = now(), updated_at = now()
+          where quiz_id = $1 and deleted_at is null",
+    )
+    .bind(quiz_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the quiz's questions: {error}")))?;
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing quiz deletion: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The quiz, or 404 when it is not this user's. Tombstones are excluded, so a deleted

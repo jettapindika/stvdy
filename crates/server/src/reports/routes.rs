@@ -65,7 +65,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/reports", get(list_reports))
         .route("/workspaces/{id}/reports/outline", post(create_outline))
-        .route("/reports/{id}", get(get_report).patch(patch_report))
+        .route("/reports/{id}", get(get_report).patch(patch_report).delete(delete_report))
         .route("/reports/{id}/generate", post(generate_section))
         .route("/reports/{id}/export", get(export_report))
 }
@@ -700,6 +700,41 @@ pub async fn export_report(
             format!("{other:?}").to_lowercase()
         ))),
     }
+}
+
+/// `DELETE /reports/:id`: tombstone the report. Credits for a `generating` report are
+/// zeroed so `fail_and_refund` cannot refund a deliberately deleted item; a `failed`
+/// report's charge is left for the boot sweep. Report revisions are left intact.
+pub async fn delete_report(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(report_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    // Verify ownership first (returns 404 for missing/other-account/already-deleted).
+    owned_report(&state, user.user_id, report_id).await?;
+
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
+
+    sqlx::query(
+        "update reports
+            set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(report_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the report: {error}")))?;
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing report deletion: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The report, or 404 when it is not this user's. Tombstones are excluded, so a deleted
