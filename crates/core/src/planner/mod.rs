@@ -7,20 +7,18 @@
 //!
 //! The steps run in the contract's fixed order and no other: horizon and windows (1–2) in
 //! [`slots`], demand, the review pass and allocation (3–6) in [`allocate`], the Power
-//! balancer (7) in [`balance`]. Replanning is [`propose`] under the name the server's replan
-//! route calls, and [`progress`] is the goal's honest components.
+//! balancer (7) in [`balance`]. Replanning is just [`propose`] with pinned intervals,
+//! and [`progress`] is the goal's honest components.
 
 mod allocate;
 mod balance;
 mod model;
-mod replan;
 pub mod slots;
 
 pub mod progress;
 
 pub use balance::{MAX_ITERATIONS, OVERLOAD_PCT, rebalance};
 pub use model::*;
-pub use replan::replan;
 
 use std::collections::BTreeMap;
 

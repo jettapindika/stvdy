@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useMatch } from 'react-router'
 
 import { CreditMeter } from '@/features/billing/CreditMeter'
+import { ThemeSync } from '@/features/settings/ThemeSync'
 import { SyncStatus } from '@/features/sync/SyncStatus'
 import { useSyncEngine } from '@/features/sync/useSyncEngine'
 import { useFormFactor } from '@/lib/useFormFactor'
@@ -68,6 +69,7 @@ export function Shell({
     <div
       className={`flex min-h-[100dvh] bg-bg text-text${isPhone ? ' shell-phone' : ''}`}
     >
+      <ThemeSync />
       <a
         href="#main"
         className="btn btn-secondary sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50"

@@ -4,6 +4,8 @@
 //! an MCQ with three options, an MCQ whose `answer` is not one of its options (which the
 //! grader would silently mark every student wrong on), and an unknown field.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use uuid::Uuid;
 
 use stvdy_core::citations::{ContextLabels, LabeledChunk};

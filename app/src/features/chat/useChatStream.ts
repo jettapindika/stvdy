@@ -24,6 +24,8 @@ export interface ChatTurn {
   question: string
   /** The answer so far. Empty until the first token arrives. */
   text: string
+  /** Chain-of-thought reasoning, when the provider exposed it. Empty otherwise. */
+  reasoning: string
   citations: ChatCitation[]
   /** What the server spent, when it said. */
   usage: ChatUsage | null
@@ -82,6 +84,7 @@ export function useChatStream(workspaceId: string): ChatStreamState {
       setTurn({
         question: request.message,
         text: '',
+        reasoning: '',
         citations: [],
         usage: null,
         error: null,
@@ -103,6 +106,12 @@ export function useChatStream(workspaceId: string): ChatStreamState {
               if (!isCurrent()) return
               setTurn((current) =>
                 current === null ? current : { ...current, text: current.text + text },
+              )
+            },
+            onReasoning(text) {
+              if (!isCurrent()) return
+              setTurn((current) =>
+                current === null ? current : { ...current, reasoning: current.reasoning + text },
               )
             },
             onCitations(citations) {

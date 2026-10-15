@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost http://localhost:8080 https://api.stvdy.app https://stvdy.ztvn.my.id; frame-ancestors 'none'; object-src 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' asset: http://asset.localhost data:; connect-src 'self' ipc: http://ipc.localhost https://api.stvdy.app https://stvdy.ztvn.my.id; frame-ancestors 'none'; object-src 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": {

@@ -13,6 +13,7 @@ import {
 } from '@/api/queries/quizzes'
 import { useSources } from '@/api/queries/sources'
 import { Field } from '@/components/ui/Field'
+import { Select } from '@/components/ui/Select'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
 
@@ -108,13 +109,9 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
               what makes the minimum safe — `min(10rem, 100%)` is 160px while there
               is room for two and the container's own width when there is not, so at
               100% the pair still sits side by side exactly as before. */}
-          <div className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-1">
-            <label className="label" htmlFor="quiz-difficulty">
-              {t('studio.quiz.difficultyLabel')}
-            </label>
-            <select
-              id="quiz-difficulty"
-              className="field"
+          <div className="min-w-[min(10rem,100%)] flex-1">
+            <Select
+              label={t('studio.quiz.difficultyLabel')}
               value={difficulty}
               onChange={(event) => {
                 setDifficulty(event.target.value as Difficulty)
@@ -125,15 +122,11 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
                   {difficultyLabel[value]}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-          <div className="flex min-w-[min(10rem,100%)] flex-1 flex-col gap-1">
-            <label className="label" htmlFor="quiz-types">
-              {t('studio.quiz.typesLabel')}
-            </label>
-            <select
-              id="quiz-types"
-              className="field"
+          <div className="min-w-[min(10rem,100%)] flex-1">
+            <Select
+              label={t('studio.quiz.typesLabel')}
               value={types}
               onChange={(event) => {
                 setTypes(event.target.value as QuestionTypes)
@@ -148,7 +141,7 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
                       : t('studio.quiz.types.mixed')}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         </div>
         <label className="label" htmlFor="quiz-count">

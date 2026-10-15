@@ -15,10 +15,11 @@ import { platform } from '../platform'
  * neither used nor cleaned up.
  *
  * `secureStore` is not available everywhere: the web adapter has no keychain and
- * throws on write (see `platform/web.ts`). That degradation is tolerated here
- * rather than worked around, because the alternative is the one thing the
- * contract forbids. On web a session therefore lasts as long as the tab, which is
- * the honest behaviour of a build with nowhere secure to put a secret.
+ * throws on write (see `platform/web.ts`). On web, session persistence is
+ * handled by `HttpOnly` cookies set by the server on auth responses. The cookie
+ * carries the refresh token and device id, so the browser sends them
+ * automatically on `/auth/refresh` and no script can read them. The `secureStore`
+ * on web remains a no-op — the cookie path bypasses it entirely.
  *
  * Subscribers exist so a 401 anywhere in the app can end the session once, and
  * every screen watching the session finds out. That is why this is a store
@@ -68,12 +69,10 @@ async function storeSet(key: string, value: string): Promise<void> {
   try {
     await platform.secureStore.set(key, value)
   } catch {
-    // No keychain (the web build). Decision (Phase 1): the refresh token is
-    // never put in `localStorage`, because anything a script can read is
-    // XSS-exfiltratable and the token is long-lived. The consequence is that on
-    // web the session lasts only as long as the tab: a reload forces a fresh
-    // sign-in. The caller's session still works in memory, so this is not
-    // surfaced as a failure.
+    // No keychain (the web build). The `secureStore` on web is a deliberate
+    // no-op: session persistence is handled by the HttpOnly cookie the server
+    // sets on login/signup/refresh. The caller's in-memory session still works,
+    // so this is not surfaced as a failure.
   }
 }
 

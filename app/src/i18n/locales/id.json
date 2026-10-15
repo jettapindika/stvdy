@@ -130,7 +130,8 @@
     "done": "Selesai",
     "stop": "Hentikan",
     "send": "Kirim",
-    "search": "Cari"
+    "search": "Cari",
+    "more": "Lainnya"
   },
   "states": {
     "loading": "Memuat",
@@ -142,7 +143,9 @@
     "synced": "Tersinkron",
     "syncing": "Menyinkronkan",
     "needsAttention": "Perlu diperiksa",
-    "notBuiltYet": "Belum dibuat. Layar ini nanti berisi {{what}}."
+    "notBuiltYet": "Belum dibuat. Layar ini nanti berisi {{what}}.",
+    "crashReason": "Halaman ini mengalami masalah. Muat ulang untuk coba lagi.",
+    "reload": "Muat ulang"
   },
   "honesty": {
     "composerHint": "AI bisa salah. Periksa kutipannya.",
@@ -151,7 +154,8 @@
     "basedOnSources_other": "Berdasarkan {{count}} sumber",
     "notInSources": "Ini tidak ada di sumber yang kamu pilih.",
     "suggested": "Saran {{what}}",
-    "nothingAddedYet": "Tidak ada yang ditambahkan sampai kamu konfirmasi."
+    "nothingAddedYet": "Tidak ada yang ditambahkan sampai kamu konfirmasi.",
+    "noSourcesCited": "Jawaban ini tidak mengutip sumber mana pun."
   },
   "lock": {
     "notOnPlan": "Tidak tersedia di paketmu",
@@ -165,13 +169,30 @@
     "skipToContent": "Lewati ke konten",
     "semester": "Semester ini",
     "railNote": "Semua kerjaanmu, di satu tempat. Satu langkah setiap kali.",
-    "settingsEyebrow": "Ruang kerjamu / Pengaturan"
+    "settingsEyebrow": "Ruang kerjamu / Pengaturan",
+    "collapseSidebar": "Ciutkan bilah sisi",
+    "expandSidebar": "Perluas bilah sisi"
   },
   "routes": {
     "notFound": {
       "title": "Tidak ditemukan",
       "what": "tidak ada: alamat ini tidak cocok dengan layar mana pun"
-    }
+    },
+    "today": "Hari ini — Stvdy",
+    "workspaces": "Ruang belajar — Stvdy",
+    "workspace": "{{name}} — Stvdy",
+    "study": "Belajar — Stvdy",
+    "studyDeck": "Ulangan — Stvdy",
+    "quiz": "Kuis — Stvdy",
+    "planner": "Jadwal — Stvdy",
+    "settings": "Pengaturan — Stvdy",
+    "billing": "Paket — Stvdy",
+    "devices": "Perangkat — Stvdy",
+    "admin": "Admin — Stvdy",
+    "dashboard": "Dasbor — Stvdy",
+    "signIn": "Masuk — Stvdy",
+    "signUp": "Daftar — Stvdy",
+    "verify": "Verifikasi — Stvdy"
   },
   "billing": {
     "planAndUsage": "Paket dan pemakaian",
@@ -573,6 +594,10 @@
       "streak": "{{count}} hari beruntun belajar",
       "loading": "Memeriksa aktivitas belajarmu"
     },
+    "failed": {
+      "title": "Tidak bisa memuat hari ini",
+      "reason": "Ada yang salah saat mengambil data belajarmu. Periksa koneksimu lalu muat ulang."
+    },
     "capture": {
       "title": "Catatan cepat",
       "label": "Apa yang harus kamu kerjakan?",
@@ -595,7 +620,12 @@
       "afternoon": "Selamat siang, {{name}}. Ini yang menantimu hari ini.",
       "evening": "Selamat malam, {{name}}. Ini yang menantimu hari ini."
     },
-    "openDay": "Buka kalender untuk {{date}}",
+    "datePicker": {
+      "label": "Pemilih tanggal",
+      "openLabel": "Buka pemilih tanggal",
+      "prevMonth": "Bulan sebelumnya",
+      "nextMonth": "Bulan berikutnya"
+    },
     "due": {
       "eyebrow": "Jatuh tempo sekarang",
       "count_other": "{{count}} kartu perlu diulang"
@@ -604,7 +634,6 @@
       "encouragement": "Belajar sedikit-sedikit juga tidak apa-apa.",
       "emptyTitle": "Belum ada hari belajar",
       "emptyReason": "Satu hari dihitung kalau kamu mengulang kartu, mengerjakan kuis, atau mencatat sesi. Sekali sesi hari ini sudah cukup untuk mulai.",
-      "emptyAction": "Buka Belajar",
       "dayActive": "Hari kamu belajar",
       "dayIdle": "Hari tanpa belajar"
     },
@@ -644,7 +673,19 @@
     "sources": {
       "loading": "Memuat sumber ruang belajar ini",
       "emptyTitle": "Belum ada sumber",
-      "emptyReason": "Tambahkan PDF atau tempel teks di atas. Semuanya dipecah dan diindeks, jadi pertanyaan bisa dijawab dari sumber mana pun dan menyebut halaman asalnya."
+      "emptyReason": "Tambahkan PDF atau tempel teks di atas. Semuanya dipecah dan diindeks, jadi pertanyaan bisa dijawab dari sumber mana pun dan menyebut halaman asalnya.",
+      "showAll": "Tampilkan semua {{count}} sumber",
+      "showLess": "Tampilkan lebih sedikit",
+      "dropHint": "PDF, PPTX atau tautan web",
+      "dropSize": "Letakkan file di sini · maks 50 MB",
+      "readyHint": "Siap = sudah diindeks untuk chat. Baca-saja = akses dikelola kursus."
+    },
+    "reference": {
+      "tabs": "Panel referensi",
+      "pdfViewer": "Penampil PDF",
+      "pageOf": "{{current}} / {{total}}",
+      "openedFrom": "Halaman {{page}} dibuka dari kutipan [{{index}}]",
+      "viewerEmpty": "Buka sumber atau klik kutipan untuk melihat dokumen di sini."
     },
     "source": {
       "untitled": "Sumber tanpa judul",
@@ -666,7 +707,9 @@
       "removeIt": "Buang",
       "noun": "sumber",
       "kindOther": "Sumber",
-      "open": "Buka sumber"
+      "open": "Buka sumber",
+      "errorScanned": "PDF ini sepertinya hasil pindai. Pengenalan teks belum tersedia.",
+      "errorNoText": "Tidak ada teks yang bisa diambil dari dokumen ini."
     },
     "upload": {
       "legend": "Tambah materi",
@@ -733,13 +776,12 @@
   },
   "chat": {
     "composer": {
-      "label": "Tanya tentang ruang belajar ini",
-      "hint": "Enter mengirim. Shift dan Enter memulai baris baru.",
-      "ask": "Tanya"
+      "label": "Tanya sumbermu",
+      "ask": "Kirim ↑",
+      "attach": "Lampirkan"
     },
     "webToggle": {
-      "label": "Cari di web juga",
-      "hint": "Juga mencari di luar ruang belajar ini dan menyebut hasilnya, lengkap dengan tautan. Jawaban tetap berpijak pada sumbermu, dan pencarian yang tidak menemukan apa pun tetap dijawab dari sumber itu."
+      "label": "Cari di web"
     },
     "empty": {
       "title": "Belum ada pertanyaan",
@@ -755,7 +797,24 @@
     },
     "retry": "Tanya lagi",
     "turn": {
-      "you": "Kamu"
+      "you": "Kamu",
+      "streaming": "Menulis…"
+    },
+    "answer": {
+      "disclaimer": "Penjelasan buatan AI. Periksa halaman yang dikutip sebelum digunakan dalam tugas yang dinilai.",
+      "viewCited": "Lihat halaman yang dikutip →",
+      "copy": "Salin",
+      "saveToStudio": "Simpan ke Studio",
+      "makeFlashcards": "Buat {{count}} Flashcard - {{credits}} kredit"
+    },
+    "thinking": {
+      "show": "Tampilkan pemikiran",
+      "hide": "Sembunyikan pemikiran"
+    },
+    "followUp": {
+      "heading": "Lanjutkan topik",
+      "workedExample": "Tunjukkan contoh penyelesaian",
+      "flashcards": "Buat flashcard dari ini"
     }
   },
   "error": {
@@ -1173,6 +1232,13 @@
       "inputHint": "Beri nama yang jelas dan spesifik untuk sesimu.",
       "inputError": "Isi nama sesi dulu untuk lanjut.",
       "inputManaged": "Nama ini diatur oleh matakuliahmu.",
+      "selectTitle": "Input pilihan",
+      "selectMeta": "Chevron kustom / token field yang sama",
+      "selectLabel": "Tingkat kesulitan",
+      "selectHint": "Pilih tingkat kesulitan pertanyaan.",
+      "selectOption1": "Mudah",
+      "selectOption2": "Sedang",
+      "selectOption3": "Sulit",
       "targets": "Ukuran target",
       "targetsMeta": "32 / 44 px",
       "targetsDescription": "44px adalah default bersama dan minimum di ponsel; 32px dengan jarak 8px adalah batas di desktop. Kolom isian juga 44px karena alasan yang sama: di ponsel, kontrol yang sulit disentuh adalah kontrol yang terlewat.",
@@ -1221,7 +1287,7 @@
     },
     "radius": {
       "title": "Sudut",
-      "meta": "8 / 12 / 16 / 999 px",
+      "meta": "12 / 20 / 24 / 999 px",
       "description": "Sudut mengikuti fungsi. Garis tepi satu piksel, dan bayangan hanya untuk lapisan yang benar-benar mengambang di atas halaman.",
       "controls": "Kontrol",
       "cards": "Kartu",
@@ -1822,6 +1888,17 @@
       "data": "Data"
     },
     "sections": "Bagian pengaturan",
+    "back": "Kembali ke Pengaturan",
+    "saving": "Menyimpan…",
+    "saved": "Tersimpan",
+    "readFailed": "Pengaturanmu tidak dapat dimuat. Coba lagi untuk memuatnya.",
+    "description": {
+      "account": "Email, paket, kemajuan dan datamu",
+      "study": "Jam belajar, pengingat dan bahasa",
+      "calendar": "Umpan kalender dan akun terhubung",
+      "devices": "Perangkat yang masuk dan kontrol sinkronisasi lokal",
+      "appearance": "Ikuti perangkat, atau pilih terang atau gelap"
+    },
     "account": {
       "email": "Alamat email",
       "plan": "Paket",
@@ -1846,7 +1923,7 @@
       "title": "Notifikasi",
       "channels": "Cara Stvdy menghubungimu",
       "locked": "Tersedia di {{plan}}",
-      "notYet": "Belum tersedia",
+      "notYet": "Tidak tersedia pada penerapan ini",
       "quiet": "Jam tenang",
       "quietHint": "Tidak ada notifikasi di dalam rentang ini.",
       "quietFrom": "Dari",
@@ -1943,7 +2020,8 @@
       "editHint": "Field yang diterima tindakan ini, dalam JSON. Konfirmasi tanpa mengubahnya untuk menambahkan persis seperti yang disarankan.",
       "editInvalidJson": "Itu bukan JSON yang valid. Perbaiki, atau batalkan perubahan untuk mengonfirmasi yang disarankan.",
       "editNotObject": "Field tindakan ini harus berupa objek JSON.",
-      "noun": "tindakan"
+      "noun": "tindakan",
+      "awaiting": "Menunggu konfirmasi"
     },
     "tool": {
       "create_task": "Tambah tugas",

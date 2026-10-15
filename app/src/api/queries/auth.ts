@@ -165,9 +165,12 @@ export function useResendVerification() {
  * Ends this session.
  *
  * `POST /auth/logout` revokes the refresh token server-side, so the sign-out is not merely
- * local: a copy of the token that leaked from this device stops working. The body carries the
- * refresh token because that is the credential being revoked — the route is unauthenticated
- * for that reason, which is also why this works for an account that cannot reach anything else.
+ * local: a copy of the token that leaked from this device stops working.
+ *
+ * Native clients send the refresh token in the body (the credential being revoked).
+ * Web clients send no body — the server reads the refresh token from the HttpOnly cookie
+ * and clears it with `Max-Age=0`. The call is always made on web even when the local
+ * store is empty, because the cookie is the credential and the store is a no-op there.
  *
  * The store is cleared even when the request fails. A sign-out that left a working refresh
  * token on the device because the network was down would be a lie about the one action whose
@@ -180,7 +183,11 @@ export function useSignOut() {
     mutationFn: async () => {
       const refreshToken = await readRefreshToken()
       if (refreshToken !== null) {
+        // Native path: send the token in the body.
         await api.post<void>('/auth/logout', { refresh_token: refreshToken }, { auth: false })
+      } else if (platform.runtime() === 'web') {
+        // Web path: the cookie carries the credential; server clears it.
+        await api.post<void>('/auth/logout', {}, { auth: false })
       }
     },
     onSettled: async () => {

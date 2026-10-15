@@ -73,10 +73,10 @@ export interface RecentDay {
 }
 
 /**
- * How many days the streak strip draws. Five, which is the design's strip and
- * enough to read a streak without turning the card into a calendar.
+ * How many days the streak strip draws. Seven — a full week, so the student
+ * sees every day at a glance.
  */
-export const RECENT_DAY_COUNT = 5
+export const RECENT_DAY_COUNT = 7
 
 export interface TodayBuckets {
   /** Today's timeline: tasks due today and the events overlapping today, earliest first. */

@@ -1,9 +1,9 @@
 /**
  * The design tokens, as data.
  *
- * `styles.css` is where the values actually live (as CSS variables, so a theme
- * switch costs nothing at runtime). This module exists for the two things CSS
- * cannot do for itself:
+ * `styles.css` supplies the system palette; explicit appearance preferences
+ * apply these same values as root overrides. This module also describes the
+ * colour pairs and names used by components:
  *
  *   1. **Prove the contrast.** `contrast.test.ts` computes every documented
  *      text/background pair in both themes and fails the build on a miss. The
@@ -39,14 +39,14 @@ export type Theme = 'light' | 'dark'
  */
 export const COLORS: Record<Theme, Record<string, string>> = {
   light: {
-    bg: '#faf8ff',
+    bg: '#f5f5f7',
     surface: '#ffffff',
-    'surface-raised': '#f2f3ff',
-    border: '#dde0f0',
-    'border-strong': '#7e85a6',
-    text: '#131b2e',
-    'text-muted': '#464555',
-    'text-subtle': '#6b6a7c',
+    'surface-raised': '#ebebef',
+    border: '#dcdce3',
+    'border-strong': '#7e7e8e',
+    text: '#151518',
+    'text-muted': '#4f4f5b',
+    'text-subtle': '#686874',
     primary: '#4f46e5',
     'primary-hover': '#3525cd',
     'on-primary': '#ffffff',
@@ -63,14 +63,14 @@ export const COLORS: Record<Theme, Record<string, string>> = {
     ring: '#4f46e5',
   },
   dark: {
-    bg: '#0b0f19',
-    surface: '#111827',
-    'surface-raised': '#1b2435',
-    border: '#263246',
-    'border-strong': '#6a789d',
-    text: '#f1f5f9',
-    'text-muted': '#b4bdcf',
-    'text-subtle': '#8493aa',
+    bg: '#080809',
+    surface: '#161618',
+    'surface-raised': '#232326',
+    border: '#323237',
+    'border-strong': '#838390',
+    text: '#f7f7fa',
+    'text-muted': '#c2c2cc',
+    'text-subtle': '#a0a0ad',
     primary: '#4f46e5',
     'primary-hover': '#3f37c9',
     'on-primary': '#ffffff',
@@ -131,6 +131,7 @@ export const PAIRS: Pair[] = [
   },
   { fg: 'primary-text', bg: 'bg', min: MIN.text, where: 'a link in body copy' },
   { fg: 'primary-text', bg: 'surface', min: MIN.text, where: 'a link on a card' },
+  { fg: 'primary-text', bg: 'surface-raised', min: MIN.text, where: 'secondary actions and Settings icon tiles' },
   { fg: 'primary-text', bg: 'primary-tint', min: MIN.text, where: 'the active nav item' },
 
   // Sources and citations: the pair that must mean "this came from your material".
@@ -180,7 +181,7 @@ export const COURSES: Record<Theme, Record<string, { marker: string; tint: strin
     indigo: { marker: '#4f46e5', tint: '#e2dfff' },
     sky: { marker: '#0369a1', tint: '#c9e6ff' },
     emerald: { marker: '#047857', tint: '#d5f5e8' },
-    amber: { marker: '#b45309', tint: '#fef3c7' },
+    amber: { marker: '#92400e', tint: '#fbeab5' },
     rose: { marker: '#be123c', tint: '#ffdad6' },
     violet: { marker: '#6d28d9', tint: '#ede4ff' },
   },
@@ -199,7 +200,7 @@ export const COURSE_NAMES = ['indigo', 'sky', 'emerald', 'amber', 'rose', 'viole
 export type CourseName = (typeof COURSE_NAMES)[number]
 
 /** True when `value` is one of the six course hues. */
-export function isCourseName(value: string): value is CourseName {
+function isCourseName(value: string): value is CourseName {
   return (COURSE_NAMES as readonly string[]).includes(value)
 }
 

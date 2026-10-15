@@ -18,11 +18,11 @@ use stvdy_core::agent::tools::{
 use stvdy_core::tasks::TaskStatus;
 use uuid::Uuid;
 
-/// `prompts/base.v2.md`, compiled in: the prompt and the registry are one contract, and
+/// `prompts/base.v3.md`, compiled in: the prompt and the registry are one contract, and
 /// this is the test that fails when they drift.
-const PROMPT: &str = include_str!("../../../prompts/base.v2.md");
+const PROMPT: &str = include_str!("../../../prompts/base.v3.md");
 
-/// The tool names as `prompts/base.v2.md`'s `<tools_and_actions>` section writes them.
+/// The tool names as `prompts/base.v3.md`'s `<tools_and_actions>` section writes them.
 ///
 /// The section names them in one sentence, and that sentence is the list; the rest of the
 /// block is prose about READ and WRITE, which is why this reads the sentence rather than
@@ -32,7 +32,7 @@ fn prompt_tool_names() -> Vec<String> {
     let sentence = PROMPT
         .lines()
         .find(|line| line.starts_with("You may have tools to manage"))
-        .expect("base.v2.md names the tools in its <tools_and_actions> section");
+        .expect("base.v3.md names the tools in its <tools_and_actions> section");
     let list = sentence
         .split_once(':')
         .expect("the sentence names the tools after a colon")

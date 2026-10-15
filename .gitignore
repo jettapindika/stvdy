@@ -60,6 +60,10 @@
 # `tauri-api/.gitignore` excludes only its `build/`, which is why this rule has to exist at
 # the repository level.
 /src-tauri/plugins/mobile/android/.tauri/
+# Same as the Android rule above, but for the iOS SwiftPM copy. The Tauri plugin
+# builder copies its iOS API into `mobile/.tauri/tauri-api/` before SwiftPM resolves
+# the local Package.swift dependency. Regenerated from the pinned crate version.
+/src-tauri/plugins/mobile/.tauri/
 
 # Mobile signing and service credentials (A328). `google-services.json` is the
 # Android Google Services plugin's project credential; a committed one is a leaked
@@ -95,3 +99,10 @@ supabase/.temp/
 # than run. It is machine-local and never shipped.
 __pycache__/
 *.pyc
+
+# Figma MCP asset downloads land at CWD (the repo root) with hash filenames.
+# Guard against accidental commits of future exports.
+/*.svg
+
+# Superpowers session state — machine-local plan-execution scratch.
+.superpowers/

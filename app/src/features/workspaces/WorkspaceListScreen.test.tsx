@@ -246,6 +246,7 @@ describe('the workspace list', () => {
     renderWithProviders(<WorkspaceListScreen />)
 
     const card = (await screen.findByRole('link', { name: 'Cell biology' })).closest('li')
+    await user.click(within(card as HTMLElement).getByRole('button', { name: 'More' }))
     await user.click(within(card as HTMLElement).getByRole('button', { name: 'Rename' }))
     await user.clear(screen.getByLabelText('Course code'))
     await user.clear(screen.getByLabelText('Next exam'))
@@ -293,6 +294,7 @@ describe('the workspace list', () => {
 
     const row = (await screen.findByRole('link', { name: 'Data Structures' })).closest('li')
     expect(row).not.toBeNull()
+    await user.click(within(row as HTMLElement).getByRole('button', { name: 'More' }))
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'Rename' }))
 
     const field = screen.getByLabelText('Workspace name')
@@ -369,6 +371,7 @@ describe('the workspace list', () => {
     renderWithProviders(<WorkspaceListScreen />)
 
     const row = (await screen.findByRole('link', { name: 'Data Structures' })).closest('li')
+    await user.click(within(row as HTMLElement).getByRole('button', { name: 'More' }))
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'Delete' }))
 
     expect(screen.getByText('Delete Data Structures?')).toBeInTheDocument()
@@ -387,6 +390,7 @@ describe('the workspace list', () => {
     renderWithProviders(<WorkspaceListScreen />)
 
     const row = (await screen.findByRole('link', { name: 'Data Structures' })).closest('li')
+    await user.click(within(row as HTMLElement).getByRole('button', { name: 'More' }))
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'Delete' }))
     await user.click(screen.getByRole('button', { name: 'Keep it' }))
 

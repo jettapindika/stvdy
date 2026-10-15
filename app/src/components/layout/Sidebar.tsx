@@ -1,5 +1,8 @@
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
+import { LayoutGroup, motion, useMotionValue, useReducedMotion } from 'motion/react'
+import type { MotionValue } from 'motion/react'
 
 import { Wordmark } from '@/components/ui/BrandIllustration'
 import { Icon, type IconName } from '@/components/ui/Icon'
@@ -7,41 +10,44 @@ import { useWorkspaces } from '@/api/queries/workspaces'
 import { useSession } from '@/features/auth/useSession'
 import { DEFAULT_TIMEZONE } from '@/lib/time'
 import { useFormFactor } from '@/lib/useFormFactor'
+import { useDockMagnification } from './TabBar'
+
+const STORAGE_KEY = 'stvdy.sidebar'
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === 'collapsed'
+  } catch {
+    return false
+  }
+}
+
+function persistCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, collapsed ? 'collapsed' : 'expanded')
+  } catch {
+    // Best-effort preference.
+  }
+}
 
 /**
- * Primary navigation, shared by the sidebar and the phone tab bar.
+ * The desktop sidebar.
  *
- * **The items carry icons as of the redesign.** The earlier revision had none,
- * deliberately — five short labels were judged unambiguous and a thin-stroke icon
- * set was judged to be the tell of a generated interface. The design's navigation
- * item is an icon plus a label, and the design is the requirement, so the glyphs
- * are back. The `Icon` set is bundled and drawn for this product rather than
- * imported.
+ * Two modes: **expanded** (216px, icon + label, courses, footer) and **collapsed**
+ * (64px, icon-only with dock magnification on hover). The collapsed state is
+ * persisted in localStorage so it survives a reload.
  *
- * The five destinations are the spec's (`SPEC.md:664-665`): Today, Workspaces,
- * Study, Planner, Settings — with Tasks and Calendar living *inside* Planner as
- * views rather than as items of their own. That is also why this rail no longer
- * lists Calendar and Tasks: they are `/planner?view=…`, and `/calendar` and
- * `/tasks` redirect there so an old link or a notification tap still lands.
- *
- * The two navs share `.nav-item` in styles.css (the tab bar extends it via
- * `.nav-item-tab`), so a change to the base treatment reaches both. That is what
- * keeps them from drifting apart.
- *
- * **This semester** is the course list under the rail's divider. It is built from
- * the real workspaces, and it renders nothing at all when there are none — the
- * alternative is a heading over an empty list, which reads as a loading failure.
- * A workspace's course code is shown only when it has one, because the field is
- * optional and inventing a code is the one thing this app may not do with data.
- *
- * The credit meter sits at the foot of the rail beside the sync control: it is the
- * one number on this rail, and the bottom is where a balance is looked for. Both
- * are links, so the number and the explanation of it are one `Tab` apart (R-32).
+ * When collapsed, moving the pointer along the rail magnifies each icon with the
+ * same spring physics the mobile dock uses — the `useDockMagnification` hook
+ * drives a CSS `scale` transform on the Y axis. The effect is the macOS dock
+ * behaviour turned vertical.
  */
 export function Sidebar() {
   const { t } = useTranslation()
-  // Resolved here rather than at module scope: a constant holding copy is
-  // evaluated before there is a language, so it could only ever ship one of them.
+  const reducedMotion = useReducedMotion()
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const pointerY = useMotionValue(Infinity)
+
   const items: { to: string; label: string; icon: IconName }[] = [
     { to: '/', label: t('nav.today'), icon: 'today' },
     { to: '/workspaces', label: t('nav.workspaces'), icon: 'workspaces' },
@@ -50,48 +56,157 @@ export function Sidebar() {
     { to: '/settings', label: t('nav.settings'), icon: 'settings' },
   ]
 
-  return (
-    // The top padding is `28px + the safe-area inset`, not `pt-7` plus `pt-safe-top`.
-    // Two padding-top utilities do not add — the later one in the stylesheet wins, and
-    // `pt-safe-top` resolves to 0 off a notched device, so the rail sat flush at the
-    // window's top edge instead of 28px below it. The inset is added rather than
-    // substituted so the design's 28px survives on a device that has one.
-    <nav
-      aria-label={t('shell.nav.main')}
-      className="hidden w-54 shrink-0 flex-col gap-8 bg-surface px-5 pb-6 shadow-[inset_-1px_0_0_0_var(--border)] pt-[calc(1.75rem+env(safe-area-inset-top,0px))] md:flex"
-    >
-      <Wordmark />
+  const disableMagnification = !collapsed || !!reducedMotion
 
-      {/* The nav items are their own 4px group: the rail's own gap is 32px, which is
-          the design's spacing *between* the rail's blocks, not between its items. */}
-      <div className="flex w-full flex-col gap-1">
-        {items.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-item">
-            <Icon name={item.icon} className="nav-icon" />
-            {item.label}
-          </NavLink>
-        ))}
+  function toggle() {
+    setCollapsed((prev) => {
+      const next = !prev
+      persistCollapsed(next)
+      // Reset magnification when expanding so springs settle.
+      if (!next) pointerY.set(Infinity)
+      return next
+    })
+  }
+
+  return (
+    <motion.nav
+      aria-label={t('shell.nav.main')}
+      className={
+        'sidebar hidden shrink-0 flex-col gap-8 pb-6 md:flex'
+        + (collapsed
+          ? ' sidebar-collapsed w-16 items-center px-2 pt-[calc(1.75rem+env(safe-area-inset-top,0px))]'
+          : ' w-54 px-5 pt-[calc(1.75rem+env(safe-area-inset-top,0px))]')
+      }
+      onPointerMove={collapsed ? (e) => pointerY.set(e.clientY) : undefined}
+      onPointerLeave={collapsed ? () => pointerY.set(Infinity) : undefined}
+      animate={{ width: collapsed ? 64 : 216 }}
+      transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 30 }}
+    >
+      {/* Logo row: wordmark (expanded) or expand button (collapsed), with toggle. */}
+      <div className={'flex w-full items-center' + (collapsed ? ' justify-center' : ' justify-between')}>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={t('shell.expandSidebar')}
+            className="sidebar-toggle"
+          >
+            <Icon name="chevron-right" size={20} />
+          </button>
+        ) : (
+          <>
+            <Wordmark />
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={t('shell.collapseSidebar')}
+              className="sidebar-toggle"
+            >
+              <Icon name="chevron-left" size={16} />
+            </button>
+          </>
+        )}
       </div>
 
-      <SemesterCourses />
+      <LayoutGroup id="desktop-navigation">
+        <div className={'flex w-full flex-col' + (collapsed ? ' items-center gap-1' : ' gap-2')}>
+          {items.map((item) => (
+            <SidebarItem
+              key={item.to}
+              to={item.to}
+              label={item.label}
+              icon={item.icon}
+              end={item.to === '/'}
+              collapsed={collapsed}
+              pointerY={pointerY}
+              disableMagnification={disableMagnification}
+              reducedMotion={reducedMotion}
+            />
+          ))}
+        </div>
+      </LayoutGroup>
 
-      <SidebarFooter />
-    </nav>
+      {!collapsed && <SemesterCourses />}
+      {!collapsed && <SidebarFooter />}
+    </motion.nav>
+  )
+}
+
+function SidebarItem({
+  to,
+  label,
+  icon,
+  end,
+  collapsed,
+  pointerY,
+  disableMagnification,
+  reducedMotion,
+}: {
+  to: string
+  label: string
+  icon: IconName
+  end: boolean
+  collapsed: boolean
+  pointerY: MotionValue<number>
+  disableMagnification: boolean
+  reducedMotion: boolean | null
+}) {
+  const ref = useRef<HTMLAnchorElement>(null)
+  const scale = useDockMagnification(pointerY, ref, disableMagnification, 'y')
+
+  if (collapsed) {
+    return (
+      <NavLink
+        ref={ref}
+        to={to}
+        end={end}
+        className="nav-item sidebar-item-collapsed"
+        aria-label={label}
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && (
+              <motion.span
+                aria-hidden="true"
+                className="nav-selection"
+                layoutId="selected-page"
+                transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 34 }}
+              />
+            )}
+            <motion.span
+              className="dock-icon-sizer"
+              style={disableMagnification ? undefined : { scale }}
+            >
+              <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
+            </motion.span>
+          </>
+        )}
+      </NavLink>
+    )
+  }
+
+  return (
+    <NavLink ref={ref} to={to} end={end} className="nav-item">
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <motion.span
+              aria-hidden="true"
+              className="nav-selection"
+              layoutId="selected-page"
+              transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 34 }}
+            />
+          )}
+          <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
+          <span className="relative z-10">{label}</span>
+        </>
+      )}
+    </NavLink>
   )
 }
 
 /**
  * The course list under the rail's divider.
- *
- * The design draws "THIS SEMESTER" over three course links, each a code in mono
- * and a name in the UI face. Both come from the workspace row; the code is
- * optional (`workspaces.course_code` is nullable) and is omitted rather than
- * filled in when absent.
- *
- * **Nothing renders while the list is empty or still loading.** A heading over an
- * empty list is a promise the rail cannot keep, and the empty state for "no
- * workspaces yet" belongs on the Workspaces screen where the student can act on
- * it, not on a rail with no room to explain.
  */
 function SemesterCourses() {
   const { t } = useTranslation()
@@ -115,10 +230,6 @@ function SemesterCourses() {
             {workspace.course_code && (
               <span className="meta text-primary-text">{workspace.course_code}</span>
             )}
-            {/* `title` is not decoration: the rail is 216px and a course name is longer
-                than that, so the name truncates — and the harness exempts a `truncate`
-                only when the full text is reachable another way. Without it the reader
-                has no way to see which course they are looking at. */}
             <span className="truncate text-label font-medium text-text" title={workspace.name}>
               {workspace.name}
             </span>
@@ -131,13 +242,6 @@ function SemesterCourses() {
 
 /**
  * The rail's closing note.
- *
- * The design puts a help line and a term label here. The term label ("AUTUMN
- * 2026") has no data source — no migration carries a semester or term, and the
- * product has no academic-calendar concept — so it is not invented. The line
- * shows the account's real timezone instead, which the app does have and which is
- * the more useful fact to have permanently on screen in a product whose whole
- * planner is timezone-sensitive.
  */
 function SidebarFooter() {
   const { t } = useTranslation()

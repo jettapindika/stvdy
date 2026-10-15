@@ -7,6 +7,7 @@ import {
   saveSession,
   setAccessToken,
 } from '../lib/tokens'
+import { platform } from '../platform'
 
 /**
  * The HTTP layer for the Phase 1 API.
@@ -104,6 +105,7 @@ function buildRequest(options: RequestOptions, token: string | null): RequestIni
   const init: RequestInit = {
     method: options.method ?? 'GET',
     headers,
+    credentials: 'include',
   }
   if (options.signal) init.signal = options.signal
 
@@ -136,7 +138,14 @@ function buildRequest(options: RequestOptions, token: string | null): RequestIni
 async function performRefresh(): Promise<boolean> {
   const refreshToken = await readRefreshToken()
   const deviceId = await readDeviceId()
-  if (refreshToken === null || deviceId === null) {
+  const hasStoredTokens = refreshToken !== null && deviceId !== null
+
+  // Native builds store the refresh token in the OS keychain. If nothing is
+  // stored, there is no session to restore — and firing a POST at the auth
+  // limiter on every cold start would burn the rate budget for nothing.
+  // Web builds have no keychain, but the browser may hold an HttpOnly cookie
+  // from a prior login, so the refresh is attempted with an empty body.
+  if (!hasStoredTokens && platform.runtime() !== 'web') {
     await clearSession()
     return false
   }
@@ -146,7 +155,10 @@ async function performRefresh(): Promise<boolean> {
     response = await fetch(`${API_BASE_URL}/auth/refresh`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken, device_id: deviceId }),
+      credentials: 'include',
+      body: hasStoredTokens
+        ? JSON.stringify({ refresh_token: refreshToken, device_id: deviceId })
+        : '{}',
     })
   } catch {
     return false
@@ -164,9 +176,7 @@ async function performRefresh(): Promise<boolean> {
   }
 
   setAccessToken(body.access_token)
-  // The server rotates the refresh token on every use, so the stored one is
-  // already stale and must be replaced before anything else runs.
-  await saveSession({ refreshToken: body.refresh_token, deviceId })
+  await saveSession({ refreshToken: body.refresh_token, deviceId: deviceId ?? '' })
   return true
 }
 

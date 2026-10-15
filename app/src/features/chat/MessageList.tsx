@@ -1,10 +1,12 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { Message } from '@/api/queries/chat'
 import type { ChatCitation, ChunkCitation } from '@/api/sse'
 import { ApiErrorNotice } from '@/components/ui/States'
 import { WebCitationMark } from '@/components/ui/Citation'
+import { Icon } from '@/components/ui/Icon'
+import { AGENT_CREDITS } from '@/features/billing/plans'
 import { CitationChip } from './CitationChip'
 import type { ChatTurn } from './useChatStream'
 
@@ -43,22 +45,18 @@ const MARKER = /^\[(?:[1-9]\d{0,2}|[wW][1-9]\d?)\]$/
 /**
  * The citation behind each marker in an answer, by first appearance.
  *
- * The wire contract never sends a label: the server resolves `[1]` to a chunk,
- * drops the label, and stores only the resolved citation. But `resolve` returns
- * the citations in the order the labels first appear in the text, so the k-th
- * distinct marker in the answer is the k-th citation. That is the mapping used
- * here, and it is the reason a claim can be pointed at individually instead of
- * only cited at the end of the paragraph.
+ * The server resolves markers before this runs, so the citations array is
+ * ordered by first occurrence in the text, which is the same order a student
+ * reads them in. Markers are case-insensitive (`[W1]` and `[w1]` are the same
+ * citation) and only the first occurrence is counted.
  *
- * Chunk and web labels are scanned in one pass, because the server resolves them
- * in one pass: an answer that cites a web result before a page sends the web
- * citation first, and a client that scanned only `[n]` would hand that web
- * citation to the page's marker. Case is folded to the server's own reading, so
- * `[w1]` and `[W1]` are one label rather than two.
- *
- * A marker with no citation left for it is left as text rather than guessed at:
- * the server strips unknown labels, so this only happens if it failed to, and a
- * chip on the wrong chunk is a false claim about the student's own material.
+ * Two kinds share the list. A chunk citation names a passage in the student's
+ * own material (`[1]`..`[999]`); a web citation names a page outside it
+ * (`[W1]`..`[W99]`). They map to different controls on screen, so both the
+ * regex above and this scan must agree on which kind of marker they see. The
+ * convention is `[N]` = chunk, `[WN]` = web, and the sets are disjoint on
+ * purpose: renaming either would merge them and misattribute every citation
+ * after the first.
  */
 export function markersFor(text: string, citations: ChatCitation[]): Map<string, ChatCitation> {
   const found = new Map<string, ChatCitation>()
@@ -96,10 +94,7 @@ function inlineNodes(
     }
     if (MARKER.test(part)) {
       const citation = markers.get(part.toUpperCase())
-      // A marker whose citation is the other kind is left as text. The server
-      // resolves each label against its own family, so this only happens when the
-      // two scans disagree, and a web citation rendered as a page (or the
-      // reverse) would misattribute the claim rather than merely look wrong.
+      // A marker whose citation is the other kind is left as text.
       if (citation === undefined) return <Fragment key={key}>{part}</Fragment>
       if (citation.type === 'web') return <WebCitationMark key={key} citation={citation} />
       if (part.toUpperCase().startsWith('[W')) return <Fragment key={key}>{part}</Fragment>
@@ -121,8 +116,7 @@ function inlineNodes(
  *
  * Paragraphs, bullet lists, bold, italic and inline code, and nothing else. A
  * full Markdown renderer would accept raw HTML and links the model invented,
- * which in an answer whose whole point is that it is grounded in the student's
- * own material is the wrong trade.
+ * both of which are risks this renderer does not take.
  */
 function AnswerText({
   text,
@@ -183,25 +177,16 @@ function AnswerText({
   )
 }
 
-function Turn({
-  role,
-  children,
-}: {
-  role: 'user' | 'assistant'
-  children: ReactNode
-}) {
+// ---------------------------------------------------------------------------
+// Turn containers
+// ---------------------------------------------------------------------------
+
+function UserTurn({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
-  const isUser = role === 'user'
   return (
     <article className="flex flex-col gap-1">
-      <span className="label">{isUser ? t('chat.turn.you') : t('app.name')}</span>
-      <div
-        className={
-          isUser
-            ? 'max-w-prose rounded-card bg-surface-raised px-3 py-2 text-sm'
-            : 'max-w-prose text-sm leading-relaxed'
-        }
-      >
+      <span className="eyebrow-primary">{t('chat.turn.you')}</span>
+      <div className="max-w-prose rounded-card bg-surface-raised px-4 py-3 text-body">
         {children}
       </div>
     </article>
@@ -209,25 +194,315 @@ function Turn({
 }
 
 /**
- * How many distinct sources the answer drew on.
+ * The source-grounded answer card: a bordered card carrying the grounded
+ * eyebrow, the answer body, citation chips, a divider, and the AI disclaimer.
  *
- * Distinct sources, not citations: an answer that cites three pages of one
- * textbook is "based on 1 source", which is the fact a student can act on. The
- * number is counted from the citations the server resolved, so it cannot claim
- * more grounding than the answer actually has, and it is hidden entirely when
- * there are none — an answer from general knowledge or from web results alone
- * must not be dressed up with a source count of zero.
+ * This is the Figma design 411:44258's `Source-grounded answer` specimen.
  */
-function SourceCount({ citations }: { citations: ChatCitation[] }) {
+function AssistantAnswer({
+  text,
+  citations,
+  sourceTitle,
+  onOpenCitation,
+  children,
+}: {
+  text: string
+  citations: ChatCitation[]
+  sourceTitle: (sourceId: string) => string
+  onOpenCitation: (citation: ChunkCitation) => void
+  children?: ReactNode
+}) {
   const { t } = useTranslation()
   const sourceIds = new Set(
-    citations.flatMap((citation) =>
-      citation.type === 'chunk' && citation.source_id ? [citation.source_id] : [],
-    ),
+    citations.flatMap((c) => (c.type === 'chunk' && c.source_id ? [c.source_id] : [])),
   )
-  if (sourceIds.size === 0) return null
-  return <p className="meta mt-1">{t('honesty.basedOnSources', { count: sourceIds.size })}</p>
+  // The grounded eyebrow names the source when there is exactly one, which is
+  // the design's "GROUNDED IN LECTURE 03". When there are several or none, it
+  // falls back to the count (the existing `SourceCount` behaviour).
+  const groundedLabel =
+    sourceIds.size === 1
+      ? sourceTitle([...sourceIds][0] as string)
+      : sourceIds.size === 0
+        ? null
+        : null
+
+  // Citation chips: the distinct chunk citations
+  const chunkCitations = citations.filter(
+    (c): c is ChunkCitation => c.type === 'chunk',
+  )
+  // Build a label string for the citation chips row
+  const chipLabels = chunkCitations
+    .map((c) => {
+      const title = sourceTitle(c.source_id)
+      const page = c.page !== null ? `p. ${String(c.page)}` : title
+      return `[${page}]`
+    })
+    .join(' · ')
+
+  return (
+    <article className="answer-card">
+      {/* Grounded eyebrow */}
+      {groundedLabel !== null && (
+        <div className="flex items-center gap-2">
+          <Icon name="study" size={20} className="text-source" />
+          <span className="eyebrow-source">
+            {t('honesty.basedOnSources_one', { count: 1 }).toUpperCase().replace(/\d+/, '')}
+            {groundedLabel.toUpperCase()}
+          </span>
+        </div>
+      )}
+
+      {/* Answer body */}
+      <div className="max-w-prose text-label leading-relaxed">
+        <AnswerText
+          text={text}
+          citations={citations}
+          sourceTitle={sourceTitle}
+          onOpenCitation={onOpenCitation}
+        />
+      </div>
+
+      {/* Citation chips row */}
+      {chipLabels.length > 0 && (
+        <span className="chip chip-source">{chipLabels}</span>
+      )}
+
+      {/* Grounding footer: source count + flashcard/save/copy actions */}
+      <GroundingFooter citations={citations} answerText={text} />
+
+      {/* Divider + AI disclaimer */}
+      <hr className="border-border" />
+      <p className="text-caption text-muted">
+        {t('chat.answer.disclaimer')}
+      </p>
+
+      {children}
+    </article>
+  )
 }
+
+// ---------------------------------------------------------------------------
+// Streaming state
+// ---------------------------------------------------------------------------
+
+function StreamingIndicator({ text }: { text: string }) {
+  const { t } = useTranslation()
+  return (
+    <article className="flex flex-col gap-2 px-2">
+      <div className="flex items-center gap-2">
+        <span className="eyebrow-primary">{t('app.name')}</span>
+        <span className="text-label text-muted">{t('chat.turn.streaming')}</span>
+      </div>
+      {text.length > 0 && (
+        <div className="max-w-prose text-body leading-relaxed">
+          <p className="whitespace-pre-wrap">
+            {text}
+            <span className="streaming-cursor" aria-hidden="true" />
+          </p>
+        </div>
+      )}
+      {text.length === 0 && (
+        <p className="flex items-center gap-2 text-muted" role="status">
+          <span className="h-2 w-2 animate-working rounded-full bg-muted" aria-hidden="true" />
+          {t('chat.list.searching')}
+        </p>
+      )}
+    </article>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Thinking disclosure
+// ---------------------------------------------------------------------------
+
+function ThinkingDisclosure({ reasoning }: { reasoning: string }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  if (reasoning.length === 0) return null
+
+  // Show a truncated preview of the reasoning
+  const preview = reasoning.length > 80 ? `${reasoning.slice(0, 80)}…` : reasoning
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        className="thinking-toggle"
+        onClick={() => { setOpen(!open) }}
+        aria-expanded={open}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} />
+        <span>{open ? t('chat.thinking.hide') : t('chat.thinking.show')}</span>
+        {!open && (
+          <span className="text-small text-subtle truncate">{preview}</span>
+        )}
+      </button>
+      {open && (
+        <div className="thinking-content whitespace-pre-wrap">
+          {reasoning}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Evidence link
+// ---------------------------------------------------------------------------
+
+function EvidenceLink({
+  citations,
+  sourceTitle,
+  onOpenCitation,
+}: {
+  citations: ChunkCitation[]
+  sourceTitle: (sourceId: string) => string
+  onOpenCitation: (citation: ChunkCitation) => void
+}) {
+  const { t } = useTranslation()
+  if (citations.length === 0) return null
+
+  // Show the first chunk citation as the evidence link
+  const cite = citations[0] as ChunkCitation
+  const title = sourceTitle(cite.source_id)
+  const pages = citations
+    .filter((c) => c.page !== null)
+    .map((c) => String(c.page))
+
+  const pageRange = pages.length > 0 ? `pp. ${pages.join('–')}` : ''
+  const label = `[1] ${title}${pageRange.length > 0 ? ` · ${pageRange}` : ''}`
+
+  return (
+    <div className="evidence-link">
+      <div className="flex items-start gap-2">
+        <Icon name="file-text" size={20} className="shrink-0 text-source" />
+        <span className="text-label text-source flex-1">{label}</span>
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary w-full"
+        onClick={() => { onOpenCitation(cite) }}
+      >
+        {t('chat.answer.viewCited')}
+      </button>
+    </div>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
+// Grounding footer (411:49140)
+// ---------------------------------------------------------------------------
+
+/**
+ * The grounding footer: source count, flashcard action with real credit cost
+ * from `AGENT_CREDITS`, Save to Studio, and copy.
+ *
+ * `SourceCount` is subsumed here rather than duplicated. The source count line
+ * uses the existing `honesty.basedOnSources` key (plural-aware, counting
+ * distinct `source_id`s), and falls back to `honesty.noSourcesCited` when the
+ * answer cited nothing. The flashcard action reads `AGENT_CREDITS.flashcards`,
+ * which is parsed from `config/plans.toml` — the same file the server charges
+ * from, so the number cannot drift.
+ */
+function GroundingFooter({
+  citations,
+  answerText,
+}: {
+  citations: ChatCitation[]
+  answerText: string
+}) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  const sourceIds = new Set(
+    citations.flatMap((c) => (c.type === 'chunk' && c.source_id ? [c.source_id] : [])),
+  )
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Source count line */}
+      {sourceIds.size === 0 ? (
+        <p className="text-label text-muted">{t('honesty.noSourcesCited')}</p>
+      ) : (
+        <p className="text-label text-source">
+          {t('honesty.basedOnSources', { count: sourceIds.size })}
+        </p>
+      )}
+
+      {/* Action row: flashcard proposal, save to studio, copy */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn btn-secondary flex-1 min-w-0">
+          {t('chat.answer.makeFlashcards', { count: 10, credits: AGENT_CREDITS.flashcards })}
+        </button>
+        <button type="button" className="btn btn-secondary flex-1 min-w-0">
+          {t('chat.answer.saveToStudio')}
+        </button>
+        <button
+          type="button"
+          className="answer-action shrink-0"
+          aria-label={t('chat.answer.copy')}
+          onClick={() => {
+            void navigator.clipboard.writeText(answerText).then(() => {
+              setCopied(true)
+              setTimeout(() => { setCopied(false) }, 2000)
+            })
+          }}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={20} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Follow-up prompts (411:44295)
+// ---------------------------------------------------------------------------
+
+/**
+ * Two affordance prompts after the last completed answer: "Show a worked
+ * example" and "Make flashcards from this". These are copy, not fabricated
+ * data — they are the same kind of thing as the empty-state strings, and they
+ * are localized through `chat.followUp.workedExample` / `.flashcards`.
+ *
+ * The `onSelect` callback fills the composer's draft with the chosen prompt,
+ * so the student sees what will be sent and can edit it before sending.
+ */
+function FollowUpPrompts({
+  onSelect,
+  disabled,
+}: {
+  onSelect: (text: string) => void
+  disabled: boolean
+}) {
+  const { t } = useTranslation()
+  const prompts = [
+    t('chat.followUp.workedExample'),
+    t('chat.followUp.flashcards'),
+  ]
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="eyebrow">{t('chat.followUp.heading')}</span>
+      {prompts.map((text) => (
+        <button
+          key={text}
+          type="button"
+          className="btn btn-secondary w-full"
+          disabled={disabled}
+          onClick={() => { onSelect(text) }}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
 
 export function MessageList({
   messages,
@@ -236,6 +511,7 @@ export function MessageList({
   onOpenCitation,
   onRetry,
   emptyReason,
+  onFollowUp,
 }: {
   messages: Message[]
   /** The answer currently arriving, or the one that failed. */
@@ -245,6 +521,8 @@ export function MessageList({
   onRetry: () => void
   /** Why the thread is empty, when it is. */
   emptyReason: string
+  /** Called when a follow-up prompt is selected; fills the composer draft. */
+  onFollowUp?: (text: string) => void
 }) {
   const { t } = useTranslation()
   const streaming = turn?.streaming === true
@@ -266,55 +544,68 @@ export function MessageList({
       aria-label={t('chat.list.label')}
       className="flex flex-col gap-5 px-5 py-4 md:px-6"
     >
-      {messages.map((message) => (
-        <Turn key={message.id} role={message.role}>
-          {message.role === 'assistant' ? (
-            <>
-              <AnswerText
+      {messages.map((message) => {
+        if (message.role === 'assistant') {
+          const chunkCites = message.citations.filter(
+            (c): c is ChunkCitation => c.type === 'chunk',
+          )
+          return (
+            <Fragment key={message.id}>
+              <AssistantAnswer
                 text={message.content}
                 citations={message.citations}
                 sourceTitle={sourceTitle}
                 onOpenCitation={onOpenCitation}
               />
-              <SourceCount citations={message.citations} />
-            </>
-          ) : (
+              {chunkCites.length > 0 && (
+                <EvidenceLink
+                  citations={chunkCites}
+                  sourceTitle={sourceTitle}
+                  onOpenCitation={onOpenCitation}
+                />
+              )}
+            </Fragment>
+          )
+        }
+
+        return (
+          <UserTurn key={message.id}>
             <p className="whitespace-pre-wrap">{message.content}</p>
-          )}
-        </Turn>
-      ))}
+          </UserTurn>
+        )
+      })}
 
       {turn !== null && (
         <>
-          <Turn role="user">
+          <UserTurn>
             <p className="whitespace-pre-wrap">{turn.question}</p>
-          </Turn>
+          </UserTurn>
 
-          {/* An answer only exists once there is text. A refusal before the first
-              token left nothing behind on the server and nothing here either, so
-              the notice is not attributed to a reply: a "Stvdy" label over a
-              message that was never written claims a turn that does not exist. */}
-          {turn.text.length > 0 && (
-            <Turn role="assistant">
-              <AnswerText
+          {/* Thinking disclosure: shown when the provider sends reasoning */}
+          {turn.reasoning.length > 0 && (
+            <ThinkingDisclosure reasoning={turn.reasoning} />
+          )}
+
+          {/* Streaming answer or completed answer */}
+          {turn.streaming ? (
+            <StreamingIndicator text={turn.text} />
+          ) : turn.text.length > 0 ? (
+            <>
+              <AssistantAnswer
                 text={turn.text}
                 citations={turn.citations}
                 sourceTitle={sourceTitle}
                 onOpenCitation={onOpenCitation}
               />
-              <SourceCount citations={turn.citations} />
-            </Turn>
-          )}
-
-          {turn.streaming && turn.text.length === 0 && (
-            <p className="flex items-center gap-2 text-muted" role="status">
-              <span
-                className="h-2 w-2 animate-working rounded-full bg-muted"
-                aria-hidden="true"
-              />
-              {t('chat.list.searching')}
-            </p>
-          )}
+              {turn.citations.filter((c): c is ChunkCitation => c.type === 'chunk').length > 0 && (
+                <EvidenceLink
+                  citations={turn.citations.filter((c): c is ChunkCitation => c.type === 'chunk')}
+                  sourceTitle={sourceTitle}
+                  onOpenCitation={onOpenCitation}
+                />
+              )}
+            </>
+          ) : null}
 
           {turn.error !== null && (
             <ApiErrorNotice
@@ -328,6 +619,11 @@ export function MessageList({
             />
           )}
         </>
+      )}
+
+      {/* Follow-up prompts after the last completed answer (411:44295) */}
+      {!streaming && messages.length > 0 && onFollowUp !== undefined && (
+        <FollowUpPrompts onSelect={onFollowUp} disabled={false} />
       )}
     </div>
   )

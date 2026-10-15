@@ -83,6 +83,10 @@ pub struct ToolCall {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Token(String),
+    /// A fragment of the model's chain-of-thought reasoning, when the provider
+    /// exposes one. Not every model sends it; the client shows it only when at
+    /// least one fragment arrives.
+    Reasoning(String),
     ToolCall(ToolCall),
     Usage(Usage),
     Done,

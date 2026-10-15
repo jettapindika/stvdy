@@ -45,7 +45,6 @@ stvdy-sync = { path = "../crates/sync" }
 # SQLite from the platform matrix.
 rusqlite = { version = "0.37", features = ["bundled"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
-tokio = { version = "1.53.2", features = ["rt", "macros", "time", "sync"] }
 uuid = { version = "1.28.0", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 base64 = "0.23.1"
@@ -129,6 +128,9 @@ tauri-plugin-stvdy-mobile = { path = "plugins/mobile" }
 # build would ship no FCM dependency and the iOS build no APNs registration — a receive path
 # that compiles and never receives.
 tauri-plugin-notifications = { version = "0.5.0-rc.14", features = ["push-notifications"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["rt", "macros", "time", "sync"] }
 
 [features]
 default = ["custom-protocol"]

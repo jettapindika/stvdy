@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
@@ -8,7 +8,7 @@ import { CreditMeter } from '@/features/billing/CreditMeter'
 import { PageFooter, PageHeader, Section, WidgetHeading } from '@/components/layout/Section'
 import { displayNameOf } from '@/components/layout/TopBar'
 import { Icon } from '@/components/ui/Icon'
-import { EmptyState, LoadingState } from '@/components/ui/States'
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { DEFAULT_TIMEZONE, formatInZone, localDateKey, zoneOffsetLabel } from '@/lib/time'
 import { COURSE_NAMES, COURSE_VARS } from '@/tokens/tokens'
@@ -51,23 +51,22 @@ export function TodayScreen() {
   const { t } = useTranslation()
   const session = useSession()
   const timeZone = session.status === 'signed-in' ? session.user.timezone : DEFAULT_TIMEZONE
-  // The instant this view of the day was opened, fixed for the life of the mount.
-  // It is the same instant the day buckets are computed from and the one the read
-  // window is derived from, so the two cannot disagree — and a window that changed
-  // on every render would be a new query on every render, which is a screen that
-  // never settles. Navigating away and back recomputes it.
-  const [now] = useState(() => new Date())
 
-  // A superset of the local day and the next seven, so the *server* sends
-  // everything the local bucketing below might need. The window is deliberately
-  // not computed from the local day's exact instants: that needs the zone's
-  // offset arithmetic here, and a bug in it would silently ask for a window the
-  // rows are not in — the failure mode `day.ts` cannot see. What the window does
-  // not decide is which day a row is on: `todayBuckets` decides that, in the
-  // student's zone.
+  // The real wall-clock instant, fixed for the mount's lifetime.
+  const [realNow] = useState(() => new Date())
+  const realTodayKey = localDateKey(realNow, timeZone)
+
+  // The day the screen is showing. Defaults to now; the date strip changes it.
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const now = selectedDate ?? realNow
+  const selectedKey = localDateKey(now, timeZone)
+
+  // The data window covers the strip's full range plus margin for the week
+  // deadlines widget (7 days ahead of the selected day). This is a superset
+  // that lets the user tap any strip day without a new fetch.
   const window = {
-    from: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-    to: new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000).toISOString(),
+    from: new Date(realNow.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    to: new Date(realNow.getTime() + 11 * 24 * 60 * 60 * 1000).toISOString(),
   }
   const data = useTodayData(window)
   const { report } = useSyncStatus()
@@ -87,14 +86,46 @@ export function TodayScreen() {
     buckets.setup.workspaces === 0 && buckets.setup.sources === 0 && buckets.setup.decks === 0
   const offline = report?.state === 'offline'
 
-  // The greeting is the reader's own day-part, read in their zone. The machine's
-  // clock is not it: a laptop set to UTC would greet a Jakarta student with
-  // "Good evening" at midnight.
+  // The greeting uses the real clock, not the selected day: greeting a student
+  // with "Good morning" because they tapped a past morning would be a lie.
   const localHour = Number(
-    new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone }).format(now),
+    new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone }).format(realNow),
   )
   const period = localHour < 12 ? 'morning' : localHour < 18 ? 'afternoon' : 'evening'
   const name = session.status === 'signed-in' ? displayNameOf(session.user.email) : ''
+
+  // When every query has either settled or errored and at least one errored,
+  // show the error state instead of the empty-looking "nothing to study" screen
+  // that a network failure would otherwise produce (N2).
+  if (data.failed && !data.loading) {
+    return (
+      <div className="flex w-full flex-col gap-6 px-5 py-6 md:px-[32px] md:py-8">
+        <PageHeader
+          eyebrow={formatInZone(now, timeZone, {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          })}
+          title={t('nav.today')}
+          subtitle={name.length > 0 ? t(`today.greeting.${period}`, { name }) : t('today.subtitle')}
+        />
+        <ErrorState
+          title={t('today.failed.title')}
+          reason={t('today.failed.reason')}
+          action={
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => globalThis.location.reload()}
+            >
+              {t('states.reload')}
+            </button>
+          }
+        />
+      </div>
+    )
+  }
 
   // The course of each row, so a timeline entry or a deadline can be tagged with
   // the course it belongs to. Built once: a lookup per row would be a scan of the
@@ -134,15 +165,12 @@ export function TodayScreen() {
         title={t('nav.today')}
         subtitle={name.length > 0 ? t(`today.greeting.${period}`, { name }) : t('today.subtitle')}
         action={
-          <Link to="/planner?view=calendar" className="btn btn-secondary hidden shrink-0 md:inline-flex">
-            <Icon name="calendar" />
-            <span aria-hidden="true">
-              {formatInZone(now, timeZone, { day: 'numeric', month: 'short' })}
-            </span>
-            <span className="sr-only">
-              {t('today.openDay', { date: formatInZone(now, timeZone, { dateStyle: 'long' }) })}
-            </span>
-          </Link>
+          <DatePickerPopover
+            now={now}
+            selectedKey={selectedKey}
+            realTodayKey={realTodayKey}
+            onSelect={setSelectedDate}
+          />
         }
       />
       <div className="account-timezone-row flex flex-wrap items-center justify-between gap-3 md:hidden">
@@ -175,9 +203,9 @@ export function TodayScreen() {
           review first, the capture second, the schedule after it — and it is
           `order-*` because the desktop bands group blocks the phone does not:
           `order` decides nothing once every block names its row and column. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,728fr)_minmax(0,408fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[7fr_3fr]">
         {/* --- Priority ------------------------------------------------------- */}
-        <div className="order-1 lg:col-start-1 lg:row-start-1">
+        <div className="order-1 flex flex-col [&>*:first-child]:flex-1 lg:col-start-1 lg:row-start-1">
           {/* The frame's priority block: the count and its context on the left, the
               one action on the right with the queue's name under it, the two
               vertically centred against each other on a desktop and stacked on a
@@ -248,14 +276,14 @@ export function TodayScreen() {
           </div>
         </div>
         {/* --- Quick capture --------------------------------------------------- */}
-        <div className="order-2 flex flex-col gap-2 lg:col-start-2 lg:row-start-3">
+        <div className="order-2 flex flex-col gap-2 [&>*:first-child]:flex-1 lg:col-start-2 lg:row-start-3">
           <QuickCapture />
           {offline ? <p className="meta text-warning">{t('today.capture.offline')}</p> : null}
         </div>
 
 
         {/* --- Today's timeline ----------------------------------------------- */}
-        <div className="order-3 lg:col-start-1 lg:row-start-2">
+        <div className="order-3 flex flex-col [&>*:first-child]:flex-1 lg:col-start-1 lg:row-start-2">
           <div className="card flex flex-col gap-4 p-4 md:p-6">
             <WidgetHeading title={t('today.timeline.title')} />
             {/* The frame's summary row: what the day holds on the left, the zone it
@@ -287,7 +315,7 @@ export function TodayScreen() {
         </div>
 
         {/* --- The week's deadlines ------------------------------------------- */}
-        <div className="order-4 lg:col-start-2 lg:row-start-2">
+        <div className="order-4 flex flex-col [&>*:first-child]:flex-1 lg:col-start-2 lg:row-start-2">
           <div className="card flex flex-col gap-4 p-4 md:p-6">
             <WidgetHeading
               title={t('today.exams.title')}
@@ -381,50 +409,33 @@ export function TodayScreen() {
         </div>
 
         {/* --- Focus timer ----------------------------------------------------- */}
-        <div className="order-5 lg:col-start-1 lg:row-start-3">
+        <div className="order-5 flex flex-col [&>*:first-child]:flex-1 lg:col-start-1 lg:row-start-3">
           <FocusTimer />
         </div>
         {/* --- Rhythm --------------------------------------------------------- */}
-        <div className="order-6 lg:col-start-2 lg:row-start-1">
+        <div className="order-6 flex flex-col [&>*:first-child]:flex-1 lg:col-start-2 lg:row-start-1">
           <div className="card flex flex-col gap-4 p-6">
             {data.loading ? (
               <LoadingState label={t('today.activity.loading')} />
-            ) : buckets.streakDays > 0 ? (
+            ) : (
               <>
-                {/* The frame's card is three blocks: the streak as a heading with
-                    the flame, the strip, and the encouragement. No eyebrow above it
-                    and no second count below it — the minutes are already stated
-                    once, in the timeline's summary line, and stating them twice on
-                    one screen is two answers to one question. */}
                 <h3 className="flex items-center gap-3">
                   <Icon name="streak" size={24} className="shrink-0 text-warning" />
-                  {t('today.activity.streak', { count: buckets.streakDays })}
+                  {buckets.streakDays > 0
+                    ? t('today.activity.streak', { count: buckets.streakDays })
+                    : t('today.streak.emptyTitle')}
                 </h3>
-                {/* The strip spreads across the card, which is the frame's
-                    arrangement; `flex-wrap` keeps the five cells from being squeezed
-                    at 200% text, where they move to a second row instead. */}
                 <ol className="flex flex-wrap justify-between gap-2">
                   {buckets.recentDays.map((day) => (
                     <RecentDayCell key={day.key} day={day} />
                   ))}
                 </ol>
-                <p className="text-small text-subtle">{t('today.streak.encouragement')}</p>
+                <p className="text-small text-subtle">
+                  {buckets.streakDays > 0
+                    ? t('today.streak.encouragement')
+                    : t('today.streak.emptyReason')}
+                </p>
               </>
-            ) : (
-              // No streak renders the empty state, and **no count line at all**:
-              // "0-day study streak" would be the app using a number to tell a
-              // student they have nothing, and a student who has not started has
-              // lost nothing.
-              <EmptyState
-                title={t('today.streak.emptyTitle')}
-                reason={t('today.streak.emptyReason')}
-                padded={false}
-                action={
-                  <Link to="/study" className="btn btn-secondary">
-                    {t('today.streak.emptyAction')}
-                  </Link>
-                }
-              />
             )}
           </div>
         </div>
@@ -741,4 +752,161 @@ function savedState(
     })
   }
   return t(`sync.state.${report.state}`)
+}
+
+// ---------------------------------------------------------------------------
+// DatePickerPopover – icon-only button that opens a month calendar grid
+// ---------------------------------------------------------------------------
+
+/** Build the 6×7 grid for a given month, padding with prev/next month days. */
+function monthGrid(year: number, month: number): Date[] {
+  const first = new Date(Date.UTC(year, month, 1))
+  // Monday = 0 … Sunday = 6
+  const startDay = (first.getUTCDay() + 6) % 7
+  const cells: Date[] = []
+  for (let i = -startDay; cells.length < 42; i++) {
+    cells.push(new Date(Date.UTC(year, month, 1 + i, 12)))
+  }
+  return cells
+}
+
+const WEEKDAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
+
+function DatePickerPopover({
+  now,
+  selectedKey,
+  realTodayKey,
+  onSelect,
+}: {
+  now: Date
+  selectedKey: string
+  realTodayKey: string
+  onSelect: (date: Date | null) => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  // The month being viewed in the popover (may differ from now when navigating).
+  const [viewYear, setViewYear] = useState(now.getUTCFullYear())
+  const [viewMonth, setViewMonth] = useState(now.getUTCMonth())
+
+  // Reset the viewed month to today's when the popover opens.
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      if (!prev) {
+        // Parse the selected key to open on the currently viewed month.
+        const [y, m] = selectedKey.split('-').map(Number)
+        setViewYear(y!)
+        setViewMonth((m ?? 1) - 1)
+      }
+      return !prev
+    })
+  }, [selectedKey])
+
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  // Close on outside click or Escape.
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: PointerEvent) {
+      if (
+        popoverRef.current && !popoverRef.current.contains(e.target as Node)
+        && buttonRef.current && !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false)
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') { setOpen(false); buttonRef.current?.focus() }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  const cells = useMemo(() => monthGrid(viewYear, viewMonth), [viewYear, viewMonth])
+
+  const monthLabel = new Intl.DateTimeFormat('default', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(viewYear, viewMonth, 15)))
+
+  const prevMonth = () => {
+    setViewMonth((m) => { if (m === 0) { setViewYear((y) => y - 1); return 11 } return m - 1 })
+  }
+  const nextMonth = () => {
+    setViewMonth((m) => { if (m === 11) { setViewYear((y) => y + 1); return 0 } return m + 1 })
+  }
+
+  return (
+    <div className="date-picker-anchor">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="btn btn-secondary shrink-0"
+        aria-label={t('today.datePicker.openLabel')}
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <Icon name="calendar" />
+      </button>
+      {open && (
+        <div ref={popoverRef} className="date-picker-popover" role="dialog" aria-label={t('today.datePicker.label')}>
+          <div className="date-picker-header">
+            <button
+              type="button"
+              className="date-picker-nav"
+              aria-label={t('today.datePicker.prevMonth')}
+              onClick={prevMonth}
+            >
+              <Icon name="chevron-left" size={16} />
+            </button>
+            <span className="date-picker-month-label">{monthLabel}</span>
+            <button
+              type="button"
+              className="date-picker-nav"
+              aria-label={t('today.datePicker.nextMonth')}
+              onClick={nextMonth}
+            >
+              <Icon name="chevron-right" size={16} />
+            </button>
+          </div>
+          <div className="date-picker-grid" role="grid" aria-label={monthLabel}>
+            {WEEKDAYS_SHORT.map((wd) => (
+              <span key={wd} className="date-picker-weekday" role="columnheader">{wd}</span>
+            ))}
+            {cells.map((date) => {
+              const key = localDateKey(date, 'UTC')
+              const inMonth = date.getUTCMonth() === viewMonth
+              const isSelected = key === selectedKey
+              const isRealToday = key === realTodayKey
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={
+                    'date-picker-cell'
+                    + (isSelected ? ' date-picker-cell-selected' : '')
+                    + (isRealToday && !isSelected ? ' date-picker-cell-today' : '')
+                    + (!inMonth ? ' date-picker-cell-outside' : '')
+                  }
+                  aria-current={isSelected ? 'date' : undefined}
+                  aria-label={formatInZone(date, 'UTC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                  onClick={() => {
+                    // Tapping "today" resets to null (same as date-strip).
+                    onSelect(isRealToday ? null : date)
+                    setOpen(false)
+                  }}
+                >
+                  {date.getUTCDate()}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

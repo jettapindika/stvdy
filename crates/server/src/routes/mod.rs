@@ -55,11 +55,11 @@ const TAURI_ORIGINS: &[&str] = &[
 
 fn cors_layer(config: &AppConfig) -> CorsLayer {
     if config.env.is_dev() {
-        // Dev only: the Vite dev server and the Tauri webviews vary by machine
-        // and port. Note `permissive()` sets no `allow_credentials`, so browsers
-        // will not attach cookies even with a wildcard origin. And auth here is
-        // a bearer header, not a cookie.
-        return CorsLayer::permissive();
+        // Dev: the Vite dev server and the Tauri webviews vary by machine and
+        // port. `very_permissive()` mirrors origin/methods/headers from the
+        // request and enables credentials, which is the credential-compatible
+        // equivalent of a wildcard. Prod uses an explicit allowlist below.
+        return CorsLayer::very_permissive();
     }
 
     let mut origins: Vec<HeaderValue> = TAURI_ORIGINS
@@ -70,8 +70,6 @@ fn cors_layer(config: &AppConfig) -> CorsLayer {
         match HeaderValue::from_str(web) {
             Ok(value) => origins.push(value),
             Err(error) => {
-                // Misconfiguration must be loud, but not fatal: the server still
-                // serves the API to the native shell.
                 tracing::error!(%error, origin = %web, "WEB_ORIGIN is not a valid header value; ignoring");
             }
         }
@@ -80,12 +78,20 @@ fn cors_layer(config: &AppConfig) -> CorsLayer {
     tracing::info!(count = origins.len(), "CORS restricted to known origins");
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods(tower_http::cors::Any)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::PATCH,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
             axum::http::header::ACCEPT,
         ])
+        .allow_credentials(true)
 }
 
 /// Builds the router.
@@ -209,9 +215,10 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .fallback(health::not_found)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        .layer(SetSensitiveRequestHeadersLayer::new(std::iter::once(
+        .layer(SetSensitiveRequestHeadersLayer::new([
             axum::http::header::AUTHORIZATION,
-        )))
+            axum::http::header::COOKIE,
+        ]))
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(cors)

@@ -177,22 +177,17 @@ export function QuickCapture() {
       <p id="quick-capture-hint" className="text-caption text-muted">
         {t('today.capture.hint')}
       </p>
-      {/* The action is a raised row rather than a filled button: this screen's one
-          primary action is the review, and a second indigo fill would make two
-          things look like the next step. The sparkle is the assistant mark, the
-          cost is in the label so the price is read before the run, and the row is
-          centred — which is the frame's arrangement and the one that keeps the
-          mark and the label together when the row wraps. */}
+      {/* The action is secondary rather than primary: this screen's one primary
+          action is the review, and a second indigo fill would make two things
+          look like the next step. */}
       <button
         type="button"
-        className="raised flex min-h-11 w-full flex-wrap items-center justify-center gap-2 rounded-field px-4 py-2 text-label font-medium text-primary-text disabled:opacity-45"
+        className="btn btn-secondary w-full"
         disabled={busy || text.trim().length === 0}
         onClick={() => void run()}
       >
         <Icon name="sparkles" className="shrink-0" />
-        <span className="min-w-0 break-words">
-          {cost === null ? t('today.capture.run') : t('today.capture.runWithCost', { count: cost })}
-        </span>
+        {cost === null ? t('today.capture.run') : t('today.capture.runWithCost', { count: cost })}
       </button>
 
       {error !== null ? (

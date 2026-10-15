@@ -5,6 +5,7 @@ import { Navigate, Outlet, useLocation } from 'react-router'
 import { CommandPalette } from '@/features/palette/CommandPalette'
 import { Shell } from './components/layout/Shell'
 import { LoadingState } from './components/ui/States'
+import { MotionSurface } from './components/ui/MotionSurface'
 import { useSession } from './features/auth/useSession'
 import { usePushRegistration } from './features/notifications/registerPush'
 import { useLocalNotifications } from './features/reminders/useLocalNotifications'
@@ -114,9 +115,9 @@ export function App() {
 
   return (
     <Shell onOpenPalette={openPalette}>
-      <div key={location.pathname} className="motion-entrance flex min-w-0 flex-1 flex-col">
+      <MotionSurface key={location.pathname} className="flex min-w-0 flex-1 flex-col">
         <Outlet />
-      </div>
+      </MotionSurface>
       <CommandPalette open={paletteOpen} onClose={closePalette} />
     </Shell>
   )

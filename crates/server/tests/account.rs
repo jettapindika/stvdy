@@ -19,10 +19,10 @@
 //!    with the request — so deleting and registering again with the same address works
 //!    immediately, and the tombstone the purge eventually rewrites is already anonymous.
 
-// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
-// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
+// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 use axum::http::StatusCode;
 use sqlx::PgPool;
 use stvdy_core::traits::storage::Storage;

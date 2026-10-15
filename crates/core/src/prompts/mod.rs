@@ -144,6 +144,16 @@ pub fn base_v2_variables() -> &'static [(&'static str, VarKind)] {
     ]
 }
 
+/// Every `{{variable}}` in `base.v3.md`, in first-appearance order.
+///
+/// v3 is v2 plus `<output_quality>` and two `<language_and_tone>` rules, none
+/// of which introduce new variables, so this table is identical to v2's. The
+/// chat composer renders against this table.
+pub fn base_v3_variables() -> &'static [(&'static str, VarKind)] {
+    // Same variables as v2; the new sections use no template variables.
+    base_v2_variables()
+}
+
 /// The declared kind of a variable, or `None` if the name is not declared.
 pub fn base_variable_kind(name: &str) -> Option<VarKind> {
     variable_kind(base_variables(), name)
@@ -237,7 +247,7 @@ pub fn compose_chat(
     web: &[PromptWebHit],
 ) -> Result<Composed, PromptError> {
     let values = values_of(vars);
-    let mut text = render(registry::BASE_V2, &values)?;
+    let mut text = render(registry::BASE_V3, &values)?;
     text.push_str("\n\n");
     text.push_str(&render_sources(chunks));
     text.push_str("\n\n");
@@ -248,7 +258,7 @@ pub fn compose_chat(
     Ok(Composed {
         text,
         labels,
-        prompt_version: registry::BASE_V2_VERSION.to_string(),
+        prompt_version: registry::BASE_V3_VERSION.to_string(),
     })
 }
 
@@ -430,10 +440,10 @@ pub fn compose_task(
 /// contradictory pair (permissive instruction with `allow_upgrade_hint: false`)
 /// cannot be constructed.
 ///
-/// The table is `base.v2.md`'s: the chat composer renders v2, and a task module
+/// The table is `base.v3.md`'s: the chat composer renders v3, and a task module
 /// passes its own table to [`render_with`] instead.
 fn render(template: &str, values: &BTreeMap<&'static str, String>) -> Result<String, PromptError> {
-    render_with(template, values, base_v2_variables())
+    render_with(template, values, base_v3_variables())
 }
 
 /// Fills a template's variables from an explicit declaration table.
@@ -603,7 +613,6 @@ fn render_web(web: &[PromptWebHit]) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 

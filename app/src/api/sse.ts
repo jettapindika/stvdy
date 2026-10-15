@@ -96,6 +96,8 @@ export interface ChatAction {
 export interface ChatStreamHandlers {
   /** A text fragment. Not a word and not a line: concatenate in arrival order. */
   onToken?(text: string): void
+  /** A reasoning fragment from chain-of-thought. Concatenate in arrival order. */
+  onReasoning?(text: string): void
   /** The citations for the answer that just streamed. May be empty. */
   onCitations?(citations: ChatCitation[]): void
   /**
@@ -215,6 +217,22 @@ export function createChatEventParser(handlers: ChatStreamHandlers): {
             return
           }
           handlers.onToken?.(text)
+          return
+        }
+        case 'reasoning': {
+          let body: unknown
+          try {
+            body = JSON.parse(data) as unknown
+          } catch {
+            handlers.onError?.(malformed('A reasoning event was not readable JSON.'))
+            return
+          }
+          const text = (body as { t?: unknown } | null)?.t
+          if (typeof text !== 'string') {
+            handlers.onError?.(malformed('A reasoning event carried no text.'))
+            return
+          }
+          handlers.onReasoning?.(text)
           return
         }
         case 'citations': {

@@ -316,6 +316,15 @@ impl LlmProvider for OpenAiCompatLlm {
                         return;
                     }
 
+                    // Chain-of-thought reasoning, when the provider exposes it
+                    // (e.g. `delta.reasoning_content` in OpenAI-compatible APIs).
+                    if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str())
+                        && !reasoning.is_empty()
+                        && tx.send(StreamEvent::Reasoning(reasoning.to_string())).await.is_err()
+                    {
+                        return;
+                    }
+
                     for call in parse_tool_calls(delta) {
                         if tx.send(StreamEvent::ToolCall(call)).await.is_err() {
                             return;

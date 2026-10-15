@@ -291,7 +291,7 @@ describe('the streak', () => {
 })
 
 describe('the streak strip and the week it sits beside', () => {
-  it('draws five local days ending today, oldest first', () => {
+  it('draws seven local days ending today, oldest first', () => {
     // The strip and the streak have to answer one question, so the last cell is
     // today and the days are the local ones: a UTC walk would end on the 15th for
     // a Jakarta student at 08:00 on the 16th.
@@ -299,6 +299,8 @@ describe('the streak strip and the week it sits beside', () => {
       input({ now: new Date('2026-10-16T01:00:00Z') }),
     )
     expect(buckets.recentDays.map((day) => day.key)).toEqual([
+      '2026-10-10',
+      '2026-10-11',
       '2026-10-12',
       '2026-10-13',
       '2026-10-14',

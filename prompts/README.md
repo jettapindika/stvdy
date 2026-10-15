@@ -13,6 +13,7 @@ prompt file is missing.
 prompts/
   base.v1.md                    # identity, language, grounding, security, tone, tools
   base.v2.md                    # v1 + the per-chat grounding toggle ({{sources_only}})
+  base.v3.md                    # v2 + anti-slop output quality rules + language_and_tone additions
   flashcards.v1.md              # task modules: appended to a base
   quiz.v1.md
   report_outline.v1.md
@@ -40,7 +41,7 @@ Two shapes, and only two:
 
 | Job | Composition |
 |---|---|
-| Chat / assistant | `base.v2.md` + `<sources>` + `<web_results>` + tool schemas |
+| Chat / assistant | `base.v3.md` + `<sources>` + `<web_results>` + tool schemas |
 | Strict-JSON task | `base.v1.md` **trimmed** (see below) + `json_contract.v1.md` + the module + `<sources>` |
 
 `base.v2.md` is `base.v1.md` superseded (rule 1) in exactly one place: rule 2 of
@@ -52,6 +53,14 @@ allowed but must be labelled and uncited — v1's wording, kept verbatim. The to
 governs general knowledge, **not** web: `<web_results>` and `[W#]` citations are
 unaffected by it. A request that omits the field is grounded `on`, because that is
 the UI default.
+
+`base.v3.md` is `base.v2.md` superseded (rule 1) in two places: `<language_and_tone>`
+gains two rules (no filler openers, prefer plain punctuation over em dashes), and a new
+`<output_quality>` section adds anti-slop quality rules adapted from
+miqdadbadjuber/anti-slop (MIT). The rules prevent the model from inventing statistics,
+fabricating names or quotes, using filler buzzwords, narrating its own process, or
+producing ungrounded claims in reports and cheatsheets. No new variables are introduced.
+Task modules remain on v1's trimmed base and are unaffected (A367).
 
 Trimming the base for task calls is deliberate, not an optimisation to skip: the base is
 long, and `<tools_and_actions>`, `<planning_help>` and `<teaching_style>` are actively

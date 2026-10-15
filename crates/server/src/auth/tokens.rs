@@ -41,6 +41,7 @@ pub struct TokenPair {
     pub refresh_token: String,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
+    pub device_id: Uuid,
 }
 
 fn encode_jwt(config: &AppConfig, claims: &AccessClaims) -> AppResult<String> {
@@ -146,6 +147,7 @@ async fn issue_pair_in_family(
         refresh_token,
         access_expires_at,
         refresh_expires_at,
+        device_id,
     })
 }
 

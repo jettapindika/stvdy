@@ -123,7 +123,7 @@ export function PageHeader({
   action?: ReactNode
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-5 md:gap-4">
+    <header className="page-heading flex flex-wrap items-center justify-between gap-5 md:gap-4">
       <div className="flex min-w-0 flex-col gap-2">
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>

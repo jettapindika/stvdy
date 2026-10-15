@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -13,6 +13,7 @@ import {
 } from '@/api/queries/workspaces'
 import { PageFooter, PageHeader, Section } from '@/components/layout/Section'
 import { BrandIllustration } from '@/components/ui/BrandIllustration'
+import { CourseIllustration } from '@/components/ui/CourseIllustration'
 import { Field } from '@/components/ui/Field'
 import { Icon } from '@/components/ui/Icon'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
@@ -355,9 +356,11 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
   const rename = useRenameWorkspace()
   const remove = useDeleteWorkspace()
   const [mode, setMode] = useState<'idle' | 'renaming' | 'deleting'>('idle')
+  const [showMenu, setShowMenu] = useState(false)
   const [name, setName] = useState(workspace.name)
   const [courseCode, setCourseCode] = useState(workspace.course_code ?? '')
   const [examDate, setExamDate] = useState(workspace.exam_date ?? '')
+  const menuBtnRef = useRef<HTMLButtonElement>(null)
 
   const renameError = asApiError(rename.error)
   const removeError = asApiError(remove.error)
@@ -366,194 +369,243 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
   // field the server is allowed to omit.
   const exam = workspace.exam_date
 
+  // Escape closes the dropdown and hands focus back to the trigger, which is the
+  // pattern CalendarScreen and QuickCapture use for their overlays. The listener
+  // is on `document` rather than on the menu, because focus can be on one of the
+  // menu's buttons or on the backdrop when Escape arrives.
+  useEffect(() => {
+    if (!showMenu) return undefined
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setShowMenu(false)
+      menuBtnRef.current?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [showMenu])
+
   return (
     <li
-      className="card flex overflow-hidden"
+      className="card course-card"
       style={courseVars(COURSE_NAMES[workspace.color] ?? 'indigo')}
     >
-      {/* The course hue as a 4px bar. The code and the name are always present, so
-          the colour is never the only thing that identifies the course. */}
       <span className="course-marker" aria-hidden="true" />
 
-      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {/* A real count from the list response, never a placeholder. Sky is the
-              source pair, and this is a fact about the workspace's sources. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Top bar: source count chip + ellipsis menu */}
+        <div className="flex flex-wrap items-center justify-between gap-2 p-4 pb-0">
           <span className="chip chip-source">
             {t('workspaces.list.sourceCount', { count: workspace.source_count })}
           </span>
           {mode === 'idle' && (
-            // `flex-wrap`: at 200% text `Rename` and `Delete` together are wider than
-            // the card's line, and without this the pair overflows the viewport —
-            // measured at 336px of content in a 240px row, with `Delete` painted 23px
-            // past the right edge. Wrapping stacks them instead.
-            <div className="flex flex-wrap gap-1">
+            <div className="relative">
               <button
+                ref={menuBtnRef}
                 type="button"
-                className="btn btn-quiet"
+                className="btn btn-quiet min-h-11 min-w-11 p-0"
+                aria-label={t('actions.more')}
+                aria-haspopup="true"
+                aria-expanded={showMenu}
                 onClick={() => {
-                  setMode('renaming')
+                  setShowMenu((prev) => !prev)
                 }}
               >
-                {t('workspaces.list.rename')}
+                <Icon name="ellipsis" size={20} />
               </button>
-              <button
-                type="button"
-                className="btn btn-quiet"
-                onClick={() => {
-                  setMode('deleting')
-                }}
-              >
-                {t('actions.delete')}
-              </button>
+              {showMenu && (
+                <>
+                  {/* Transparent backdrop to close the menu on outside click */}
+                  <div
+                    className="fixed inset-0 z-[9]"
+                    onClick={() => {
+                      setShowMenu(false)
+                    }}
+                  />
+                  <div className="float absolute right-0 top-full z-10 mt-1 flex min-w-[8rem] flex-col py-1">
+                    <button
+                      type="button"
+                      className="btn btn-quiet justify-start rounded-none px-3 py-2 text-small"
+                      onClick={() => {
+                        setShowMenu(false)
+                        setMode('renaming')
+                      }}
+                    >
+                      {t('workspaces.list.rename')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet justify-start rounded-none px-3 py-2 text-small text-danger"
+                      onClick={() => {
+                        setShowMenu(false)
+                        setMode('deleting')
+                      }}
+                    >
+                      {t('actions.delete')}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        {mode === 'renaming' ? (
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              rename.mutate(
-                { workspaceId: workspace.id, name, courseCode, examDate },
-                {
-                  onSuccess: () => {
-                    setMode('idle')
-                  },
-                },
-              )
-            }}
-          >
-            <Field
-              label={t('workspaces.list.renameLabel')}
-              value={name}
-              required
-              autoFocus
-              onChange={(event) => {
-                setName(event.target.value)
-              }}
-            />
-            <Field
-              label={t('workspaces.list.courseCodeLabel')}
-              value={courseCode}
-              maxLength={16}
-              onChange={(event) => {
-                setCourseCode(event.target.value)
-              }}
-            />
-            <Field
-              label={t('workspaces.list.examDateLabel')}
-              type="date"
-              value={examDate}
-              onChange={(event) => {
-                setExamDate(event.target.value)
-              }}
-            />
-            <div className="flex flex-wrap gap-2">
-              <button type="submit" className="btn btn-primary" disabled={rename.isPending}>
-                {rename.isPending ? t('workspaces.list.saving') : t('actions.save')}
-              </button>
-              <button
-                type="button"
-                className="btn btn-quiet"
-                onClick={() => {
-                  setName(workspace.name)
-                  setCourseCode(workspace.course_code ?? '')
-                  setExamDate(workspace.exam_date ?? '')
-                  setMode('idle')
-                  rename.reset()
-                }}
-              >
-                {t('actions.cancel')}
-              </button>
+        {mode === 'idle' ? (
+          <>
+            {/* Hero illustration area */}
+            <div className="course-card-hero">
+              <CourseIllustration color={workspace.color} className="absolute inset-0 h-full w-full" />
+              <div className="course-card-info">
+                {workspace.course_code && (
+                  <p className="meta uppercase wrap-anywhere text-primary-text">
+                    {workspace.course_code}
+                  </p>
+                )}
+                <h3 className="min-w-0 wrap-anywhere text-h4">
+                  <Link
+                    to={`/workspaces/${workspace.id}`}
+                    className="inline-flex min-h-11 items-center hover:underline"
+                  >
+                    {workspace.name}
+                  </Link>
+                </h3>
+              </div>
             </div>
-          </form>
-        ) : (
-          <div className="flex min-w-0 flex-col gap-2">
-            {workspace.course_code && (
-              <p className="meta uppercase wrap-anywhere text-primary-text">{workspace.course_code}</p>
-            )}
-            <h3 className="min-w-0 wrap-anywhere text-h4">
-              <Link to={`/workspaces/${workspace.id}`} className="inline-flex min-h-11 items-center hover:underline">
-                {workspace.name}
+
+            {/* Footer: open link + exam date */}
+            <div className="flex flex-col gap-1 px-4 pb-4">
+              <Link
+                to={`/workspaces/${workspace.id}`}
+                className="link inline-flex min-h-11 items-center self-start text-small"
+              >
+                {t('workspaces.list.open')}
               </Link>
-            </h3>
-            {/* A link that is a control needs its own target, which is why this is
-                `inline-flex min-h-11` and not a bare `.link` (see styles.css). */}
-            <Link
-              to={`/workspaces/${workspace.id}`}
-              className="link inline-flex min-h-11 items-center self-start"
-            >
-              {t('workspaces.list.open')}
-            </Link>
-          </div>
-        )}
-
-        {mode === 'deleting' && (
-          <div className="note note-danger flex flex-col items-start gap-2">
-            <p className="font-medium">
-              {t('workspaces.list.deleteConfirmTitle', { name: workspace.name })}
-            </p>
-            <p className="text-small">
-              {workspace.source_count === 0
-                ? t('workspaces.list.deleteNoSources')
-                : t('workspaces.list.deleteSources', { count: workspace.source_count })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                autoFocus
-                disabled={remove.isPending}
-                onClick={() => {
-                  remove.mutate(workspace.id, {
-                    onSuccess: () => {
-                      setMode('idle')
-                    },
-                  })
-                }}
-              >
-                {remove.isPending
-                  ? t('workspaces.list.deleting')
-                  : t('workspaces.list.deleteConfirm')}
-              </button>
-              <button
-                type="button"
-                className="btn btn-quiet"
-                onClick={() => {
-                  remove.reset()
-                  setMode('idle')
-                }}
-              >
-                {t('workspaces.keepIt')}
-              </button>
+              {typeof exam === 'string' && exam.length > 0 && (
+                <p className="meta uppercase wrap-anywhere">
+                  {t('workspaces.list.examLine', {
+                    date: formatInZone(new Date(`${exam}T00:00:00Z`), 'UTC', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    }),
+                  })}
+                </p>
+              )}
             </div>
+          </>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
+            {mode === 'renaming' && (
+              <form
+                className="flex flex-col gap-3"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  rename.mutate(
+                    { workspaceId: workspace.id, name, courseCode, examDate },
+                    {
+                      onSuccess: () => {
+                        setMode('idle')
+                      },
+                    },
+                  )
+                }}
+              >
+                <Field
+                  label={t('workspaces.list.renameLabel')}
+                  value={name}
+                  required
+                  autoFocus
+                  onChange={(event) => {
+                    setName(event.target.value)
+                  }}
+                />
+                <Field
+                  label={t('workspaces.list.courseCodeLabel')}
+                  value={courseCode}
+                  maxLength={16}
+                  onChange={(event) => {
+                    setCourseCode(event.target.value)
+                  }}
+                />
+                <Field
+                  label={t('workspaces.list.examDateLabel')}
+                  type="date"
+                  value={examDate}
+                  onChange={(event) => {
+                    setExamDate(event.target.value)
+                  }}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button type="submit" className="btn btn-primary" disabled={rename.isPending}>
+                    {rename.isPending ? t('workspaces.list.saving') : t('actions.save')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-quiet"
+                    onClick={() => {
+                      setName(workspace.name)
+                      setCourseCode(workspace.course_code ?? '')
+                      setExamDate(workspace.exam_date ?? '')
+                      setMode('idle')
+                      rename.reset()
+                    }}
+                  >
+                    {t('actions.cancel')}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {mode === 'deleting' && (
+              <div className="note note-danger flex flex-col items-start gap-2">
+                <p className="font-medium">
+                  {t('workspaces.list.deleteConfirmTitle', { name: workspace.name })}
+                </p>
+                <p className="text-small">
+                  {workspace.source_count === 0
+                    ? t('workspaces.list.deleteNoSources')
+                    : t('workspaces.list.deleteSources', { count: workspace.source_count })}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    autoFocus
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      remove.mutate(workspace.id, {
+                        onSuccess: () => {
+                          setMode('idle')
+                        },
+                      })
+                    }}
+                  >
+                    {remove.isPending
+                      ? t('workspaces.list.deleting')
+                      : t('workspaces.list.deleteConfirm')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-quiet"
+                    onClick={() => {
+                      remove.reset()
+                      setMode('idle')
+                    }}
+                  >
+                    {t('workspaces.keepIt')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {renameError !== null && (
+              <ApiErrorNotice error={renameError} noun={t('workspaces.noun')} />
+            )}
+            {removeError !== null && (
+              <ApiErrorNotice error={removeError} noun={t('workspaces.noun')} />
+            )}
           </div>
-        )}
-
-        {/* The date the student set, formatted in the reader's own calendar and
-            never as a countdown: nothing here knows how many days are left, and a
-            countdown that disagreed with the student's own calendar would be
-            wrong on exactly the day it mattered. A workspace with no date omits
-            the line rather than showing a dash. */}
-        {typeof exam === 'string' && exam.length > 0 && mode !== 'renaming' && (
-          <p className="meta uppercase wrap-anywhere">
-            {t('workspaces.list.examLine', {
-              date: formatInZone(new Date(`${exam}T00:00:00Z`), 'UTC', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-              }),
-            })}
-          </p>
-        )}
-
-        {renameError !== null && (
-          <ApiErrorNotice error={renameError} noun={t('workspaces.noun')} />
-        )}
-        {removeError !== null && (
-          <ApiErrorNotice error={removeError} noun={t('workspaces.noun')} />
         )}
       </div>
     </li>

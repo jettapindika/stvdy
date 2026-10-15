@@ -928,7 +928,7 @@ fn replan_keeps_pinned_blocks_exactly() {
         pinned.clone(),
         config(50, 10, 0, 0, 0.0),
     );
-    let proposal = stvdy_core::planner::replan(&input);
+    let proposal = stvdy_core::planner::propose(&input);
 
     for interval in &pinned {
         let found = proposal.blocks.iter().find(|block| {

@@ -1,7 +1,7 @@
-// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
-// relaxations in clippy.toml are not guaranteed to apply (see Task 1).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
+// relaxations in clippy.toml are not guaranteed to apply (see Task 1).
 //! Guards the sync contract: every +sync table carries the sync columns and both
 //! triggers, the trigger set matches the spec's table list, and a write produces
 //! exactly one `change_log` row with the right op.

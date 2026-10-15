@@ -120,6 +120,9 @@ export default defineConfig({
     // serve a file outside its allowed list. Granting exactly the one directory
     // keeps the rest of the repo unreachable from the browser.
     fs: { allow: ['.', '../config'] },
+    proxy: process.env.VITE_API_PROXY ? {
+      '/api': { target: process.env.VITE_API_PROXY, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '/api') },
+    } : undefined,
   },
 
   build: {

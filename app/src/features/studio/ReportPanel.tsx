@@ -16,6 +16,7 @@ import {
 } from '@/api/queries/reports'
 import { useSources } from '@/api/queries/sources'
 import { Field } from '@/components/ui/Field'
+import { Select } from '@/components/ui/Select'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { REPORT_CREDITS } from '@/features/billing/plans'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
@@ -264,25 +265,19 @@ function CheatsheetForm({
         />
         <span className="text-xs text-muted">{t('studio.cheatsheet.examDateHint')}</span>
       </div>
-      <div className="flex flex-col gap-1">
-        <label className="label" htmlFor="cheatsheet-depth">
-          {t('studio.cheatsheet.depthLabel')}
-        </label>
-        <select
-          id="cheatsheet-depth"
-          className="field"
-          value={depth}
-          onChange={(event) => {
-            setDepth(event.target.value as CheatsheetDepth)
-          }}
-        >
-          {(['brief', 'normal', 'thorough'] as const).map((value) => (
-            <option key={value} value={value}>
-              {depthLabel[value]}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Select
+        label={t('studio.cheatsheet.depthLabel')}
+        value={depth}
+        onChange={(event) => {
+          setDepth(event.target.value as CheatsheetDepth)
+        }}
+      >
+        {(['brief', 'normal', 'thorough'] as const).map((value) => (
+          <option key={value} value={value}>
+            {depthLabel[value]}
+          </option>
+        ))}
+      </Select>
       <SourcePicker
         workspaceId={workspaceId}
         sources={sources}

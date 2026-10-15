@@ -12,11 +12,11 @@ serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
-# The client engine's `Transport` trait is async, and the engine's pass is a
-# `tokio` future. Neither is needed by the protocol half today, but the manifest
-# change lands here so the client slice (Task 8) adds code, not dependencies.
+# The client engine's `Transport` trait is async; `async-trait` is the attribute it uses.
 async-trait.workspace = true
-tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true

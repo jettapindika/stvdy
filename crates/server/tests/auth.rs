@@ -5,10 +5,10 @@
 //! a happy-path test: it only shows up when an *already rotated* token is
 //! presented again.
 
-// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
-// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
+// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sqlx::PgPool;

@@ -5,6 +5,7 @@ import { useChunk, useMessages } from '@/api/queries/chat'
 import { useSources } from '@/api/queries/sources'
 import { asApiError } from '@/api/errors'
 import type { ChunkCitation } from '@/api/sse'
+import { Icon } from '@/components/ui/Icon'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
@@ -34,7 +35,14 @@ import { useChatStream } from './useChatStream'
  * arriving in silence, each breaks the screen for a keyboard or screen-reader
  * user even though it looks perfect.
  */
-export function ChatScreen({ workspaceId }: { workspaceId: string }) {
+export function ChatScreen({
+  workspaceId,
+  onViewCitation,
+}: {
+  workspaceId: string
+  /** Called when a citation is opened, so the reference panel can show it. */
+  onViewCitation?: (citation: ChunkCitation) => void
+}) {
   const { t } = useTranslation()
   const messages = useMessages(workspaceId)
   const sources = useSources(workspaceId)
@@ -115,9 +123,15 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             messages={messages.data}
             turn={stream.turn}
             sourceTitle={titleOf}
-            onOpenCitation={setOpenCitation}
+            onOpenCitation={(citation) => {
+              setOpenCitation(citation)
+              onViewCitation?.(citation)
+            }}
             onRetry={stream.retry}
             emptyReason={readySources.length === 0 ? noSourcesReason : readyReason}
+            onFollowUp={(text) => {
+              setDraft(text)
+            }}
           />
         )}
 
@@ -138,66 +152,67 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
         />
       )}
 
+      {/* The floating composer: `.chat-composer` gives it the float treatment
+          (border, shadow, sheet radius). It is NOT position:fixed — it is a flow
+          sibling inside the flex column, so it stays within its panel's grid
+          track. See the advisory about not using fixed positioning. */}
       <form
-        className="flex flex-col gap-3 border-t border-border px-5 py-3 md:px-6"
+        className="chat-composer mx-3 mb-3"
         onSubmit={(event) => {
           event.preventDefault()
           submit()
         }}
       >
-        <SourcePicker
-          workspaceId={workspaceId}
-          sources={readySources}
-          selected={selected}
-          onChange={setSelected}
-          disabled={streaming}
-        />
-
-        <div className="flex flex-col gap-1">
-          <label className="label" htmlFor="chat-message">
+        <div className="flex flex-col gap-2">
+          <label className="text-label font-medium" htmlFor="chat-message">
             {t('chat.composer.label')}
           </label>
           <textarea
             id="chat-message"
-            className="field min-h-20"
+            className="field min-h-11"
             value={draft}
+            placeholder={t('chat.composer.label')}
             aria-describedby="chat-message-hint"
             onChange={(event) => {
               setDraft(event.target.value)
             }}
             onKeyDown={(event) => {
-              // Enter sends and Shift+Enter breaks the line, which is the
-              // convention a chat box is expected to follow. The form still
-              // submits on the button, so nothing here is the only way to send.
               if (event.key !== 'Enter' || event.shiftKey) return
               event.preventDefault()
               submit()
             }}
           />
-          <span id="chat-message-hint" className="text-xs text-muted">
-            {t('chat.composer.hint')}
-          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <SourcePicker
+              workspaceId={workspaceId}
+              sources={readySources}
+              selected={selected}
+              onChange={setSelected}
+              disabled={streaming}
+            />
+            <button type="button" className="answer-action" aria-label={t('chat.composer.attach')}>
+              <Icon name="paperclip" size={20} />
+              <span className="hidden md:inline">{t('chat.composer.attach')}</span>
+            </button>
+          </div>
+
           {streaming ? (
             <button type="button" className="btn btn-secondary" onClick={stream.stop}>
               {t('actions.stop')}
             </button>
           ) : (
-            <button type="submit" className="btn btn-primary" disabled={!canSend}>
+            <button type="submit" className="btn btn-primary min-w-24" disabled={!canSend}>
               {t('chat.composer.ask')}
             </button>
           )}
+        </div>
 
-          {/* The grounding toggle, default on. It sits first because it is the
-              setting that changes what an answer *is*, and it is a checkbox so
-              the state is announced as checked/unchecked rather than conveyed by
-              colour. The tooltip is `title` rather than a custom popover: the
-              text is one sentence, and a custom one would need its own focus and
-              dismissal behaviour to be worth the accessibility cost. */}
+        <div className="flex flex-wrap items-center gap-4">
           <label
-            className="flex min-h-11 items-center gap-2 text-sm text-muted"
+            className="composer-toggle"
             title={t('honesty.sourcesOnlyTooltip')}
           >
             <input
@@ -212,13 +227,7 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             {t('honesty.sourcesOnly')}
           </label>
 
-          {/* A checkbox is its own on/off state: the box is filled when checked
-              and the label is the accessible name, so the state is announced as
-              "checked" by a screen reader and read as a tick by a sighted user
-              without either depending on the accent colour. The row is a 44px
-              label wrapping the box, so the whole row is the target on a phone
-              and the box itself is a normal tab stop with the shared focus ring. */}
-          <label className="flex min-h-11 items-center gap-2 text-sm text-muted">
+          <label className="composer-toggle">
             <input
               type="checkbox"
               checked={useWeb}
@@ -230,14 +239,8 @@ export function ChatScreen({ workspaceId }: { workspaceId: string }) {
             />
             {t('chat.webToggle.label')}
           </label>
-          <span id="chat-web-hint" className="text-xs text-muted">
-            {t('chat.webToggle.hint')}
-          </span>
         </div>
 
-        {/* The honesty line. It is part of the composer rather than a tooltip:
-            the spec requires it under every composer, and a warning nobody has to
-            open is a warning most people never read. */}
         <p id="chat-grounding-hint" className="composer-hint">
           {t('honesty.composerHint')}
         </p>

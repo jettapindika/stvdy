@@ -1,7 +1,7 @@
-// See Task 1: `#[sqlx::test]` is a macro harness, so clippy.toml's test
-// relaxations are not guaranteed to apply.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// See Task 1: `#[sqlx::test]` is a macro harness, so clippy.toml's test
+// relaxations are not guaranteed to apply.
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sqlx::PgPool;

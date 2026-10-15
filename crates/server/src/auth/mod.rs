@@ -1,5 +1,6 @@
 //! Auth: password hashing, tokens, verification and the request extractors.
 
+pub mod cookie;
 pub mod email_verify;
 pub mod extract;
 pub mod google;

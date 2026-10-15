@@ -130,7 +130,8 @@
     "done": "Done",
     "stop": "Stop",
     "send": "Send",
-    "search": "Search"
+    "search": "Search",
+    "more": "More"
   },
   "states": {
     "loading": "Loading",
@@ -142,7 +143,9 @@
     "synced": "Synced",
     "syncing": "Syncing",
     "needsAttention": "Needs attention",
-    "notBuiltYet": "Not built yet. This screen will hold {{what}}."
+    "notBuiltYet": "Not built yet. This screen will hold {{what}}.",
+    "crashReason": "The page ran into a problem. Reload to try again.",
+    "reload": "Reload"
   },
   "honesty": {
     "composerHint": "AI can make mistakes. Check the citations.",
@@ -152,7 +155,8 @@
     "basedOnSources_other": "Based on {{count}} sources",
     "notInSources": "This isn't covered in your selected sources.",
     "suggested": "Suggested {{what}}",
-    "nothingAddedYet": "Nothing is added until you confirm."
+    "nothingAddedYet": "Nothing is added until you confirm.",
+    "noSourcesCited": "This answer did not cite any of your sources."
   },
   "lock": {
     "notOnPlan": "Not available on your plan",
@@ -166,13 +170,30 @@
     "skipToContent": "Skip to content",
     "semester": "This semester",
     "railNote": "Your work, in one place. One step at a time.",
-    "settingsEyebrow": "Your workspace / Settings"
+    "settingsEyebrow": "Your workspace / Settings",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "routes": {
     "notFound": {
       "title": "Not found",
       "what": "nothing: this address does not match a screen"
-    }
+    },
+    "today": "Today — Stvdy",
+    "workspaces": "Workspaces — Stvdy",
+    "workspace": "{{name}} — Stvdy",
+    "study": "Study — Stvdy",
+    "studyDeck": "Review — Stvdy",
+    "quiz": "Quiz — Stvdy",
+    "planner": "Planner — Stvdy",
+    "settings": "Settings — Stvdy",
+    "billing": "Plan — Stvdy",
+    "devices": "Devices — Stvdy",
+    "admin": "Admin — Stvdy",
+    "dashboard": "Dashboard — Stvdy",
+    "signIn": "Sign in — Stvdy",
+    "signUp": "Sign up — Stvdy",
+    "verify": "Verify — Stvdy"
   },
   "billing": {
     "planAndUsage": "Plan and usage",
@@ -586,6 +607,10 @@
       "streak": "{{count}}-day study streak",
       "loading": "Checking your study"
     },
+    "failed": {
+      "title": "Could not load today",
+      "reason": "Something went wrong while fetching your study data. Check your connection and reload."
+    },
     "capture": {
       "title": "Quick capture",
       "label": "What do you have to do?",
@@ -608,7 +633,12 @@
       "afternoon": "Good afternoon, {{name}}. Here is what is on your desk today.",
       "evening": "Good evening, {{name}}. Here is what is on your desk today."
     },
-    "openDay": "Open the calendar for {{date}}",
+    "datePicker": {
+      "label": "Date selector",
+      "openLabel": "Open date picker",
+      "prevMonth": "Previous month",
+      "nextMonth": "Next month"
+    },
     "due": {
       "eyebrow": "Due now",
       "count_one": "{{count}} flashcard due for review",
@@ -618,7 +648,6 @@
       "encouragement": "A little study, at your own pace.",
       "emptyTitle": "No study days yet",
       "emptyReason": "A day counts when you review a card, take a quiz, or log a session. One session today is enough to start.",
-      "emptyAction": "Open Study",
       "dayActive": "A day you studied",
       "dayIdle": "A day with no study"
     },
@@ -661,7 +690,19 @@
     "sources": {
       "loading": "Loading this workspace's sources",
       "emptyTitle": "No sources yet",
-      "emptyReason": "Add a PDF or paste text above. Each one is chunked and indexed, so a question can be answered from any of them and cite the page it came from."
+      "emptyReason": "Add a PDF or paste text above. Each one is chunked and indexed, so a question can be answered from any of them and cite the page it came from.",
+      "showAll": "Show all {{count}} sources",
+      "showLess": "Show fewer",
+      "dropHint": "PDF, PPTX or a web link",
+      "dropSize": "Drop files here · up to 50 MB",
+      "readyHint": "Ready = indexed for chat. Read-only = course-managed access."
+    },
+    "reference": {
+      "tabs": "Reference panel",
+      "pdfViewer": "PDF Viewer",
+      "pageOf": "{{current}} / {{total}}",
+      "openedFrom": "Page {{page}} opened from citation [{{index}}]",
+      "viewerEmpty": "Open a source or click a citation to view the document here."
     },
     "source": {
       "untitled": "Untitled source",
@@ -684,7 +725,9 @@
       "removeIt": "Remove it",
       "noun": "sources",
       "kindOther": "Source",
-      "open": "Open source"
+      "open": "Open source",
+      "errorScanned": "This PDF looks scanned. Text recognition is not available yet.",
+      "errorNoText": "No text could be extracted from this document."
     },
     "upload": {
       "legend": "Add material",
@@ -755,20 +798,19 @@
   },
   "chat": {
     "composer": {
-      "label": "Ask about this workspace",
-      "hint": "Enter sends. Shift and Enter starts a new line.",
-      "ask": "Ask"
+      "label": "Ask your sources",
+      "ask": "Send ↑",
+      "attach": "Attach"
     },
     "webToggle": {
-      "label": "Search the web too",
-      "hint": "Also searches outside this workspace and cites what it finds, with links. Answers stay grounded in your sources, and a search that finds nothing still answers from them."
+      "label": "Search the web"
     },
     "empty": {
       "title": "No questions yet",
-      "noSources": "Ask once a source has finished indexing. A question is answered from this workspace’s material and cites the page each claim came from.",
-      "noSourcesWithWeb": "Ask once a source has finished indexing. A question is answered from this workspace’s material and cites the page each claim came from. Web results are searched for as well.",
-      "default": "Ask about anything in this workspace’s material. The answer cites the page each claim came from.",
-      "defaultWithWeb": "Ask about anything in this workspace’s material. The answer cites the page each claim came from. Web results are cited with links to where they came from."
+      "noSources": "Ask once a source has finished indexing. A question is answered from this workspace's material and cites the page each claim came from.",
+      "noSourcesWithWeb": "Ask once a source has finished indexing. A question is answered from this workspace's material and cites the page each claim came from. Web results are searched for as well.",
+      "default": "Ask about anything in this workspace's material. The answer cites the page each claim came from.",
+      "defaultWithWeb": "Ask about anything in this workspace's material. The answer cites the page each claim came from. Web results are cited with links to where they came from."
     },
     "list": {
       "label": "Conversation",
@@ -777,7 +819,24 @@
     },
     "retry": "Ask again",
     "turn": {
-      "you": "You"
+      "you": "You",
+      "streaming": "Writing…"
+    },
+    "answer": {
+      "disclaimer": "AI-generated explanation. Check the cited pages before using it in assessed work.",
+      "viewCited": "View cited page →",
+      "copy": "Copy",
+      "saveToStudio": "Save to Studio",
+      "makeFlashcards": "Make {{count}} Flashcards - {{credits}} credits"
+    },
+    "thinking": {
+      "show": "Show thinking",
+      "hide": "Hide thinking"
+    },
+    "followUp": {
+      "heading": "Continue the thread",
+      "workedExample": "Show a worked example",
+      "flashcards": "Make flashcards from this"
     }
   },
   "error": {
@@ -1202,6 +1261,13 @@
       "inputHint": "Give your session a clear, specific name.",
       "inputError": "Enter a session name to continue.",
       "inputManaged": "This name is managed by your course.",
+      "selectTitle": "Select inputs",
+      "selectMeta": "Custom chevron / same field tokens",
+      "selectLabel": "Difficulty",
+      "selectHint": "Choose the question difficulty level.",
+      "selectOption1": "Easy",
+      "selectOption2": "Medium",
+      "selectOption3": "Hard",
       "targets": "Target sizes",
       "targetsMeta": "32 / 44 px",
       "targetsDescription": "44px is the shared default and the phone minimum; 32px with 8px gaps is the desktop floor. The field is 44px for the same reason: on a phone a control that is hard to hit is a control that gets missed.",
@@ -1250,7 +1316,7 @@
     },
     "radius": {
       "title": "Corners",
-      "meta": "8 / 12 / 16 / 999 px",
+      "meta": "12 / 20 / 24 / 999 px",
       "description": "Corners follow function. One pixel ruled borders, and elevation only for a layer that genuinely floats above the page.",
       "controls": "Controls",
       "cards": "Cards",
@@ -1866,6 +1932,17 @@
       "data": "Data"
     },
     "sections": "Settings sections",
+    "back": "Back to Settings",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "readFailed": "Your settings could not be loaded. Retry to load them again.",
+    "description": {
+      "account": "Email, plan, progress and your data",
+      "study": "Study hours, reminders and language",
+      "calendar": "Calendar feeds and connected accounts",
+      "devices": "Signed-in devices and local sync controls",
+      "appearance": "Match your device, or choose light or dark"
+    },
     "account": {
       "email": "Email address",
       "plan": "Plan",
@@ -1890,7 +1967,7 @@
       "title": "Notifications",
       "channels": "How Stvdy reaches you",
       "locked": "Available on {{plan}}",
-      "notYet": "Not available yet",
+      "notYet": "Unavailable on this deployment",
       "quiet": "Quiet hours",
       "quietHint": "No notifications inside this window.",
       "quietFrom": "From",
@@ -1987,7 +2064,8 @@
       "editHint": "The fields this action accepts, as JSON. Confirm without changing them to add exactly what was proposed.",
       "editInvalidJson": "That is not valid JSON. Fix it, or cancel the edit to confirm what was proposed.",
       "editNotObject": "The action's fields must be a JSON object.",
-      "noun": "action"
+      "noun": "action",
+      "awaiting": "Awaiting confirmation"
     },
     "tool": {
       "create_task": "Add a task",

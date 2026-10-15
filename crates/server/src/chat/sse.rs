@@ -21,6 +21,16 @@ pub fn token(text: &str) -> Event {
         .unwrap_or_else(|_| fallback())
 }
 
+/// `event: reasoning` with one reasoning fragment from chain-of-thought.
+/// Sent only when the provider exposes it; a client that never sees this event
+/// simply has no thinking disclosure to show, which is the correct empty state.
+pub fn reasoning(text: &str) -> Event {
+    Event::default()
+        .event("reasoning")
+        .json_data(serde_json::json!({ "t": text }))
+        .unwrap_or_else(|_| fallback())
+}
+
 /// `event: citations` with the resolved, structured array. Sent even when empty:
 /// a client that only ever sees this event on success cannot tell "no citations"
 /// from "the stream died before the citations event".
@@ -128,10 +138,11 @@ mod tests {
     /// than trusted to stay spelled the same.
     #[test]
     fn the_event_names_match_the_documented_contract() {
-        let names = ["token", "citations", "usage", "done", "error"];
+        let names = ["token", "reasoning", "citations", "usage", "done", "error"];
         for name in names {
             let event = match name {
                 "token" => token("x"),
+                "reasoning" => reasoning("thinking"),
                 "citations" => citations(&[]),
                 "usage" => usage(1, 9),
                 "done" => done(uuid::Uuid::now_v7(), false),

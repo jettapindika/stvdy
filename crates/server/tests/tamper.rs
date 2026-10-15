@@ -15,10 +15,10 @@
 //! exact `code`, and the counted ones by their `limit` and `used`, because a bare 422
 //! proves only that something failed.
 
-// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
-// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// Test code may unwrap/expect/panic; `#[sqlx::test]` is a macro harness, so the
+// relaxations in clippy.toml are not guaranteed to apply (see Phase 0 Task 1).
 use std::path::Path;
 use std::sync::Arc;
 

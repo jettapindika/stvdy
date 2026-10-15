@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { PageFooter } from '@/components/layout/Section'
 import { Wordmark } from '@/components/ui/BrandIllustration'
+import { MotionSurface } from '@/components/ui/MotionSurface'
 
 /**
  * The chrome the auth screens share.
@@ -13,10 +14,8 @@ import { Wordmark } from '@/components/ui/BrandIllustration'
  * border, and there is no shadow, because elevation is reserved for a layer that
  * genuinely floats above the page.
  *
- * The heading is `text-h2` up to the `sm` breakpoint and `text-h1` from there,
- * which is the frame's own measurement: 24/32 on a phone, 32/42 on a desktop. A
- * 32px heading is not wrong on a phone, but the frame reduces it, and the design's
- * values are the requirement.
+ * Auth headings use the responsive shared type scale; body copy and fields keep
+ * the 16px reading floor.
  *
  * Fields come from `components/ui/Field`, so a form here is wired exactly like a
  * form anywhere else in the app.
@@ -46,7 +45,7 @@ export function AuthCard({
       </header>
 
       <main className="auth-main">
-        <div className="auth-card card motion-entrance flex w-full max-w-[27.5rem] flex-col gap-5 p-6 sm:gap-6 sm:p-8">
+        <MotionSurface className="auth-card card flex w-full max-w-[30rem] flex-col gap-6 p-6 sm:gap-7 sm:p-10">
           <div className="flex flex-col gap-2">
             <h1 className="text-h2 sm:text-h1">{title}</h1>
             <p className="text-body text-muted">{subtitle}</p>
@@ -63,7 +62,7 @@ export function AuthCard({
               <div className="flex flex-wrap items-center justify-center gap-2">{footer}</div>
             </>
           )}
-        </div>
+        </MotionSurface>
       </main>
 
       <div className="auth-footer">

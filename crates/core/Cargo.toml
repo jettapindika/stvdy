@@ -24,7 +24,6 @@ hex.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
-uuid.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [lints]

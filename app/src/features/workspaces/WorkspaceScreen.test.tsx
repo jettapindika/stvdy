@@ -285,14 +285,14 @@ describe('the sources panel', () => {
     )
   }, 15000)
 
-  it('shows the readable ingestion error when a source fails', async () => {
-    sources = [source({ id: 's1', title: 'Broken scan', status: 'failed', error: 'No text layer found' })]
+  it('shows the localized ingestion error when a source fails', async () => {
+    sources = [source({ id: 's1', title: 'Broken scan', status: 'failed', error: 'no extractable text: the document may be a scan' })]
     statuses = {
       s1: {
         id: 's1',
         status: 'failed',
         chunk_count: null,
-        error: 'No text layer found, so nothing could be extracted',
+        error: 'no extractable text: the document may be a scan',
         updated_at: '2026-10-11T08:00:00Z',
       },
     }
@@ -301,7 +301,7 @@ describe('the sources panel', () => {
 
     expect(await screen.findByText('Failed')).toBeInTheDocument()
     expect(
-      await screen.findByText('No text layer found, so nothing could be extracted'),
+      await screen.findByText('This PDF looks scanned. Text recognition is not available yet.'),
     ).toBeInTheDocument()
   })
 

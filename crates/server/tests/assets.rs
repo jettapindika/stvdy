@@ -15,10 +15,10 @@
 //!    type the browser needs. A 200 with the wrong MIME type is a stylesheet that does not
 //!    apply, which is the same silent failure one step later.
 
-// `#[sqlx::test]` is a macro harness, so clippy.toml's test relaxations are not guaranteed
-// to apply to the generated code.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// `#[sqlx::test]` is a macro harness, so clippy.toml's test relaxations are not guaranteed
+// to apply to the generated code.
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sqlx::PgPool;

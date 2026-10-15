@@ -53,12 +53,12 @@ export function FocusTimer() {
 
   const block = settings.data?.settings
 
-  // The readout is **elapsed time**, and it stays elapsed when nothing is running.
-  // The frame shows its block length here at `READY` (`25:00`), which is a countdown
-  // position; this timer counts up, so the same number would mean two different things
-  // within one second of pressing Start, and a student would read the jump from
-  // `50:00` to `00:01` as the timer resetting. The plan is stated beside it instead,
-  // in the block-length line, and `Ready` is the heading's word.
+  // The readout is **elapsed time** and stays elapsed when nothing is running.
+  // The Figma frame shows the block length at idle (`25:00`), but the number that
+  // gets logged is the elapsed time — never the configured block length
+  // (useFocusTimer.ts:26-33). Showing a countdown would display a number that
+  // disagrees with what the button beside it says ("Stop and log 5 min" while the
+  // readout reads 20:00). The plan is stated in the session-length line instead.
   const clock =
     state.kind === 'idle'
       ? '00:00'
@@ -66,8 +66,6 @@ export function FocusTimer() {
           state.elapsedSec % 60,
         ).padStart(2, '0')}`
 
-  // The state word is short on purpose: it sits in the card's heading, and a
-  // sentence there would wrap the heading at 200% text.
   const stateWord =
     state.kind === 'running'
       ? t('today.timer.running')
@@ -76,48 +74,41 @@ export function FocusTimer() {
         : t('today.timer.ready')
 
   return (
-    <div className="card flex flex-col gap-4 p-6">
-      {/* The state word goes through `action` rather than `meta`, because the frame
-          types it in caps (`READY`) and `WidgetHeading`'s `meta` renders the sentence-case
-          `.meta`. `.eyebrow` is the class carrying the uppercase treatment; the word is
-          still a plain word, so the state is readable in monochrome and to a screen
-          reader. */}
+    <div className="card @container flex flex-col gap-4 p-6">
       <WidgetHeading
         title={t('today.timer.title')}
         action={<span className="eyebrow">{stateWord}</span>}
       />
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-        {/* The design's readout is 36/47.5 mono, and the scale's nearest step is
-            `text-h1` at 32/42 — the size utilities are a closed set and a new one
-            is a change to the frozen stylesheet, so the readout takes the closest
-            step rather than an inline pixel value nothing else can share. */}
-        <p className="font-mono text-h1 tabular-nums">{clock}</p>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <p
+          className="font-mono leading-normal tabular-nums"
+          style={{ fontSize: `min(var(--text-h1), ${90 / (0.6 * clock.length)}cqi)` }}
+        >
+          {clock}
+        </p>
 
-        {/* The readout is the measurement; the block length is the plan it was
-            started against, and it is mono because it is metadata. */}
+        {/* The block length is the plan the session runs against; mono caps
+            matches the spec's metadata treatment and the Figma frame. Rendered
+            as a plain auto-basis child so `flex-wrap` can move it to its own
+            line at 200% text — `flex-1 min-w-0` would give it a hypothetical
+            main size of 0 and squeeze it into leftover space instead. */}
         {block !== undefined ? (
-          <p className="eyebrow">
-            {t('today.timer.sessionLength', {
-              focus: block.block_len_min,
-              rest: block.break_min,
-            })}
-          </p>
+          <p className="eyebrow">{t('today.timer.sessionLength', {
+            focus: block.block_len_min,
+            rest: block.break_min,
+          })}</p>
         ) : null}
 
-        {/* One control, at the right end of the row, which is the frame's
-            placement. `ml-auto` rather than `justify-between` because the row has
-            to wrap: at 200% text the readout and the button take separate lines,
-            and the button then sits at the row's start. */}
         {state.kind === 'idle' ? (
-          <button type="button" className="btn btn-secondary ml-auto" onClick={() => void start()}>
+          <button type="button" className="btn btn-secondary ml-auto shrink-0" onClick={() => void start()}>
             <Icon name="play" size={16} />
             {t('today.timer.start')}
           </button>
         ) : null}
 
         {state.kind === 'running' ? (
-          <button type="button" className="btn btn-secondary ml-auto" onClick={() => void stop()}>
+          <button type="button" className="btn btn-secondary ml-auto shrink-0" onClick={() => void stop()}>
             {t('today.timer.stopAndLog', { count: state.elapsedMin })}
           </button>
         ) : null}

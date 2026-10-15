@@ -15,10 +15,10 @@
 //! function would prove the function works and say nothing about whether `main` routes the
 //! argument to it.
 
-// `#[sqlx::test]` is a macro harness, so clippy.toml's test relaxations are not guaranteed to
-// apply to the generated code.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+// `#[sqlx::test]` is a macro harness, so clippy.toml's test relaxations are not guaranteed to
+// apply to the generated code.
 use std::process::Command;
 
 use sqlx::{Executor, PgPool};

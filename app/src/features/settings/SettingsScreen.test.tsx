@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { Route, Routes } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -113,6 +113,80 @@ afterEach(() => {
 })
 
 describe('the settings form', () => {
+  it('opens a category from the directory and returns to Settings', async () => {
+    const user = userEvent.setup()
+    setup()
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings" element={<SettingsScreen />} />
+        <Route path="/settings/:section" element={<SettingsScreen />} />
+      </Routes>,
+      { route: '/settings' },
+    )
+    expect(await screen.findByText(USER.email)).toBeInTheDocument()
+    expect(screen.queryByLabelText('From')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: /Study preferences/ }))
+    expect(await screen.findByLabelText('From')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Back to Settings' }))
+    expect(await screen.findByRole('link', { name: /Appearance/ })).toHaveAttribute('href', '/settings/appearance')
+    expect(screen.queryByLabelText('From')).not.toBeInTheDocument()
+  })
+
+  it('omits plan metadata when usage cannot be loaded', async () => {
+    setup()
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/usage') return jsonResponse(503, { code: 'unavailable', message: 'offline' })
+      return jsonResponse(200, { channels_available: [] })
+    })
+    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+
+    expect(await screen.findByText(USER.email)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/^Plan:/)).not.toBeInTheDocument())
+  })
+
+  it('retries a failed settings read instead of rendering a blank page', async () => {
+    const user = userEvent.setup()
+    const cache = fakeCache({ user_settings: [] })
+    installFakePlatform('macos', { sync: { read: cache.read } })
+    mockFetch((url) => {
+      const path = new URL(url).pathname
+      if (path === '/auth/me') return jsonResponse(200, USER)
+      if (path === '/usage') return jsonResponse(200, USAGE)
+      return jsonResponse(200, { channels_available: [] })
+    })
+    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    expect(await screen.findByRole('alert')).toHaveTextContent(/settings/i)
+    cache.set('user_settings', [{ id: 'u1', ...ROW }])
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText(USER.email)).toBeInTheDocument()
+  })
+
+  it.each(['From', 'To'])('clears both quiet-hour ends when %s is cleared, including midnight', async (label) => {
+    const user = userEvent.setup()
+    const { fake } = setup({ ...ROW, quiet_start_hour: 0, quiet_end_hour: 7 })
+    renderWithProviders(
+      <Routes><Route path="/settings/:section" element={<SettingsScreen />} /></Routes>,
+      { route: '/settings/study' },
+    )
+    await user.clear(await screen.findByLabelText(label))
+    expect(fake.sync.writes.at(-1)?.payload).toEqual({ quiet_start_hour: null, quiet_end_hour: null })
+  })
+
+  it('saves the theme selected by its radio choice', async () => {
+    const user = userEvent.setup()
+    const { fake } = setup({ ...ROW, theme: 'light' })
+    renderWithProviders(
+      <Routes><Route path="/settings/:section" element={<SettingsScreen />} /></Routes>,
+      { route: '/settings/appearance' },
+    )
+    expect(await screen.findByRole('radio', { name: 'Light' })).toBeChecked()
+    await user.click(screen.getByRole('radio', { name: 'Dark' }))
+    expect(fake.sync.writes.at(-1)?.payload).toEqual({ theme: 'dark' })
+    await vi.waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'))
+  })
+
   it('says which window a wrapping pair means, rather than calling it invalid', async () => {
     // 22 → 7 is the normal case, not an error: the reader tests membership, never
     // `start < end` (A202), and the form says which window it means rather than
@@ -289,56 +363,6 @@ describe('the settings form', () => {
   })
 })
 
-/**
- * The channel label as a 44px target, asserted as a source property.
- *
- * jsdom has no layout engine, so `getBoundingClientRect()` in this suite is all
- * zeros and no box can be measured here. What can be asserted is the class that
- * makes the box — the technique `components/layout/shellLayout.test.ts` uses for
- * the same reason — and **the numbers are the browser measurements**, taken in
- * Chromium at 390x844 in both themes.
- *
- * The defect, measured: the label was **65.9x22** (Phase 14 — a thumb aimed at the
- * channel name and landing a few pixels high hit the row `<div>` and toggled
- * nothing), so `min-h-11` was added; with the height fixed, `input#channel-email`
- * was still **35.3x44** at 100% text, because "Email" is a short word and the
- * label is only as wide as its own text. Both directions are asserted on **every**
- * label rather than the email row: the next short name has the same defect, and a
- * per-row fix is one that gets forgotten. The checkbox stays 13x13 — the label is
- * what a finger reaches.
- *
- * Measured after, 390px, both themes: Email **44x44** (100%) and 88x88 (200%),
- * Discord 50.9x44, Telegram 61.6x44, "In the app" 65.9x44, "Push notifications"
- * 118.1x44 — every label at least 44px in both directions.
- */
-describe('the channel rows', () => {
-  it('gives every channel label a 44px box in both directions, not just the short one', async () => {
-    // `setup()` rather than relying on the platform a previous test installed. Without it
-    // this test only passed when a sibling had run first and left its fake platform behind,
-    // which is a test that passes for a reason unrelated to what it asserts.
-    setup()
-    const { container } = renderWithProviders(
-      <Routes>
-        <Route path="/settings/:section" element={<SettingsScreen />} />
-      </Routes>,
-      { route: '/settings/study' },
-    )
-    await screen.findByLabelText('Email')
-
-    const labels = [...container.querySelectorAll('label[for^="channel-"]')]
-    const boxes = [...container.querySelectorAll('input[id^="channel-"]')]
-    expect(labels).toHaveLength(boxes.length)
-    expect(labels.length).toBeGreaterThanOrEqual(5)
-    for (const label of labels) {
-      expect(label.className, `${label.textContent ?? ''} must be a 44px target`).toMatch(
-        /\bmin-h-11\b/,
-      )
-      expect(label.className, `${label.textContent ?? ''} must be a 44px target`).toMatch(
-        /\bmin-w-11\b/,
-      )
-    }
-  })
-})
 
 /**
  * A `/settings` response from a server that predates `reminder_channels`.

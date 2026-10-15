@@ -947,7 +947,6 @@ pub(crate) fn file_stem(title: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use stvdy_core::generation::report::MAX_REPORT_SECTIONS;

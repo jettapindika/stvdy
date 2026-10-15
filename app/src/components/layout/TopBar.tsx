@@ -88,7 +88,7 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { t } = useTranslation()
 
   return (
-    <div className="flex flex-col border-b border-border bg-surface md:hidden">
+    <div className="phone-header flex flex-col md:hidden">
       {/* `flex-wrap` is the 200%-text accommodation, and it is the same one the desktop
           bar makes. At a 32px root the wordmark, the search button and the avatar
           together measure 414px against a 390px phone, and the overflow is reported by
@@ -104,7 +104,7 @@ export function PhoneHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
             type="button"
             onClick={onOpenPalette}
             aria-label={t('palette.open')}
-            className="flex size-11 items-center justify-center rounded-field text-muted hover:bg-surface-raised"
+            className="header-icon flex size-11 items-center justify-center rounded-pill text-muted hover:bg-surface-raised"
           >
             <Icon name="search" size={20} />
           </button>

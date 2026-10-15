@@ -26,6 +26,18 @@ pub const BASE_V2: &str = include_str!("../../../../prompts/base.v2.md");
 /// The version stored with every request composed from [`BASE_V2`].
 pub const BASE_V2_VERSION: &str = "base.v2";
 
+/// The chat base prompt, v3. Supersedes [`BASE_V2`] with two additions:
+/// `<language_and_tone>` gains two anti-filler rules, and a new
+/// `<output_quality>` section adds anti-slop quality rules adapted from
+/// miqdadbadjuber/anti-slop (MIT). Chat composes on v3; task modules stay on
+/// v1's trimmed base.
+///
+/// A38: a shipped version is never edited, only superseded.
+pub const BASE_V3: &str = include_str!("../../../../prompts/base.v3.md");
+
+/// The version stored with every request composed from [`BASE_V3`].
+pub const BASE_V3_VERSION: &str = "base.v3";
+
 /// The shared strict-JSON preamble every task module is followed by.
 pub const JSON_CONTRACT_V1: &str = include_str!("../../../../prompts/json_contract.v1.md");
 

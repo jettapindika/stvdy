@@ -215,7 +215,11 @@ export function useTodayData(window: { from: string; to: string }): TodayData {
   const tasks = useTasks()
   const events = useEvents(window.from, window.to)
   const sessions = useSessions(window.from, window.to)
-  const activity = useActivity(window.from, window.to)
+  // Streak calculation needs ~30 days of history; the caller's window is only
+  // ~24 h for the timeline, which caps the streak at 2 days on web.
+  const activityTo = new Date(window.to)
+  const activityFrom = new Date(activityTo.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const activity = useActivity(activityFrom, activityTo.toISOString())
   const queue = useQuery({ queryKey: ['review-queue'], queryFn: readReviewQueue })
   const setup = useQuery({ queryKey: ['setup-counts'], queryFn: readSetup })
 

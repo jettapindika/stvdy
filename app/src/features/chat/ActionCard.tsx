@@ -195,32 +195,31 @@ export function ActionCard({ action, timeZone }: { action: ActionRow; timeZone: 
   return (
     <section
       aria-label={t('agent.card.label')}
-      className="panel flex flex-col gap-3 px-4 py-4"
+      className="card flex flex-col gap-3 px-4 py-4"
     >
-      <div className="flex items-start gap-3">
-        {/* The state is an icon **and** a word, never a colour alone: `clock` while
-            the proposal is waiting, `check` once it is confirmed. Both carry their
-            sentence beside them. */}
-        <Icon name={pending ? 'clock' : 'check'} className="mt-0.5 shrink-0 text-muted" />
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-body font-medium">
-            {pending
-              ? t('honesty.suggested', { what })
-              : t('agent.card.confirmed')}
-          </p>
-          {createdTitle !== null && (
-            <p className="text-small text-muted">{t('agent.card.created', { title: createdTitle })}</p>
-          )}
-          {/* The server recorded why a confirmed action did not finish (the enqueue
-              failed after the claim committed). It is shown rather than hidden: the
-              row *was* created and the student needs to know the work did not start. */}
-          {action.error !== null && (
-            <p className="note note-danger text-small" role="status">
-              {t('agent.card.failed', { error: action.error })}
-            </p>
-          )}
-        </div>
+      {/* Status row: icon + pending/confirmed chip */}
+      <div className="flex items-center gap-2">
+        <Icon name={pending ? 'calendar' : 'circle-check'} size={20} className="shrink-0 text-muted" />
+        {pending ? (
+          <span className="chip chip-due">{t('agent.card.awaiting')}</span>
+        ) : (
+          <span className="chip chip-ready">{t('agent.card.confirmed')}</span>
+        )}
       </div>
+
+      {/* Proposal heading: the suggested action when pending, the tool name when resolved */}
+      <p className="text-h3 font-heading min-w-0 wrap-anywhere">
+        {pending ? t('honesty.suggested', { what }) : what}
+      </p>
+
+      {createdTitle !== null && (
+        <p className="text-label text-muted">{t('agent.card.created', { title: createdTitle })}</p>
+      )}
+      {action.error !== null && (
+        <p className="note note-danger text-small" role="status">
+          {t('agent.card.failed', { error: action.error })}
+        </p>
+      )}
 
       {pending && (
         <dl className="flex flex-col gap-1">

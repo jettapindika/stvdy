@@ -28,45 +28,30 @@
    ========================================================================== */
 
 :root {
-  /* ground and structure */
-  --bg: #faf8ff;
+  color-scheme: light;
+  --bg: #f5f5f7;
   --surface: #ffffff;
-  --surface-raised: #f2f3ff;
-  /* The spec's `border` is a hairline for panel edges (1.25:1 on the ground),
-     which is right for a divider and cannot carry a control's boundary at the
-     3:1 an input or a focusable outline needs. `--border-strong` is the same hue
-     family taken down to 3.14:1 on surface / 2.98:1 on bg, so a field boundary
-     is a real edge. */
-  --border: #dde0f0;
-  --border-strong: #7e85a6;      /* 3.44:1 on bg, 3.63:1 on surface: a real edge */
+  --surface-raised: #ebebef;
+  --border: #dcdce3;
+  --border-strong: #7e7e8e;
 
-  /* text */
-  --text: #131b2e;        /* 17.16:1 on surface */
-  --text-muted: #464555;  /*  9.36:1 on surface */
-  --text-subtle: #6b6a7c; /*  5.28:1 on surface */
+  --text: #151518;
+  --text-muted: #4f4f5b;
+  --text-subtle: #686874;
 
-  /* actions and brand */
-  --primary: #4f46e5;      /* white on this is 6.29:1 */
-  /* The hover fill. The design states `#4F46E5 -> #3525CD`, and that is a
-     **light-theme** pair: `--primary-text` inverts to `#C4BFFF` in the dark block, and
-     white on `#C4BFFF` is 1.72:1 — below even the 3:1 UI floor, and a regression from the
-     6.29:1 the button has at rest. So hover gets its own token, which is the only way
-     one declaration can be right in both themes. */
-  --primary-hover: #3525cd; /* white on this is 8.90:1 */
+  --primary: #4f46e5;
+  --primary-hover: #3525cd;
   --on-primary: #ffffff;
-  --primary-text: #3525cd; /*  9.14:1 on surface, 7.07:1 on the tint */
+  --primary-text: #3525cd;
   --primary-tint: #e2dfff;
 
-  /* sources and citations */
-  --source: #006591;       /*  4.97:1 on the tint, 6.42:1 on surface */
+  --source: #006591;
   --source-tint: #c9e6ff;
-
-  /* state */
-  --success: #005338;      /*  7.87:1 on the tint */
+  --success: #005338;
   --success-tint: #d5f5e8;
-  --warning: #92400e;      /*  6.37:1 on the tint */
+  --warning: #92400e;
   --warning-tint: #fef3c7;
-  --danger: #ba1a1a;       /*  5.00:1 on the tint */
+  --danger: #ba1a1a;
   --danger-tint: #ffdad6;
 
   /* Course colours: six categorical hues, used as a 4px marker plus a tinted
@@ -76,67 +61,52 @@
   --course-indigo: #4f46e5;
   --course-sky: #0369a1;
   --course-emerald: #047857;
-  --course-amber: #b45309;
+  --course-amber: #92400e;
   --course-rose: #be123c;
   --course-violet: #6d28d9;
   --course-indigo-tint: #e2dfff;
   --course-sky-tint: #c9e6ff;
   --course-emerald-tint: #d5f5e8;
-  --course-amber-tint: #fef3c7;
+  --course-amber-tint: #fbeab5;
   --course-rose-tint: #ffdad6;
   --course-violet-tint: #ede4ff;
 
   /* Elevation, used only where something genuinely floats above the ground. */
   --ring: #4f46e5;          /* 5.97:1 on bg, 6.29:1 on surface */
-  --shadow-float: 0 1px 2px rgb(19 27 46 / 0.05), 0 12px 32px -16px rgb(19 27 46 / 0.18);
+  --shadow-float: 0 16px 48px -24px rgb(0 0 0 / 0.3);
+  /* Select chevron: an inline SVG whose stroke matches `--text-muted`. Defined
+     here so `select.field` references one variable and both theme paths work. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%234f4f5b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0b0f19;
-    --surface: #111827;
-    --surface-raised: #1b2435;
-    --border: #263246;
-    /* 4.04:1 on surface, 4.36:1 on bg. Not a Figma variable: the design's
-       `border/default` is a hairline and cannot carry a control's boundary at the
-       3:1 an input or focusable outline needs, which is the same reason the light
-       theme has one. */
-    --border-strong: #6a789d;
+    color-scheme: dark;
+    --bg: #080809;
+    --surface: #161618;
+    --surface-raised: #232326;
+    --border: #323237;
+    --border-strong: #838390;
 
-    --text: #f1f5f9;        /* 16.19:1 on surface */
-    --text-muted: #b4bdcf;  /*  9.39:1 on surface, 8.24:1 on raised */
-    /* Not a Figma variable. The design has three text levels in the light sheets
-       (primary, muted, on-action) and no fourth; this is the app's caption level,
-       held one step below `--text-muted` so the two stay distinguishable. */
-    --text-subtle: #8493aa; /*  5.69:1 on surface */
+    --text: #f7f7fa;
+    --text-muted: #c2c2cc;
+    --text-subtle: #a0a0ad;
 
-    /* Unchanged in dark: the fill is dark enough for white text at 6.29:1, and
-       the same indigo in both themes is what makes the brand recognisable. */
     --primary: #4f46e5;
-    /* Not a Figma variable — the design states no dark hover fill. Hover goes
-       *darker* here, not lighter: the light theme's `#3525CD` is a shade that reads
-       as "pressed" against a light ground, and on the dark surface the same
-       direction would lighten the fill toward the label and cost the contrast.
-       White on this is 8.14:1. */
     --primary-hover: #3f37c9;
     --on-primary: #ffffff;
-    --primary-text: #c4bfff; /* 10.34:1 on surface, 8.52:1 on the tint */
+    --primary-text: #c4bfff;
     --primary-tint: #28234d;
 
-    --source: #8cd3ff;       /* 10.88:1 on surface, 8.96:1 on the tint */
+    --source: #8cd3ff;
     --source-tint: #0d2b40;
-
-    --success: #85e0ba;      /* 11.29:1 on surface, 8.22:1 on the tint */
+    --success: #85e0ba;
     --success-tint: #10382d;
-    --warning: #f8d787;      /* 12.72:1 on surface, 9.74:1 on the tint */
+    --warning: #f8d787;
     --warning-tint: #392c16;
-    --danger: #ffb4ab;       /* 10.45:1 on surface, 8.20:1 on the tint */
+    --danger: #ffb4ab;
     --danger-tint: #432327;
 
-    /* Course colours: six categorical hues, used as a 4px marker plus a tinted
-       chip plus an initial or icon. Never as the only signal, and never as a
-       status colour: a course is not a state. Each is >= 4.5:1 both on the ground
-       and on its own tint. */
     --course-indigo: #c4bfff;
     --course-sky: #8cd3ff;
     --course-emerald: #85e0ba;
@@ -149,12 +119,9 @@
     --course-amber-tint: #392c16;
     --course-rose-tint: #432327;
     --course-violet-tint: #2a1b4d;
-
-    /* Not a Figma variable; it tracks `--primary-text`, because a focus ring is a
-       brand affordance and the two drifting apart is how a ring ends up invisible
-       on the surface it sits on. 9.61:1 on bg, 8.90:1 on surface. */
     --ring: #c4bfff;
-    --shadow-float: 0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px -16px rgb(0 0 0 / 0.55);
+    --shadow-float: 0 16px 48px -24px rgb(0 0 0 / 0.3);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23c2c2cc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
 }
 
@@ -188,26 +155,11 @@
   --font-heading: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* The scale, as utilities: text-display, text-h1, text-h2, text-h3, text-h4,
-     text-body, text-label, text-small, text-caption, text-meta.
-
-     These are the Figma design's values, which **supersede the earlier spec's
-     scale**. Two of the changes are reversals worth naming, because both were
-     previously rules rather than values:
-
-     - `text-meta` is 11/18 and the phone tab label is 10px. The earlier spec said
-       "NOTHING below 12px"; the design's metadata role is 11px monospace, and it
-       is the single most characteristic line in the redesign (eyebrows, counts,
-       timestamps, keycaps), so the floor is gone rather than approximated.
-     - `text-body` is 16/24 at *both* viewports. It used to be 14/22 on desktop,
-       which made desktop text noticeably smaller than a phone's.
-
-     `text-meta` is set in JetBrains Mono because metadata is the evidence layer:
-     a count or a page reference reads differently from prose at a glance. */
-  --text-display: 3rem;          /* 48 / 62 */
-  --text-display--line-height: 3.875rem;
-  --text-h1: 2rem;               /* 32 / 42 */
-  --text-h1--line-height: 2.625rem;
+  /* Strong page titles, quiet evidence metadata, and a stable 16px reading size. */
+  --text-display: 3rem;
+  --text-display--line-height: 3.5rem;
+  --text-h1: 2.5rem;
+  --text-h1--line-height: 3.25rem;
   --text-h2: 1.5rem;             /* 24 / 32 */
   --text-h2--line-height: 2rem;
   --text-h3: 1.25rem;            /* 20 / 26 */
@@ -224,13 +176,10 @@
   --text-caption--line-height: 1.125rem;
   --text-meta: 0.6875rem;        /* 11 / 18 */
   --text-meta--line-height: 1.125rem;
-  --text-tab: 0.625rem;          /* 10 / 12, the phone tab-bar label only */
-  --text-tab--line-height: 0.75rem;
 
-  /* Shape. 8 controls, 12 cards, 16 sheets and modals, 999 chips. */
-  --radius-field: 8px;
-  --radius-card: 12px;
-  --radius-sheet: 16px;
+  --radius-field: 12px;
+  --radius-card: 20px;
+  --radius-sheet: 24px;
   --radius-pill: 999px;
 
   /* Safe-area insets as spacing tokens -> pt-safe-top / pb-safe-bottom. */
@@ -240,13 +189,20 @@
   --spacing-safe-right: env(safe-area-inset-right, 0px);
 }
 
-/* Motion: 120/200/300 ms ease-out, and nothing else. Named so a component says
-   which of the three it means instead of inventing a fourth. */
+/* CSS feedback durations; route and navigation motion live in MotionSurface and
+   the primary navigation components. */
 :root {
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 300ms;
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* Animatable custom property for the border-beam conic-gradient rotation. */
+@property --border-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
 }
 
 @layer base {
@@ -276,22 +232,15 @@
     min-height: 100dvh;
   }
 
-  /* Hierarchy comes from size and space, never from colour. Headings take Plus
-     Jakarta Sans; the same size in a different weight would read as an accident
-     rather than a system.
-
-     `letter-spacing: 0`: the earlier revision tightened headings by -0.02em, and
-     the design measures every heading at `ls 0.0`. The design's headings are also
-     larger (h1 32/42 against the old 24/32), and tight tracking on a large size
-     reads as cramped rather than deliberate. */
+  /* The bold heading face establishes hierarchy without adding visual chrome. */
   h1,
   h2,
   h3,
   h4 {
     color: var(--text);
     font-family: var(--font-heading);
-    font-weight: 600;
-    letter-spacing: 0;
+    font-weight: 700;
+    letter-spacing: -0.025em;
     text-wrap: balance;
     /* A heading is often a single long word, and a single word cannot wrap: at 200%
        text "Workspaces" is 387px at the 64px h1 size, wider than a phone's content
@@ -301,8 +250,8 @@
     overflow-wrap: break-word;
   }
   h1 {
-    font-size: 2rem;
-    line-height: 2.625rem;
+    font-size: var(--text-h1);
+    line-height: var(--text-h1--line-height);
   }
   h2 {
     font-size: 1.5rem;
@@ -366,18 +315,72 @@
   .text-h3,
   .text-h4 {
     font-family: var(--font-heading);
-    font-weight: 600;
+    font-weight: 700;
   }
 
   /* --- Surfaces ----------------------------------------------------------- */
 
-  /* A card sits on the ground: surface fill, hairline border, 12px radius. The
-     spec allows shadows only for floating layers, so elevation is not how a card
-     reads here. */
+  /* Grouped panels stay flat; only navigation and transient layers float. */
   .card {
+    position: relative;
     background-color: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
+  }
+
+  /* Animated beam that rotates along the card's border.
+     Two pseudo-elements: `::before` paints a conic-gradient ring masked to
+     just the border area; `::after` adds a soft glow behind the beam head so
+     the sweep is visible even on light backgrounds. Both are inert.
+     Reduced-motion users see nothing: the blanket rule in `@layer utilities`
+     kills the animation after one near-instant iteration. */
+  .card::before,
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 1;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .card::before {
+    padding: 2px;
+    background: conic-gradient(
+      from var(--border-beam-angle),
+      transparent 0%,
+      var(--primary) 5%,
+      transparent 15%,
+      transparent 100%
+    );
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    animation: border-beam 8s linear infinite;
+  }
+  .card::after {
+    padding: 4px;
+    background: conic-gradient(
+      from var(--border-beam-angle),
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 40%, transparent) 5%,
+      transparent 15%,
+      transparent 100%
+    );
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    filter: blur(4px);
+    animation: border-beam 8s linear infinite;
   }
 
   /* A region inside a card: same fill, no border, separated by space. */
@@ -405,14 +408,7 @@
 
   /* --- Buttons ------------------------------------------------------------ */
 
-  /* `CONTROL RADIUS / 8 PX`, from the design's UI-controls sheet. The earlier
-     revision made every button a pill, which read as "action or count" and left
-     the 8px rectangle meaning only "field"; the design separates the two roles
-     differently — a control is a control, and the pill is for chips and counts.
-
-     Padding 10/16, gap 8 and a 44px default height are the design's measurements,
-     and 44px is also the mobile target floor (32px is the desktop one, so the
-     larger of the two is the shared default). */
+  /* Rounded rectangles distinguish controls from the capsule navigation. */
   .btn {
     display: inline-flex;
     align-items: center;
@@ -420,7 +416,7 @@
     gap: 0.5rem;
     border-radius: var(--radius-field);
     border: 1px solid transparent;
-    padding: 0.625rem 1rem;
+    padding: 0.75rem 1.125rem;
     font-size: 0.875rem;
     font-weight: 600;
     line-height: 1.25rem;
@@ -456,7 +452,8 @@
       background-color var(--duration-fast) var(--ease-out),
       border-color var(--duration-fast) var(--ease-out),
       color var(--duration-fast) var(--ease-out),
-      opacity var(--duration-fast) var(--ease-out);
+      opacity var(--duration-fast) var(--ease-out),
+      transform var(--duration-fast) var(--ease-out);
   }
   .btn:disabled {
     opacity: 0.45;
@@ -488,12 +485,12 @@
      edge is a 1.25:1 hairline is a control a low-vision user cannot find. The
      stated rule wins; the same reason moved `.field` off `--border`. */
   .btn-secondary {
-    background-color: var(--surface);
+    background-color: var(--surface-raised);
     color: var(--primary-text);
     border-color: var(--border-strong);
   }
   .btn-secondary:hover:not(:disabled) {
-    background-color: var(--surface-raised);
+    background-color: var(--surface);
   }
 
   .btn-quiet {
@@ -544,6 +541,7 @@
     /* 16px: the body size, and the size iOS will not zoom the page to reach. */
     font-size: 1rem;
     line-height: 1.5rem;
+    transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
   }
   .field::placeholder {
     color: var(--text-subtle);
@@ -554,6 +552,26 @@
   .field:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 1px;
+  }
+  .field:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  /* A `<select>` carries the same `.field` tokens but needs three things an
+     `<input>` does not: the browser chrome removed, a fixed chevron that stays
+     in the design's palette, and right padding so the longest option never
+     runs under the indicator. `appearance: none` strips the UA dropdown arrow
+     on every engine the app targets (Chromium ≥ 80, WebKit ≥ 14); the chevron
+     is `--select-chevron`, set per theme in `:root`, so it tracks `--text-muted`
+     through `@media`, `data-theme` and inline overrides. */
+  select.field {
+    appearance: none;
+    padding-right: 2.5rem;
+    background-image: var(--select-chevron);
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+    cursor: pointer;
   }
 
   /* --- Navigation --------------------------------------------------------- */
@@ -571,8 +589,8 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    border-radius: var(--radius-field);
-    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-pill);
+    padding: 0.75rem 1rem;
     font-size: 0.875rem;
     line-height: 1.25rem;
     color: var(--text-muted);
@@ -602,14 +620,14 @@
     flex-direction: column;
     justify-content: center;
     gap: 0.25rem;
-    border-radius: 0;
-    padding: 0.4rem 0.25rem;
+    border-radius: var(--radius-pill);
+    padding: 0.5rem 0.25rem;
     /* 56px visual row from the Figma bottom tabs; padding around the nav keeps
        the 44px touch requirement while leaving room for icon and label. */
     min-height: 3.5rem;
     flex: 1;
-    font-size: 0.625rem;
-    line-height: 0.75rem;
+    font-size: 0.6875rem;        /* 11 / 14 */
+    line-height: 0.875rem;
     text-align: center;
   }
   /* The active tab is the design's `#F2F3FF` fill with an indigo icon and a 600
@@ -665,7 +683,7 @@
 
   .auth-main {
     display: flex;
-    min-height: 0;
+    min-height: auto;
     flex: 1;
     align-items: center;
     justify-content: center;
@@ -868,12 +886,7 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     line-height: 1.125rem;
-    /* `letter-spacing: 0`, like every other style in the design. The previous
-       revision added 0.04em here on the argument that tracking is what makes an
-       11px mono line legible; the design's own metadata says `letterSpacing: 0`
-       on every text node in the file, and the caps come from the string rather
-       than from the CSS. `text-transform` stays, because the design's strings are
-       typed in caps and a translation need not be. */
+    /* Evidence metadata stays untracked and distinct from display headings. */
     letter-spacing: 0;
     text-transform: uppercase;
     color: var(--text-muted);
@@ -1041,8 +1054,8 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    border-bottom: 1px solid var(--border);
-    background-color: var(--surface);
+    border-bottom: 0;
+    background-color: var(--bg);
     padding: 0 2rem;
     min-height: 5rem;
   }
@@ -1180,6 +1193,56 @@
     color: var(--source);
   }
 
+  /* --- Course cards ------------------------------------------------------- */
+
+  /* A course-card is the workspace entry in the list. Desktop gets a minimum
+     332px matching the Figma frame; `min-height` rather than `height` so the
+     rename and delete forms can expand beyond it at 200% text. On phone the
+     height is unconstrained. */
+  .course-card {
+    display: flex;
+    overflow: hidden;
+    height: auto;
+  }
+  @media (min-width: 768px) {
+    .course-card {
+      min-height: 332px;
+    }
+  }
+
+  /* The illustration area in the top half of a course card, behind the
+     course code and name. A gradient mask fades the bottom edge so the
+     pattern dissolves into the card surface. */
+  .course-card-hero {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 120px;
+    overflow: hidden;
+    /* `surface-raised` rather than `course-tint`: the sky course tint is the
+       same value as the source tint, and a large sky background would break
+       the "sky is sources only" signal the design system reserves. The marker
+       bar and the illustration pattern already carry the course hue. */
+    background-color: var(--surface-raised);
+  }
+  .course-card-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, transparent 40%, var(--surface) 100%);
+    pointer-events: none;
+  }
+
+  /* The text overlay inside the hero area, positioned at the bottom so the
+     course code and name sit above the fade. */
+  .course-card-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    z-index: 1;
+  }
+
   /* --- Course markers ----------------------------------------------------- */
 
   /* The course colour as a 4px bar. It reads `--course-marker`, which
@@ -1204,34 +1267,285 @@
     line-height: 1rem;
     color: var(--text-subtle);
   }
+
+  /* --- Chat: answer card ------------------------------------------------- */
+
+  /* A source-grounded answer: a bordered card with padding, gap between the
+     heading block, the body, the citations and the AI disclaimer. The card is
+     the design's `Source-grounded answer` specimen. */
+  .answer-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  /* The streaming cursor: a 2px-wide bar at the primary colour, sitting at the
+     end of the last word while the answer arrives. It blinks on the `working`
+     keyframe the app already defines. */
+  .streaming-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.125rem;
+    background-color: var(--primary);
+    vertical-align: text-bottom;
+    animation: working 1.4s ease-in-out infinite;
+  }
+
+  /* The thinking disclosure: a collapsible block that shows the model's
+     intermediate reasoning. Collapsed by default; opened by the student. */
+  .thinking-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  .thinking-toggle:hover {
+    color: var(--text);
+  }
+  .thinking-content {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-muted);
+    padding-left: 1.75rem;
+  }
+
+  /* The evidence link: a source-tinted block that points to the cited page. */
+  .evidence-link {
+    background-color: var(--source-tint);
+    border-radius: var(--radius-field);
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* Answer actions row: Copy, Save to Studio. Quiet controls beside the answer. */
+  .answer-action {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+  .answer-action:hover {
+    color: var(--text);
+  }
+
+  /* --- Chat: floating composer ------------------------------------------- */
+
+  /* The composer floats above the message list with the `.float` treatment:
+     border, shadow, sheet radius. It is NOT position:fixed — it is a flow sibling
+     inside the flex column, so it stays within its panel's grid track. */
+  .chat-composer {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sheet);
+    box-shadow: 0 4px 16px 0 rgb(0 0 0 / 0.04);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  /* The toggle row in the composer: a pair of labelled switches. */
+  .composer-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text);
+  }
+
+  /* --- Sources: drop zone ------------------------------------------------ */
+
+  /* The add-source drop zone: a dashed border, centred content. */
+  .source-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.25rem;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-field);
+  }
+
+  .page-heading { padding-block: 0.5rem; }
+  .page-heading h1 { font-weight: 700; }
+
+
+  /* --- Date picker popover (Today screen, desktop) ------------------------ */
+  .date-picker-anchor { position: relative; }
+  .date-picker-popover {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 50;
+    width: 18rem;
+    padding: 0.75rem;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-float);
+  }
+  .date-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  .date-picker-month-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .date-picker-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-field);
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  .date-picker-nav:hover { background-color: var(--surface-raised); color: var(--text); }
+  .date-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.125rem;
+    text-align: center;
+  }
+  .date-picker-weekday {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 0.25rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+  }
+  .date-picker-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    margin: 0 auto;
+    font-size: 0.8125rem;
+    border-radius: var(--radius-field);
+    border: 1px solid transparent;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .date-picker-cell:hover { background-color: var(--surface-raised); }
+  .date-picker-cell-outside { color: var(--text-muted); opacity: 0.5; }
+  .date-picker-cell-today {
+    color: var(--primary-text);
+    font-weight: 600;
+  }
+  .date-picker-cell-selected {
+    background-color: var(--primary-tint);
+    color: var(--primary-text);
+    border-color: var(--primary);
+    font-weight: 600;
+  }
+  .date-picker-cell-selected:hover { background-color: var(--primary-tint); }
+  .sidebar { background-color: var(--bg); border-right: 1px solid var(--border); }
+  .sidebar .nav-item, .dock-nav .nav-item { min-width: 0; isolation: isolate; }
+  .sidebar .nav-item > span { min-width: 0; overflow-wrap: anywhere; }
+  .sidebar .nav-item[aria-current="page"], .dock-nav .nav-item[aria-current="page"] { background-color: transparent; font-weight: 600; }
+  .sidebar-collapsed .nav-item { padding: 0.625rem; border-radius: var(--radius-pill); justify-content: center; }
+  .sidebar-collapsed .nav-item[aria-current="page"] { background-color: transparent; }
+  .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem;
+    border-radius: var(--radius-pill);
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  }
+  .sidebar-toggle:hover { background-color: var(--surface-raised); color: var(--text); }
+  .nav-selection { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background-color: var(--primary-tint); pointer-events: none; }
+  .mobile-dock { position: sticky; bottom: 0; z-index: 40; padding: 0.75rem max(0.75rem, env(safe-area-inset-left, 0px)) calc(0.75rem + env(safe-area-inset-bottom, 0px)); }
+  .dock-nav { display: flex; width: 100%; min-width: 0; overflow: visible; gap: 0.25rem; padding: 0.375rem; background-color: var(--surface); border: 1px solid var(--border); border-radius: 2rem; box-shadow: var(--shadow-float); }
+  .dock-nav .nav-item-tab { flex: 1 0 3rem; gap: 0.25rem; min-height: 3.5rem; font-size: 0.6875rem; line-height: 0.875rem; }
+  .dock-icon-sizer { display: flex; align-items: center; justify-content: center; will-change: transform; transform-origin: center; }
+  .phone-header { background-color: var(--bg); }
+  .header-icon { background-color: var(--surface); border: 1px solid var(--border); }
+  .btn:active:not(:disabled), .header-icon:active { transform: scale(0.98); }
+
+  .settings-page { container: settings / inline-size; }
+  .settings-save-status:empty { display: none; }
+  .settings-directory { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr)); }
+  .settings-category { display: flex; align-items: center; gap: 1rem; min-height: 4rem; padding: 1.25rem; color: var(--text); text-decoration: none; transition: background-color var(--duration-base) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
+  .settings-category:hover { background: var(--surface-raised); }
+  .settings-category:active { transform: scale(0.99); }
+  .settings-category-icon { display: grid; place-items: center; flex: 0 0 auto; width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--surface-raised); color: var(--primary-text); }
+  .settings-category-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 0.25rem; overflow-wrap: anywhere; }
+  .settings-detail { display: grid; gap: 1.5rem; min-width: 0; }
+  .settings-detail-nav { display: none; }
+  .settings-detail-content { container: settings-content / inline-size; min-width: 0; }
+  .settings-form-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1.25rem; }
+  .settings-form-pair > label { min-width: 0; }
+  .settings-form-pair .field { width: 100%; min-width: 0; }
+  .settings-channel-row + .settings-channel-row { border-top: 1px solid var(--border); }
+  .settings-channel-label { display: flex; align-items: center; gap: 1rem; min-height: 4rem; padding: 0.75rem 0; cursor: pointer; }
+  .settings-channel-label:has(input:disabled) { cursor: default; }
+  .settings-channel-label input { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; accent-color: var(--primary); }
+  .settings-theme-options { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+  .settings-theme-choice { display: flex; min-width: 0; flex-direction: column; gap: 0.75rem; padding: 0.75rem; border: 1px solid var(--border-strong); border-radius: var(--radius-card); cursor: pointer; }
+  .settings-theme-choice:has(input:checked) { border-color: var(--primary-text); background: var(--primary-tint); }
+  .settings-theme-choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 3px; }
+  .settings-theme-preview { display: grid; grid-template-columns: 1fr 2fr; gap: 0.5rem; padding: 0.75rem; min-height: 5rem; border-radius: var(--radius-field); background: Canvas; color: CanvasText; border: 1px solid var(--border-strong); }
+  .settings-theme-preview-light { color-scheme: light; }
+  .settings-theme-preview-dark { color-scheme: dark; }
+  .settings-theme-preview-system { background: linear-gradient(90deg, Canvas 50%, CanvasText 50%); }
+  .settings-theme-preview span { background: currentColor; opacity: 0.25; border-radius: 0.25rem; }
+  .settings-theme-preview span:first-child { grid-row: span 2; }
+  .settings-theme-preview span:last-child { background: var(--primary); opacity: 1; }
+  .settings-theme-label { display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; overflow-wrap: anywhere; }
+  .settings-theme-label input { accent-color: var(--primary); flex: 0 0 auto; }
+  @container settings (min-width: 56rem) {
+    .settings-detail { grid-template-columns: 14rem minmax(0, 1fr); gap: 2rem; }
+    .settings-detail-nav { display: flex; flex-direction: column; gap: 0.375rem; }
+  }
+  @media (max-width: 767px) {
+    h1 { font-size: 2.125rem; line-height: 2.75rem; }
+  }
 }
 
 @layer utilities {
-  .motion-entrance {
-    animation: motion-entrance var(--duration-base) var(--ease-out);
-  }
-
-  @keyframes motion-entrance {
-    from {
-      opacity: 0;
-      transform: translateY(0.375rem);
-      filter: blur(0.375rem);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-      filter: blur(0);
-    }
-  }
-
-  /* Motion is limited to state transitions. One exception with a written
-     purpose: a running job genuinely is working, so its indicator may pulse.
-     Nothing else loops. */
+  /* Motion is limited to state transitions. Two looping exceptions with
+     written purposes: a running job genuinely is working, so its indicator may
+     pulse; and the border beam gives every card a sweeping accent highlight. */
   @media (prefers-reduced-motion: reduce) {
-    .motion-entrance {
-      animation: none;
-    }
-
     *,
     *::before,
     *::after {
@@ -1252,6 +1566,12 @@
   }
   .animate-working {
     animation: working 1.4s ease-in-out infinite;
+  }
+
+  @keyframes border-beam {
+    to {
+      --border-beam-angle: 360deg;
+    }
   }
 
   /* A card flip becomes a crossfade when the student asks for reduced motion;

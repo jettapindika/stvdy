@@ -43,7 +43,14 @@ impl AuthUser {
     /// An expired subscription therefore drops to the free limits on its own, without an
     /// admin editing the row, and a plan id in the database that is not in `plans.toml`
     /// gets the free plan's limits — the safe direction.
+    ///
+    /// An admin always resolves to `Power`: every feature gate, limit, model tier,
+    /// and `/usage` response flows through this method, so the operator's account
+    /// sees and can use every surface without a subscription (A7).
     pub fn effective_plan(&self) -> stvdy_core::config::PlanId {
+        if self.is_admin {
+            return stvdy_core::config::PlanId::Power;
+        }
         crate::entitlements::effective_plan(&self.plan_id, self.subscription_status)
     }
 

@@ -9,13 +9,14 @@ use uuid::Uuid;
 
 use stvdy_core::citations::{Citation, resolve};
 use stvdy_core::prompts::registry::{
-    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, NO_EXAM_DATE, NO_OTHER_SECTIONS,
+    BASE_V1, BASE_V1_VERSION, BASE_V2, BASE_V2_VERSION, BASE_V3, BASE_V3_VERSION,
+    NO_EXAM_DATE, NO_OTHER_SECTIONS,
     NO_SEMESTER_CONTEXT, SOURCE_LANGUAGE,
 };
 use stvdy_core::prompts::{
     ChatVars, ModuleId, PromptChunk, PromptError, PromptWebHit, UNTRUSTED_VARIABLES, VarKind,
-    base_v2_variables, base_variable_kind, base_variables, compose_chat, compose_task,
-    module_variables,
+    base_v2_variables, base_v3_variables, base_variable_kind, base_variables, compose_chat,
+    compose_task, module_variables,
 };
 
 /// The base prompt file, read from disk by the same relative path the registry
@@ -26,6 +27,10 @@ const BASE_FILE: &str = include_str!("../../../prompts/base.v1.md");
 /// grounding toggle" check is against the files rather than against the
 /// registry's copies of them.
 const BASE_V2_FILE: &str = include_str!("../../../prompts/base.v2.md");
+
+/// The v3 base prompt file. v3 is v2 plus `<output_quality>` and two
+/// `<language_and_tone>` rules (anti-slop quality filter).
+const BASE_V3_FILE: &str = include_str!("../../../prompts/base.v3.md");
 
 /// The flashcards module file, for the documented-schema check.
 const FLASHCARDS_FILE: &str = include_str!("../../../prompts/flashcards.v1.md");
@@ -149,6 +154,8 @@ fn the_registry_compiles_the_base_file_verbatim() {
     assert_eq!(BASE_V1_VERSION, "base.v1");
     assert_eq!(BASE_V2, BASE_V2_FILE);
     assert_eq!(BASE_V2_VERSION, "base.v2");
+    assert_eq!(BASE_V3, BASE_V3_FILE);
+    assert_eq!(BASE_V3_VERSION, "base.v3");
 }
 
 /// v2's declared variables are v1's plus the one toggle, so a future edit that
@@ -179,6 +186,102 @@ fn base_v2_differs_from_v1_only_in_the_grounding_section() {
         section(BASE_V2_FILE, "grounding_and_citations"),
         "v2 exists precisely because the grounding rules changed"
     );
+}
+
+/// v3's variable table is identical to v2's: the new sections add no template
+/// variables.
+#[test]
+fn base_v3_variables_equal_v2() {
+    assert_eq!(base_v3_variables(), base_v2_variables());
+}
+
+/// v3's variable table covers every `{{variable}}` that literally appears in
+/// `base.v3.md`, and vice versa.
+#[test]
+fn base_v3_variables_covers_every_variable_in_the_file() {
+    let declared: Vec<&str> = base_v3_variables().iter().map(|(name, _)| *name).collect();
+
+    for name in variables_in(BASE_V3_FILE) {
+        assert!(
+            declared.contains(&name.as_str()),
+            "prompts/base.v3.md uses {{{{{name}}}}} but base_v3_variables() does not declare it"
+        );
+    }
+    for name in &declared {
+        assert!(
+            variables_in(BASE_V3_FILE).iter().any(|used| used == name),
+            "base_v3_variables() declares {name} but prompts/base.v3.md never uses it"
+        );
+    }
+}
+
+/// v3 differs from v2 only in `<language_and_tone>` (two added rules) and the
+/// new `<output_quality>` section. Every other section is byte-identical.
+#[test]
+fn base_v3_differs_from_v2_only_in_language_tone_and_output_quality() {
+    // Collect all section names from both files.
+    let v2_sections = sections_in(BASE_V2_FILE);
+    let v3_sections = sections_in(BASE_V3_FILE);
+
+    // v3 must have every v2 section plus output_quality.
+    for name in &v2_sections {
+        assert!(
+            v3_sections.contains(name),
+            "v3 is missing section <{name}> that v2 has"
+        );
+    }
+    assert!(
+        v3_sections.contains(&"output_quality".to_string()),
+        "v3 must contain the new <output_quality> section"
+    );
+    assert_eq!(
+        v3_sections.len(),
+        v2_sections.len() + 1,
+        "v3 should have exactly one more section than v2 (output_quality)"
+    );
+
+    // Every section that exists in both must be identical except language_and_tone.
+    for name in &v2_sections {
+        let v2_sec = section(BASE_V2_FILE, name);
+        let v3_sec = section(BASE_V3_FILE, name);
+        if name == "language_and_tone" {
+            assert_ne!(
+                v2_sec, v3_sec,
+                "v3's <language_and_tone> must differ from v2's (two rules added)"
+            );
+            // v3's language_and_tone must contain v2's (it adds lines, not removes).
+            assert!(
+                v3_sec.contains(v2_sec.trim_end_matches("</language_and_tone>").trim_end().lines().last().unwrap().trim()),
+                "v3's <language_and_tone> must contain v2's last rule"
+            );
+        } else {
+            assert_eq!(
+                v2_sec, v3_sec,
+                "section <{name}> must be identical between v2 and v3"
+            );
+        }
+    }
+
+    // The identity line (before the first section) must be identical.
+    let v2_preamble = BASE_V2_FILE.split("<context>").next().unwrap();
+    let v3_preamble = BASE_V3_FILE.split("<context>").next().unwrap();
+    assert_eq!(v2_preamble, v3_preamble, "the identity line must be identical");
+}
+
+/// Every section name in a prompt file, in order.
+fn sections_in(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(inner) = trimmed.strip_prefix('<') {
+            if let Some(name) = inner.strip_suffix('>') {
+                if !name.is_empty() && !name.starts_with('/') && !name.contains([' ', '\t', '<']) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names
 }
 
 /// Everything before the `<name>` opening tag and everything after its closing
@@ -226,9 +329,10 @@ fn the_plan_gate_instruction_is_declared_derived() {
 
 #[test]
 fn a_missing_caller_variable_is_an_error_named_after_it() {
-    // The chat composer renders v2, so the sweep is over v2's table: a caller
-    // variable only v2 uses (`sources_only`) must be checked too.
-    for (name, kind) in base_v2_variables() {
+    // The chat composer renders v3, so the sweep is over v3's table (which
+    // equals v2's): a caller variable only v2/v3 uses (`sources_only`) must be
+    // checked too.
+    for (name, kind) in base_v3_variables() {
         if *kind != VarKind::Caller || *name == "allow_upgrade_hint" {
             // The boolean is always supplied; a string cannot represent "absent".
             continue;
@@ -278,7 +382,7 @@ fn the_composed_prompt_has_no_unfilled_variable() {
         !composed.text.contains("{{"),
         "an unfilled variable must never reach a model"
     );
-    assert_eq!(composed.prompt_version, "base.v2");
+    assert_eq!(composed.prompt_version, "base.v3");
     assert!(composed.text.contains("Jetta"));
     assert!(composed.text.contains("Jaringan Komputer"));
 }

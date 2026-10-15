@@ -75,7 +75,7 @@ describe('the session gate', () => {
 
     expect(await screen.findByText('Sign in screen')).toBeInTheDocument()
     expect(screen.queryByText('Today content')).not.toBeInTheDocument()
-    // Nothing to restore means nothing is asked of the server.
+    // Nothing to restore means nothing is asked of the server (native path).
     expect(calls).toHaveLength(0)
   })
 

@@ -1,36 +1,26 @@
 # Stvdy — Design Direction
 
-> **Source of the values: the Figma design.** This document is the implementation
-> record: what the tokens are, what each one means, what was measured, and which
-> earlier decisions it replaces.
->
-> **The design is the Figma file again, and this is the second reversal.** The
-> history matters because both directions are recorded below and a later reader
-> will find traces of each:
->
-> 1. The first revision transcribed a landing/auth mock (`Figma file Random`, node
->    `392-691`) and sampled a palette from it.
-> 2. The second revision replaced that wholesale with a palette and type scale the
->    spec fixed for itself, and this file then said the design was "no longer
->    sampled from a Figma frame".
-> 3. **This revision returns to the design.** The Figma file's `Stvdy` page
->    (section `424:2487`, 54 frames) now covers the design system and every
->    screen in both viewports, and it is the requirement. `docs/SPEC.md` § Design
->    system and UI rules was rewritten in the same change; the decision record is
->    `docs/superpowers/specs/2026-10-12-figma-redesign-design.md`.
->
-> What is genuinely new in the design, and what it overturns, is under
-> **What the design changed** below. What it confirms — the palette, the three
-> typefaces, the 4pt grid, the radius scale, the 12px-floor's *spirit* — is not
-> restated here.
+The current visual direction follows the request to restyle the whole app using
+[Musicfy](https://github.com/realidkroo/musicfy) as a display and animation reference.
+Stvdy keeps its study workflows, semantic colours, bundled typefaces and source
+citations. Neutral surfaces, larger page titles, rounded panels and a floating
+phone dock replace the earlier Figma-only surface treatment.
+
+The Figma page `424:2487` remains the record of the information architecture and
+screen content, not a requirement to retain the old palette or corner sizes.
+Earlier implementation and verification records below are historical. The token,
+type and motion sections describe the current implementation.
+
+Reading this as a study workspace for university students, with a neutral,
+content-first display: ENERGY 2 / RHYTHM 2 / MOTION 2.
 
 ## Identity
 
-**Calm, fast, and honest.** The audience is Indonesian university students on
-mid-range Android phones, studying at night on unreliable campus Wi-Fi under exam
-pressure. The interface is a light, low-contrast-ground page with white cards,
-near-black type, and one indigo that carries every action. Nothing shouts; nothing
-is animated for decoration.
+The audience is Indonesian university students on mid-range Android phones,
+studying at night on unreliable campus Wi-Fi under exam pressure. Neutral page
+grounds and flat cards keep long reading sessions quiet; larger titles and
+rounded controls carry the requested display treatment. System appearance is the
+default, with working Light and Dark choices rather than a forced dark theme.
 
 **Indigo is the action.** `--primary` fills buttons, marks the selected item, and
 carries the brand. This is a deliberate reversal of the earlier direction, which
@@ -54,22 +44,22 @@ standalone feature icon.
 
 ## Palette
 
-Every value below is the spec's. The ratio beside each text token is **computed
-from the token values by `app/src/tokens/contrast.test.ts`**, which fails the build
-on a miss in either theme — so this table cannot drift from what renders.
+The palette is shared by `styles.css` and `app/src/tokens/tokens.ts`.
+`app/src/tokens/contrast.test.ts` computes the documented text and UI pairs in
+both themes and checks that the stylesheet and token data agree.
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
-| `bg` | `#FAF8FF` | `#0B0F19` | Page ground. |
-| `surface` | `#FFFFFF` | `#111827` | Cards and panels. |
-| `surface-raised` | `#F2F3FF` | `#1B2435` | Insets and secondary blocks: raised, not recessed. |
-| `border` | `#DDE0F0` | `#263246` | Hairlines and dividers. 1px in both themes. |
-| `border-strong` | `#7E85A6` | `#6A789D` | A boundary that must be visible: input edges. Derived, see below. |
-| `text` | `#131B2E` | `#F1F5F9` | Body text. 17.16:1 / 16.19:1 on `surface`. |
-| `text-muted` | `#464555` | `#B4BDCF` | Secondary text. 9.36:1 / 9.39:1. |
-| `text-subtle` | `#6B6A7C` | `#8493AA` | Captions and hints. 5.28:1 / 5.69:1. |
-| `primary` | `#4F46E5` | `#4F46E5` | **The action fill.** White on it is 6.29:1 in both themes. |
-| `primary-text` | `#3525CD` | `#C4BFFF` | Indigo as text: links, active nav. 9.14:1 / 10.34:1 on `surface`. |
+| `bg` | `#F5F5F7` | `#080809` | Neutral page ground. |
+| `surface` | `#FFFFFF` | `#161618` | Cards and panels. |
+| `surface-raised` | `#EBEBEF` | `#232326` | Insets and secondary blocks. |
+| `border` | `#DCDCE3` | `#323237` | Hairlines and dividers. 1px in both themes. |
+| `border-strong` | `#7E7E8E` | `#838390` | Visible input boundaries. |
+| `text` | `#151518` | `#F7F7FA` | Body text. 18.22:1 / 16.90:1 on `surface`. |
+| `text-muted` | `#4F4F5B` | `#C2C2CC` | Secondary text. 8.07:1 / 10.23:1 on `surface`. |
+| `text-subtle` | `#686874` | `#A0A0AD` | Captions and hints. 5.50:1 / 6.99:1 on `surface`. |
+| `primary` | `#4F46E5` | `#4F46E5` | Action fill; white labels clear 4.5:1 in both themes. |
+| `primary-text` | `#3525CD` | `#C4BFFF` | Links and active navigation. 9.14:1 / 10.54:1 on `surface`. |
 | `primary-tint` | `#E2DFFF` | `#28234D` | Selected rows, working chips. |
 | `source` | `#006591` | `#8CD3FF` | **Citations only.** 4.97:1 / 8.96:1 on its tint. |
 | `source-tint` | `#C9E6FF` | `#0D2B40` | The citation chip's fill. |
@@ -81,18 +71,10 @@ on a miss in either theme — so this table cannot drift from what renders.
 | `danger-tint` | `#FFDAD6` | `#432327` | |
 | `ring` | `#4F46E5` | `#C4BFFF` | The focus ring. Derived, see below. |
 
-Two tokens are derived rather than specified, and both for the same reason: the
-spec's value cannot carry the role it is given.
-
-- **`border-strong`.** `--border` is 1.25:1 on the ground and 1.31:1 on a card,
-  which is exactly right for a divider and far short of the 3:1 WCAG 2.2 requires
-  of a component boundary. An input whose only edge is a 1.25:1 hairline is an
-  input a low-vision user cannot find. `#7E85A6` is the same hue family at 3.44:1
-  on the ground and 3.63:1 on a card.
-- **`ring`.** The spec's dark `--primary-text` (`#C4BFFF`) is the focus ring in
-  dark mode, and the fill `--primary` in light. Using `--primary` in both would put
-  a 2.82:1 ring on a dark card, which is a focus indicator that fails the same
-  3:1 rule it exists to satisfy.
+`border` separates surfaces; it is not the sole boundary of a field.
+`border-strong` clears 3:1 against the page ground in both themes (3.67:1 light,
+5.35:1 dark). Focus uses `ring`, with the light action colour and dark
+`primary-text` colour tested against their adjacent surfaces.
 
 **Course colours** are six categorical hues — indigo, sky, emerald, amber, rose,
 violet — each with a tint, each ≥ 4.5:1 both on the ground and on its own tint, in
@@ -100,6 +82,9 @@ both themes. They are used as a 4px marker plus a tinted chip plus an initial or
 icon, and **never as the only signal**: two courses in the same colour are told
 apart by their names, and a colour-blind user loses nothing. A course colour is not
 a status colour; amber means "due soon" and a course is never "due".
+
+The light amber course pair is `#92400E` on `#FBEAB5`, keeping the tinted chip
+distinct from the new neutral page ground while preserving readable text.
 
 ## Typography
 
@@ -115,12 +100,12 @@ files and `app/src/fonts.css`):
 names carry characters outside basic latin, and dropping the subset renders them
 in a fallback face mid-sentence.
 
-Scale, **from the design**, as Tailwind utilities:
+Current shared scale, as Tailwind utilities:
 
 | Utility | Size / line-height | Use |
 |---|---|---|
-| `text-display` | 48 / 62 | The design system's own sheets; marketing |
-| `text-h1` | 32 / 42 | Page title |
+| `text-display` | 48 / 56 | Display specimens |
+| `text-h1` | 40 / 52 | Page title and timer readout |
 | `text-h2` | 24 / 32 | Section |
 | `text-h3` | 20 / 26 | Widget heading |
 | `text-h4` | 18 / 23 | Card title |
@@ -129,46 +114,66 @@ Scale, **from the design**, as Tailwind utilities:
 | `text-small` | 13 / 20 | Secondary |
 | `text-caption` | 12 / 18 | Helper text |
 | `text-meta` | 11 / 18 | Eyebrows, counts, timestamps — JetBrains Mono |
-| `text-tab` | 10 / 12 | The phone tab-bar label only |
+| Phone dock label | 11 / 14 | Primary phone destinations |
+
+Page headings reduce to 34/44 below 768px. The shared 40/52 title role leaves
+enough height for the heading font at 200% text; the previous 40/48 line box
+clipped it in Chromium. The timer caps at the title size and fits its card by
+the rendered glyph count, including long resumed sessions, with 10% width
+clearance and a 1.5 line-height for the mono numerals.
 
 Two changes are reversals, and both were rules rather than values:
 
 - **The 12px floor is withdrawn.** The design's metadata role is 11px monospace,
   and it is the most characteristic line in the redesign — every eyebrow, count,
-  timestamp and keycap. It is uppercase with `letter-spacing: 0.04em` when it
-  labels something (`.eyebrow`), which is what makes an 11px mono line legible.
+  timestamp and keycap. Uppercase and untracked (`letter-spacing: 0`), it stays
+  distinct from display headings without adding another visual component.
   The spirit of the old rule survives: nothing is small *and* low-contrast, and
   every one of these pairs is measured by `contrast.test.ts`.
 - **Body is 16/24 on desktop too**, up from 14/22. The old desktop body was a step
   smaller than a phone's for no reason other than that a desktop has more room,
   which is the wrong direction for a reading surface.
 
-Heading `letter-spacing` is `0`, not the old `-0.02em`: the design measures every
-heading at `ls 0.0`, and tight tracking on a 32px heading reads as cramped rather
-than deliberate. Mobile inputs are 16px, because iOS zooms the whole page when a
-focused field's text is smaller, leaving the student's view scrolled sideways
-mid-sentence. Every layout must survive 200% text scaling and Indonesian strings
-(~25% longer than English).
+Headings use `letter-spacing: -0.025em` for the compact display treatment;
+evidence metadata remains untracked. Mobile inputs stay at 16px to avoid iOS
+focus zoom. Layouts must survive 200% text scaling and Indonesian strings
+(approximately 25% longer than English).
 
 ## Shape, elevation, motion
 
-- **Radius:** 8 controls, 12 cards, 16 sheets and modals, 999 chips. Shape carries
-  meaning: rounded rectangle means "field", pill means "action or count", 16px
-  means "this layer floats".
-- **1px borders in both themes.** A card is `surface` plus a `border` hairline, not
-  a shadow. Elevation is reserved for things that genuinely float.
-- **Shadow only on floating layers** (`.float`): popover, bottom sheet, modal,
-  command palette.
-- **Motion 120 / 200 / 300 ms, ease-out.** Named as `--duration-fast/base/slow`.
-  `prefers-reduced-motion` turns the flashcard flip into a crossfade and stops
-  every transition. No looping animation except a working indicator.
+- Radius: 12px controls, 20px cards, 24px sheets and modals, pill-shaped navigation
+  selections and chips. Fields and cards remain visibly different from navigation.
+- Cards use a surface fill and 1px border. Shadow marks floating layers, including
+  the phone dock, rather than every card.
+- CSS feedback keeps the 120/200/300ms duration tokens. Motion 14.2.0 supplies one
+  300ms opacity/10px route entrance and a shared spring selection in each primary
+  navigation surface (stiffness 380, damping 34). No decorative loops are added.
+- `MotionConfig reducedMotion="user"` and `useReducedMotion` disable route entry
+  and selection movement when requested. Existing CSS reduced-motion rules still
+  cover control transitions and the flashcard crossfade.
 
-Route entry adapts Magic UI's **Blur Fade** mechanism, inspected through its MCP
-registry: one 200ms opacity/6px-offset/6px-blur entrance, using the existing easing
-token. It runs on the route content or auth card, not on every widget. The command
-palette stays outside the animated wrapper so its fixed scrim remains viewport-sized.
-There is no retained transform/filter after the entrance, and reduced motion disables
-it entirely. No animation runtime or remote asset is added.
+The route wrapper contains page content, not the command palette, so the palette's
+fixed scrim stays viewport-sized. Auth cards reuse the same entrance. This replaces
+the earlier CSS Blur Fade adaptation of Magic UI; there is no blur on reading
+content and no remotely loaded animation code.
+
+Settings opens as a category directory with a compact account summary. Account,
+Study preferences, Calendar connections, Devices and sync, and Appearance each
+have their own `/settings/:section` surface and a Back to Settings link. Wide
+containers also show section navigation; narrow containers keep the form full
+width. Study preferences includes notifications and language, preserving the
+existing per-change saves and availability/plan restrictions.
+
+Appearance boots from a validated `stvdy.theme` preference. A valid account setting
+wins after refresh, including same-value refreshes. Explicit themes override all
+colour/course tokens and `color-scheme`; System removes those inline overrides
+and follows OS changes through CSS. Storage denial does not block rendering.
+
+The persisted theme is a device-wide boot preference and intentionally survives
+sign-out; the next account's valid preference replaces it after loading. The
+palette initializes in the application module before React renders, not in an
+inline HTML boot script. A slow module load may briefly show the OS palette;
+native first-frame behaviour has not been measured.
 
 
 ## Accessibility
@@ -287,7 +292,7 @@ destinations exist. No unpublished legal notice, fake control, review-duration
 estimate, or Figma sample account data is introduced for visual completeness.
 
 
-### Verification of the responsive follow-up
+### Historical verification of the Figma responsive follow-up
 
 `npm --prefix app test`: 75 files, 761 tests passed. Web and store builds pass;
 `check:no-purchase-ui` finds no purchase path in the three shipped store files.
@@ -326,6 +331,98 @@ palette, type, spacing, shapes and a single route-entry motion). Liveliness PASS
 (real routes and states retained, both themes checked, two code-review fix rounds
 closed). No new visual assets or decorative loops were introduced.
 
+### Musicfy redesign verification
+
+The final frontend run passed 76 test files and 778 tests. Web and store builds
+passed. The store-policy check found no purchase UI in the three shipped files;
+the CDN check found no third-party loads. Vite retains its existing large-entry
+chunk warning; the threshold was not raised.
+
+| Browser run | Surfaces | Theme/text combinations | Lowest text contrast | Clipped / overlapped / undersized / missing focus rings |
+|---|---:|---:|---:|---|
+| Phone 390x844 | 36 | 144 | 4.71:1 | 0 / 0 / 0 / 0 |
+| Desktop 1365x900 | 37 | 148 | 4.62:1 | 0 / 0 / 0 / 0 |
+
+Reports: `var/musicfy-final-phone.json` and
+`var/musicfy-final-desktop.json`. Both cover light/dark and 100%/200% text.
+The phone run reached 1,940 targets and 1,924 keyboard stops; the desktop run
+reached 2,672 targets and 2,612 stops. Neither found an unreached control or
+an unintended focus trap.
+
+Focused browser smoke exercised the Settings directory/detail paths, quiet-hour
+clearing, channel toggling, language preference saves, all three appearance
+choices against both OS palettes, route entry, reduced motion, and search/Escape.
+The palette scrim measured exactly 1365x900 in that viewport. Ordinary route entry
+was observed at opacity 0.0083 with a 9.9169px translation before settling;
+reduced-motion entry rendered at opacity 1 with no transform. Page errors: zero.
+Settings also held exact page width at 320, 390, 600, 768, 1024, 1365 and 1440px,
+each at 100% and 200% text. Real persisted timer markers exercised 101, 1440 and
+100000-minute readouts across four widths and two text scales: 24 cases, with no
+row overflow or glyph clipping. The smoke marker was removed afterward.
+
+These are fixture-backed browser/layout checks, not native-device or production
+backend verification. The device-wide appearance preference and possible OS
+palette flash before module evaluation are intentional tradeoffs recorded above.
+
+#### Delivery gate
+
+Scope: the redesigned shared surfaces and changed Settings/navigation controls;
+unchanged backend and native integration behavior is not claimed as reverified.
+
+| Item | Status and evidence |
+|---|---|
+| R-02 copy punctuation | PASS: new category descriptions and labels add no connector em dash; existing source titles and metadata remain data. |
+| R-03 mobile reflow | PASS: the full phone gate and focused width sweeps found no page overflow or clipping. |
+| R-17 statistics | PASS: balances, counts and plan names still read the existing API/query data. |
+| R-18 testimonials | PASS: no testimonial, customer name or review block was added. |
+| R-23 visual assets | PASS: bundled brand/icon assets and account initials are retained; no fabricated profile content was introduced. |
+| R-24 navigation | PASS: directory routes, Back to Settings and primary destinations were exercised in the browser walks. |
+| R-25 contrast | PASS: token tests and both full browser runs clear their text/UI thresholds. |
+| R-26 controls | PASS: changed directory, theme, channel and form controls retain real routes or save handlers; browser smoke observed saves. |
+| R-27 states | PASS: settings retry and unavailable-plan behavior are covered by the passing suite; existing loading/error/offline components remain. |
+| R-28 FAQ | PASS: no FAQ was added or altered by the redesign. |
+| R-32 keyboard | PASS: both full keyboard walks reached every expected control with a focus ring; search closes with Escape. |
+| R-33 source implementation | PASS: styles, components and runtime integration live in source, not an external injection script. |
+| R-34 themes | PASS: explicit Light/Dark beat the opposite OS palette; System followed both OS changes in Chromium. |
+| R-35 runtime proof | PASS: tests, both builds, full browser walks and the changed-control smoke were run after the corrections. |
+| R-36 claims | PASS: no security, compliance, customer or performance marketing claim was added. |
+| R-37 direction | PASS: the user supplied Musicfy and approved the Settings direction before requesting the app-wide restyle. |
+| R-38 content honesty | PASS: fixture rows exist only in verification; shipped views still consume real account/course data. |
+| R-01 colour purpose | PASS: neutral surfaces support reading; the existing indigo action and source-only sky semantics remain. |
+| R-04 icon purpose | PASS: category icons identify account, study, calendar, devices and appearance using the bundled set. |
+| R-06 typography purpose | PASS: larger compact headings establish hierarchy; the 16px reading floor and evidence face remain. |
+| R-07 background purpose | PASS: no grid, blueprint or decorative texture was added. |
+| R-08 arrows | PASS: category chevrons and Back to Settings convey navigation direction, not decorative button emphasis. |
+| R-09 badges | PASS: no promotional badge or duplicate pill eyebrow was added. |
+| R-10 glass limit | PASS: the new surfaces and dock are solid fills without backdrop blur. |
+| R-12 elevation purpose | PASS: card surfaces stay flat; the dock shadow identifies the floating navigation layer. |
+| R-13 glow limit | PASS: no glow field or glowing control treatment was introduced. |
+| R-14 card hierarchy | PASS: equal category cards are peer navigation choices, distinct from the compact account summary and detail forms. |
+| R-19 motion purpose | PASS: one route entrance and shared navigation selection indicate state changes; reduced motion disables their movement. |
+| R-22 illustrations | PASS: no unrelated illustration or stock asset was added. |
+| Dials explicit | PASS: ENERGY 2 / RHYTHM 2 / MOTION 2 is recorded at the start of this document. |
+| Dials reflected | PASS: the screenshots show bold page titles, quiet reading surfaces and bounded transitions rather than decorative loops. |
+| Focal point | PASS: directory choices are the Settings focal task; each detail page groups the relevant controls. |
+| Structural whitespace | PASS: summary, category grid and detail groups use separate spacing levels; mobile fields stack. |
+| Deliberate accent | PASS: indigo marks actions and active navigation; source and status colours retain their existing semantic roles. |
+| Identity motif | PASS: rounded panels and pill navigation repeat across the shared system without turning fields into pills. |
+| Design read | PASS: the supplied reference and approved Settings direction establish the intended audience and display treatment. |
+| C-1 intent | PASS: palette, type, shapes, layout and motion have written reasons in this document. |
+| C-2 completeness | PASS: no new dead or placeholder control was shipped. |
+| C-3 content composition | PASS: Settings is organised around actual preference categories, with no filler feature/stat grid. |
+| C-4 resilience | PASS: theme/text/viewport checks, keyboard walks and error-state tests pass for the changed surfaces. |
+| C-5 evidence | PASS: no invented user metric, testimonial or claim was introduced. |
+| R-05 composition | PASS: directory, account summary and detail forms have different jobs and layouts. |
+| R-11 shape consistency | PASS: controls/cards/sheets use 12/20/24px; navigation and chips use pills. |
+| R-15 action labels | PASS: category names, Back to Settings and existing form actions describe their actual destinations or changes. |
+| R-16 copy | PASS: new copy describes preferences and destinations without generic AI marketing language. |
+| R-20 identity | PASS: Stvdy branding, study content, source semantics and evidence typography remain visible in both themes. |
+| R-21 theme choice | PASS: System is the default and both explicit choices work; dark mode is not forced. |
+| R-29 palette restraint | PASS: neutral grounds plus indigo dominate; categorical/status colours retain their documented roles. |
+| R-30 reference adaptation | PASS: Musicfy informs surfaces and motion; its music content, assets and product identity were not copied. |
+| R-31 decisions documented | PASS: the palette, type, shape, elevation, category layout and motion reasons are recorded above. |
+
+
 ## What the design does not cover
 
 - **Dark mode.** 53 of the 54 frames are light. Every surface is therefore
@@ -354,15 +451,15 @@ find traces:
 | Palette sampled from the Figma frame: `paper #f5f7fb`, `card #ffffff`, `surface-sunk #eef1f7`, `ink #101010`, `rule #dfe4ee`, `accent #3588c8`, `success #0e9080`, `danger #b3261e` | The spec's palette, above. Every token renamed as well as revalued, so no component silently keeps the old colour. |
 | "Blue is the identity, black is the action" — the primary button was near-black | Reversed: indigo is the action fill. |
 | IBM Plex Sans + IBM Plex Mono, chosen because the Figma typeface was unreadable | Plus Jakarta Sans + Inter + JetBrains Mono, named by the spec. |
-| Cards `14px` with a soft shadow as the elevation marker; dark mode lifted `card` and added a hairline to compensate | Cards `12px`, `surface` + 1px `border` in both themes. Elevation is for floating layers only. |
+| Cards `14px` with a soft shadow; later Figma cards `12px` | Cards `20px`, `surface` + 1px `border` in both themes. Elevation is for floating layers only. |
 | Scale `hero 2.25rem/1.15`, body `0.9375rem/1.6`, meta `0.75rem` | The spec's scale, above. |
 | "Copy is English for the MVP" | English **and** Bahasa Indonesia from day one, with a pseudo-locale test. |
 | The styleguide page as a hand-maintained palette list | The same page, but its values are asserted by the contrast test rather than written in prose. |
 
-| The spec's own type scale (Display 32/40 … Caption 12/16, "NOTHING below 12px") | The design's scale: Display 48/62, H1 32/42, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Metadata 11/18 | Recorded above under **What the design changed**; the floor is withdrawn and desktop body rises to 16 |
-| Desktop body 14/22 | 16/24 | The design has one body size for every viewport |
-| Heading tracking `-0.02em` | `0` | The design measures every heading at `ls 0.0` |
-| The Figma file as a source to be *rejected* ("the app's design is no longer sampled from a Figma frame") | The Figma file as the requirement of record | The file now covers the design system and every screen; the earlier judgement was about a landing mock, not about this |
+| Earlier Display 32/40 and 48/62, H1 32/42 | Current Display 48/56, H1 40/52, with the reading and metadata roles retained |
+| Desktop body 14/22 | 16/24 at every viewport |
+| Figma heading tracking `0` | `-0.025em` for the requested Musicfy-inspired display treatment |
+| Figma as the complete visual requirement | Figma information architecture with the current neutral surfaces, rounded shapes and motion described above |
 
 Kept from every earlier direction, unchanged in spirit: the illustration as the only
 decorative element, air over density, dark mode derived rather than inverted, the

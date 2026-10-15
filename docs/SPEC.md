@@ -40,17 +40,17 @@ Differentiators (keep in mind in every design choice):
 - Purchase policy for mobile: because payment is QRIS only, the iOS and Android apps DO NOT sell anything: no checkout, no purchase buttons, no links or instructions pointing to a website purchase, no prices, no upgrade prompts. Users buy on the web or desktop app; the plan then syncs to their account on every device. On mobile, locked features show a neutral message ("Not available on your plan") with no call-to-action. Controlled by config/billing_policy.toml (default: purchase UI enabled on web/macos/windows, disabled on ios/android). Document the app-store review risk of this approach (stores may require their own billing for digital subscriptions in many regions) in docs/RELEASE.md, and keep the PaymentProvider trait extensible so store billing could be added later.
 
 # DESIGN SYSTEM AND UI RULES (non-negotiable)
-Visual reference: /design contains HTML exports from Google Stitch (mobile + desktop, light + dark). They are REFERENCE ONLY for layout and look. Re-implement everything as React components using semantic tokens. Do NOT copy: CDN scripts/fonts/images, hard-coded hex values, inline Tailwind configs, alert(), fixed-height hacks, fake data, or the placeholder name "Synapse AI". The app name is Stvdy.
+The current visual direction uses Musicfy (https://github.com/realidkroo/musicfy) as the requested display and animation reference, while retaining Stvdy's Figma-defined study workflows and information architecture. Re-implement with semantic React components and shared tokens. Do not copy remote scripts/fonts/images, literal colours into components, inline Tailwind configs, alert(), fixed-height hacks, fabricated data or another product's identity. The app name is Stvdy.
 
 ## Tokens (CSS variables, light/dark; wire into the Tailwind theme; no raw hex in components)
 role              | light                          | dark
-bg                | #FAF8FF                        | #0B0F19
-surface           | #FFFFFF                        | #111827
-surface-raised    | #F2F3FF                        | #1B2435
-border            | #DDE0F0                        | #263246
-text              | #131B2E                        | #F1F5F9
-text-muted        | #464555                        | #B4BDCF
-text-subtle       | #6B6A7C                        | #8493AA
+bg                | #F5F5F7                        | #080809
+surface           | #FFFFFF                        | #161618
+surface-raised    | #EBEBEF                        | #232326
+border            | #DCDCE3                        | #323237
+text              | #151518                        | #F7F7FA
+text-muted        | #4F4F5B                        | #C2C2CC
+text-subtle       | #686874                        | #A0A0AD
 primary (fill)    | #4F46E5 (white label)          | #4F46E5 (white label)
 primary-text/icon | #3525CD                        | #C4BFFF
 primary-tint      | #E2DFFF                        | #28234D
@@ -62,13 +62,13 @@ Semantic usage: indigo = actions/brand/selection; sky = sources and citations ON
 
 ## Type, shape, motion
 - Fonts bundled locally: Plus Jakarta Sans (headings 600/700), Inter (UI/body), JetBrains Mono (page refs, timestamps, hotkeys only).
-- Scale (px/line-height), **from the Figma design, which supersedes the earlier scale**: Display 48/62, H1 32/42, H2 24/32, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Small 13/20, Caption 12/18, Metadata 11/18, phone tab label 10/12. The earlier rule "NOTHING below 12px" is **withdrawn**: the design's metadata role is 11px monospace (uppercase as an eyebrow, at `letter-spacing: 0` like every other style in the file), and it carries most of the redesign's character. Body is 16/24 at every viewport, not 14/22 on desktop. Mobile inputs are 16px (prevents iOS zoom). Layouts must survive 200% text scaling and Indonesian strings (~25% longer than English).
-- 4pt spacing grid: 8 tight groups, 12 control padding, 16 card body, 24 related blocks, 32 section separation. Radius: 8 controls, 12 cards, 16 sheets/modals, 999 chips. 1px borders in both themes; shadows only for floating layers.
-- Motion 120/200/300 ms ease-out. Respect prefers-reduced-motion (card flip becomes a crossfade). No looping animations except loading and active-recording states.
+- Shared scale (px/line-height): Display 48/56, H1 40/52, H2 24/32, H3 20/26, H4 18/23, Body 16/24, Label 14/20, Small 13/20, Caption 12/18, Metadata 11/18; phone dock labels 11/14. Page headings reduce to 34/44 below 768px. Display headings use -0.025em tracking; evidence metadata remains untracked. Body and mobile inputs stay at 16px. Layouts must survive 200% text scaling and Indonesian strings (approximately 25% longer than English).
+- 4pt spacing grid: 8 tight groups, 12 control padding, 16 card body, 24 related blocks, 32 section separation. Radius: 12 controls, 20 cards, 24 sheets/modals, 999 navigation selections and chips. 1px borders in both themes; shadows only for floating layers, including the phone dock.
+- CSS feedback uses 120/200/300ms ease-out. Motion 14.2.0 provides a 300ms opacity/10px route entrance and a shared spring navigation selection (stiffness 380, damping 34). MotionConfig and useReducedMotion disable entrance/selection movement for prefers-reduced-motion; the existing card flip becomes a crossfade. No decorative looping animations.
 - One outline icon set, drawn for this product and bundled as SVG (no CDN, no imported pack), 20px in controls and 24px in navigation. Use an icon, not an emoji, for the streak.
-- **The shell is the design's**: a 216px desktop sidebar (wordmark, five nav items with icons, a "THIS SEMESTER" course list, a help note, the account's timezone) and an 80px top bar (a global search field that opens the command palette with its `⌘K`/`Ctrl K` badge, the sync state, the credit meter, the account group). A phone gets a 72px app header and a tab bar of five items, each a 24px icon over a 10px label.
-- Phone balances live in page content: beside the timezone on Today, and in the Workspaces directory's account summary. Bottom tabs are 56px visual rows with 8px padding plus the real safe-area inset; there is no permanent sync row above them. Pending/offline/refused writes remain visible in a normal-flow sync notice with the server's rejection code. `/study/:deckId` uses the focused session header instead of global navigation.
-- Workspace, Quiz, planner context, and study-source columns switch at 64rem of available container space, not a viewport-only desktop breakpoint, so enlarged text and tablet layouts reflow without squeezing their content. Route entry uses one 200ms Blur Fade transition; reduced motion disables it, and floating dialogs remain outside the animated content.
+- Desktop shell: a 216px sidebar (wordmark, five navigation items, the semester's real course list, help note and account timezone) and an 80px top bar (search opening the command palette with its platform shortcut, sync state, credit meter and account link). Phone: a 72px app header and a rounded floating dock with five icon/label destinations.
+- Phone balances live in page content: beside the timezone on Today, and in the Workspaces directory's account summary. Dock targets are at least 44px with 56px visual rows, real safe-area insets and an internally scrollable band when enlarged labels need it. Pending/offline/refused writes remain visible in a normal-flow sync notice with the server's rejection code. `/study/:deckId` uses the focused session header instead of global navigation.
+- Workspace, Quiz, planner context and study-source columns switch at 64rem of available container space rather than a viewport-only breakpoint. Settings section navigation appears only when its container has 56rem; narrower forms keep full width. Floating dialogs remain outside animated route content.
 
 ## Accessibility (WCAG 2.2 AA)
 Focus ring on every interactive element (2px primary ring + 2px offset, both themes; never remove outlines without replacing them); tap targets >= 44px on mobile and >= 32px with 8px gaps on desktop; never color-only meaning (add icon/text/pattern); labels on all inputs; aria-live for toasts and streaming answers; correct heading hierarchy; accessible names for icon buttons; charts and heatmaps have text equivalents; pinch-zoom is allowed (no `user-scalable=no`, no `maximum-scale`); keyboard-navigable everywhere on desktop. Add automated a11y checks (axe) to CI for the component gallery and key screens.
@@ -697,7 +697,7 @@ Admin: users, plan overrides, manual payment mark/refund, manual credit grants, 
 10. Tasks: list and board views, subtasks, priority, due date, estimate, "Break down" suggestions with Accept/Edit/Dismiss, quick capture.
 11. Syllabus review screen.
 12. Dashboard (inside Study or More): time per course, review activity, weak topics.
-13. Settings: Account; Study preferences (timezone, study hours, daily limit, session and break length); Notifications (channels, quiet hours); Calendar connections (Google status, add ICS URL, copy "your calendar feed" link with Regenerate); Devices and sync (list, sign out, sign out all, reset local data and resync); Data (export, delete account); Language (English / Bahasa Indonesia); Appearance (System / Light / Dark); BYOK key (Power, web/desktop only).
+13. Settings: a category directory with a compact account summary. `/settings/account` holds account, plan/progress links, updates, export and deletion; `/settings/study` holds timezone, study hours, daily/session/break limits, notification channels, quiet hours and language; `/settings/calendar` holds calendar connections and the calendar feed; `/settings/devices` holds devices and sync; `/settings/appearance` holds System/Light/Dark. Detail pages have Back to Settings, with section navigation on wide containers. Preserve per-change saves, plan/channel restrictions and web/desktop-only purchase paths. Appearance is a validated device boot preference, replaced by a valid signed-in account setting after refresh; System follows the OS without inline palette overrides.
 14. Plan and usage. Phone: read-only (plan, renewal date, credit meter, usage by feature), NO prices or purchase UI. Web/desktop: pricing page (3 plan cards, yearly default, student discount banner, comparison table, FAQ), billing page (current plan, renewal date, credits, payment history, buy credits), QRIS checkout (order summary, large QR, amount, 15:00 countdown, status states: waiting, paid, expired -> new QR, amount mismatch -> "under review", failed, offline).
 15. System states: offline, syncing, sync error, 404, generic error, maintenance; desktop command palette (⌘K/Ctrl+K) searching sources, decks, tasks, and actions.
 16. Admin (web only, admin only): users, plans, manual payment actions, grants/refunds, margin report, payments flagged `review`.

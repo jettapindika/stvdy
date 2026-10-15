@@ -2,6 +2,7 @@ import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
+import type { ChunkCitation } from '@/api/sse'
 import { asApiError, validationMessage } from '@/api/errors'
 import {
   HTTP_URL_PATTERN,
@@ -21,6 +22,7 @@ import { useWorkspace } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
+import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ChatScreen } from '@/features/chat/ChatScreen'
 import { FlashcardsPanel } from '@/features/studio/FlashcardsPanel'
 import { QuizPanel } from '@/features/studio/QuizPanel'
@@ -102,6 +104,9 @@ export function WorkspaceScreen() {
   const workspace = useWorkspace(workspaceId)
   const [active, setActive] = useState<Panel>('sources')
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  // The citation the student last opened in the chat. Lifted here so the
+  // reference panel's viewer tab can show the cited passage.
+  const [viewedCitation, setViewedCitation] = useState<ChunkCitation | null>(null)
 
   // The strip's labels are copy, so they are resolved per render rather than
   // kept in a module-scope table that would have no language to read from.
@@ -257,14 +262,181 @@ export function WorkspaceScreen() {
                     overflows, so nothing breaks. */}
                 <div className="min-h-0 flex-1 overflow-y-auto wrap-anywhere @container">
                   {id === 'sources' && <SourcesPanel workspaceId={workspaceId} />}
-                  {id === 'chat' && <ChatScreen workspaceId={workspaceId} />}
-                  {id === 'studio' && <StudioPanel workspaceId={workspaceId} />}
+                  {id === 'chat' && (
+                    <ChatScreen
+                      workspaceId={workspaceId}
+                      onViewCitation={(citation) => {
+                        setViewedCitation(citation)
+                        setActive('studio')
+                      }}
+                    />
+                  )}
+                  {id === 'studio' && (
+                    <ReferencePanel
+                      workspaceId={workspaceId}
+                      citation={viewedCitation}
+                    />
+                  )}
                 </div>
               </section>
             ))}
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * The reference panel: the third column in the workspace grid.
+ *
+ * It carries a `PDF Viewer | Studio` tab strip (411:44328 / 411:44591). The PDF
+ * viewer opens the source the student last cited or clicked, using the preview
+ * endpoint (`GET /sources/{id}/preview`) that returns a uniform PDF rendition
+ * for every source kind. The Studio tab holds flashcards, quizzes and reports.
+ */
+type ReferenceView = 'viewer' | 'studio'
+
+function ReferencePanel({
+  workspaceId,
+  citation,
+}: {
+  workspaceId: string
+  citation: ChunkCitation | null
+}) {
+  const { t } = useTranslation()
+  const [view, setView] = useState<ReferenceView>('studio')
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const sources = useSources(workspaceId)
+
+  // When a citation arrives, switch to the viewer tab
+  const prevCitationRef = useRef(citation)
+  if (citation !== null && citation !== prevCitationRef.current) {
+    prevCitationRef.current = citation
+    if (view !== 'viewer') setView('viewer')
+  }
+
+  const views: { id: ReferenceView; label: string }[] = [
+    { id: 'viewer', label: t('workspaces.reference.pdfViewer') },
+    { id: 'studio', label: t('workspaces.panel.studio') },
+  ]
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const index = views.findIndex((v) => v.id === view)
+    let next = index
+    if (event.key === 'ArrowRight') next = (index + 1) % views.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + views.length) % views.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = views.length - 1
+    else return
+
+    const target = views[next]
+    if (target === undefined) return
+    event.preventDefault()
+    setView(target.id)
+    tabRefs.current[target.id]?.focus()
+  }
+
+  // The source list for SourcePassage's title lookup
+  const sourceList = (sources.data ?? []).map((s) => ({ id: s.id, title: s.title }))
+
+  // The source title for the viewer header
+  const viewedSource = citation !== null
+    ? sources.data?.find((s) => s.id === citation.source_id) ?? null
+    : null
+
+  return (
+    <div className="flex flex-col">
+      <div
+        role="tablist"
+        aria-label={t('workspaces.reference.tabs')}
+        onKeyDown={onKeyDown}
+        className="flex border-b border-border bg-surface px-4 pt-2"
+      >
+        {views.map((v) => {
+          const selected = v.id === view
+          return (
+            <button
+              key={v.id}
+              ref={(node) => { tabRefs.current[v.id] = node }}
+              id={`ref-tab-${v.id}`}
+              role="tab"
+              type="button"
+              aria-selected={selected}
+              aria-controls={`ref-panel-${v.id}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => { setView(v.id) }}
+              className="flex min-h-11 flex-1 min-w-max items-center justify-center px-1"
+            >
+              <span
+                className={`flex min-h-11 items-center border-b-2 px-1 text-label ${selected ? 'border-primary font-semibold text-primary-text' : 'border-transparent text-muted hover:text-text'}`}
+              >
+                {v.label}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div
+        id="ref-panel-viewer"
+        role="tabpanel"
+        aria-labelledby="ref-tab-viewer"
+        hidden={view !== 'viewer'}
+        className="flex-1 overflow-y-auto bg-surface-raised p-4"
+      >
+        {citation === null ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <Icon name="file-text" size={24} className="text-muted" />
+            <p className="text-label text-muted">
+              {t('workspaces.reference.pdfViewer')}
+            </p>
+            <p className="text-small text-subtle max-w-60">
+              {t('workspaces.reference.viewerEmpty')}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {/* Document header */}
+            {viewedSource !== null && (
+              <div className="flex items-center gap-3">
+                <Icon name="file-text" size={20} className="shrink-0 text-muted" />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="text-label font-medium truncate">{viewedSource.title}</span>
+                  <span className="meta">
+                    {citation.page !== null
+                      ? t('workspaces.reference.pageOf', { current: citation.page, total: '–' })
+                      : ''}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* The cited passage rendered by SourcePassage */}
+            <SourcePassage
+              chunkId={citation.chunk_id}
+              sources={sourceList}
+            />
+
+            {/* Citation link note */}
+            {citation.page !== null && (
+              <p className="meta text-source">
+                {t('workspaces.reference.openedFrom', { page: citation.page, index: 1 })}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div
+        id="ref-panel-studio"
+        role="tabpanel"
+        aria-labelledby="ref-tab-studio"
+        hidden={view !== 'studio'}
+        className="flex-1 overflow-y-auto"
+      >
+        <StudioPanel workspaceId={workspaceId} />
+      </div>
     </div>
   )
 }
@@ -367,9 +539,25 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const sources = useSources(workspaceId)
   const listError = asApiError(sources.error)
+  const [expanded, setExpanded] = useState(false)
+
+  const MAX_VISIBLE = 3
+  const all = sources.data ?? []
+  const visible = expanded ? all : all.slice(0, MAX_VISIBLE)
+  const hasMore = all.length > MAX_VISIBLE
 
   return (
     <div className="flex flex-col gap-4 px-5 py-5 md:px-4 md:py-4">
+      {/* Heading with source count chip */}
+      {all.length > 0 && (
+        <div className="flex items-center justify-between">
+          <span className="text-h3">{t('workspaces.panel.sources')}</span>
+          <span className="chip chip-source">
+            {t('workspaces.detail.sourceCount', { count: all.length })}
+          </span>
+        </div>
+      )}
+
       {sources.isPending && (
         <SkeletonRows rows={2} label={t('workspaces.sources.loading')} />
       )}
@@ -396,15 +584,36 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
         />
       )}
 
-      {sources.data !== undefined && sources.data.length > 0 && (
+      {visible.length > 0 && (
         <ul className="flex flex-col gap-4">
-          {sources.data.map((source) => (
+          {visible.map((source) => (
             <SourceRow key={source.id} workspaceId={workspaceId} source={source} />
           ))}
         </ul>
       )}
 
-      <UploadForm workspaceId={workspaceId} />
+      {/* Expand/collapse when more than MAX_VISIBLE sources */}
+      {hasMore && (
+        <button
+          type="button"
+          className="btn btn-quiet self-start"
+          onClick={() => { setExpanded(!expanded) }}
+        >
+          {expanded
+            ? t('workspaces.sources.showLess')
+            : t('workspaces.sources.showAll', { count: all.length })}
+        </button>
+      )}
+
+      {/* Drop zone for adding sources */}
+      <div className="source-dropzone">
+        <Icon name="upload" size={20} className="text-muted" />
+        <UploadForm workspaceId={workspaceId} />
+        <span className="meta text-center">{t('workspaces.sources.dropHint')}</span>
+        <span className="meta text-center">{t('workspaces.sources.dropSize')}</span>
+      </div>
+
+      <p className="meta">{t('workspaces.sources.readyHint')}</p>
     </div>
   )
 }
@@ -526,7 +735,7 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
       </div>
 
       {errorText !== null && errorText.length > 0 && (
-        <p className="note note-danger text-small">{errorText}</p>
+        <p className="note note-danger text-small">{localizeSourceError(errorText, t)}</p>
       )}
 
       {confirming && (
@@ -565,6 +774,25 @@ function SourceRow({ workspaceId, source }: { workspaceId: string; source: Sourc
       )}
     </li>
   )
+}
+
+/**
+ * Map known server-side ingestion errors to localized strings. Unknown
+ * errors pass through unchanged so no failure is ever silenced.
+ */
+function localizeSourceError(
+  error: string,
+  t: (key: string) => string,
+): string {
+  if (error.includes('may be a scan')) return t('workspaces.source.errorScanned')
+  if (
+    error.includes('no extractable text') ||
+    error.includes('has no text') ||
+    error.includes('produced no chunks')
+  ) {
+    return t('workspaces.source.errorNoText')
+  }
+  return error
 }
 
 function UploadForm({ workspaceId }: { workspaceId: string }) {

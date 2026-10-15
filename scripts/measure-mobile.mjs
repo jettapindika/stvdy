@@ -990,7 +990,7 @@ const INVOICES_VIEW = {
 }
 
 /**
- * The four taps that reach the checkout screen, shared by its six state surfaces.
+ * The five taps that reach the checkout screen, shared by its six state surfaces.
  *
  * "Choose Pro" is `pricing.choose` rendered with the plan's name; the click drives the real
  * `POST /billing/checkout` against the fixture, and the screen navigates to
@@ -999,6 +999,7 @@ const INVOICES_VIEW = {
  */
 const CHECKOUT_STEPS = [
   { nav: 'More' },
+  { selector: '.settings-directory a[href="/settings/account"]' },
   { link: 'Open plan and usage' },
   { button: 'See plans' },
   { button: 'Choose Pro' },
@@ -1022,12 +1023,12 @@ const STUDY_STEPS = [
  * The way an operator reaches the admin console: Settings, then the link the account
  * section renders for an administrator.
  *
- * **Two taps, and both are asserted by the walk rather than assumed.** Settings is where
+ * **Three taps, all asserted by the walk rather than assumed.** Settings is where
  * the console's only route in lives, so if that link stops rendering — a renamed i18n key,
  * a `is_admin` that stops arriving on `/auth/me` — this surface fails with "no link Open
  * the admin console" rather than measuring a screen nobody can get to.
  */
-const ADMIN_STEPS = [{ nav: 'More' }, { link: 'Open the admin console' }]
+const ADMIN_STEPS = [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/account"]' }, { link: 'Open the admin console' }]
 
 /**
  * The surfaces this walks, by the taps a user takes to reach them.
@@ -1128,7 +1129,12 @@ const SURFACES = [
   // layout at 200% text is the one property that remains unmeasured, and that is stated in
   // the design doc's §10 rather than left implicit.
   { name: 'settings', steps: [{ nav: 'More' }] },
-  { name: 'plan', steps: [{ nav: 'More' }, { link: 'Open plan and usage' }] },
+  { name: 'settings-account', expect: 'Your data', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/account"]' }] },
+  { name: 'settings-study', expect: 'How Stvdy reaches you', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/study"]' }] },
+  { name: 'settings-calendar', expect: 'Your calendar feed', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/calendar"]' }] },
+  { name: 'settings-devices', expect: 'Signed-in devices', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/devices"]' }] },
+  { name: 'settings-appearance', expect: 'Theme', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/appearance"]' }] },
+  { name: 'plan', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/account"]' }, { link: 'Open plan and usage' }] },
   // --- Phase 11: the planner and the syllabus import, which had never been walked -----
   //
   // Reached by **tapping** — Tasks' `Plan` link, then the planner's own import link —
@@ -1281,7 +1287,7 @@ const SURFACES = [
   // Reached from Settings, the way a phone reaches it, and the one screen on this
   // list with a bar chart in it. Requested by Phase 12's own gate-5 slice, which
   // owns the screen and supplied the fixture bodies below.
-  { name: 'dashboard', steps: [{ nav: 'More' }, { link: 'View your progress' }] },
+  { name: 'dashboard', steps: [{ nav: 'More' }, { selector: '.settings-directory a[href="/settings/account"]' }, { link: 'View your progress' }] },
   // The same chat thread with two proposals waiting under it, so the agent cards
   // are measured rather than only their absence. The card renders straight from
   // `GET /actions/pending`, so no step beyond the thread's own is needed — and both
@@ -1307,6 +1313,7 @@ const SURFACES = [
     expect: 'Plans',
     steps: [
       { nav: 'More' },
+      { selector: '.settings-directory a[href="/settings/account"]' },
       { link: 'Open plan and usage' },
       { button: 'See plans' },
     ],

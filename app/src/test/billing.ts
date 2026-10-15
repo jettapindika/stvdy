@@ -14,7 +14,7 @@ import { USAGE, USER } from './usage'
  * second.
  *
  * The prices here are **deliberately not the values in `config/plans.toml`**. That
- * is the whole design of the honesty assertion in `BillingScreen.test.tsx`: a
+ * is the whole design of the honesty assertion in `PricingScreen.test.tsx`: a
  * screen that rendered the file's numbers instead of the payload's would agree
  * with `config/plans.toml` and disagree with the server, and the test would pass.
  * So the fixture's `pro` monthly price is `12345` where the file says `10000`, and

@@ -7,7 +7,9 @@ import { EXPORT_FORMATS, useDeleteAccount, useExportAccount } from '@/api/querie
 import { useSaveSettings, useSettings, type ReminderChannel } from '@/api/queries/settings'
 import { useUsage } from '@/api/queries/usage'
 import { PageFooter, PageHeader, Section } from '@/components/layout/Section'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import { ApiErrorNotice, LoadingState } from '@/components/ui/States'
+import { Select } from '@/components/ui/Select'
 import { useSession } from '@/features/auth/useSession'
 import { planForReminderChannel } from '@/features/billing/plans'
 import { ConnectionsPanel } from '@/features/calendar/ConnectionsPanel'
@@ -17,72 +19,19 @@ import { saveBlob } from '@/lib/download'
 import { DEFAULT_TIMEZONE, zoneOffsetLabel } from '@/lib/time'
 import { UpdatesPanel } from './UpdatesPanel'
 
-/**
- * Settings: what the student chooses, and what another phase owns.
- *
- * **Quiet hours are a window, and the window may wrap midnight.** `22 → 7` is the
- * normal case, so the form says which window it means ("22:00 to 07:00, next day")
- * rather than presenting two numbers and leaving the student to work out whether
- * the pair is valid. The rule is membership, not `start < end` (A202).
- *
- * **A channel the plan does not grant is locked, and the plan that has it is
- * named.** The fact comes from two places that are each authoritative for their
- * half: `GET /usage` says what *this account* may choose (that is the enforcement,
- * and the server refuses a channel the plan does not grant per channel with 403
- * `plan_required`), and `config/plans.toml` says which plan first has it — because
- * a screen that derived the name from the account's own plan could only ever say
- * "not yours". Choosing a locked channel is impossible rather than a 403 after the
- * fact.
- *
- * **The timezone is on the account, not on the settings row** (A203), which is why
- * it is saved through the same `PUT /settings` but read from `GET /auth/me`. The
- * page's footer states that same zone and its offset for today, because "when is
- * now" is the question every deadline on the other screens is answered in.
- *
- * **The sections this phase does not own are named.** BYOK (Phase 13) says which
- * phase brings it, rather than being an absent control a student would look for and
- * not find. Data export and deletion used to be in that list and is now a section of
- * its own (A355) — copy that outlives its phase is worse than no copy, because it
- * tells a student a working feature does not exist.
- *
- * **Deleting the account is behind a type-to-confirm, and the copy states the
- * consequences before the button is reachable.** A destructive action behind one tap
- * is the wrong default on a phone, where a mis-tap is easy and the account is not
- * recoverable; and the forfeiture of remaining prepaid time is what `docs/EULA.md`
- * § 5 promises will be said before confirmation (A350).
- *
- * **This screen is the phone's only route to the plan.** The credit meter lives in
- * the sidebar, which a phone does not render, and both `LockedFeature` and the
- * plan-limit notice deliberately carry no link on iOS and Android (A143) — so
- * without the link in the plan section below, the read-only plan screen Phase 14
- * builds (A322) would be reachable on a phone only by typing a URL into a webview
- * that has no address bar. The section is a link for the same reason Devices is
- * one: a sub-screen of settings is reached from here, not from a sixth tab item
- * (A189).
- */
 
 /** The channels the settings screen offers, in the order the matrix lists them. */
 const CHANNELS: ReminderChannel[] = ['web', 'push', 'email', 'telegram', 'discord']
 
-/**
- * The screen's sections, in the order the sub-nav lists them.
- *
- * The design's Settings frames are a two-column screen: a vertical sub-nav on the
- * left and one section's content on the right, which is a change from the earlier
- * single long scroll. The section is part of the URL (`/settings/devices`) rather
- * than component state, because a student who is told "revoke it in Settings →
- * Devices" should be able to be sent a link to it, and because the sync control in
- * the shell links straight to `/devices` and a browser Back from there should land
- * somewhere sensible.
- *
- * The vocabulary is the design's five, and the three the earlier screen had that
- * are not among them (Notifications, Language, Data) are folded into the section
- * they belong to rather than dropped: notifications and language are study
- * preferences in the sense the design uses the phrase, and the data controls are
- * facts about the account.
- */
 const SECTIONS = ['account', 'study', 'calendar', 'devices', 'appearance'] as const
 type SettingsSection = (typeof SECTIONS)[number]
+const SECTION_ICONS: Record<SettingsSection, IconName> = {
+  account: 'lock',
+  study: 'study',
+  calendar: 'calendar',
+  devices: 'laptop',
+  appearance: 'settings',
+}
 
 /** The section a path names, or the first one when it names nothing usable. */
 function sectionFromParam(value: string | undefined): SettingsSection {
@@ -96,7 +45,7 @@ export function SettingsScreen() {
   const settings = useSettings()
   const usage = useUsage()
   const { section: sectionParam } = useParams()
-  const section = sectionFromParam(sectionParam)
+  const section = sectionParam === undefined ? null : sectionFromParam(sectionParam)
   const [error, setError] = useState<ApiError | null>(null)
 
   const userId = session.status === 'signed-in' ? session.user.id : ''
@@ -120,18 +69,23 @@ export function SettingsScreen() {
   // empty id — a write the server would reject as another row's.
   if (settings.isPending || session.status === 'loading') {
     return (
-      <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
+      <div className="settings-page flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
         <LoadingState label={t('settings.loading')} />
       </div>
     )
   }
 
-  if (row === undefined) {
+  if (settings.isError || row === undefined) {
     return (
-      <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
+      <div className="settings-page flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
         <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
-        {error !== null ? <ApiErrorNotice error={error} noun={t('settings.noun')} /> : null}
+        <div role="alert" className="card flex flex-col items-start gap-4 p-6">
+          <p>{t('settings.readFailed')}</p>
+          <button type="button" className="btn btn-secondary" onClick={() => void settings.refetch()}>
+            {t('actions.retry')}
+          </button>
+        </div>
       </div>
     )
   }
@@ -171,7 +125,7 @@ export function SettingsScreen() {
   const footerZoneLabel = `${footerZone} · ${zoneOffsetLabel(now, footerZone)}`
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
+    <div className="settings-page flex w-full min-w-0 flex-col gap-6 px-5 md:px-[32px] py-8">
       <PageHeader
         eyebrow={t('shell.settingsEyebrow')}
         title={t('nav.settings')}
@@ -182,24 +136,41 @@ export function SettingsScreen() {
         <ApiErrorNotice error={error} noun={t('settings.noun')} action={t('actions.retry')} />
       ) : null}
 
-      {/* The two-column body. `lg` rather than `md` because the sub-nav is a column
-          of words and the content beside it is a form; below that width the nav
-          wraps into a row above the content, which is what a phone gets — five
-          full-width rows would push the section the student came for off the
-          first screen. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-        <nav
-          aria-label={t('settings.sections')}
-          className="flex shrink-0 flex-wrap gap-1 lg:w-56 lg:flex-col"
-        >
+      <p role="status" aria-live="polite" className="settings-save-status text-small text-muted">
+        {save.status === 'pending' ? t('settings.saving') : save.status === 'success' ? t('settings.saved') : ''}
+      </p>
+
+      {section === null ? (
+        <>
+          <AccountIdentity compact />
+          <nav aria-label={t('settings.sections')} className="settings-directory">
+            {SECTIONS.map((item) => (
+              <Link key={item} to={`/settings/${item}`} className="card settings-category">
+                <span className="settings-category-icon"><Icon name={SECTION_ICONS[item]} size={24} /></span>
+                <span className="settings-category-copy">
+                  <span className="text-body font-semibold">{t(`settings.section.${item}`)}</span>
+                  <span className="text-small text-muted">{t(`settings.description.${item}`)}</span>
+                </span>
+                <Icon name="chevron-right" className="shrink-0 text-muted" />
+              </Link>
+            ))}
+          </nav>
+        </>
+      ) : (
+      <div className="settings-detail">
+        <nav aria-label={t('settings.sections')} className="settings-detail-nav">
           {SECTIONS.map((item) => (
             <NavLink key={item} to={`/settings/${item}`} className="nav-item">
+              <Icon name={SECTION_ICONS[item]} />
               {t(`settings.section.${item}`)}
             </NavLink>
           ))}
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <div className="settings-detail-content flex min-w-0 flex-col gap-6">
+          <Link to="/settings" className="settings-back link inline-flex min-h-11 items-center gap-2 self-start">
+            <Icon name="arrow-left" />{t('settings.back')}
+          </Link>
           {section === 'account' && (
             <>
               <AccountIdentity />
@@ -259,6 +230,7 @@ export function SettingsScreen() {
               <Section title={t('settings.study.title')}>
                 <p className="text-label text-muted">{t('settings.study.intro')}</p>
                 <div className="card flex flex-col gap-6 p-6">
+                  <div className="settings-form-pair">
                   <label className="flex flex-col gap-1">
                     <span className="label">{t('settings.study.timezone')}</span>
                     <input
@@ -270,32 +242,6 @@ export function SettingsScreen() {
                       {t('settings.study.timezoneHint')}
                     </span>
                   </label>
-
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex flex-col gap-1">
-                      <span className="label">{t('settings.study.startHour')}</span>
-                      <input
-                        className="field max-w-24"
-                        type="number"
-                        min={0}
-                        max={23}
-                        value={row.study_start_hour}
-                        onChange={(event) => write({ study_start_hour: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="label">{t('settings.study.endHour')}</span>
-                      <input
-                        className="field max-w-24"
-                        type="number"
-                        min={1}
-                        max={24}
-                        value={row.study_end_hour}
-                        onChange={(event) => write({ study_end_hour: Number(event.target.value) })}
-                      />
-                    </label>
-                  </div>
-
                   <label className="flex flex-col gap-1">
                     <span className="label">{t('settings.study.maxMinutes')}</span>
                     <input
@@ -309,12 +255,39 @@ export function SettingsScreen() {
                       }
                     />
                   </label>
+                  </div>
 
-                  <div className="flex flex-wrap gap-4">
+                  <div className="settings-form-pair">
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.startHour')}</span>
+                      <input
+                        className="field"
+                        type="number"
+                        min={0}
+                        max={23}
+                        value={row.study_start_hour}
+                        onChange={(event) => write({ study_start_hour: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">{t('settings.study.endHour')}</span>
+                      <input
+                        className="field"
+                        type="number"
+                        min={1}
+                        max={24}
+                        value={row.study_end_hour}
+                        onChange={(event) => write({ study_end_hour: Number(event.target.value) })}
+                      />
+                    </label>
+                  </div>
+
+
+                  <div className="settings-form-pair">
                     <label className="flex flex-col gap-1">
                       <span className="label">{t('settings.study.blockLength')}</span>
                       <input
-                        className="field max-w-24"
+                        className="field"
                         type="number"
                         min={5}
                         max={180}
@@ -325,7 +298,7 @@ export function SettingsScreen() {
                     <label className="flex flex-col gap-1">
                       <span className="label">{t('settings.study.breakLength')}</span>
                       <input
-                        className="field max-w-24"
+                        className="field"
                         type="number"
                         min={0}
                         max={60}
@@ -348,60 +321,32 @@ export function SettingsScreen() {
                       const minPlan = planForReminderChannel(channel)
                       const on = selectedChannels.includes(channel)
                       return (
-                        <div key={channel} className="flex min-h-11 flex-wrap items-center gap-2">
-                          <input
-                            id={`channel-${channel}`}
-                            type="checkbox"
-                            checked={on}
-                            // A locked channel is not choosable at all, and neither is
-                            // one this deployment cannot deliver on: in both cases the
-                            // remedy is elsewhere, and a control that refuses after the
-                            // fact is worse than one that is visibly unavailable (A288).
-                            disabled={!granted || !available}
-                            onChange={(event) =>
-                              write({
+                        <div key={channel} className="settings-channel-row">
+                          <label htmlFor={`channel-${channel}`} className="settings-channel-label">
+                            <span className="settings-category-copy">
+                              <span id={`channel-name-${channel}`} className="text-body font-medium">
+                                {t(`settings.channel.${channel}`)}
+                              </span>
+                              {!granted && minPlan !== null ? (
+                                <span className="text-small text-muted">{t('settings.notifications.locked', { plan: minPlan })}</span>
+                              ) : !available ? (
+                                <span className="text-small text-muted">{t('settings.notifications.notYet')}</span>
+                              ) : null}
+                            </span>
+                            {!granted ? <Icon name="lock" className="shrink-0 text-muted" /> : null}
+                            <input
+                              id={`channel-${channel}`}
+                              aria-labelledby={`channel-name-${channel}`}
+                              type="checkbox"
+                              checked={on}
+                              disabled={!granted || !available}
+                              onChange={(event) => write({
                                 reminder_channels: event.target.checked
                                   ? [...selectedChannels, channel]
                                   : selectedChannels.filter((kept) => kept !== channel),
-                              })
-                            }
-                          />
-                          {/* The label is the hit area, and it carries `min-h-11` and
-                              `min-w-11` for the same reason `LockedFeature`'s link
-                              does. Measured in Chromium at 390px: the label was
-                              **65.9x22**, so a thumb aimed at the channel name and
-                              landing a few pixels high hit the row `<div>` and toggled
-                              nothing (Phase 14); and with the height fixed,
-                              `input#channel-email` was **35.3x44** at 100% text in both
-                              themes, because "Email" is a short word and the label is
-                              only as wide as its text. The width is on **every**
-                              channel label rather than the email row: the next short
-                              name ("Web", "Push") has the same defect, and a per-row
-                              fix is one that gets forgotten. It costs a 9px sliver on
-                              the narrow rows and buys the 44px target the gate
-                              requires. The checkbox itself stays 13x13 — the label is
-                              what a finger reaches. */}
-                          <label
-                            htmlFor={`channel-${channel}`}
-                            className="text-body flex min-h-11 min-w-11 items-center"
-                          >
-                            {t(`settings.channel.${channel}`)}
+                              })}
+                            />
                           </label>
-                          {!granted && minPlan !== null ? (
-                            // The word carries the state; the tone repeats it, so the
-                            // row reads in monochrome.
-                            <span className="chip chip-due">
-                              {t('settings.notifications.locked', { plan: minPlan })}
-                            </span>
-                          ) : !available ? (
-                            // Granted by the plan and not deliverable yet. The sentence
-                            // names which of the two it is, because "not available"
-                            // alone reads as a bug rather than as a channel that is
-                            // coming.
-                            <span className="chip chip-due">
-                              {t('settings.notifications.notYet')}
-                            </span>
-                          ) : null}
                         </div>
                       )
                     })}
@@ -412,11 +357,11 @@ export function SettingsScreen() {
                     <p className="text-caption text-muted">
                       {t('settings.notifications.quietHint')}
                     </p>
-                    <div className="flex flex-wrap gap-4">
+                    <div className="settings-form-pair">
                       <label className="flex flex-col gap-1">
                         <span className="label">{t('settings.notifications.quietFrom')}</span>
                         <input
-                          className="field max-w-24"
+                          className="field"
                           type="number"
                           min={0}
                           max={23}
@@ -428,7 +373,7 @@ export function SettingsScreen() {
                             write({
                               quiet_start_hour:
                                 event.target.value === '' ? null : Number(event.target.value),
-                              quiet_end_hour: row.quiet_end_hour ?? 7,
+                              quiet_end_hour: event.target.value === '' ? null : row.quiet_end_hour ?? 7,
                             })
                           }
                         />
@@ -436,14 +381,14 @@ export function SettingsScreen() {
                       <label className="flex flex-col gap-1">
                         <span className="label">{t('settings.notifications.quietTo')}</span>
                         <input
-                          className="field max-w-24"
+                          className="field"
                           type="number"
                           min={0}
                           max={23}
                           value={row.quiet_end_hour ?? ''}
                           onChange={(event) =>
                             write({
-                              quiet_start_hour: row.quiet_start_hour ?? 22,
+                              quiet_start_hour: event.target.value === '' ? null : row.quiet_start_hour ?? 22,
                               quiet_end_hour:
                                 event.target.value === '' ? null : Number(event.target.value),
                             })
@@ -475,12 +420,9 @@ export function SettingsScreen() {
               <Section title={t('settings.language.title')}>
                 <p className="text-label text-muted">{t('settings.language.intro')}</p>
                 <div className="card flex flex-col gap-2 p-4">
-                  <label className="label" htmlFor="settings-language">
-                    {t('settings.language.label')}
-                  </label>
-                  <select
-                    id="settings-language"
-                    className="field max-w-64"
+                  <Select
+                    label={t('settings.language.label')}
+                    className="max-w-64"
                     value={row.language}
                     onChange={(event) => write({ language: event.target.value as Language })}
                   >
@@ -489,7 +431,7 @@ export function SettingsScreen() {
                         {LANGUAGE_LABELS[language]}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </Section>
             </>
@@ -503,23 +445,26 @@ export function SettingsScreen() {
             <>
               <Section title={t('settings.appearance.title')}>
                 <p className="text-label text-muted">{t('settings.appearance.intro')}</p>
-                <div className="card flex flex-col gap-2 p-4">
-                  <label className="label" htmlFor="settings-theme">
-                    {t('settings.appearance.label')}
-                  </label>
-                  <select
-                    id="settings-theme"
-                    className="field max-w-64"
-                    value={row.theme}
-                    onChange={(event) =>
-                      write({ theme: event.target.value as 'system' | 'light' | 'dark' })
-                    }
-                  >
-                    <option value="system">{t('settings.appearance.system')}</option>
-                    <option value="light">{t('settings.appearance.light')}</option>
-                    <option value="dark">{t('settings.appearance.dark')}</option>
-                  </select>
-                </div>
+                <fieldset className="card settings-theme-options p-4">
+                  <legend className="label">{t('settings.appearance.label')}</legend>
+                  {(['system', 'light', 'dark'] as const).map((theme) => (
+                    <label key={theme} className="settings-theme-choice">
+                      <span className={`settings-theme-preview settings-theme-preview-${theme}`} aria-hidden="true">
+                        <span /><span /><span />
+                      </span>
+                      <span className="settings-theme-label">
+                        <input
+                          type="radio"
+                          name="settings-theme"
+                          value={theme}
+                          checked={row.theme === theme}
+                          onChange={() => write({ theme })}
+                        />
+                        <span>{t(`settings.appearance.${theme}`)}</span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
               </Section>
 
               {/* The one section this build does not own. It is named rather than
@@ -538,6 +483,7 @@ export function SettingsScreen() {
           )}
         </div>
       </div>
+      )}
 
       <PageFooter
         left={<span className="uppercase">{footerZoneLabel}</span>}
@@ -559,10 +505,24 @@ export function SettingsScreen() {
  * `.label`: a control's label sits above a control, and a label over a value reads
  * as a field the student can type into.
  */
-function AccountIdentity() {
+function AccountIdentity({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
   const session = useSession()
   const usage = useUsage()
+
+  if (compact) {
+    return (
+      <div className="card flex min-w-0 flex-wrap items-center gap-4 p-5">
+        <span className="settings-category-icon" aria-hidden="true"><Icon name="lock" /></span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="wrap-anywhere text-label font-semibold">{session.status === 'signed-in' ? session.user.email : ''}</p>
+          {usage.data?.name || usage.isPending ? (
+            <p className="text-small text-muted">{t('settings.account.plan')}: {usage.data?.name ?? t('states.loading')}</p>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Section title={t('settings.section.account')}>

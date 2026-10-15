@@ -180,11 +180,15 @@ describe('the signed-out path', () => {
     expect(getAccessToken()).toBeNull()
   })
 
-  it('reports "no session" instead of refreshing when nothing is stored', async () => {
+  it('attempts a cookie-based refresh when nothing is stored', async () => {
+    // With cookie-based auth, the client tries to refresh even without stored
+    // tokens — the browser may hold an HttpOnly cookie from a prior login.
+    // The empty response fails validation, so the result is still false.
     const calls = mockFetch(() => jsonResponse(200, {}))
 
     await expect(ensureFreshSession()).resolves.toBe(false)
-    expect(calls).toHaveLength(0)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toContain('/auth/refresh')
   })
 
   it('keeps the session when the server could not be reached at all', async () => {

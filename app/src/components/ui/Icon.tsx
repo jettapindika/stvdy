@@ -30,8 +30,6 @@ export type IconName =
   | 'planner'
   | 'settings'
   // Structure and objects
-  | 'folder'
-  | 'book-open'
   | 'calendar'
   | 'cards'
   | 'file-text'
@@ -57,8 +55,6 @@ export type IconName =
   | 'link'
   | 'play'
   | 'external'
-  | 'expand'
-  | 'maximize'
   | 'ellipsis'
   // A reorder handle, and the sync pass that can be asked for by hand.
   | 'grip-vertical'
@@ -75,6 +71,9 @@ export type IconName =
   | 'chevron-right'
   | 'chevron-down'
   | 'arrow-left'
+  | 'expand'
+  // Attachment
+  | 'paperclip'
 
 /**
  * Paths per icon. A list rather than a single `d`, because several of these are
@@ -105,11 +104,6 @@ const PATHS: Record<IconName, string[]> = {
   ],
 
   // --- Structure and objects ---------------------------------------------
-  folder: ['M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
-  'book-open': [
-    'M12 6.5C10.4 5 8.3 4.4 5 4.4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1c3.3 0 5.4.6 7 2.1 1.6-1.5 3.7-2.1 7-2.1a1 1 0 0 0 1-1v-11a1 1 0 0 0-1-1c-3.3 0-5.4.6-7 2.1z',
-    'M12 6.5v13',
-  ],
   calendar: [
     'M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v13A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5z',
     'M4 10h16M8 3v4M16 3v4',
@@ -155,9 +149,6 @@ const PATHS: Record<IconName, string[]> = {
   ],
   play: ['M7.5 4.5l12 7.5-12 7.5z'],
   external: ['M14 4h6v6M20 4l-9 9M18 14v5H5V6h5'],
-  // Two arrows pulling apart: open a panel.
-  expand: ['M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6'],
-  maximize: ['M15 3h6v6M9 21H3v-6M21 3l-7.5 7.5M3 21l7.5-7.5'],
   // Three dots. Drawn as tiny circles rather than strokes with a round cap,
   // because a zero-length stroke is not reliably rendered and the dots are the
   // whole glyph.
@@ -214,10 +205,18 @@ const PATHS: Record<IconName, string[]> = {
   alert: ['M12 4l9 16H3z', 'M12 10v4M12 17h.01'],
 
   // --- Chevrons and arrows ------------------------------------------------
-  'chevron-left': ['M15 5l-7 7 7 7'],
+  'chevron-left': ['M15 19l-7-7 7-7'],
   'chevron-right': ['M9 5l7 7-7 7'],
   'chevron-down': ['M6 9.5l6 6 6-6'],
   'arrow-left': ['M19 12H5', 'M11 18l-6-6 6-6'],
+  // Four outward arrows: the expand / full-screen control on the PDF viewer.
+  expand: [
+    'M4 14v6h6M20 10V4h-6M14 10l6-6M10 14l-6 6',
+  ],
+  // A rotated paperclip: the attach-file control in the composer.
+  paperclip: [
+    'M21.4 11.6l-8.5 8.5a4.5 4.5 0 0 1-6.4-6.4l8.5-8.5a3 3 0 0 1 4.3 4.3l-8.5 8.5a1.5 1.5 0 0 1-2.1-2.1l8.5-8.5',
+  ],
 }
 
 export type IconProps = {

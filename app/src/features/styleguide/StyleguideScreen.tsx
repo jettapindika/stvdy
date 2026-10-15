@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { PageHeader, Section, WidgetHeading, sectionId } from '@/components/layout/Section'
 import { Citation, CitationList } from '@/components/ui/Citation'
 import { Field } from '@/components/ui/Field'
+import { Select } from '@/components/ui/Select'
 import { Icon } from '@/components/ui/Icon'
 import { COURSE_NAMES, contrast, courseVars, tokenColor } from '@/tokens/tokens'
 import type { IconName } from '@/components/ui/Icon'
@@ -63,8 +64,8 @@ const DARK_CORE = ['bg', 'surface', 'border', 'text']
  * size in the wrong family and teach the wrong thing.
  */
 const TYPE_SCALE: { utility: string; family: string; spec: string; sample: string }[] = [
-  { utility: 'text-display', family: 'font-heading', spec: '48 / 62', sample: 'display' },
-  { utility: 'text-h1', family: 'font-heading', spec: '32 / 42', sample: 'headingOne' },
+  { utility: 'text-display', family: 'font-heading', spec: '48 / 56', sample: 'display' },
+  { utility: 'text-h1', family: 'font-heading', spec: '40 / 52', sample: 'headingOne' },
   { utility: 'text-h2', family: 'font-heading', spec: '24 / 32', sample: 'headingTwo' },
   { utility: 'text-h3', family: 'font-heading', spec: '20 / 26', sample: 'headingThree' },
   { utility: 'text-h4', family: 'font-heading', spec: '18 / 23', sample: 'h4' },
@@ -449,6 +450,42 @@ export function StyleguideScreen() {
           <div className="flex flex-col gap-3">
             <WidgetHeading
               eyebrow="02.3"
+              title={t('styleguide.controls.selectTitle')}
+              meta={t('styleguide.controls.selectMeta')}
+            />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Select
+                label={t('styleguide.controls.selectLabel')}
+                tabIndex={-1}
+              >
+                <option>{t('styleguide.controls.selectOption1')}</option>
+                <option>{t('styleguide.controls.selectOption2')}</option>
+                <option>{t('styleguide.controls.selectOption3')}</option>
+              </Select>
+              <Select
+                label={t('styleguide.controls.selectLabel')}
+                hint={t('styleguide.controls.selectHint')}
+                tabIndex={-1}
+              >
+                <option>{t('styleguide.controls.selectOption1')}</option>
+                <option>{t('styleguide.controls.selectOption2')}</option>
+                <option>{t('styleguide.controls.selectOption3')}</option>
+              </Select>
+              <Select
+                label={t('styleguide.controls.selectLabel')}
+                disabled
+                tabIndex={-1}
+              >
+                <option>{t('styleguide.controls.selectOption1')}</option>
+                <option>{t('styleguide.controls.selectOption2')}</option>
+                <option>{t('styleguide.controls.selectOption3')}</option>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <WidgetHeading
+              eyebrow="02.4"
               title={t('styleguide.controls.targets')}
               meta={t('styleguide.controls.targetsMeta')}
             />

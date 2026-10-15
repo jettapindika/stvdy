@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import { createBrowserRouter, Navigate, useParams } from 'react-router'
 
+import { useDocumentTitle } from './lib/useDocumentTitle'
 import { App } from './App'
 import { AdminScreen } from './features/admin/AdminScreen'
 import { NotBuiltYet } from './components/ui/States'
+import { ErrorScreen } from './components/ui/ErrorScreen'
 import { DeepLinkHandler } from './features/auth/DeepLinkHandler'
 import { NotificationRouter } from './features/notifications/NotificationRouter'
 import { GoogleCallbackRoute } from './features/auth/GoogleCallbackScreen'
@@ -167,10 +169,12 @@ export const router = createBrowserRouter([
     // root; the outlet below is the deep-link handler's.
     element: (
       <>
+        <DocumentTitle />
         <DeepLinkHandler />
         <NotificationRouter />
       </>
     ),
+    errorElement: <ErrorScreen />,
     children: [
       // The web build's Google callback lands here; the native shell delivers the
       // same ticket as a deep-link intent instead.
@@ -296,3 +300,9 @@ export const router = createBrowserRouter([
     ],
   },
 ])
+
+/** Runs the title hook inside the router so every navigation updates `document.title`. */
+function DocumentTitle() {
+  useDocumentTitle()
+  return null
+}

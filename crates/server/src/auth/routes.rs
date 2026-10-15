@@ -9,6 +9,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::http::HeaderMap;
+use axum::http::header::SET_COOKIE;
 use chrono::{DateTime, Utc};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -48,12 +50,12 @@ pub struct LoginRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
-    pub refresh_token: String,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LogoutRequest {
-    pub refresh_token: String,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +230,21 @@ pub(crate) fn user_view(
     }
 }
 
+fn session_headers(
+    pair: &tokens::TokenPair,
+    is_dev: bool,
+) -> [(axum::http::header::HeaderName, axum::http::HeaderValue); 1] {
+    [(
+        SET_COOKIE,
+        super::cookie::session_cookie(
+            &pair.refresh_token,
+            &pair.device_id.to_string(),
+            pair.refresh_expires_at,
+            is_dev,
+        ),
+    )]
+}
+
 /// `POST /auth/signup`
 pub async fn signup(
     State(state): State<AppState>,
@@ -323,6 +340,7 @@ pub async fn signup(
 
     Ok((
         StatusCode::CREATED,
+        session_headers(&pair, state.config.env.is_dev()),
         Json(AuthResponse {
             user: user_view(
                 user_id,
@@ -349,7 +367,7 @@ pub async fn signup(
 pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginRequest>,
-) -> AppResult<Json<AuthResponse>> {
+) -> AppResult<impl IntoResponse> {
     let email = normalize_email(&body.email)?;
     validate_device(&body.device)?;
 
@@ -390,23 +408,26 @@ pub async fn login(
 
     tracing::info!(user_id = %row.id, platform = %body.device.platform, "login");
 
-    Ok(Json(AuthResponse {
-        user: user_view(
-            row.id,
-            row.email,
-            row.email_verified,
-            row.email_verified_at,
-            row.plan_id,
-            row.timezone,
-            row.student_verified,
-            row.is_admin,
-            row.created_at,
-        ),
-        access_token: pair.access_token,
-        refresh_token: pair.refresh_token,
-        expires_at: pair.access_expires_at,
-        device_id,
-    }))
+    Ok((
+        session_headers(&pair, state.config.env.is_dev()),
+        Json(AuthResponse {
+            user: user_view(
+                row.id,
+                row.email,
+                row.email_verified,
+                row.email_verified_at,
+                row.plan_id,
+                row.timezone,
+                row.student_verified,
+                row.is_admin,
+                row.created_at,
+            ),
+            access_token: pair.access_token,
+            refresh_token: pair.refresh_token,
+            expires_at: pair.access_expires_at,
+            device_id,
+        }),
+    ))
 }
 
 #[derive(sqlx::FromRow)]
@@ -435,29 +456,72 @@ pub struct RefreshResponse {
 /// `POST /auth/refresh`
 pub async fn refresh(
     State(state): State<AppState>,
-    Json(body): Json<RefreshRequest>,
-) -> AppResult<Json<RefreshResponse>> {
+    headers: HeaderMap,
+    body: Option<Json<RefreshRequest>>,
+) -> AppResult<impl IntoResponse> {
+
+    // Native clients send the token in the body; web clients fall back to the cookie.
+    let refresh_token: String = if let Some(token) = body
+        .as_ref()
+        .and_then(|b| b.refresh_token.clone())
+    {
+        token
+    } else {
+        let cookie_str = headers
+            .get(axum::http::header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(AppError::Unauthorized)?;
+        super::cookie::parse_session_cookie(cookie_str)
+            .map(|(token, _)| token)
+            .ok_or(AppError::Unauthorized)?
+    };
+
     let pair = tokens::rotate(
         &state.pool,
         &state.config,
-        &SecretString::from(body.refresh_token),
+        &SecretString::from(refresh_token),
     )
     .await?;
 
-    Ok(Json(RefreshResponse {
-        access_token: pair.access_token,
-        refresh_token: pair.refresh_token,
-        expires_at: pair.access_expires_at,
-    }))
+    Ok((
+        session_headers(&pair, state.config.env.is_dev()),
+        Json(RefreshResponse {
+            access_token: pair.access_token,
+            refresh_token: pair.refresh_token,
+            expires_at: pair.access_expires_at,
+        }),
+    ))
 }
 
 /// `POST /auth/logout`
+///
+/// Idempotent: a second call after the cookie was already cleared returns 204
+/// without an error, because the session is already gone and an error would
+/// make the sign-out screen show a failure for something that succeeded.
 pub async fn logout(
     State(state): State<AppState>,
-    Json(body): Json<LogoutRequest>,
-) -> AppResult<StatusCode> {
-    tokens::revoke_by_refresh_token(&state.pool, &SecretString::from(body.refresh_token)).await?;
-    Ok(StatusCode::NO_CONTENT)
+    headers: HeaderMap,
+    body: Option<Json<LogoutRequest>>,
+) -> AppResult<impl IntoResponse> {
+    let clear = [(SET_COOKIE, super::cookie::clear_cookie(state.config.env.is_dev()))];
+
+    // Native clients send the token in the body; web clients fall back to the cookie.
+    // No credential at all is a no-op: the session is already gone.
+    let refresh_token = body
+        .and_then(|b| b.0.refresh_token)
+        .or_else(|| {
+            headers
+                .get(axum::http::header::COOKIE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(super::cookie::parse_session_cookie)
+                .map(|(token, _)| token)
+        });
+
+    if let Some(token) = refresh_token {
+        tokens::revoke_by_refresh_token(&state.pool, &SecretString::from(token)).await?;
+    }
+
+    Ok((clear, StatusCode::NO_CONTENT))
 }
 
 /// `POST /auth/logout-all`
@@ -546,9 +610,21 @@ pub async fn google_callback(
 pub async fn google_exchange(
     State(state): State<AppState>,
     Json(body): Json<crate::auth::google::ExchangeRequest>,
-) -> AppResult<Json<AuthResponse>> {
+) -> AppResult<impl IntoResponse> {
     validate_device(&body.device)?;
-    Ok(Json(crate::auth::google::exchange(&state, &body).await?))
+    let auth_response = crate::auth::google::exchange(&state, &body).await?;
+    let expires_at =
+        Utc::now() + chrono::Duration::days(state.config.auth.refresh_ttl_days);
+    let cookie = super::cookie::session_cookie(
+        &auth_response.refresh_token,
+        &auth_response.device_id.to_string(),
+        expires_at,
+        state.config.env.is_dev(),
+    );
+    Ok((
+        [(SET_COOKIE, cookie)],
+        Json(auth_response),
+    ))
 }
 
 /// `POST /auth/google/set-password`. A Google-only account can set one only

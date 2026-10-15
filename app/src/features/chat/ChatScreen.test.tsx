@@ -198,8 +198,8 @@ describe('a streamed answer', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Apa itu graf?')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Apa itu graf?')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     const log = await screen.findByRole('log')
     expect(log).toHaveAttribute('aria-live', 'polite')
@@ -246,7 +246,7 @@ describe('a streamed answer', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    const composer = screen.getByLabelText('Ask about this workspace')
+    const composer = screen.getByLabelText('Ask your sources')
     // Enter, not a click: a click legitimately puts focus on the button that was
     // clicked, and the property under test is that the *answer* does not take
     // focus away from the field the student is typing in.
@@ -270,8 +270,8 @@ describe('a streamed answer', () => {
     await screen.findByText('No questions yet')
 
     await user.click(screen.getByLabelText('Bab 3 Graf'))
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Ringkas bab ini')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Ringkas bab ini')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     await vi.waitFor(() => {
       expect(calls.some((call) => call.url.endsWith('/workspaces/w1/chat'))).toBe(true)
@@ -306,8 +306,8 @@ describe('a streamed answer', () => {
     await user.click(toggle)
     expect(toggle).not.toBeChecked()
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Jelaskan graf')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Jelaskan graf')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     await vi.waitFor(() => {
       expect(calls.some((call) => call.url.endsWith('/workspaces/w1/chat'))).toBe(true)
@@ -335,11 +335,11 @@ describe('a streamed answer', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Tanya')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Tanya')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send ↑' })).toBeNull()
   })
 })
 
@@ -352,8 +352,8 @@ describe('a failure on the screen', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Apa itu graf?')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Apa itu graf?')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     stream.push(frame('token', { t: 'Graf adalah' }))
     expect(await screen.findByText(/Graf adalah/)).toBeInTheDocument()
@@ -387,8 +387,8 @@ describe('a failure on the screen', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Tanya')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Tanya')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     expect(await screen.findByText('Not enough credits')).toBeInTheDocument()
     // Nothing that looks like an answer, because the server persisted nothing.
@@ -416,8 +416,8 @@ describe('a failure on the screen', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'Tanya')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'Tanya')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     expect(await screen.findByText('Email not verified')).toBeInTheDocument()
     expect(screen.getByText(/Check your inbox/)).toBeInTheDocument()
@@ -430,8 +430,8 @@ describe('a citation chip', () => {
     const user = userEvent.setup()
 
     renderChat()
-    await user.type(await screen.findByLabelText('Ask about this workspace'), 'Apa itu graf?')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.type(await screen.findByLabelText('Ask your sources'), 'Apa itu graf?')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     await vi.waitFor(() => {
       expect(calls.some((call) => call.url.endsWith('/workspaces/w1/chat'))).toBe(true)
@@ -441,9 +441,9 @@ describe('a citation chip', () => {
 
     // The toggle is a real control now, not a disabled note, so flipping it has
     // to change what the next turn sends.
-    await user.click(screen.getByRole('checkbox', { name: /Search the web too/ }))
-    await user.type(screen.getByLabelText('Ask about this workspace'), 'dan lagi')
-    await user.click(screen.getByRole('button', { name: 'Ask' }))
+    await user.click(screen.getByRole('checkbox', { name: /Search the web/ }))
+    await user.type(screen.getByLabelText('Ask your sources'), 'dan lagi')
+    await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 
     await vi.waitFor(() => {
       const bodies = calls
@@ -646,9 +646,9 @@ describe('the chat panel inside the workspace screen', () => {
     await user.click(await screen.findByRole('tab', { name: 'Chat' }))
 
     const panel = screen.getByRole('tabpanel', { name: 'Chat' })
-    expect(await within(panel).findByLabelText('Ask about this workspace')).toBeInTheDocument()
+    expect(await within(panel).findByLabelText('Ask your sources')).toBeInTheDocument()
     expect(within(panel).queryByText(/Not built yet/)).toBeNull()
     // Studio is the flashcard panel Phase 4 built, not a placeholder.
-    expect(screen.getByRole('tabpanel', { name: 'Studio' })).toHaveTextContent('Generate deck')
+    expect(document.getElementById('panel-studio')!).toHaveTextContent('Generate deck')
   })
 })

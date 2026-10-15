@@ -1,4 +1,5 @@
 import { screen, within } from '@testing-library/react'
+import { Route, Routes } from 'react-router'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -105,6 +106,13 @@ function setup() {
   return { fake, calls }
 }
 
+function renderAccount() {
+  return renderWithProviders(
+    <Routes><Route path="/settings/:section" element={<SettingsScreen />} /></Routes>,
+    { route: '/settings/account' },
+  )
+}
+
 beforeEach(() => {
   setAccessToken('access-1')
   // Assigned onto the real `URL` rather than stubbed as a whole object: the test's own
@@ -123,7 +131,7 @@ describe('the data section', () => {
   it('offers all three documents the spec names, each as its own request', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     // JSON, Markdown and ICS are three documents, not one with a flag: the spec names
     // them because they answer different questions, and offering only one would be
@@ -144,7 +152,7 @@ describe('the data section', () => {
 
   it('states the consequences before the control that acts on them', async () => {
     setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     // The EULA § 5 promise: the forfeiture is said *before* confirmation. The assertion
     // is on the copy being present before the confirm field is opened, because a screen
@@ -161,7 +169,7 @@ describe('the data section', () => {
   it('requires the student to type their own address before the deletion is reachable', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     const start = await screen.findByRole('button', { name: 'Delete my account' })
     await user.click(start)
@@ -193,7 +201,7 @@ describe('the data section', () => {
   it('cancels the confirmation and forgets what was typed', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     await user.click(await screen.findByRole('button', { name: 'Delete my account' }))
     await user.type(screen.getByLabelText(/Type rani@example.com to confirm/), 'rani@example.com')
@@ -213,7 +221,7 @@ describe('the data section', () => {
   it('signs this device out, because the server already did', async () => {
     const user = userEvent.setup()
     setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     await user.click(await screen.findByRole('button', { name: 'Delete my account' }))
     await user.type(
@@ -237,7 +245,7 @@ describe('the data section', () => {
     // reach this section. A locked export button would be a plan decision the spec does not
     // have, made on the screen where a student is trying to leave.
     setup()
-    renderWithProviders(<SettingsScreen />, { route: '/settings' })
+    renderAccount()
 
     const section = (await screen.findByRole('heading', { name: 'Your data' })).closest('section')
     expect(section).not.toBeNull()

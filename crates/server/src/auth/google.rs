@@ -1,8 +1,8 @@
 //! Sign-in with Google (A48).
 //!
-//! Standard Authorization Code + PKCE, server-side, using the same `oauth2`
-//! crate and the same deep-link return path the Calendar integration needs. The
-//! flow ends by issuing our *own* access + refresh pair through
+//! Standard Authorization Code + PKCE, server-side, with the same deep-link
+//! return path the Calendar integration needs. The flow ends by issuing our
+//! *own* access + refresh pair through
 //! `auth::tokens::issue_pair`, so nothing downstream can tell how the user
 //! signed in.
 //!
@@ -13,7 +13,7 @@
 //!    to the browser, which is the party PKCE exists to distrust. AES-GCM under
 //!    `ENCRYPTION_KEY_HEX` keeps it server-side while staying stateless, so it
 //!    works with more than one instance.
-//! 2. **The `id_token` is verified here, not by `oauth2`.** `oauth2` 5.0.0 has
+//! 2. **The `id_token` is verified here, not by a library.** `oauth2` has
 //!    no JWT or JWKS support, so it can hand back an `id_token` but cannot check
 //!    its signature. Verification is `jsonwebtoken` against Google's JWKS, plus
 //!    the issuer, audience, expiry and nonce checks that are the actual security
@@ -248,16 +248,14 @@ pub async fn exchange(
 /// `Validation`* rather than by hand, but they are declared so the deserialized
 /// shape matches the token and a future reader can see what is verified.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct IdTokenClaims {
     sub: String,
     email: String,
     email_verified: Option<bool>,
     nonce: Option<String>,
-    #[allow(dead_code)]
     aud: String,
-    #[allow(dead_code)]
     iss: String,
-    #[allow(dead_code)]
     exp: i64,
 }
 
@@ -335,9 +333,10 @@ async fn fetch_jwks(force: bool) -> AppResult<jsonwebtoken::jwk::JwkSet> {
 
 /// Verifies the `id_token` and returns its claims.
 ///
-/// This is the step `oauth2` 5.0.0 cannot do, and it is the whole security
-/// argument for trusting the `sub` claim. `email_verified` is required to be
-/// true: linking on an unverified address is an account-takeover path (A48).
+/// This is the step the `oauth2` crate could not do (it has no JWT or JWKS
+/// support), and it is the whole security argument for trusting the `sub`
+/// claim. `email_verified` is required to be true: linking on an unverified
+/// address is an account-takeover path (A48).
 async fn verify_id_token(
     google: &crate::config::GoogleLoginConfig,
     id_token: &str,

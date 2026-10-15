@@ -415,6 +415,12 @@ pub async fn chat(
                             emitted = safe;
                         }
                     }
+                    Some(StreamEvent::Reasoning(text)) => {
+                        // Reasoning fragments are forwarded to the client as-is.
+                        // They are not appended to `answer` (they are not the
+                        // answer) and not held back for marker safety.
+                        yield Ok(sse::reasoning(&text));
+                    }
                     Some(StreamEvent::Usage(reported)) => {
                         usage = Some(reported);
                     }

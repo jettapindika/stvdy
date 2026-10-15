@@ -4,6 +4,8 @@
 //! order and its denominator are the two things a later refactor breaks silently, so
 //! they are pinned here rather than left to the route test.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use uuid::Uuid;
 
 use stvdy_core::quiz::{AnswerRecord, grade_mcq, normalize, summarize};
