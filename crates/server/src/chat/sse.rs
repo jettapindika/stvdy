@@ -1,9 +1,9 @@
 //! The SSE writer for chat (roadmap § 4).
 //!
 //! Hand-rolled rather than `axum::response::sse`'s typed helper because the
-//! contract has six named events and one of them (`error`) has to be sendable at
-//! any point, including before the first token. Keeping the frame shape in one
-//! place is also what stops a handler from inventing a seventh event name.
+//! contract has seven named events and one of them (`error`) has to be sendable
+//! at any point, including before the first token. Keeping the frame shape in
+//! one place is also what stops a handler from inventing an eighth event name.
 
 use axum::response::sse::Event;
 use stvdy_core::citations::Citation;

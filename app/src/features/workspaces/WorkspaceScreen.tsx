@@ -1,11 +1,10 @@
-import { useId, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 
 import type { ChunkCitation } from '@/api/sse'
-import { asApiError, validationMessage } from '@/api/errors'
+import { asApiError } from '@/api/errors'
 import {
-  HTTP_URL_PATTERN,
   UPLOAD_KINDS,
   acceptFor,
   isSettledStatus,
@@ -19,7 +18,6 @@ import {
   type UploadKind,
 } from '@/api/queries/sources'
 import { useWorkspace } from '@/api/queries/workspaces'
-import { Field } from '@/components/ui/Field'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { SourcePassage } from '@/components/ui/SourcePassage'
@@ -159,8 +157,8 @@ export function WorkspaceScreen() {
   }
 
   return (
-    <div className="@container/workspace flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-col gap-2 border-b border-border bg-surface px-5 py-5 md:px-6 md:py-6">
+    <div className="@container/workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-surface px-5 py-5 md:px-6 md:py-6">
         {/* A link that is a control needs its own target: `inline-flex min-h-11
             items-center` (see the `.link` rule in styles.css). */}
         <Link to="/workspaces" className="link inline-flex min-h-11 items-center gap-2 self-start">
@@ -174,7 +172,7 @@ export function WorkspaceScreen() {
       </header>
 
       {workspaceError !== null && (
-        <div className="px-5 py-3">
+        <div className="shrink-0 px-5 py-3">
           <ApiErrorNotice error={workspaceError} noun={t('workspaces.noun')} />
         </div>
       )}
@@ -195,7 +193,7 @@ export function WorkspaceScreen() {
             role="tablist"
             aria-label={t('workspaces.panels.label')}
             onKeyDown={onKeyDown}
-            className="mx-5 my-3 flex gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 @min-[64rem]/workspace:hidden"
+            className="mx-5 my-3 flex shrink-0 gap-1 overflow-x-auto overscroll-x-contain rounded-pill bg-surface-raised p-1 @min-[64rem]/workspace:hidden"
           >
             {panels.map((panel) => {
               const selected = active === panel.id
@@ -234,7 +232,7 @@ export function WorkspaceScreen() {
                   active === id ? 'flex' : 'hidden'
                 }`}
               >
-                <div className="border-b border-border px-4 py-2">
+                <div className="shrink-0 border-b border-border px-4 py-2">
                   {/* Not a heading: the design draws a 20/26 panel title, and the
                       frozen scale maps that size to `h3` — but this screen's only
                       `h1` is the workspace's name and there is no `h2` above these,
@@ -346,12 +344,12 @@ function ReferencePanel({
     : null
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div
         role="tablist"
         aria-label={t('workspaces.reference.tabs')}
         onKeyDown={onKeyDown}
-        className="flex border-b border-border bg-surface px-4 pt-2"
+        className="flex shrink-0 border-b border-border bg-surface px-4 pt-2"
       >
         {views.map((v) => {
           const selected = v.id === view
@@ -605,13 +603,11 @@ function SourcesPanel({ workspaceId }: { workspaceId: string }) {
         </button>
       )}
 
-      {/* Drop zone for adding sources */}
-      <div className="source-dropzone">
-        <Icon name="upload" size={20} className="text-muted" />
-        <UploadForm workspaceId={workspaceId} />
-        <span className="meta text-center">{t('workspaces.sources.dropHint')}</span>
-        <span className="meta text-center">{t('workspaces.sources.dropSize')}</span>
-      </div>
+      {/* Simplified drop zone (411:44509): just an upload icon, a button that
+          opens the file picker, and the accepted-types hint. No material-type
+          radio buttons — the kind is inferred from the file extension by the
+          existing `acceptFor` / `useUploadSource` path. */}
+      <AddSourceZone workspaceId={workspaceId} />
 
       <p className="meta">{t('workspaces.sources.readyHint')}</p>
     </div>
@@ -795,194 +791,75 @@ function localizeSourceError(
   return error
 }
 
-function UploadForm({ workspaceId }: { workspaceId: string }) {
+/**
+ * The simplified add-source drop zone (411:44509).
+ *
+ * Replaces the full material-type UploadForm with a single button that opens
+ * a file picker accepting all supported types. The kind is inferred from the
+ * file extension by the existing upload path.
+ */
+function AddSourceZone({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
-  const [kind, setKind] = useState<UploadKind>('pdf')
-  const [file, setFile] = useState<File | null>(null)
-  const [text, setText] = useState('')
-  const [url, setUrl] = useState('')
-  const [title, setTitle] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
-  const fileId = useId()
-  const textId = useId()
-  const urlId = useId()
-  const fileErrorId = useId()
-  const textErrorId = useId()
-  const urlErrorId = useId()
   const upload = useUploadSource(workspaceId)
-
   const uploadError = asApiError(upload.error)
-  const validation =
-    uploadError?.code === 'validation'
-      ? validationMessage(uploadError, t, ['file', 'text', 'url', 'title'])
-      : null
-  const showNotice = uploadError !== null && (validation === null || validation.field === null)
 
-  // The URL's own error comes from the client, before a round trip: the server is
-  // the enforcement, and this is only the message.
-  const urlMalformed = kind === 'url' && url.trim().length > 0 && !HTTP_URL_PATTERN.test(url.trim())
-  const ready =
-    kind === 'text'
-      ? text.trim().length > 0
-      : kind === 'url'
-        ? HTTP_URL_PATTERN.test(url.trim())
-        : file !== null
+  // Accept all file types the upload supports
+  const allAccepted = UPLOAD_KINDS
+    .filter((k): k is Exclude<UploadKind, 'url' | 'text'> => k !== 'url' && k !== 'text')
+    .map((k) => acceptFor(k))
+    .join(',')
 
-  const kindLabel: Record<UploadKind, string> = {
-    pdf: t('workspaces.upload.kindPdf'),
-    docx: t('workspaces.upload.kindDocx'),
-    pptx: t('workspaces.upload.kindPptx'),
-    url: t('workspaces.upload.kindUrl'),
-    text: t('workspaces.upload.kindText'),
+  function handleFile(file: File) {
+    // Infer kind from extension
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    const FILE_KINDS: Record<string, 'pdf' | 'docx' | 'pptx'> = {
+      pdf: 'pdf',
+      docx: 'docx',
+      pptx: 'pptx',
+    }
+    const kind = FILE_KINDS[ext] ?? 'pdf'
+    upload.mutate(
+      { kind, file, title: '' },
+      {
+        onSettled: () => {
+          if (fileInput.current) fileInput.current.value = ''
+        },
+      },
+    )
   }
 
   return (
-    <form
-      className="panel flex flex-col gap-3 p-4"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!ready) return
-        upload.mutate(
-          kind === 'text'
-            ? { kind: 'text', text, title }
-            : kind === 'url'
-              ? { kind: 'url', url: url.trim(), title }
-              : { kind, file: file as File, title },
-          {
-            onSuccess: () => {
-              setFile(null)
-              setText('')
-              setUrl('')
-              setTitle('')
-              // A file input cannot be cleared by state alone; the element keeps
-              // the chosen file until it is reset, which would leave the old name
-              // visible over an empty form.
-              if (fileInput.current) fileInput.current.value = ''
-            },
-          },
-        )
-      }}
-    >
-      <p className="eyebrow">{t('workspaces.upload.legend')}</p>
+    <div className="source-dropzone">
+      <Icon name="upload" size={20} className="text-muted" />
 
-      {showNotice && uploadError !== null && (
-        <ApiErrorNotice error={uploadError} noun={t('workspaces.upload.noun')} />
-      )}
-
-      <fieldset className="flex flex-col gap-1">
-        <legend className="label">{t('workspaces.upload.legend')}</legend>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))] gap-2">
-          {UPLOAD_KINDS.map((option) => (
-            <label
-              key={option}
-              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 rounded-field border border-border-strong px-3 py-2 text-small has-[:checked]:border-primary has-[:checked]:bg-primary-tint has-[:checked]:text-primary-text has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring"
-            >
-              <input
-                type="radio"
-                name="kind"
-                value={option}
-                checked={kind === option}
-                onChange={() => {
-                  setKind(option)
-                }}
-              />
-              <span className="min-w-0 wrap-anywhere">{kindLabel[option]}</span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      {kind === 'text' ? (
-        <div className="flex flex-col gap-1">
-          <label className="label" htmlFor={textId}>
-            {t('workspaces.upload.textLabel')}
-          </label>
-          <textarea
-            id={textId}
-            className="field min-h-28"
-            name="text"
-            value={text}
-            aria-invalid={validation?.field === 'text' ? true : undefined}
-            aria-describedby={validation?.field === 'text' ? textErrorId : undefined}
-            onChange={(event) => {
-              setText(event.target.value)
-            }}
-          />
-          {validation?.field === 'text' && (
-            <span id={textErrorId} className="text-small text-danger">
-              {validation.message}
-            </span>
-          )}
-        </div>
-      ) : kind === 'url' ? (
-        <div className="flex flex-col gap-1">
-          <label className="label" htmlFor={urlId}>
-            {t('workspaces.upload.urlLabel')}
-          </label>
-          <input
-            id={urlId}
-            className="field"
-            type="url"
-            name="url"
-            inputMode="url"
-            placeholder="https://"
-            value={url}
-            aria-invalid={urlMalformed || validation?.field === 'url' ? true : undefined}
-            aria-describedby={urlMalformed || validation?.field === 'url' ? urlErrorId : undefined}
-            onChange={(event) => {
-              setUrl(event.target.value)
-            }}
-          />
-          {(urlMalformed || validation?.field === 'url') && (
-            <span id={urlErrorId} className="text-small text-danger">
-              {urlMalformed ? t('workspaces.upload.urlInvalid') : validation?.message}
-            </span>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <label className="label" htmlFor={fileId}>
-            {kindLabel[kind]}
-          </label>
-          <input
-            ref={fileInput}
-            id={fileId}
-            className="field"
-            type="file"
-            name="file"
-            accept={acceptFor(kind)}
-            aria-invalid={validation?.field === 'file' ? true : undefined}
-            aria-describedby={validation?.field === 'file' ? fileErrorId : undefined}
-            onChange={(event) => {
-              setFile(event.target.files?.[0] ?? null)
-            }}
-          />
-          {validation?.field === 'file' && (
-            <span id={fileErrorId} className="text-small text-danger">
-              {validation.message}
-            </span>
-          )}
-        </div>
-      )}
-
-      <Field
-        label={t('workspaces.upload.titleLabel')}
-        name="title"
-        value={title}
-        hint={t('workspaces.upload.titleHint')}
-        error={validation?.field === 'title' ? validation.message : undefined}
+      <input
+        ref={fileInput}
+        type="file"
+        className="hidden"
+        accept={allAccepted}
+        aria-label={t('workspaces.sources.addSource')}
         onChange={(event) => {
-          setTitle(event.target.value)
+          const file = event.target.files?.[0]
+          if (file) handleFile(file)
         }}
       />
 
-      <button type="submit" className="btn btn-primary self-start" disabled={!ready || upload.isPending}>
-        {upload.isPending ? t('workspaces.upload.uploading') : t('workspaces.upload.submit')}
+      <button
+        type="button"
+        className="btn btn-secondary w-full"
+        disabled={upload.isPending}
+        onClick={() => { fileInput.current?.click() }}
+      >
+        {upload.isPending ? t('workspaces.upload.uploading') : t('workspaces.sources.addSource')}
       </button>
-      {/* Upload progress is the ingestion status above, not a fake percentage:
-          `fetch` cannot report bytes sent, and a bar that is not measuring
-          anything is worse than a word that is true. */}
-      <p className="text-caption text-muted">{t('workspaces.upload.afterStored')}</p>
-    </form>
+
+      <span className="meta text-center">{t('workspaces.sources.dropHint')}</span>
+      <span className="meta text-center">{t('workspaces.sources.dropSize')}</span>
+
+      {uploadError !== null && (
+        <ApiErrorNotice error={uploadError} noun={t('workspaces.upload.noun')} />
+      )}
+    </div>
   )
 }

@@ -157,3 +157,18 @@ export function useUndoReview(deckId: string) {
       client.invalidateQueries({ queryKey: flashcardKeys.deck(deckId), exact: true }),
   })
 }
+
+/**
+ * `DELETE /decks/:id` — soft-delete a deck and all its cards.
+ *
+ * Invalidates the workspace's deck list so the panel drops the row immediately.
+ * The `workspaceId` is the deck's own `workspace_id`, which the caller already
+ * has from the `Deck` object.
+ */
+export function useDeleteDeck(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (deckId: string) => api.delete(`/decks/${deckId}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: flashcardKeys.decks(workspaceId) }),
+  })
+}

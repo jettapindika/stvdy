@@ -6,6 +6,7 @@ import { useSources } from '@/api/queries/sources'
 import { asApiError } from '@/api/errors'
 import type { ChunkCitation } from '@/api/sse'
 import { Icon } from '@/components/ui/Icon'
+import { Toggle } from '@/components/ui/Toggle'
 import { ApiErrorNotice, SkeletonRows } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
@@ -171,7 +172,7 @@ export function ChatScreen({
             id="chat-message"
             className="field min-h-11"
             value={draft}
-            placeholder={t('chat.composer.label')}
+            placeholder={t('chat.composer.placeholder')}
             aria-describedby="chat-message-hint"
             onChange={(event) => {
               setDraft(event.target.value)
@@ -182,22 +183,26 @@ export function ChatScreen({
               submit()
             }}
           />
+          <span id="chat-message-hint" className="text-xs text-muted">
+            {t('chat.composer.hint')}
+          </span>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <SourcePicker
-              workspaceId={workspaceId}
-              sources={readySources}
-              selected={selected}
-              onChange={setSelected}
-              disabled={streaming}
-            />
-            <button type="button" className="answer-action" aria-label={t('chat.composer.attach')}>
-              <Icon name="paperclip" size={20} />
-              <span className="hidden md:inline">{t('chat.composer.attach')}</span>
-            </button>
-          </div>
+        {/* Source picker: rendered above the action row so its "no sources" text
+            does not cramp the attach button in a horizontal flex. */}
+        <SourcePicker
+          workspaceId={workspaceId}
+          sources={readySources}
+          selected={selected}
+          onChange={setSelected}
+          disabled={streaming}
+        />
+
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" className="answer-action shrink-0" aria-label={t('chat.composer.attach')}>
+            <Icon name="paperclip" size={20} />
+            <span className="hidden md:inline">{t('chat.composer.attach')}</span>
+          </button>
 
           {streaming ? (
             <button type="button" className="btn btn-secondary" onClick={stream.stop}>
@@ -211,34 +216,23 @@ export function ChatScreen({
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-          <label
-            className="composer-toggle"
-            title={t('honesty.sourcesOnlyTooltip')}
+          <Toggle
+            checked={sourcesOnly}
+            onChange={(next) => {
+              setGroundedByWorkspace((current) => ({ ...current, [workspaceId]: next }))
+            }}
           >
-            <input
-              type="checkbox"
-              checked={sourcesOnly}
-              aria-describedby="chat-grounding-hint"
-              onChange={(event) => {
-                const next = event.target.checked
-                setGroundedByWorkspace((current) => ({ ...current, [workspaceId]: next }))
-              }}
-            />
             {t('honesty.sourcesOnly')}
-          </label>
+          </Toggle>
 
-          <label className="composer-toggle">
-            <input
-              type="checkbox"
-              checked={useWeb}
-              aria-describedby="chat-web-hint"
-              onChange={(event) => {
-                const next = event.target.checked
-                setWebByWorkspace((current) => ({ ...current, [workspaceId]: next }))
-              }}
-            />
+          <Toggle
+            checked={useWeb}
+            onChange={(next) => {
+              setWebByWorkspace((current) => ({ ...current, [workspaceId]: next }))
+            }}
+          >
             {t('chat.webToggle.label')}
-          </label>
+          </Toggle>
         </div>
 
         <p id="chat-grounding-hint" className="composer-hint">

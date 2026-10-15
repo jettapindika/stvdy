@@ -161,6 +161,12 @@ fn read_only_rows() -> Vec<Row> {
             "reads the caller's own decks",
         ),
         ro("GET", "/decks/{id}", "reads the caller's own deck"),
+        ro(
+            "DELETE",
+            "/decks/{id}",
+            "soft-deletes the caller's own deck and its cards — a tombstone, not a row \
+             delete, so sync propagates the removal to every device",
+        ),
         ro("GET", "/decks/{id}/due", "reads the caller's own due cards"),
         ro(
             "POST",

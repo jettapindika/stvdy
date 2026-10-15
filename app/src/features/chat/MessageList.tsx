@@ -285,7 +285,17 @@ function AssistantAnswer({
 // Streaming state
 // ---------------------------------------------------------------------------
 
-function StreamingIndicator({ text }: { text: string }) {
+function StreamingIndicator({
+  text,
+  citations,
+  sourceTitle,
+  onOpenCitation,
+}: {
+  text: string
+  citations: ChatCitation[]
+  sourceTitle: (sourceId: string) => string
+  onOpenCitation: (citation: ChunkCitation) => void
+}) {
   const { t } = useTranslation()
   return (
     <article className="flex flex-col gap-2 px-2">
@@ -295,10 +305,13 @@ function StreamingIndicator({ text }: { text: string }) {
       </div>
       {text.length > 0 && (
         <div className="max-w-prose text-body leading-relaxed">
-          <p className="whitespace-pre-wrap">
-            {text}
-            <span className="streaming-cursor" aria-hidden="true" />
-          </p>
+          <AnswerText
+            text={text}
+            citations={citations}
+            sourceTitle={sourceTitle}
+            onOpenCitation={onOpenCitation}
+          />
+          <span className="streaming-cursor" aria-hidden="true" />
         </div>
       )}
       {text.length === 0 && (
@@ -588,7 +601,12 @@ export function MessageList({
 
           {/* Streaming answer or completed answer */}
           {turn.streaming ? (
-            <StreamingIndicator text={turn.text} />
+            <StreamingIndicator
+              text={turn.text}
+              citations={turn.citations}
+              sourceTitle={sourceTitle}
+              onOpenCitation={onOpenCitation}
+            />
           ) : turn.text.length > 0 ? (
             <>
               <AssistantAnswer

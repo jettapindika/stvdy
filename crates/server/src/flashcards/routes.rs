@@ -53,7 +53,7 @@ const MAX_SOURCES: usize = 20;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/{id}/decks", post(create_deck).get(list_decks))
-        .route("/decks/{id}", get(get_deck))
+        .route("/decks/{id}", get(get_deck).delete(delete_deck))
         .route("/decks/{id}/due", get(due_cards))
         .route("/flashcards/{id}/review", post(review_card))
         .route("/flashcard-reviews/{id}", delete(undo_review))
@@ -499,6 +499,52 @@ pub async fn list_decks(
             "max_cards": MAX_REQUESTED_CARDS,
         }
     })))
+}
+
+/// `DELETE /decks/:id` — soft-delete a deck and its cards.
+///
+/// A tombstone, not a row delete: the deck is a synced entity, so the removal
+/// has to reach every device, and a real delete would leave the change log
+/// nothing to say. The deck's cards are tombstoned alongside it — a card
+/// without a deck is unreachable, and leaving them live would keep counting
+/// them against the monthly limit while the student cannot see them.
+pub async fn delete_deck(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(deck_id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    // Verify ownership first (returns 404 for missing/other-account/already-deleted).
+    owned_deck(&state, user.user_id, deck_id).await?;
+
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
+
+    sqlx::query(
+        "update decks set deleted_at = now(), updated_at = now()
+          where id = $1 and user_id = $2 and deleted_at is null",
+    )
+    .bind(deck_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the deck: {error}")))?;
+
+    sqlx::query(
+        "update flashcards set deleted_at = now(), updated_at = now()
+          where deck_id = $1 and deleted_at is null",
+    )
+    .bind(deck_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!("deleting the deck's cards: {error}")))?;
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing deck deletion: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /decks/:id`: the deck, its cards, and its generation state.

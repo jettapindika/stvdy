@@ -1,7 +1,13 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
-import { LayoutGroup, motion, useMotionValue, useReducedMotion } from 'motion/react'
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+} from 'motion/react'
 import type { MotionValue } from 'motion/react'
 
 import { Wordmark } from '@/components/ui/BrandIllustration'
@@ -13,6 +19,8 @@ import { useFormFactor } from '@/lib/useFormFactor'
 import { useDockMagnification } from './TabBar'
 
 const STORAGE_KEY = 'stvdy.sidebar'
+const EXPANDED_W = 216
+const COLLAPSED_W = 64
 
 function readCollapsed(): boolean {
   try {
@@ -30,6 +38,9 @@ function persistCollapsed(collapsed: boolean): void {
   }
 }
 
+const SPRING = { type: 'spring' as const, stiffness: 300, damping: 30 }
+const INSTANT = { duration: 0 }
+
 /**
  * The desktop sidebar.
  *
@@ -37,10 +48,10 @@ function persistCollapsed(collapsed: boolean): void {
  * (64px, icon-only with dock magnification on hover). The collapsed state is
  * persisted in localStorage so it survives a reload.
  *
- * When collapsed, moving the pointer along the rail magnifies each icon with the
- * same spring physics the mobile dock uses — the `useDockMagnification` hook
- * drives a CSS `scale` transform on the Y axis. The effect is the macOS dock
- * behaviour turned vertical.
+ * The transition animates `width` and `padding` together on the `motion.nav`,
+ * and content inside clips via `overflow: hidden`. Labels animate `maxWidth` +
+ * `opacity` in place; courses and footer fade out then unmount via
+ * `AnimatePresence`, so nothing pops during the spring.
  */
 export function Sidebar() {
   const { t } = useTranslation()
@@ -57,12 +68,12 @@ export function Sidebar() {
   ]
 
   const disableMagnification = !collapsed || !!reducedMotion
+  const spring = reducedMotion ? INSTANT : SPRING
 
   function toggle() {
     setCollapsed((prev) => {
       const next = !prev
       persistCollapsed(next)
-      // Reset magnification when expanding so springs settle.
       if (!next) pointerY.set(Infinity)
       return next
     })
@@ -71,45 +82,59 @@ export function Sidebar() {
   return (
     <motion.nav
       aria-label={t('shell.nav.main')}
-      className={
-        'sidebar hidden shrink-0 flex-col gap-8 pb-6 md:flex'
-        + (collapsed
-          ? ' sidebar-collapsed w-16 items-center px-2 pt-[calc(1.75rem+env(safe-area-inset-top,0px))]'
-          : ' w-54 px-5 pt-[calc(1.75rem+env(safe-area-inset-top,0px))]')
-      }
+      className="sidebar hidden shrink-0 flex-col gap-8 overflow-clip pb-6 md:flex"
+      style={{ paddingTop: 'calc(1.75rem + env(safe-area-inset-top, 0px))' }}
+      animate={{
+        width: collapsed ? COLLAPSED_W : EXPANDED_W,
+        paddingLeft: collapsed ? 8 : 20,
+        paddingRight: collapsed ? 8 : 20,
+      }}
+      transition={spring}
       onPointerMove={collapsed ? (e) => pointerY.set(e.clientY) : undefined}
       onPointerLeave={collapsed ? () => pointerY.set(Infinity) : undefined}
-      animate={{ width: collapsed ? 64 : 216 }}
-      transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 30 }}
     >
-      {/* Logo row: wordmark (expanded) or expand button (collapsed), with toggle. */}
-      <div className={'flex w-full items-center' + (collapsed ? ' justify-center' : ' justify-between')}>
-        {collapsed ? (
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={t('shell.expandSidebar')}
-            className="sidebar-toggle"
-          >
-            <Icon name="chevron-right" size={20} />
-          </button>
-        ) : (
-          <>
-            <Wordmark />
-            <button
+      {/* Logo row */}
+      <div className="flex w-full items-center" style={{ minHeight: 35 }}>
+        <AnimatePresence mode="popLayout" initial={false}>
+          {collapsed ? (
+            <motion.button
+              key="expand"
               type="button"
               onClick={toggle}
-              aria-label={t('shell.collapseSidebar')}
-              className="sidebar-toggle"
+              aria-label={t('shell.expandSidebar')}
+              className="sidebar-toggle mx-auto"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.15 }}
             >
-              <Icon name="chevron-left" size={16} />
-            </button>
-          </>
-        )}
+              <Icon name="chevron-right" size={20} />
+            </motion.button>
+          ) : (
+            <motion.div
+              key="logo"
+              className="flex w-full items-center justify-between gap-2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              <Wordmark />
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label={t('shell.collapseSidebar')}
+                className="sidebar-toggle shrink-0"
+              >
+                <Icon name="chevron-left" size={16} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <LayoutGroup id="desktop-navigation">
-        <div className={'flex w-full flex-col' + (collapsed ? ' items-center gap-1' : ' gap-2')}>
+        <div className="flex w-full flex-col gap-1">
           {items.map((item) => (
             <SidebarItem
               key={item.to}
@@ -121,13 +146,27 @@ export function Sidebar() {
               pointerY={pointerY}
               disableMagnification={disableMagnification}
               reducedMotion={reducedMotion}
+              spring={spring}
             />
           ))}
         </div>
       </LayoutGroup>
 
-      {!collapsed && <SemesterCourses />}
-      {!collapsed && <SidebarFooter />}
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            key="secondary"
+            className="flex w-full flex-1 flex-col gap-8"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ ...spring, opacity: { duration: 0.2 } }}
+          >
+            <SemesterCourses />
+            <SidebarFooter />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.nav>
   )
 }
@@ -141,6 +180,7 @@ function SidebarItem({
   pointerY,
   disableMagnification,
   reducedMotion,
+  spring,
 }: {
   to: string
   label: string
@@ -150,43 +190,19 @@ function SidebarItem({
   pointerY: MotionValue<number>
   disableMagnification: boolean
   reducedMotion: boolean | null
+  spring: Record<string, unknown>
 }) {
   const ref = useRef<HTMLAnchorElement>(null)
   const scale = useDockMagnification(pointerY, ref, disableMagnification, 'y')
 
-  if (collapsed) {
-    return (
-      <NavLink
-        ref={ref}
-        to={to}
-        end={end}
-        className="nav-item sidebar-item-collapsed"
-        aria-label={label}
-      >
-        {({ isActive }) => (
-          <>
-            {isActive && (
-              <motion.span
-                aria-hidden="true"
-                className="nav-selection"
-                layoutId="selected-page"
-                transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 34 }}
-              />
-            )}
-            <motion.span
-              className="dock-icon-sizer"
-              style={disableMagnification ? undefined : { scale }}
-            >
-              <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
-            </motion.span>
-          </>
-        )}
-      </NavLink>
-    )
-  }
-
   return (
-    <NavLink ref={ref} to={to} end={end} className="nav-item">
+    <NavLink
+      ref={ref}
+      to={to}
+      end={end}
+      className={'nav-item' + (collapsed ? ' sidebar-item-collapsed' : '')}
+      aria-label={collapsed ? label : undefined}
+    >
       {({ isActive }) => (
         <>
           {isActive && (
@@ -197,8 +213,22 @@ function SidebarItem({
               transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 34 }}
             />
           )}
-          <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
-          <span className="relative z-10">{label}</span>
+          <motion.span
+            className="dock-icon-sizer"
+            style={collapsed && !disableMagnification ? { scale } : undefined}
+          >
+            <Icon name={icon} className="nav-icon relative z-10 shrink-0" />
+          </motion.span>
+          <motion.span
+            className="relative z-10 whitespace-nowrap overflow-hidden"
+            animate={{
+              opacity: collapsed ? 0 : 1,
+              maxWidth: collapsed ? 0 : EXPANDED_W - 40,
+            }}
+            transition={spring}
+          >
+            {label}
+          </motion.span>
         </>
       )}
     </NavLink>

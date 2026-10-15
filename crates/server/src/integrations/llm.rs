@@ -320,7 +320,10 @@ impl LlmProvider for OpenAiCompatLlm {
                     // (e.g. `delta.reasoning_content` in OpenAI-compatible APIs).
                     if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str())
                         && !reasoning.is_empty()
-                        && tx.send(StreamEvent::Reasoning(reasoning.to_string())).await.is_err()
+                        && tx
+                            .send(StreamEvent::Reasoning(reasoning.to_string()))
+                            .await
+                            .is_err()
                     {
                         return;
                     }

@@ -6,6 +6,7 @@ import { asApiError } from '@/api/errors'
 import {
   useCreateDeck,
   useDecks,
+  useDeleteDeck,
   type Deck,
   type DeckStatus,
 } from '@/api/queries/flashcards'
@@ -119,7 +120,7 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
       {decksList !== undefined && decksList.length > 0 && (
         <ul className="flex flex-col divide-y divide-border border-y border-border">
           {decksList.map((deck) => (
-            <DeckRow key={deck.id} deck={deck} />
+            <DeckRow key={deck.id} deck={deck} workspaceId={workspaceId} />
           ))}
         </ul>
       )}
@@ -134,8 +135,10 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
  * source rows follow — so "Generating" and "Failed" are still readable in
  * monochrome and to a screen reader.
  */
-function DeckRow({ deck }: { deck: Deck }) {
+function DeckRow({ deck, workspaceId }: { deck: Deck; workspaceId: string }) {
   const { t } = useTranslation()
+  const remove = useDeleteDeck(workspaceId)
+  const [confirming, setConfirming] = useState(false)
   // Resolved here rather than at module scope: a constant holding copy is
   // evaluated before there is a language, so it could only ever ship one of them.
   const statusLabel: Record<DeckStatus, string> = {
@@ -143,6 +146,7 @@ function DeckRow({ deck }: { deck: Deck }) {
     ready: t('studio.status.ready'),
     failed: t('studio.status.failed'),
   }
+  const displayName = deck.title.length > 0 ? deck.title : t('studio.deck.untitled')
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -167,7 +171,7 @@ function DeckRow({ deck }: { deck: Deck }) {
             exactly when more room is needed. `ReportRow` carries the same shape with
             a viewport `sm:` because its own measurement was a phone one. */}
         <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
-          {deck.title.length > 0 ? deck.title : t('studio.deck.untitled')}
+          {displayName}
         </span>
         <span className="meta">{t('studio.deck.cards', { count: deck.card_count })}</span>
         <span className={STATUS_CHIP[deck.status]} role="status">
@@ -181,7 +185,56 @@ function DeckRow({ deck }: { deck: Deck }) {
             {t('nav.study')}
           </Link>
         )}
+        {!confirming && (
+          <button
+            type="button"
+            className="btn btn-quiet text-danger text-sm"
+            onClick={() => { setConfirming(true) }}
+          >
+            {t('actions.delete')}
+          </button>
+        )}
       </div>
+
+      {confirming && (
+        <div className="note note-danger flex flex-col items-start gap-2">
+          <p className="font-medium">
+            {t('studio.deck.deleteConfirm', { name: displayName })}
+          </p>
+          <p className="text-small">
+            {deck.card_count === 0
+              ? t('studio.deck.deleteNoCards')
+              : t('studio.deck.deleteCards', { count: deck.card_count })}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              autoFocus
+              disabled={remove.isPending}
+              onClick={() => {
+                remove.mutate(deck.id, {
+                  onSuccess: () => { setConfirming(false) },
+                })
+              }}
+            >
+              {remove.isPending
+                ? t('studio.deck.deleting')
+                : t('studio.deck.deleteIt')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => {
+                remove.reset()
+                setConfirming(false)
+              }}
+            >
+              {t('actions.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {deck.error !== null && deck.error.length > 0 && (
         <p className="note note-danger text-sm">{deck.error}</p>

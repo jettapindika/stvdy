@@ -695,7 +695,8 @@
       "showLess": "Show fewer",
       "dropHint": "PDF, PPTX or a web link",
       "dropSize": "Drop files here · up to 50 MB",
-      "readyHint": "Ready = indexed for chat. Read-only = course-managed access."
+      "readyHint": "Ready = indexed for chat. Read-only = course-managed access.",
+      "addSource": "+ Add Source"
     },
     "reference": {
       "tabs": "Reference panel",
@@ -730,21 +731,8 @@
       "errorNoText": "No text could be extracted from this document."
     },
     "upload": {
-      "legend": "Add material",
-      "kindPdf": "PDF file",
-      "kindDocx": "Word document",
-      "kindPptx": "Slides",
-      "kindUrl": "Link",
-      "kindText": "Pasted text",
-      "textLabel": "Text to add",
-      "titleLabel": "Title",
-      "titleHint": "Optional. The name this source is listed under.",
       "uploading": "Uploading",
-      "submit": "Add source",
-      "afterStored": "After the file is stored, this workspace's source list shows extraction and indexing until the source is ready.",
-      "noun": "uploading sources",
-      "urlLabel": "Link to add",
-      "urlInvalid": "Enter a full web address, starting with http:// or https://"
+      "noun": "uploading sources"
     },
     "sourcePicker": {
       "legend": "Answer from",
@@ -800,7 +788,9 @@
     "composer": {
       "label": "Ask your sources",
       "ask": "Send ↑",
-      "attach": "Attach"
+      "attach": "Attach",
+      "placeholder": "Ask a follow-up question…",
+      "hint": "Enter sends. Shift and Enter starts a new line."
     },
     "webToggle": {
       "label": "Search the web"
@@ -1105,7 +1095,13 @@
       },
       "untitled": "Untitled deck",
       "cards_one": "{{count}} card",
-      "cards_other": "{{count}} cards"
+      "cards_other": "{{count}} cards",
+      "deleteConfirm": "Delete {{name}}?",
+      "deleteCards_one": "{{count}} card goes with it. This cannot be undone.",
+      "deleteCards_other": "{{count}} cards go with it. This cannot be undone.",
+      "deleteNoCards": "It has no cards yet, so nothing is lost. This cannot be undone.",
+      "deleting": "Deleting",
+      "deleteIt": "Delete deck"
     },
     "quiz": {
       "nameLabel": "Quiz name",

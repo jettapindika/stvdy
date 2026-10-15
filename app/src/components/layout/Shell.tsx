@@ -67,7 +67,7 @@ export function Shell({
 
   return (
     <div
-      className={`flex min-h-[100dvh] bg-bg text-text${isPhone ? ' shell-phone' : ''}`}
+      className={`flex min-h-[100dvh] max-h-[100dvh] bg-bg text-text${isPhone ? ' shell-phone' : ''}`}
     >
       <ThemeSync />
       <a
@@ -83,7 +83,7 @@ export function Shell({
           starts where the sidebar ends rather than spanning the window — which is
           what the design draws, and what keeps the sidebar's own wordmark at the
           window's top-left corner. */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!focusedSession && (isPhone ? <PhoneHeader onOpenPalette={onOpenPalette} /> : <TopBar onOpenPalette={onOpenPalette} />)}
         {isPhone && !focusedSession && <SyncStatus variant="notice" />}
         {isPhone && workspaceDirectory && (

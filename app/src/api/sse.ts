@@ -103,12 +103,12 @@ export interface ChatStreamHandlers {
   /**
    * A WRITE tool proposed an action, mid-answer.
    *
-   * A new event on **this** stream rather than a second one (roadmap § 4 fixes the
-   * six names: `token`, `citations`, `action`, `usage`, `done`, `error`), because a
-   * proposal belongs to the turn that produced it: it arrives while the answer is
-   * still streaming, and a second connection would have to be told which turn it
-   * was for. It can arrive zero times (a turn with no write tool) or several (up to
-   * `MAX_PROPOSALS_PER_TURN`).
+   * A new event on **this** stream rather than a second one (the contract fixes
+   * seven names: `token`, `reasoning`, `citations`, `action`, `usage`, `done`,
+   * `error`), because a proposal belongs to the turn that produced it: it
+   * arrives while the answer is still streaming, and a second connection would
+   * have to be told which turn it was for. It can arrive zero times (a turn
+   * with no write tool) or several (up to `MAX_PROPOSALS_PER_TURN`).
    */
   onAction?(action: ChatAction): void
   onUsage?(usage: ChatUsage): void

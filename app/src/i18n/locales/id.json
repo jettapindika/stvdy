@@ -678,7 +678,8 @@
       "showLess": "Tampilkan lebih sedikit",
       "dropHint": "PDF, PPTX atau tautan web",
       "dropSize": "Letakkan file di sini · maks 50 MB",
-      "readyHint": "Siap = sudah diindeks untuk chat. Baca-saja = akses dikelola kursus."
+      "readyHint": "Siap = sudah diindeks untuk chat. Baca-saja = akses dikelola kursus.",
+      "addSource": "+ Tambah Sumber"
     },
     "reference": {
       "tabs": "Panel referensi",
@@ -712,21 +713,8 @@
       "errorNoText": "Tidak ada teks yang bisa diambil dari dokumen ini."
     },
     "upload": {
-      "legend": "Tambah materi",
-      "kindPdf": "File PDF",
-      "kindDocx": "Dokumen Word",
-      "kindPptx": "Slide",
-      "kindUrl": "Tautan",
-      "kindText": "Teks yang ditempel",
-      "textLabel": "Teks yang ditambahkan",
-      "titleLabel": "Judul",
-      "titleHint": "Opsional. Nama sumber ini di daftar.",
       "uploading": "Mengunggah",
-      "submit": "Tambah sumber",
-      "afterStored": "Setelah file tersimpan, daftar sumber di ruang belajar ini menampilkan proses ekstraksi dan pengindeksan sampai sumbernya siap.",
-      "noun": "mengunggah sumber",
-      "urlLabel": "Tautan yang ditambahkan",
-      "urlInvalid": "Masukkan alamat web lengkap, dimulai dengan http:// atau https://"
+      "noun": "mengunggah sumber"
     },
     "sourcePicker": {
       "legend": "Jawab dari",
@@ -778,7 +766,9 @@
     "composer": {
       "label": "Tanya sumbermu",
       "ask": "Kirim ↑",
-      "attach": "Lampirkan"
+      "attach": "Lampirkan",
+      "placeholder": "Ajukan pertanyaan lanjutan…",
+      "hint": "Enter mengirim. Shift dan Enter memulai baris baru."
     },
     "webToggle": {
       "label": "Cari di web"
@@ -1078,7 +1068,12 @@
         "reason": "Pilih sumber di atas lalu buat satu. Setiap kartu terhubung ke bagian asalnya."
       },
       "untitled": "Dek tanpa judul",
-      "cards_other": "{{count}} kartu"
+      "cards_other": "{{count}} kartu",
+      "deleteConfirm": "Hapus {{name}}?",
+      "deleteCards_other": "{{count}} kartu ikut terhapus. Ini tidak bisa dibatalkan.",
+      "deleteNoCards": "Belum ada kartu di dalamnya, jadi tidak ada yang hilang. Ini tidak bisa dibatalkan.",
+      "deleting": "Menghapus",
+      "deleteIt": "Hapus dek"
     },
     "quiz": {
       "nameLabel": "Nama kuis",

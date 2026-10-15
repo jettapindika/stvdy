@@ -115,7 +115,7 @@ export function App() {
 
   return (
     <Shell onOpenPalette={openPalette}>
-      <MotionSurface key={location.pathname} className="flex min-w-0 flex-1 flex-col">
+      <MotionSurface key={location.pathname} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Outlet />
       </MotionSurface>
       <CommandPalette open={paletteOpen} onClose={closePalette} />

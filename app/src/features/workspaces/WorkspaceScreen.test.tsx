@@ -305,12 +305,12 @@ describe('the sources panel', () => {
     ).toBeInTheDocument()
   })
 
-  it('uploads pasted text as multipart, with the fields the contract names', async () => {
+  it('infers pptx kind from the file extension when adding a source', async () => {
     const sent: { form: FormData | null } = { form: null }
-    const calls = serve((path, init) => {
+    serve((path, init) => {
       if (path === '/workspaces/w1/sources' && init.method === 'POST') {
         sent.form = init.body as FormData
-        const created = source({ id: 's2', kind: 'text', title: 'Ohm law', status: 'pending' })
+        const created = source({ id: 's2', kind: 'pptx', title: 'Slides', status: 'pending' })
         sources = [...sources, created]
         return jsonResponse(201, { source: created })
       }
@@ -320,143 +320,20 @@ describe('the sources panel', () => {
     const user = userEvent.setup()
     renderWorkspace()
 
-    await user.click(await screen.findByLabelText('Pasted text'))
-    await user.type(screen.getByLabelText('Text to add'), 'V equals I times R')
-    await user.type(screen.getByLabelText('Title'), 'Ohm law')
-    await user.click(screen.getByRole('button', { name: 'Add source' }))
+    const panel = await sourcesPanel()
 
-    await vi.waitFor(() => {
-      expect(sent.form).not.toBeNull()
-    })
-
-    expect(sent.form?.get('kind')).toBe('text')
-    expect(sent.form?.get('text')).toBe('V equals I times R')
-    expect(sent.form?.get('title')).toBe('Ohm law')
-    // No file part for a text source, and no content-type set by hand: the
-    // multipart boundary is the browser's.
-    expect(sent.form?.get('file')).toBeNull()
-    const post = calls.find((call) => call.init.method === 'POST')
-    expect(post?.init.headers).not.toHaveProperty('content-type')
-
-    // The new source appears, with its real status from the server.
-    expect(await screen.findByText('Ohm law')).toBeInTheDocument()
-    expect(await screen.findByText('Waiting to start')).toBeInTheDocument()
-  })
-
-  it('will not submit an upload with nothing in it', async () => {
-    serve()
-    const user = userEvent.setup()
-    renderWorkspace()
-
-    const submit = await screen.findByRole('button', { name: 'Add source' })
-    expect(submit).toBeDisabled()
-
-    await user.click(screen.getByLabelText('Pasted text'))
-    expect(screen.getByRole('button', { name: 'Add source' })).toBeDisabled()
-
-    await user.type(screen.getByLabelText('Text to add'), '   ')
-    expect(screen.getByRole('button', { name: 'Add source' })).toBeDisabled()
-  })
-
-  it('uploads a Word document as a file part, with the docx kind', async () => {
-    const sent: { form: FormData | null } = { form: null }
-    serve((path, init) => {
-      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
-        sent.form = init.body as FormData
-        const created = source({ id: 's3', kind: 'docx', title: 'Week 3', status: 'pending' })
-        sources = [...sources, created]
-        return jsonResponse(201, { source: created })
-      }
-      return undefined
-    })
-
-    const user = userEvent.setup()
-    renderWorkspace()
-
-    await user.click(await screen.findByLabelText('Word document'))
-    const input = screen.getByLabelText('Word document', { selector: 'input[type="file"]' })
-    expect(input).toHaveAttribute(
-      'accept',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx',
-    )
-    const file = new File(['%PDF'], 'week3.docx', {
-      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    })
-    await user.upload(input, file)
-    await user.click(screen.getByRole('button', { name: 'Add source' }))
-
-    await vi.waitFor(() => {
-      expect(sent.form).not.toBeNull()
-    })
-    expect(sent.form?.get('kind')).toBe('docx')
-    expect((sent.form?.get('file') as File).name).toBe('week3.docx')
-    expect(await screen.findByText('Word')).toBeInTheDocument()
-  })
-
-  it('uploads slides as a pptx, which the form could not send before', async () => {
-    const sent: { form: FormData | null } = { form: null }
-    serve((path, init) => {
-      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
-        sent.form = init.body as FormData
-        return jsonResponse(201, {
-          source: source({ id: 's4', kind: 'pptx', title: 'Lecture 7', status: 'pending' }),
-        })
-      }
-      return undefined
-    })
-
-    const user = userEvent.setup()
-    renderWorkspace()
-
-    await user.click(await screen.findByLabelText('Slides'))
-    const input = screen.getByLabelText('Slides', { selector: 'input[type="file"]' })
-    await user.upload(input, new File(['zip'], 'lecture.pptx'))
-    await user.click(screen.getByRole('button', { name: 'Add source' }))
+    // The hidden file input is labelled by the same text as the button.
+    const fileInput = within(panel).getByLabelText('+ Add Source') as HTMLInputElement
+    const file = new File(['slides'], 'lecture.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+    await user.upload(fileInput, file)
 
     await vi.waitFor(() => {
       expect(sent.form).not.toBeNull()
     })
     expect(sent.form?.get('kind')).toBe('pptx')
-    expect((sent.form?.get('file') as File).name).toBe('lecture.pptx')
   })
 
-  it('adds a link, and refuses a bare host with its own message', async () => {
-    const sent: { form: FormData | null } = { form: null }
-    serve((path, init) => {
-      if (path === '/workspaces/w1/sources' && init.method === 'POST') {
-        sent.form = init.body as FormData
-        return jsonResponse(201, {
-          source: source({ id: 's5', kind: 'url', title: 'example.test', status: 'pending' }),
-        })
-      }
-      return undefined
-    })
 
-    const user = userEvent.setup()
-    renderWorkspace()
-
-    await user.click(await screen.findByLabelText('Link'))
-    const field = screen.getByLabelText('Link to add')
-
-    // A bare host is the mistake this catches, and it is caught before a request.
-    await user.type(field, 'example.test/osmosis')
-    expect(
-      await screen.findByText('Enter a full web address, starting with http:// or https://'),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add source' })).toBeDisabled()
-
-    await user.clear(field)
-    await user.type(field, 'https://example.test/osmosis')
-    await user.click(screen.getByRole('button', { name: 'Add source' }))
-
-    await vi.waitFor(() => {
-      expect(sent.form).not.toBeNull()
-    })
-    expect(sent.form?.get('kind')).toBe('url')
-    expect(sent.form?.get('url')).toBe('https://example.test/osmosis')
-    // No file part for a link: there is nothing to upload.
-    expect(sent.form?.get('file')).toBeNull()
-  })
 
   it('removes a source only after the confirmation', async () => {
     sources = [source({ id: 's1', title: 'Lecture 3' })]
