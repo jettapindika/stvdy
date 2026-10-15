@@ -1,7 +1,7 @@
-//! Prompt assembly for chat: gathers the values `base.v2.md` declares and hands
+//! Prompt assembly for chat: gathers the values `base.v3.md` declares and hands
 //! them to the core composer.
 //!
-//! Everything here is *plumbing*: the prompt text lives in `prompts/base.v2.md`
+//! Everything here is *plumbing*: the prompt text lives in `prompts/base.v3.md`
 //! and the composition rules live in `crates/core/src/prompts/`. A prompt string
 //! written in this file would be the thing the roadmap forbids, because it could
 //! not be versioned or reviewed as prose.
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn the_prompt_is_never_built_from_a_string_literal_here() {
-        // The prompt lives in prompts/base.v2.md and is compiled in by the core
+        // The prompt lives in prompts/base.v3.md and is compiled in by the core
         // registry. A prompt sentence in this file would break the roadmap rule
         // ("prompts live in versioned modules, never inline") in the one place it
         // is easiest to break.

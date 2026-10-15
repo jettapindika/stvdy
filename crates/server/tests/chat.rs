@@ -1253,7 +1253,7 @@ async fn a_request_that_omits_sources_only_is_grounded_on(pool: PgPool) {
     .unwrap();
     assert_eq!(
         version.as_deref(),
-        Some("base.v2"),
+        Some("base.v3"),
         "the logged prompt version must be the text that was sent"
     );
 }

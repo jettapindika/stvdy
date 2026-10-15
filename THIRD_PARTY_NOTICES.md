@@ -108,6 +108,7 @@ JavaScript, from `app/package.json`:
 | Source | Licence | Use |
 |---|---|---|
 | [anti-slop](https://github.com/miqdadbadjuber/anti-slop) (miqdadbadjuber) | MIT | `prompts/base.v3.md`'s `<output_quality>` section adapts rules from anti-slop's core rulebook (R-02, R-05, R-16, R-17, R-23, R-36, R-38, C-5) for a study-assistant context. The rules are rewritten, not copied verbatim: install wizard, mode selection, UI layout, mobile, and accessibility scaffolding are excluded. No anti-slop source file is vendored. |
+
 ## Copyleft audit
 
 Checked across the full resolved dependency graph, not just direct dependencies. Exactly one
