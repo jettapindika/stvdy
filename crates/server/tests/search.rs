@@ -522,6 +522,35 @@ async fn a_pinned_tier_constructs_only_that_tier(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn the_composite_walks_the_web_tier_before_the_academic_apis(pool: PgPool) {
+    let harness = TestState::new(pool);
+    // The walk stops at the first tier that returns anything, and a scholarly
+    // index matches almost any word: with the academic APIs first, a question
+    // about a Windows update error was answered by Crossref with an unrelated
+    // paper and SearXNG was never consulted (measured on staging 2026-10-15).
+    // The order here is the contract that prevents that, so it is asserted
+    // rather than left to the construction code's shape.
+    let composite = CompositeSearch::new(
+        &search_config(
+            SearchTier::Composite,
+            Some("http://127.0.0.1:8088"),
+            true,
+            true,
+        ),
+        harness.state.pool.clone(),
+    )
+    .expect("a composite with every tier configured");
+
+    assert_eq!(
+        composite.tier_names(),
+        vec![
+            "searxng", "openalex", "crossref", "arxiv", "doaj", "eric", "pubmed", "exa", "tavily",
+        ],
+        "the web tier leads, the academic APIs follow, the paid fallbacks are last"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn a_pinned_tier_that_is_unconfigured_is_none(pool: PgPool) {
     let harness = TestState::new(pool);
     // A deployment that asked for a tier it has no key for is broken, and the

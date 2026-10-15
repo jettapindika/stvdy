@@ -78,7 +78,16 @@ fn drop_uncitable(hits: Vec<SearchHit>) -> Vec<SearchHit> {
 }
 
 impl CompositeSearch {
-    /// Builds the tiers `SEARCH_PROVIDER` asks for, in A3's order.
+    /// Builds the tiers `SEARCH_PROVIDER` asks for, in A3's order: the general
+    /// web first, the academic APIs behind it, then the paid fallbacks.
+    ///
+    /// **The web tier is first because the academic APIs match almost any word.**
+    /// The walk stops at the first tier that returns anything, and a scholarly
+    /// index answers a question about a Windows update error with an unrelated
+    /// paper, so with the academic APIs first SearXNG was never consulted and a
+    /// general question got no usable result. Academic hits are the better answer
+    /// for a study app, which is why they are still walked — just after the tier
+    /// that can answer a general question.
     ///
     /// `None` when a *pinned* tier is unconfigured, which is a different thing
     /// from the composite not having it: a deployment running `SEARCH_PROVIDER=exa`
@@ -88,10 +97,6 @@ impl CompositeSearch {
     pub fn new(config: &SearchConfig, pool: PgPool) -> Option<Self> {
         let mut tiers: Vec<Arc<dyn SearchProvider>> = Vec::new();
         let mut searxng = None;
-
-        if matches!(config.tier, SearchTier::Composite | SearchTier::Academic) {
-            tiers.extend(academic::providers().ok()?);
-        }
 
         if matches!(config.tier, SearchTier::Composite | SearchTier::Searxng) {
             match &config.searxng_url {
@@ -103,6 +108,10 @@ impl CompositeSearch {
                 None if config.tier == SearchTier::Searxng => return None,
                 None => {}
             }
+        }
+
+        if matches!(config.tier, SearchTier::Composite | SearchTier::Academic) {
+            tiers.extend(academic::providers().ok()?);
         }
 
         if matches!(config.tier, SearchTier::Composite | SearchTier::Exa) {

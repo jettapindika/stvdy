@@ -2,10 +2,13 @@
 //! OpenAlex, Crossref, arXiv, DOAJ, ERIC, PubMed.
 //!
 //! All six are keyless, which is what gives a deployment with no paid fallback a
-//! working web tier, and it is why this tier is first: it is the one that always
-//! answers. Each maps its own response shape to `SearchHit`; the mapping functions
-//! are `pub` and take the decoded body, so they can be tested against a real
-//! response without a network.
+//! working search tier: with no SearXNG URL and no API key, these six are the
+//! whole composite. They sit **behind** SearXNG rather than in front of it
+//! because a scholarly index matches almost any word, so walking them first meant
+//! a general question was answered with an unrelated paper and the web tier was
+//! never reached. Each maps its own response shape to `SearchHit`; the mapping
+//! functions are `pub` and take the decoded body, so they can be tested against a
+//! real response without a network.
 //!
 //! Three of these APIs are not what a guess would produce, and the code below says
 //! so where it matters:

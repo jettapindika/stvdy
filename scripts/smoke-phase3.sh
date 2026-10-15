@@ -140,8 +140,8 @@ web = [c for c in citations if c.get("type") == "web"]
 assert web, f"no web citation in {citations}"
 assert all(c.get("url", "").startswith("http") for c in web), web
 
-# The gate: URLs AND DOIs. The academic tier is what carries a DOI, and it is the
-# tier this phase consults first.
+# The gate: URLs AND DOIs. The academic tier is what carries a DOI, and this run
+# pins `SEARCH_PROVIDER=academic`, so it is the only tier consulted.
 with_doi = [c for c in web if c.get("doi")]
 assert with_doi, (
     "no citation carried a DOI. The academic tier is reachable from this machine and "

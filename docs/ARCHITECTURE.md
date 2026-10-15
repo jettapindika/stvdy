@@ -966,13 +966,17 @@ caller cannot tell them apart:
 
 | Order | Tier | Key | DOI | Published date |
 |---|---|---|---|---|
-| 1a-f | OpenAlex, Crossref, arXiv, DOAJ, ERIC, PubMed | keyless or free | yes | yes |
-| 2 | self-hosted SearXNG | `SEARXNG_URL` | no | no |
+| 1 | self-hosted SearXNG | `SEARXNG_URL` | no | no |
+| 2a-f | OpenAlex, Crossref, arXiv, DOAJ, ERIC, PubMed | keyless or free | yes | yes |
 | 3 | Exa | `EXA_API_KEY` | no | yes |
 | 4 | Tavily | `SEARCH_API_KEY` | no | no |
 
-**The academic tier is first because it is free, official, and better for a study
-app than a SERP**, and it is the tier that carries a DOI. Which specific API
+**The web tier is first because the walk stops at the first tier that returns
+anything, and the academic APIs match almost any word.** Measured on staging: a
+question about a Windows update error was answered by Crossref with an unrelated
+Indonesian paper and cited nothing, and SearXNG was never consulted. The academic
+tier sits behind the web one — it is what a deployment with no `SEARXNG_URL` runs
+on, and it is the tier that carries a DOI. Which specific API
 answers is not stable: they return empty under load without erroring, so two
 identical queries can be answered by two different providers. That fact drives two
 design decisions below.

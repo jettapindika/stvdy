@@ -1,6 +1,7 @@
-//! SearXNG, the second tier (A3): a self-hosted metasearch service, so it needs
+//! SearXNG, the first tier (A3): a self-hosted metasearch service, so it needs
 //! no key and no quota, at the price of being only as good as the engines it can
-//! reach from where it runs.
+//! reach from where it runs. It leads the walk because it is the tier that answers
+//! a general question; the academic APIs behind it answer when it does not.
 //!
 //! That price is the reason this module is more than a mapping. SearXNG answers
 //! `unresponsive_engines` alongside its results, and with the tuned engine list
