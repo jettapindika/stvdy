@@ -37,20 +37,36 @@ use crate::state::AppState;
 /// is the *second* line of defence; the account-level cap in A43 is the first.
 const AUTH_PER_MINUTE: u32 = 30;
 
-/// The client's IP, or the loopback fallback.
+/// The client's IP as the rate limiters count it.
 ///
-/// `X-Forwarded-For` is deliberately not trusted: with no proxy in front it is
-/// attacker-controlled, and honouring it would let one client bypass the limit
-/// by inventing a header. A deployment behind a load balancer needs its own
-/// extractor, which is a decision for the phase that deploys one.
+/// The socket peer is not the client behind a proxy. `deploy/staging/nginx.conf`
+/// runs behind the Cloudflare Tunnel, so every tunnel request reaches nginx from
+/// the docker bridge gateway; counting `ConnectInfo` would put the whole site in
+/// one bucket. nginx resolves the true client with its `real_ip` module and
+/// passes it in `X-Real-IP`, overwriting whatever the caller sent.
+///
+/// Reading a header is safe only because the server is not directly reachable:
+/// `deploy/staging/docker-compose.staging.yml` publishes no port for `server`, so
+/// nginx is the only thing that can open a connection to it. A deployment that
+/// exposed the port would let a caller forge this header and bypass the limit —
+/// which is why the compose file's absent `ports:` is part of this rule rather
+/// than a detail of it. `X-Real-IP` is preferred over `X-Forwarded-For` because
+/// nginx sets it to a single resolved address, while the forwarded chain is a
+/// list whose first entry a direct caller can supply.
 ///
 /// Shared by the tower governor key extractor and the signup limiter, so the two
 /// cannot disagree about who the client is — a limiter that counted a different
 /// address than the one the other one throttled would be worse than one of them.
-fn peer_ip(extensions: &axum::http::Extensions) -> IpAddr {
-    extensions
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(addr)| addr.ip())
+fn peer_ip(headers: &axum::http::HeaderMap, extensions: &axum::http::Extensions) -> IpAddr {
+    headers
+        .get("x-real-ip")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<IpAddr>().ok())
+        .or_else(|| {
+            extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|ConnectInfo(addr)| addr.ip())
+        })
         // Tests drive the router with `oneshot` and have no socket, so they
         // all share one bucket. That is what makes a rate-limit test
         // possible without a listener.
@@ -65,7 +81,7 @@ impl KeyExtractor for PeerIp {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
-        Ok(peer_ip(req.extensions()))
+        Ok(peer_ip(req.headers(), req.extensions()))
     }
 }
 
@@ -85,7 +101,7 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        Ok(Self(peer_ip(&parts.extensions).to_string()))
+        Ok(Self(peer_ip(&parts.headers, &parts.extensions).to_string()))
     }
 }
 

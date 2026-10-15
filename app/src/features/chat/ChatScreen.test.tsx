@@ -269,6 +269,8 @@ describe('a streamed answer', () => {
     renderChat()
     await screen.findByText('No questions yet')
 
+    // Open the source dropdown and select a source
+    await user.click(screen.getByRole('button', { name: /Sources/ }))
     await user.click(screen.getByLabelText('Bab 3 Graf'))
     await user.type(screen.getByLabelText('Ask your sources'), 'Ringkas bab ini')
     await user.click(screen.getByRole('button', { name: 'Send ↑' }))
@@ -441,7 +443,7 @@ describe('a citation chip', () => {
 
     // The toggle is a real control now, not a disabled note, so flipping it has
     // to change what the next turn sends.
-    await user.click(screen.getByRole('checkbox', { name: /Search the web/ }))
+    await user.click(screen.getByRole('switch', { name: /Search the web/ }))
     await user.type(screen.getByLabelText('Ask your sources'), 'dan lagi')
     await user.click(screen.getByRole('button', { name: 'Send ↑' }))
 

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { useQueries } from '@tanstack/react-query'
@@ -5,7 +6,7 @@ import { useQueries } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useDashboard } from '@/api/queries/dashboard'
-import { flashcardKeys, type DecksResponse } from '@/api/queries/flashcards'
+import { flashcardKeys, useDeleteDeck, type Deck, type DecksResponse } from '@/api/queries/flashcards'
 import { quizKeys, type QuizzesResponse } from '@/api/queries/quizzes'
 import { useWorkspaces } from '@/api/queries/workspaces'
 import { PageHeader, Section } from '@/components/layout/Section'
@@ -191,43 +192,7 @@ export function StudyHubScreen() {
           <div className="card">
             <ul>
               {decks.map(({ deck, course }) => (
-                <li key={deck.id} className="border-b border-border last:border-b-0">
-                  <Link
-                    to={`/study/${deck.id}`}
-                    className="flex min-h-[4.625rem] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
-                  >
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-field bg-surface-raised">
-                      <Icon name="cards" className="text-primary-text" />
-                    </span>
-                    {/* `min-w-28` is load-bearing, and it is the fix for a real squeeze:
-                        the row is icon + text + a status chip, and at 200% text the chip
-                        grew enough to leave this column **25px** wide — a title rendered
-                        one letter per line. A minimum the column will not go below is
-                        what makes `flex-wrap` on the row put the chip on its own line
-                        instead of shrinking the text to nothing. `min-w-0` alone (the
-                        usual rule here) is the opposite: it permits exactly that. */}
-                    <span className="flex min-w-[min(7rem,100%)] flex-1 flex-col gap-1">
-                      <span className="truncate text-label font-medium" title={deck.title}>
-                        {deck.title}
-                      </span>
-                      {/* `title`: this line truncates beside a chip, and a truncated
-                          course name with no other way to read it is a name the reader
-                          cannot recover. */}
-                      {course && (
-                        <span className="meta truncate" title={course}>
-                          {course}
-                        </span>
-                      )}
-                    </span>
-                    {/* The deck's own state, in words. A deck that is still generating
-                        says so rather than showing a zero it would later contradict. */}
-                    <span className={deck.status === 'ready' ? 'chip' : 'chip chip-working'}>
-                      {deck.status === 'ready'
-                        ? t('study.hub.cardCount', { count: deck.card_count })
-                        : t('study.hub.generating')}
-                    </span>
-                  </Link>
-                </li>
+                <HubDeckRow key={deck.id} deck={deck} course={course} />
               ))}
             </ul>
           </div>
@@ -283,5 +248,102 @@ export function StudyHubScreen() {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * One deck row in the Study hub, with an inline delete action.
+ *
+ * The link covers the icon, title and chip; the delete button sits beside it
+ * so a click on it does not navigate. The confirm block replaces the row
+ * content, following the same pattern as `WorkspaceCard`'s delete.
+ */
+function HubDeckRow({ deck, course }: { deck: Deck; course: string | undefined }) {
+  const { t } = useTranslation()
+  const remove = useDeleteDeck(deck.workspace_id)
+  const removeError = asApiError(remove.error)
+  const [confirming, setConfirming] = useState(false)
+  const displayName = deck.title.length > 0 ? deck.title : t('studio.deck.untitled')
+
+  if (confirming) {
+    return (
+      <li className="border-b border-border px-4 py-3 last:border-b-0">
+        <div className="note note-danger flex flex-col items-start gap-2">
+          <p className="font-medium">
+            {t('studio.deck.deleteConfirm', { name: displayName })}
+          </p>
+          <p className="text-small">
+            {deck.card_count === 0
+              ? t('studio.deck.deleteNoCards')
+              : t('studio.deck.deleteCards', { count: deck.card_count })}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              autoFocus
+              disabled={remove.isPending}
+              onClick={() => {
+                remove.mutate(deck.id, {
+                  onSuccess: () => { setConfirming(false) },
+                })
+              }}
+            >
+              {remove.isPending
+                ? t('studio.deck.deleting')
+                : t('studio.deck.deleteIt')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => {
+                remove.reset()
+                setConfirming(false)
+              }}
+            >
+              {t('actions.cancel')}
+            </button>
+          </div>
+        </div>
+        {removeError !== null && (
+          <ApiErrorNotice error={removeError} noun={t('errors.nouns.deck')} />
+        )}
+      </li>
+    )
+  }
+
+  return (
+    <li className="flex items-center border-b border-border last:border-b-0">
+      <Link
+        to={`/study/${deck.id}`}
+        className="flex min-h-[4.625rem] min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 hover:bg-surface-raised"
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-field bg-surface-raised">
+          <Icon name="cards" className="text-primary-text" />
+        </span>
+        <span className="flex min-w-[min(7rem,100%)] flex-1 flex-col gap-1">
+          <span className="truncate text-label font-medium" title={deck.title}>
+            {deck.title}
+          </span>
+          {course && (
+            <span className="meta truncate" title={course}>
+              {course}
+            </span>
+          )}
+        </span>
+        <span className={deck.status === 'ready' ? 'chip' : 'chip chip-working'}>
+          {deck.status === 'ready'
+            ? t('study.hub.cardCount', { count: deck.card_count })
+            : t('study.hub.generating')}
+        </span>
+      </Link>
+      <button
+        type="button"
+        className="btn btn-quiet mr-2 text-danger text-sm"
+        onClick={() => { setConfirming(true) }}
+      >
+        {t('actions.delete')}
+      </button>
+    </li>
   )
 }

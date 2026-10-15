@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -82,68 +82,81 @@ function buildVariantStamp(variant: string): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), buildVariantStamp(isStoreBuild ? 'store' : 'full')],
+export default defineConfig(({ mode }) => {
+  // `loadEnv` reads `app/.env` (and `.env.local`, `.env.[mode]`) the same way the
+  // client build does. `process.env` does *not* see those files — it only holds
+  // what the shell exported — so the proxy target must come from here.
+  const env = loadEnv(mode, '.', ['VITE_'])
 
-  // The build-time constant the purchase gate reads. A `define` rather than an
-  // env var read at run time, because the whole point is that the minifier can
-  // prove the branch dead (see the comment above `isStoreBuild`).
-  define: {
-    __PURCHASE_UI__: JSON.stringify(!isStoreBuild),
-  },
+  // The bare origin of the staging/production API server. When set (in `app/.env`
+  // as `VITE_API_PROXY=https://stvdy.ztvn.my.id`), Vite proxies `/api/*` requests
+  // to it, sidestepping CORS entirely. The client's `VITE_API_BASE_URL` should be
+  // `/api` at the same time, so every `fetch` goes through the dev server.
+  const apiProxy = env.VITE_API_PROXY?.replace(/\/+$/, '')
 
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-      // The repo's shared config, so the app reads the same
-      // `billing_policy.toml` the server does rather than a copy that can
-      // drift. Imported as text (`?raw`) and parsed in `features/billing`.
-      '@config': fileURLToPath(new URL('../config', import.meta.url)),
+  return {
+    plugins: [react(), tailwindcss(), buildVariantStamp(isStoreBuild ? 'store' : 'full')],
+
+    // The build-time constant the purchase gate reads. A `define` rather than an
+    // env var read at run time, because the whole point is that the minifier can
+    // prove the branch dead (see the comment above `isStoreBuild`).
+    define: {
+      __PURCHASE_UI__: JSON.stringify(!isStoreBuild),
     },
-  },
 
-  // Tauri prints Rust compiler output to the same terminal; never wipe it.
-  clearScreen: false,
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+        // The repo's shared config, so the app reads the same
+        // `billing_policy.toml` the server does rather than a copy that can
+        // drift. Imported as text (`?raw`) and parsed in `features/billing`.
+        '@config': fileURLToPath(new URL('../config', import.meta.url)),
+      },
+    },
 
-  // Vite's envPrefix is a startsWith check, so 'TAURI_ENV_*' would never match
-  // TAURI_ENV_PLATFORM. Use the bare prefix.
-  envPrefix: ['VITE_', 'TAURI_ENV_'],
+    // Tauri prints Rust compiler output to the same terminal; never wipe it.
+    clearScreen: false,
 
-  server: {
-    port: 5173, // must equal build.devUrl in src-tauri/tauri.conf.json
-    strictPort: true,
-    host: host || false,
-    // Vite 8: server.hmr's ws fields are deprecated in favour of server.ws.
-    ws: host ? { protocol: 'ws', host, port: 1421 } : undefined,
-    watch: { ignored: ['**/src-tauri/**'] },
-    // `@config` resolves outside the app root, and the dev server refuses to
-    // serve a file outside its allowed list. Granting exactly the one directory
-    // keeps the rest of the repo unreachable from the browser.
-    fs: { allow: ['.', '../config'] },
-    proxy: process.env.VITE_API_PROXY ? {
-      '/api': { target: process.env.VITE_API_PROXY, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '/api') },
-    } : undefined,
-  },
+    // Vite's envPrefix is a startsWith check, so 'TAURI_ENV_*' would never match
+    // TAURI_ENV_PLATFORM. Use the bare prefix.
+    envPrefix: ['VITE_', 'TAURI_ENV_'],
 
-  build: {
-    // A store build the *shell* asked for writes `dist`, because that is the
-    // directory `tauri.conf.json`'s `frontendDist` packages: the bytes a store
-    // receives and the bytes `check-no-purchase-ui.mjs` reads have to be the same
-    // ones, and keying on `TAURI_ENV_PLATFORM` is what makes them so. The same
-    // build made without the shell writes `dist-mobile`, so it cannot destroy the
-    // web/desktop build the shell and `check-no-cdn.mjs` both read.
-    outDir: manualStoreBuild ? 'dist-mobile' : 'dist',
-    // Tailwind 4 requires Safari 16.4+, which is the honest floor for the
-    // macOS/iOS WKWebView; Windows/Android use Chromium.
-    target: isWindows ? 'chrome111' : 'safari16.4',
-    minify: isDebug ? false : 'oxc',
-    sourcemap: isDebug,
-  },
+    server: {
+      port: 5173, // must equal build.devUrl in src-tauri/tauri.conf.json
+      strictPort: true,
+      host: host || false,
+      // Vite 8: server.hmr's ws fields are deprecated in favour of server.ws.
+      ws: host ? { protocol: 'ws', host, port: 1421 } : undefined,
+      watch: { ignored: ['**/src-tauri/**'] },
+      // `@config` resolves outside the app root, and the dev server refuses to
+      // serve a file outside its allowed list. Granting exactly the one directory
+      // keeps the rest of the repo unreachable from the browser.
+      fs: { allow: ['.', '../config'] },
+      proxy: apiProxy ? {
+        '/api': { target: apiProxy, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '/api') },
+      } : undefined,
+    },
 
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
-  },
+    build: {
+      // A store build the *shell* asked for writes `dist`, because that is the
+      // directory `tauri.conf.json`'s `frontendDist` packages: the bytes a store
+      // receives and the bytes `check-no-purchase-ui.mjs` reads have to be the same
+      // ones, and keying on `TAURI_ENV_PLATFORM` is what makes them so. The same
+      // build made without the shell writes `dist-mobile`, so it cannot destroy the
+      // web/desktop build the shell and `check-no-cdn.mjs` both read.
+      outDir: manualStoreBuild ? 'dist-mobile' : 'dist',
+      // Tailwind 4 requires Safari 16.4+, which is the honest floor for the
+      // macOS/iOS WKWebView; Windows/Android use Chromium.
+      target: isWindows ? 'chrome111' : 'safari16.4',
+      minify: isDebug ? false : 'oxc',
+      sourcemap: isDebug,
+    },
+
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./src/test/setup.ts'],
+      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    },
+  }
 })

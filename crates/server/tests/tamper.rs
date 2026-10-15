@@ -1333,14 +1333,15 @@ async fn usage_events_of(harness: &TestState, user_id: Uuid) -> i64 {
 // Farm signups past the per-IP limit
 // ---------------------------------------------------------------------------------------
 
-/// A signup farm from one address is refused, and the address is the **connection's**.
+/// A signup farm from one address is refused, and the address is the **proxy's**.
 ///
 /// The limiter is database-backed (A154), so this drives real signups: the first
 /// `SIGNUP_PER_IP_PER_DAY` succeed and the next is `429 rate_limited`. Every request
-/// carries `x-forwarded-for` naming a different address, and the refusal proves the header
-/// bought nothing — the peer address comes from `ConnectInfo`, which is what a listener
-/// inserts and what a client cannot forge. That is the tamper half: a modified client's
-/// cheapest move against a per-IP limit is to claim a second IP.
+/// carries `x-forwarded-for` naming a different address, and the refusal proves that
+/// header bought nothing: the peer comes from `x-real-ip` (which nginx sets and a
+/// direct caller cannot forge, because the server publishes no port) or, when that is
+/// absent, from `ConnectInfo`. That is the tamper half: a modified client's cheapest
+/// move against a per-IP limit is to claim a second IP.
 ///
 /// `crates/server/tests/abuse.rs::the_per_ip_signup_limit_trips_and_logs` owns the deeper
 /// suite (the four fields of the log line, the database count, the public-domain
@@ -1365,9 +1366,11 @@ async fn signing_up_past_the_per_ip_limit_is_refused(pool: PgPool) {
 
 /// A signup carrying an explicit peer address, and a **false** `x-forwarded-for`.
 ///
-/// The limiter reads the address from the connection (`ConnectInfo`), never from a
-/// header, so supplying one the way a listener would is the only way to test a second IP
-/// — and setting the header to a third address is the assertion that it is ignored.
+/// `x-forwarded-for` is a list whose first entry a caller supplies, so it is never the
+/// address the limiter counts — that is `x-real-ip`, which nginx sets to the single
+/// address its `real_ip` module resolved. Supplying `ConnectInfo` the way a listener
+/// would is how a test picks a second address; setting the forwarded chain to a third
+/// address is the assertion that the chain is ignored.
 async fn signup_from(app: &axum::Router, ip: &str, email: &str) -> (StatusCode, serde_json::Value) {
     let body = serde_json::to_vec(&serde_json::json!({
         "email": email,
@@ -1383,6 +1386,78 @@ async fn signup_from(app: &axum::Router, ip: &str, email: &str) -> (StatusCode, 
         .body(axum::body::Body::from(body))
         .expect("request");
     let address = ip.parse::<std::net::IpAddr>().expect("a peer address");
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+            address, 4242,
+        )));
+
+    let response = tower::ServiceExt::oneshot(app.clone(), request)
+        .await
+        .expect("response");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, value)
+}
+
+/// `x-real-ip` wins over the socket peer, which is what makes the limit per-client
+/// behind the proxy rather than one bucket for the whole site.
+///
+/// The two addresses are set to different values and the limiter must count the header:
+/// a request whose `x-real-ip` is already at the limit is refused even though its socket
+/// peer is fresh. This is the half of the pair that the tamper case above cannot see —
+/// it proves the header is *read*, while that one proves `x-forwarded-for` is not.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_forwarded_client_address_is_what_the_limiter_counts(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let limit = stvdy_server::ratelimit::SIGNUP_PER_IP_PER_DAY;
+    // Burn the limit from one forwarded address, always over the same socket peer.
+    for index in 0..limit {
+        let (status, body) =
+            signup_forwarded_from(&app, "203.0.113.9", "198.51.100.1", &format!("real{index}@ugm.ac.id"))
+                .await;
+        assert_eq!(status, StatusCode::CREATED, "attempt {index}: {body}");
+    }
+
+    let (status, refused) =
+        signup_forwarded_from(&app, "203.0.113.9", "198.51.100.1", "real-over@ugm.ac.id").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{refused}");
+    assert_eq!(refused["code"], "rate_limited", "{refused}");
+
+    // A different forwarded address over the same peer is a different client and is
+    // still allowed, which is the property that keeps one student's retries from
+    // spending another's budget.
+    let (status, body) = signup_forwarded_from(&app, "203.0.113.10", "198.51.100.1", "other@ugm.ac.id").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+/// A signup with an explicit `x-real-ip` (what nginx sets) and a socket peer.
+async fn signup_forwarded_from(
+    app: &axum::Router,
+    real_ip: &str,
+    peer: &str,
+    email: &str,
+) -> (StatusCode, serde_json::Value) {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "email": email,
+        "password": "correct horse battery",
+        "device": { "name": "Laptop", "platform": "macos" }
+    }))
+    .expect("serialize");
+    let mut request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/auth/signup")
+        .header("content-type", "application/json")
+        .header("x-real-ip", real_ip)
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    let address = peer.parse::<std::net::IpAddr>().expect("a peer address");
     request
         .extensions_mut()
         .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(

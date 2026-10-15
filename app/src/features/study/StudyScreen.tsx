@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
 import {
   useDeck,
+  useDeleteDeck,
   useDueCards,
   useReviewCard,
   useUndoReview,
@@ -91,8 +92,10 @@ export function StudyScreen() {
   const due = useDueCards(deckId)
   const review = useReviewCard(deckId)
   const undo = useUndoReview(deckId)
+  const navigate = useNavigate()
 
   const workspaceId = deck.data?.deck.workspace_id ?? ''
+  const remove = useDeleteDeck(workspaceId)
   const sources = useSources(workspaceId)
   const workspace = useWorkspace(workspaceId)
 
@@ -104,6 +107,8 @@ export function StudyScreen() {
   const [failed, setFailed] = useState<FailedReview | null>(null)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
   const [undoError, setUndoError] = useState<ApiError | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const removeError = asApiError(remove.error)
   const cardRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const advanceFocus = useRef(false)
@@ -658,7 +663,7 @@ export function StudyScreen() {
         <div
           ref={endRef}
           tabIndex={-1}
-          className="focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+          className="flex flex-col gap-4 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
         >
           <EmptyState
             title={t('study.nothingDue.title')}
@@ -675,6 +680,58 @@ export function StudyScreen() {
               ) : undefined
             }
           />
+
+          {!confirmingDelete && (
+            <button
+              type="button"
+              className="btn btn-quiet text-danger text-sm self-center"
+              onClick={() => { setConfirmingDelete(true) }}
+            >
+              {t('actions.delete')}
+            </button>
+          )}
+
+          {confirmingDelete && (
+            <div className="note note-danger flex flex-col items-start gap-2">
+              <p className="font-medium">
+                {t('studio.deck.deleteConfirm', { name: deck.data?.deck.title ?? '' })}
+              </p>
+              <p className="text-small">
+                {(deck.data?.deck.card_count ?? 0) === 0
+                  ? t('studio.deck.deleteNoCards')
+                  : t('studio.deck.deleteCards', { count: deck.data?.deck.card_count ?? 0 })}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={remove.isPending}
+                  onClick={() => {
+                    remove.mutate(deckId, {
+                      onSuccess: () => { void navigate('/study') },
+                    })
+                  }}
+                >
+                  {remove.isPending
+                    ? t('studio.deck.deleting')
+                    : t('studio.deck.deleteIt')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  onClick={() => {
+                    remove.reset()
+                    setConfirmingDelete(false)
+                  }}
+                >
+                  {t('actions.cancel')}
+                </button>
+              </div>
+              {removeError !== null && (
+                <ApiErrorNotice error={removeError} noun={t('errors.nouns.deck')} />
+              )}
+            </div>
+          )}
         </div>
       )}
       </div>

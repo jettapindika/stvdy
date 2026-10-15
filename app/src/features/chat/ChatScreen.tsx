@@ -36,6 +36,83 @@ import { useChatStream } from './useChatStream'
  * arriving in silence, each breaks the screen for a keyboard or screen-reader
  * user even though it looks perfect.
  */
+/**
+ * The source dropdown trigger (410:5647): a compact `@ Sources · N ⌄` button
+ * that discloses the full SourcePicker in a floating panel. When closed only the
+ * trigger is visible, keeping the composer action row compact.
+ */
+function SourceDropdown({
+  workspaceId,
+  sources,
+  selected,
+  onChange,
+  disabled,
+}: {
+  workspaceId: string
+  sources: { id: string; title: string }[]
+  selected: string[]
+  onChange: (next: string[]) => void
+  disabled: boolean
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const count = selected.length > 0 ? selected.length : sources.length
+
+  // Close on click outside or Escape
+  useEffect(() => {
+    if (!open) return
+    function onDown(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        className="btn btn-secondary gap-1"
+        disabled={disabled}
+        aria-expanded={open}
+        aria-controls="source-dropdown-panel"
+        onClick={() => { setOpen(!open) }}
+      >
+        <span>{`@  ${t('workspaces.panel.sources')} · ${String(count)}`}</span>
+        <Icon name="chevron-down" size={16} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div id="source-dropdown-panel" className="float absolute bottom-full left-0 z-10 mb-2 w-64 p-3">
+          <SourcePicker
+            workspaceId={workspaceId}
+            sources={sources}
+            selected={selected}
+            onChange={onChange}
+            disabled={disabled}
+          />
+          <button
+            type="button"
+            className="btn btn-quiet mt-2 w-full"
+            onClick={() => { setOpen(false) }}
+          >
+            {t('actions.done')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 export function ChatScreen({
   workspaceId,
   onViewCitation,
@@ -188,21 +265,27 @@ export function ChatScreen({
           </span>
         </div>
 
-        {/* Source picker: rendered above the action row so its "no sources" text
-            does not cramp the attach button in a horizontal flex. */}
-        <SourcePicker
-          workspaceId={workspaceId}
-          sources={readySources}
-          selected={selected}
-          onChange={setSelected}
-          disabled={streaming}
-        />
-
+        {/* Action row: source dropdown trigger, attach, send */}
         <div className="flex items-center justify-between gap-2">
-          <button type="button" className="answer-action shrink-0" aria-label={t('chat.composer.attach')}>
-            <Icon name="paperclip" size={20} />
-            <span className="hidden md:inline">{t('chat.composer.attach')}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Source dropdown trigger (410:5647): a compact button that shows
+                the count and discloses the full SourcePicker on click. When no
+                sources exist the button is omitted entirely so it does not show
+                a dead "@ Sources · 0" control. */}
+            {readySources.length > 0 && (
+              <SourceDropdown
+                workspaceId={workspaceId}
+                sources={readySources}
+                selected={selected}
+                onChange={setSelected}
+                disabled={streaming}
+              />
+            )}
+            <button type="button" className="answer-action shrink-0" aria-label={t('chat.composer.attach')}>
+              <Icon name="paperclip" size={20} />
+              <span className="hidden md:inline">{t('chat.composer.attach')}</span>
+            </button>
+          </div>
 
           {streaming ? (
             <button type="button" className="btn btn-secondary" onClick={stream.stop}>
@@ -218,6 +301,8 @@ export function ChatScreen({
         <div className="flex flex-wrap items-center gap-4">
           <Toggle
             checked={sourcesOnly}
+            title={t('honesty.sourcesOnlyTooltip')}
+            describedBy="chat-grounding-hint"
             onChange={(next) => {
               setGroundedByWorkspace((current) => ({ ...current, [workspaceId]: next }))
             }}
