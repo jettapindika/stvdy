@@ -1023,7 +1023,10 @@ async fn deleting_a_workspace_tombstones_its_content(pool: PgPool) {
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(live_quizzes, 0, "quizzes must be tombstoned with the workspace");
+    assert_eq!(
+        live_quizzes, 0,
+        "quizzes must be tombstoned with the workspace"
+    );
 
     let live_reports: i64 = sqlx::query_scalar(
         "select count(*) from reports where workspace_id = $1 and deleted_at is null",
@@ -1032,7 +1035,10 @@ async fn deleting_a_workspace_tombstones_its_content(pool: PgPool) {
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(live_reports, 0, "reports must be tombstoned with the workspace");
+    assert_eq!(
+        live_reports, 0,
+        "reports must be tombstoned with the workspace"
+    );
 
     let live_cheatsheets: i64 = sqlx::query_scalar(
         "select count(*) from cheatsheets where workspace_id = $1 and deleted_at is null",
@@ -1154,7 +1160,10 @@ async fn bulk_delete_tombstones_the_batch_and_skips_stale_ids(pool: PgPool) {
             .fetch_one(&harness.state.pool)
             .await
             .unwrap();
-    assert_eq!(other_live, 1, "another workspace's deck must not be reachable");
+    assert_eq!(
+        other_live, 1,
+        "another workspace's deck must not be reachable"
+    );
 
     let live_quizzes: i64 = sqlx::query_scalar(
         "select count(*) from quizzes where workspace_id = $1 and deleted_at is null",

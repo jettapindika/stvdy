@@ -931,7 +931,15 @@ async fn a_deleted_quiz_is_gone_from_the_list_and_its_questions_are_tombstoned(p
         workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
     let (quiz_id, question_ids) =
         generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
-    answered(&app, &token, &quiz_id, &question_ids[0], "Membuka koneksi TCP.", None).await;
+    answered(
+        &app,
+        &token,
+        &quiz_id,
+        &question_ids[0],
+        "Membuka koneksi TCP.",
+        None,
+    )
+    .await;
 
     let (status, body) = json(
         &app,
@@ -982,7 +990,10 @@ async fn a_deleted_quiz_is_gone_from_the_list_and_its_questions_are_tombstoned(p
     .fetch_one(&harness.state.pool)
     .await
     .unwrap();
-    assert_eq!(live_questions, 0, "the questions must be tombstoned with the quiz");
+    assert_eq!(
+        live_questions, 0,
+        "the questions must be tombstoned with the quiz"
+    );
 
     let attempts: i64 = sqlx::query_scalar("select count(*) from quiz_attempts where quiz_id = $1")
         .bind(quiz_uuid)
@@ -1013,8 +1024,14 @@ async fn a_quiz_can_be_renamed(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["quiz"]["title"], "UTS Jaringan", "the title is trimmed: {body}");
-    assert_eq!(body["quiz"]["question_count"], 2, "renaming must not touch questions: {body}");
+    assert_eq!(
+        body["quiz"]["title"], "UTS Jaringan",
+        "the title is trimmed: {body}"
+    );
+    assert_eq!(
+        body["quiz"]["question_count"], 2,
+        "renaming must not touch questions: {body}"
+    );
 
     let (status, _) = json(
         &app,

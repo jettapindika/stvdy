@@ -1017,7 +1017,10 @@ async fn a_report_title_is_edited_through_the_outline(pool: PgPool) {
     let report_id = created["report"]["id"].as_str().unwrap().to_string();
 
     let before = get_report(&app, &token, &report_id).await;
-    let sections = before["report"]["outline"]["sections"].as_array().unwrap().len();
+    let sections = before["report"]["outline"]["sections"]
+        .as_array()
+        .unwrap()
+        .len();
     let mut renamed = before["report"]["outline"].clone();
     renamed["title"] = serde_json::json!("UTS Jaringan");
 
@@ -1035,7 +1038,10 @@ async fn a_report_title_is_edited_through_the_outline(pool: PgPool) {
     let after = get_report(&app, &token, &report_id).await;
     assert_eq!(after["report"]["title"], "UTS Jaringan");
     assert_eq!(
-        after["report"]["outline"]["sections"].as_array().unwrap().len(),
+        after["report"]["outline"]["sections"]
+            .as_array()
+            .unwrap()
+            .len(),
         sections,
         "a rename must not drop sections: {after}"
     );

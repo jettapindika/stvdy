@@ -721,7 +721,10 @@ async fn a_cheatsheet_can_be_renamed(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["cheatsheet"]["title"], "Rangkuman UTS", "{body}");
-    assert_eq!(body["cheatsheet"]["scope"], scope, "the scope is not the title: {body}");
+    assert_eq!(
+        body["cheatsheet"]["scope"], scope,
+        "the scope is not the title: {body}"
+    );
 
     let (status, _) = json(
         &app,

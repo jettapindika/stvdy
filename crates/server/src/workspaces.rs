@@ -29,14 +29,8 @@ pub fn routes() -> Router<AppState> {
             "/workspaces/{id}",
             get(get_one).patch(update).delete(delete_one),
         )
-        .route(
-            "/workspaces/{id}/bulk-delete",
-            post(bulk_delete),
-        )
-        .route(
-            "/workspaces/{id}/content-order",
-            patch(reorder_content),
-        )
+        .route("/workspaces/{id}/bulk-delete", post(bulk_delete))
+        .route("/workspaces/{id}/content-order", patch(reorder_content))
 }
 
 #[derive(Debug, Serialize)]
@@ -373,9 +367,7 @@ pub async fn delete_one(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        AppError::Internal(anyhow::anyhow!(
-            "tombstoning a workspace's decks: {error}"
-        ))
+        AppError::Internal(anyhow::anyhow!("tombstoning a workspace's decks: {error}"))
     })?;
     sqlx::query(
         "update flashcards set deleted_at = now(), updated_at = now()
@@ -571,9 +563,10 @@ async fn bulk_delete(
         ));
     }
 
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
-    })?;
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
 
     if !body.deck_ids.is_empty() {
         sqlx::query(
@@ -663,9 +656,9 @@ async fn bulk_delete(
         })?;
     }
 
-    tx.commit().await.map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("committing bulk delete: {error}"))
-    })?;
+    tx.commit()
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("committing bulk delete: {error}")))?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -696,9 +689,10 @@ async fn reorder_content(
 ) -> AppResult<StatusCode> {
     owned_name(&state, user.user_id, workspace_id).await?;
 
-    let mut tx = state.pool.begin().await.map_err(|error| {
-        AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
-    })?;
+    let mut tx =
+        state.pool.begin().await.map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+        })?;
 
     for (index, id) in body.deck_ids.iter().enumerate() {
         sqlx::query(
@@ -753,9 +747,7 @@ async fn reorder_content(
         .bind(user.user_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| {
-            AppError::Internal(anyhow::anyhow!("reordering cheatsheets: {error}"))
-        })?;
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("reordering cheatsheets: {error}")))?;
     }
 
     tx.commit().await.map_err(|error| {
