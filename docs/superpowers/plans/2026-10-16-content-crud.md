@@ -669,16 +669,47 @@ async fn deleting_a_workspace_tombstones_its_content(pool: PgPool) {
     let (status, body) = delete(&app, &format!("/workspaces/{workspace}"), &token).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
-    for table in ["decks", "quizzes", "reports", "cheatsheets"] {
-        let live: i64 = sqlx::query_scalar(&format!(
-            "select count(*) from {table} where workspace_id = $1 and deleted_at is null"
-        ))
-        .bind(workspace_id)
-        .fetch_one(&harness.state.pool)
-        .await
-        .unwrap();
-        assert_eq!(live, 0, "{table} rows must be tombstoned with the workspace");
-    }
+    // Four literal statements rather than one `format!` loop: `query_scalar` takes
+    // `impl SqlSafeStr`, which only `&'static str` implements, so a table name
+    // interpolated at runtime is a compile error by design.
+    let live_decks: i64 = sqlx::query_scalar(
+        "select count(*) from decks where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_decks, 0, "decks must be tombstoned with the workspace");
+
+    let live_quizzes: i64 = sqlx::query_scalar(
+        "select count(*) from quizzes where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_quizzes, 0, "quizzes must be tombstoned with the workspace");
+
+    let live_reports: i64 = sqlx::query_scalar(
+        "select count(*) from reports where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_reports, 0, "reports must be tombstoned with the workspace");
+
+    let live_cheatsheets: i64 = sqlx::query_scalar(
+        "select count(*) from cheatsheets where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        live_cheatsheets, 0,
+        "cheatsheets must be tombstoned with the workspace"
+    );
 
     let live_cards: i64 = sqlx::query_scalar(
         "select count(*) from flashcards f
