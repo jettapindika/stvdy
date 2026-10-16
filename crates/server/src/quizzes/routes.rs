@@ -374,7 +374,7 @@ pub async fn list_quizzes(
                   where qq.quiz_id = q.id and qq.deleted_at is null) as question_count
            from quizzes q
           where q.user_id = $1 and q.workspace_id = $2 and q.deleted_at is null
-          order by q.created_at desc, q.id",
+          order by q.sort_order asc, q.created_at desc, q.id",
     )
     .bind(user.user_id)
     .bind(workspace_id)

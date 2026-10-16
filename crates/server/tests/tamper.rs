@@ -1147,6 +1147,8 @@ async fn another_users_rows_are_not_readable(pool: PgPool) {
     let quiz = Uuid::now_v7();
     let source = Uuid::now_v7();
     let chunk = Uuid::now_v7();
+    let report = Uuid::now_v7();
+    let cheatsheet = Uuid::now_v7();
 
     sqlx::query("insert into workspaces (id, user_id, name) values ($1, $2, 'Bob''s course')")
         .bind(workspace)
@@ -1199,11 +1201,34 @@ async fn another_users_rows_are_not_readable(pool: PgPool) {
     .execute(&harness.state.pool)
     .await
     .unwrap();
+    sqlx::query(
+        "insert into reports (id, user_id, workspace_id, title, status)
+         values ($1, $2, $3, 'Bob''s report', 'draft')",
+    )
+    .bind(report)
+    .bind(bob_id)
+    .bind(workspace)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into cheatsheets (id, user_id, workspace_id, title, scope, status, source_ids)
+         values ($1, $2, $3, 'Bob''s cheatsheet', 'UTS', 'ready', array[$4]::uuid[])",
+    )
+    .bind(cheatsheet)
+    .bind(bob_id)
+    .bind(workspace)
+    .bind(source)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
 
     let routes = [
         format!("/workspaces/{workspace}"),
         format!("/decks/{deck}"),
         format!("/quizzes/{quiz}"),
+        format!("/reports/{report}"),
+        format!("/cheatsheets/{cheatsheet}"),
         format!("/sources/{source}/status"),
         format!("/chunks/{chunk}"),
     ];
@@ -1212,6 +1237,31 @@ async fn another_users_rows_are_not_readable(pool: PgPool) {
         let (status, body) = json(&app, "GET", uri, &alice, serde_json::Value::Null).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{uri}: {body}");
         assert_eq!(body["code"], "not_found", "{uri}: {body}");
+    }
+
+    // DELETE and PATCH on another user's rows must also 404.
+    let delete_routes = [
+        format!("/decks/{deck}"),
+        format!("/quizzes/{quiz}"),
+        format!("/reports/{report}"),
+        format!("/cheatsheets/{cheatsheet}"),
+    ];
+    for uri in &delete_routes {
+        let (status, body) = json(&app, "DELETE", uri, &alice, serde_json::Value::Null).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "DELETE {uri}: {body}");
+        assert_eq!(body["code"], "not_found", "DELETE {uri}: {body}");
+    }
+
+    let rename_body = serde_json::json!({ "title": "hijacked" });
+    let patch_routes = [
+        format!("/decks/{deck}"),
+        format!("/quizzes/{quiz}"),
+        format!("/cheatsheets/{cheatsheet}"),
+    ];
+    for uri in &patch_routes {
+        let (status, body) = json(&app, "PATCH", uri, &alice, rename_body.clone()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "PATCH {uri}: {body}");
+        assert_eq!(body["code"], "not_found", "PATCH {uri}: {body}");
     }
 
     // The owner reads the same rows, so the 404s above are about ownership.

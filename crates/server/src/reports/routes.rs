@@ -374,7 +374,7 @@ pub async fn list_reports(
                 generating_index, created_at, updated_at
            from reports
           where user_id = $1 and workspace_id = $2 and deleted_at is null
-          order by updated_at desc, id",
+          order by sort_order asc, updated_at desc, id",
     )
     .bind(user.user_id)
     .bind(workspace_id)

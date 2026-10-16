@@ -11,7 +11,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, patch, post};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,6 +28,14 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/workspaces/{id}",
             get(get_one).patch(update).delete(delete_one),
+        )
+        .route(
+            "/workspaces/{id}/bulk-delete",
+            post(bulk_delete),
+        )
+        .route(
+            "/workspaces/{id}/content-order",
+            patch(reorder_content),
         )
 }
 
@@ -355,6 +363,92 @@ pub async fn delete_one(
         ))
     })?;
 
+    // Tombstone decks + their flashcards.
+    sqlx::query(
+        "update decks set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's decks: {error}"
+        ))
+    })?;
+    sqlx::query(
+        "update flashcards set deleted_at = now(), updated_at = now()
+          where deck_id in (select id from decks where workspace_id = $1)
+            and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's flashcards: {error}"
+        ))
+    })?;
+
+    // Tombstone quizzes + their questions.
+    sqlx::query(
+        "update quizzes set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's quizzes: {error}"
+        ))
+    })?;
+    sqlx::query(
+        "update quiz_questions set deleted_at = now(), updated_at = now()
+          where quiz_id in (select id from quizzes where workspace_id = $1)
+            and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's quiz questions: {error}"
+        ))
+    })?;
+
+    // Tombstone reports.
+    sqlx::query(
+        "update reports set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's reports: {error}"
+        ))
+    })?;
+
+    // Tombstone cheatsheets.
+    sqlx::query(
+        "update cheatsheets set deleted_at = now(), updated_at = now(),
+                credits_spent = case when status = 'generating' then 0 else credits_spent end
+          where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(deleted_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        AppError::Internal(anyhow::anyhow!(
+            "tombstoning a workspace's cheatsheets: {error}"
+        ))
+    })?;
+
     // Inside the transaction, so the chunk count and the quota cannot disagree.
     let keys = crate::sources::routes::reclaim_chunks(&mut *tx, &source_ids)
         .await
@@ -438,4 +532,235 @@ fn validate_course_code(raw: Option<&str>) -> AppResult<Option<&str>> {
         ));
     }
     Ok(Some(code))
+}
+
+// ---------------------------------------------------------------------------
+// Bulk delete
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct BulkDeleteBody {
+    #[serde(default)]
+    deck_ids: Vec<Uuid>,
+    #[serde(default)]
+    quiz_ids: Vec<Uuid>,
+    #[serde(default)]
+    report_ids: Vec<Uuid>,
+    #[serde(default)]
+    cheatsheet_ids: Vec<Uuid>,
+}
+
+/// `POST /workspaces/:id/bulk-delete`: tombstone multiple content items in one
+/// transaction. IDs not belonging to the workspace are silently skipped
+/// (idempotent — already deleted or wrong workspace).
+async fn bulk_delete(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(workspace_id): Path<Uuid>,
+    Json(body): Json<BulkDeleteBody>,
+) -> AppResult<StatusCode> {
+    owned_name(&state, user.user_id, workspace_id).await?;
+
+    if body.deck_ids.is_empty()
+        && body.quiz_ids.is_empty()
+        && body.report_ids.is_empty()
+        && body.cheatsheet_ids.is_empty()
+    {
+        return Err(AppError::Validation(
+            "at least one id is required".to_string(),
+        ));
+    }
+
+    let mut tx = state.pool.begin().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+    })?;
+
+    if !body.deck_ids.is_empty() {
+        sqlx::query(
+            "update decks set deleted_at = now(), updated_at = now(),
+                    credits_spent = case when status = 'generating' then 0 else credits_spent end
+              where id = any($1) and workspace_id = $2 and user_id = $3 and deleted_at is null",
+        )
+        .bind(&body.deck_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("bulk-deleting decks: {error}")))?;
+
+        sqlx::query(
+            "update flashcards set deleted_at = now(), updated_at = now()
+              where deck_id in (select id from decks where id = any($1)
+                                  and workspace_id = $2 and user_id = $3)
+                and deleted_at is null",
+        )
+        .bind(&body.deck_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("bulk-deleting flashcards: {error}"))
+        })?;
+    }
+
+    if !body.quiz_ids.is_empty() {
+        sqlx::query(
+            "update quizzes set deleted_at = now(), updated_at = now(),
+                    credits_spent = case when status = 'generating' then 0 else credits_spent end
+              where id = any($1) and workspace_id = $2 and user_id = $3 and deleted_at is null",
+        )
+        .bind(&body.quiz_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("bulk-deleting quizzes: {error}")))?;
+
+        sqlx::query(
+            "update quiz_questions set deleted_at = now(), updated_at = now()
+              where quiz_id in (select id from quizzes where id = any($1)
+                                  and workspace_id = $2 and user_id = $3)
+                and deleted_at is null",
+        )
+        .bind(&body.quiz_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("bulk-deleting quiz questions: {error}"))
+        })?;
+    }
+
+    if !body.report_ids.is_empty() {
+        sqlx::query(
+            "update reports set deleted_at = now(), updated_at = now(),
+                    credits_spent = case when status = 'generating' then 0 else credits_spent end
+              where id = any($1) and workspace_id = $2 and user_id = $3 and deleted_at is null",
+        )
+        .bind(&body.report_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("bulk-deleting reports: {error}")))?;
+    }
+
+    if !body.cheatsheet_ids.is_empty() {
+        sqlx::query(
+            "update cheatsheets set deleted_at = now(), updated_at = now(),
+                    credits_spent = case when status = 'generating' then 0 else credits_spent end
+              where id = any($1) and workspace_id = $2 and user_id = $3 and deleted_at is null",
+        )
+        .bind(&body.cheatsheet_ids)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("bulk-deleting cheatsheets: {error}"))
+        })?;
+    }
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing bulk delete: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Reorder content
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ReorderBody {
+    #[serde(default)]
+    deck_ids: Vec<Uuid>,
+    #[serde(default)]
+    quiz_ids: Vec<Uuid>,
+    #[serde(default)]
+    report_ids: Vec<Uuid>,
+    #[serde(default)]
+    cheatsheet_ids: Vec<Uuid>,
+}
+
+/// `PATCH /workspaces/:id/content-order`: set `sort_order` from array index
+/// (0-based). Items not in the array keep their existing `sort_order`.
+async fn reorder_content(
+    State(state): State<AppState>,
+    user: VerifiedUser,
+    Path(workspace_id): Path<Uuid>,
+    Json(body): Json<ReorderBody>,
+) -> AppResult<StatusCode> {
+    owned_name(&state, user.user_id, workspace_id).await?;
+
+    let mut tx = state.pool.begin().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("starting transaction: {error}"))
+    })?;
+
+    for (index, id) in body.deck_ids.iter().enumerate() {
+        sqlx::query(
+            "update decks set sort_order = $1, updated_at = now()
+              where id = $2 and workspace_id = $3 and user_id = $4 and deleted_at is null",
+        )
+        .bind(index as i32)
+        .bind(id)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("reordering decks: {error}")))?;
+    }
+
+    for (index, id) in body.quiz_ids.iter().enumerate() {
+        sqlx::query(
+            "update quizzes set sort_order = $1, updated_at = now()
+              where id = $2 and workspace_id = $3 and user_id = $4 and deleted_at is null",
+        )
+        .bind(index as i32)
+        .bind(id)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("reordering quizzes: {error}")))?;
+    }
+
+    for (index, id) in body.report_ids.iter().enumerate() {
+        sqlx::query(
+            "update reports set sort_order = $1, updated_at = now()
+              where id = $2 and workspace_id = $3 and user_id = $4 and deleted_at is null",
+        )
+        .bind(index as i32)
+        .bind(id)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AppError::Internal(anyhow::anyhow!("reordering reports: {error}")))?;
+    }
+
+    for (index, id) in body.cheatsheet_ids.iter().enumerate() {
+        sqlx::query(
+            "update cheatsheets set sort_order = $1, updated_at = now()
+              where id = $2 and workspace_id = $3 and user_id = $4 and deleted_at is null",
+        )
+        .bind(index as i32)
+        .bind(id)
+        .bind(workspace_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!("reordering cheatsheets: {error}"))
+        })?;
+    }
+
+    tx.commit().await.map_err(|error| {
+        AppError::Internal(anyhow::anyhow!("committing content reorder: {error}"))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

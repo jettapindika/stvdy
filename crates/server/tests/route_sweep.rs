@@ -146,6 +146,16 @@ fn read_only_rows() -> Vec<Row> {
             "deleting is the remedy a workspace refusal names",
         ),
         ro(
+            "POST",
+            "/workspaces/{id}/bulk-delete",
+            "bulk-deleting content spends nothing — the credits were already spent on generation",
+        ),
+        ro(
+            "PATCH",
+            "/workspaces/{id}/content-order",
+            "reordering content spends nothing",
+        ),
+        ro(
             "GET",
             "/chunks/{id}",
             "reads a chunk of the caller's source",

@@ -481,7 +481,7 @@ pub async fn list_decks(
                   where f.deck_id = d.id and f.deleted_at is null) as card_count
            from decks d
           where d.user_id = $1 and d.workspace_id = $2 and d.deleted_at is null
-          order by d.created_at desc, d.id",
+          order by d.sort_order asc, d.created_at desc, d.id",
     )
     .bind(user.user_id)
     .bind(workspace_id)

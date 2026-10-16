@@ -317,7 +317,7 @@ pub async fn list_cheatsheets(
                 template_version, page_count, created_at, updated_at
            from cheatsheets
           where user_id = $1 and workspace_id = $2 and deleted_at is null
-          order by created_at desc, id",
+          order by sort_order asc, created_at desc, id",
     )
     .bind(user.user_id)
     .bind(workspace_id)
