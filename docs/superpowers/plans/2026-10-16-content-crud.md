@@ -25,6 +25,26 @@ Already implemented, **uncommitted** — verify, do not rewrite:
 
 Missing: the backend tests, the API docs, and every piece of UI.
 
+## Outcome — where the implementation diverged, and why
+
+Every task below is complete. One divergence matters when reading it: the plan's Tasks 10–13 specify each row's `idle | renaming | deleting` machine, its selection checkbox and its reorder arrows **per panel** — four copies of one behaviour, and four places for one of them to drift. What shipped instead puts each in one place:
+
+| Component | Owns |
+|---|---|
+| `app/src/features/studio/ContentManagement.tsx` | `useSelection`, `BulkToolbar`, `useReorder` (debounced) |
+| `app/src/features/studio/ContentList.tsx` | the `<ul>`, the Select toggle, the toolbar, the reorder wiring, `RowBindings` |
+| `app/src/features/studio/ContentRow.tsx` | one row: the mode machine, the inline rename form, the confirm block |
+| `app/src/features/studio/DetailActions.tsx` | `InlineTitleForm` and `DetailDelete` for the three detail screens |
+
+So the plan's per-panel code blocks are **not** what is in the tree. Read those four components as the source of truth, and Tasks 10–13 as a specification of *behaviour* rather than of file layout.
+
+`app/src/features/phoneLayout.test.ts` moved with that refactor. It asserted four copies of the title span's class list — exactly the duplication the shared row removed — so it now asserts the shared row plus the workspace card, and separately that each Studio panel renders the shared row. The invariant (every title row keeps `w-full … @md:w-auto @md:flex-1 wrap-anywhere`) is unchanged; only its expression moved.
+
+Two further corrections came out of running the plan's own tests, and both are applied to the code blocks below:
+
+- The report and cheatsheet tests need a scripted model installed (`with_llm`). `TestState::new` sets `llm: None`, so `POST /reports/outline` and the generation job fail before any assertion runs.
+- `sqlx::query_scalar` takes `impl SqlSafeStr`, which only `&'static str` implements, so the cascade test's table name cannot be interpolated with `format!` — it is four literal statements.
+
 ## Global Constraints
 
 - Every user-visible string needs a key in **both** `app/src/i18n/locales/en.json` and `app/src/i18n/locales/id.json`. Plurals: English gets `_one`/`_other`, Indonesian `_other` only. `app/src/i18n/i18n.test.ts` asserts placeholders resolve.
