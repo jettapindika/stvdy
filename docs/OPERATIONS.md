@@ -345,6 +345,32 @@ gateway's own repository (`docs/OPERATIONS.md` § Payments). The sync checks for
 rather than shipping it: a copy of another project's source is not something this script should
 be able to invent.
 
+**That repository is private, so the host cannot clone it, and the context is shipped by hand.**
+`git clone https://github.com/jettapindika/gopay-payment-gateway.git` on the host fails with
+`could not read Username for 'https://github.com'` — there is no credential there, and putting one
+on a trial host to hold a merchant account's source is the wrong trade. Ship the **build context
+only**, from a checkout on the machine that has one:
+
+```bash
+tar -cf - Dockerfile .dockerignore go.mod go.sum README.md cmd \
+  | ssh stvdy-vps 'rm -rf ~/stvdy/gopay-bridge-src && mkdir -p ~/stvdy/gopay-bridge-src && tar -xf - -C ~/stvdy/gopay-bridge-src'
+```
+
+Two things this has to get right, both found by doing it. **The `._*` sidecars must go** — macOS
+`tar` writes an AppleDouble entry per file, so a context carrying them is one whose `COPY` list is
+not what the repository says; `find ~/stvdy/gopay-bridge-src -name '._*' -delete` is the cleanup.
+And **`gopay-session.json` must not be in the context**: it holds live merchant tokens, it is
+gitignored and dockerignored on the gateway side, and a shipped copy would be a second,
+unrotated copy of the one credential that matters.
+
+**The bridge is not started by `staging-deploy.sh`.** That script brings up `postgres`, `server`
+and `web` by name; `gopay-bridge` is started once, explicitly, and `restart: unless-stopped` keeps
+it up across a reboot:
+
+```bash
+cd ~/stvdy && docker compose -f docker-compose.staging.yml up -d gopay-bridge
+```
+
 **`migrations/` is not optional in its file list, and leaving it out produces a runtime 500 rather
 than a build failure.** `sqlx::migrate!` embeds the migration files at **compile** time, so an image
 built from a context whose `migrations/` is stale carries code for a schema its database does not
