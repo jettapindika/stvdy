@@ -243,6 +243,10 @@ git commit -m "test(quizzes): cover delete, tombstoned questions, surviving atte
 async fn a_deleted_report_is_gone_from_the_list(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // `TestState::new` installs no provider, and `report_created` posts to
+    // `/reports/outline`, which is a synchronous model call. Without a scripted reply
+    // that route answers `provider_error` and the create assertion fails.
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![outline_reply()])));
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
     let token = signed_up(&app, &harness, "report-deleter@example.test").await;
     let (workspace_id, source_id) =
@@ -301,6 +305,8 @@ async fn a_deleted_report_is_gone_from_the_list(pool: PgPool) {
 async fn a_report_title_is_edited_through_the_outline(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // Same reason as the delete test above.
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![outline_reply()])));
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
     let token = signed_up(&app, &harness, "report-renamer@example.test").await;
     let (workspace_id, source_id) =
@@ -373,6 +379,11 @@ Add `use uuid::Uuid;` to the imports if absent, then append:
 async fn a_deleted_cheatsheet_is_gone_from_the_list_and_keeps_its_objects(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // `TestState::new` installs no provider, and `generated` drains a real generation
+    // job. Without a scripted reply the job fails, the object keys stay NULL, and this
+    // test's central assertion — that the keys survive the tombstone — would fail for a
+    // reason that has nothing to do with deletion.
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![blocks_reply()])));
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
     let token = signed_up(&app, &harness, "sheet-deleter@example.test").await;
     let (workspace_id, source_id) =
@@ -436,6 +447,8 @@ async fn a_deleted_cheatsheet_is_gone_from_the_list_and_keeps_its_objects(pool: 
 async fn a_cheatsheet_can_be_renamed(pool: PgPool) {
     let harness = TestState::new(pool);
     harness.seed_plans().await.unwrap();
+    // Same reason as the delete test above: `generated` needs a scripted reply.
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![blocks_reply()])));
     let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
     let token = signed_up(&app, &harness, "sheet-renamer@example.test").await;
     let (workspace_id, source_id) =

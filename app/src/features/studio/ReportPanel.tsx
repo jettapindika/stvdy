@@ -5,20 +5,29 @@ import { Link, useNavigate } from 'react-router'
 import { asApiError } from '@/api/errors'
 import {
   useCreateCheatsheet,
+  useCheatsheets,
+  useDeleteCheatsheet,
+  useRenameCheatsheet,
+  type Cheatsheet,
   type CheatsheetDepth,
+  type CheatsheetStatus,
 } from '@/api/queries/cheatsheets'
 import {
   readableOutline,
   useCreateOutline,
+  useDeleteReport,
   useReports,
   type Report,
   type ReportStatus,
 } from '@/api/queries/reports'
 import { useSources } from '@/api/queries/sources'
+import { useBulkDelete, useReorderContent } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
 import { Select } from '@/components/ui/Select'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
 import { REPORT_CREDITS } from '@/features/billing/plans'
+import { ContentList, type RowBindings } from '@/features/studio/ContentList'
+import { ContentRow } from '@/features/studio/ContentRow'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
 
 /**
@@ -75,6 +84,13 @@ export function ReportPanel({ workspaceId }: { workspaceId: string }) {
     selected.length > 0 &&
     !create.isPending
   const reportsList = reports.data?.reports
+  const cheatsheets = useCheatsheets(workspaceId)
+  const cheatsheetList = cheatsheets.data?.cheatsheets
+  const bulk = useBulkDelete(workspaceId)
+  const bulkError = asApiError(bulk.error)
+  const cheatsheetBulk = useBulkDelete(workspaceId)
+  const cheatsheetBulkError = asApiError(cheatsheetBulk.error)
+  const reorder = useReorderContent(workspaceId)
 
   return (
     <div className="flex flex-col gap-5 px-5 py-5 md:px-4 md:py-4">
@@ -167,14 +183,52 @@ export function ReportPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {reportsList !== undefined && reportsList.length > 0 && (
-        <ul className="flex flex-col divide-y divide-border border-y border-border">
-          {reportsList.map((report) => (
-            <ReportRow key={report.id} report={report} />
-          ))}
-        </ul>
+        <ContentList
+          items={reportsList}
+          noun={t('errors.nouns.reports')}
+          onBulkDelete={(ids) => {
+            bulk.mutate({ reportIds: ids })
+          }}
+          bulkPending={bulk.isPending}
+          bulkError={bulkError}
+          onReorder={async (ids) => {
+            await reorder.mutateAsync({ reportIds: ids })
+          }}
+          row={(report, _index, bindings) => (
+            <ReportRow
+              key={report.id}
+              report={report}
+              workspaceId={workspaceId}
+              bindings={bindings}
+            />
+          )}
+        />
       )}
 
       <CheatsheetForm workspaceId={workspaceId} sources={readySources} />
+
+      {cheatsheetList !== undefined && cheatsheetList.length > 0 && (
+        <ContentList
+          items={cheatsheetList}
+          noun={t('errors.nouns.cheatsheets')}
+          onBulkDelete={(ids) => {
+            cheatsheetBulk.mutate({ cheatsheetIds: ids })
+          }}
+          bulkPending={cheatsheetBulk.isPending}
+          bulkError={cheatsheetBulkError}
+          onReorder={async (ids) => {
+            await reorder.mutateAsync({ cheatsheetIds: ids })
+          }}
+          row={(sheet, _index, bindings) => (
+            <CheatsheetRow
+              key={sheet.id}
+              sheet={sheet}
+              workspaceId={workspaceId}
+              bindings={bindings}
+            />
+          )}
+        />
+      )}
     </div>
   )
 }
@@ -308,8 +362,17 @@ function CheatsheetForm({
  * the row cannot claim progress the report does not have. `0 of 5` before the
  * first section is generated is a real state and is shown as one.
  */
-function ReportRow({ report }: { report: Report }) {
+function ReportRow({
+  report,
+  workspaceId,
+  bindings,
+}: {
+  report: Report
+  workspaceId: string
+  bindings: RowBindings
+}) {
   const { t } = useTranslation()
+  const remove = useDeleteReport(workspaceId)
   // Resolved here rather than at module scope: a constant holding copy is
   // evaluated before there is a language, so it could only ever ship one of them.
   const statusLabel: Record<ReportStatus, string> = {
@@ -324,52 +387,110 @@ function ReportRow({ report }: { report: Report }) {
   // which is also what made the report screen behind this link unreachable.
   const total = report.outline === null ? 0 : readableOutline(report.outline).sections.length
   const written = report.sections.filter((section) => section.body_md !== null).length
+  const displayName = report.title.length > 0 ? report.title : t('studio.report.untitled')
 
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {/* `w-full … @md:w-auto @md:flex-1` is load-bearing, not decoration, and it is
-            the opposite of the `min-w-0` a fieldset needs. This row's other three
-            children are all effectively fixed-width (a count, a status chip, a
-            button), while `flex-1` gives this span a flex basis of `0`: the three
-            fit on the line without it, so the title is left the remainder. Measured
-            in Chromium at 390px, the title rendered **16px wide and 18 lines** — two
-            characters per line, a report's own name unreadable on a phone — and at
-            200% text scale 100px over 6 lines. Giving it the whole line at narrow
-            widths pushes the other three to the next line and lets the title wrap at
-            word boundaries; `@md:` restores the one-line row when the panel is wide
-            enough for all four.
-
-            `@md:` (28rem of *container*) rather than the viewport `sm:` this used to
-            carry, because the width that decides this is the panel's: at 1365px a
-            three-column grid leaves a panel ~157px of content while a 390px phone
-            leaves one panel ~350px, so `sm:` fired on the desktop window and handed
-            the title the same squeeze the phone measurement had just fixed — and the
-            container breakpoint is rem-based, so its threshold doubles with the
-            reader's text size, which is when the room is actually needed. The
-            `@container` is on the panel content box in `WorkspaceScreen`. */}
-        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
-          {report.title.length > 0 ? report.title : t('studio.report.untitled')}
-        </span>
-        {total > 0 && (
-          <span className="meta">
-            {t('studio.report.written', { written, total })}
-          </span>
-        )}
-        <span className={STATUS_CHIP[report.status]} role="status">
-          {report.status === 'generating' && (
-            <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
-          )}
-          {statusLabel[report.status]}
-        </span>
+    <ContentRow
+      title={displayName}
+      meta={
+        total > 0 ? (
+          <span className="meta">{t('studio.report.written', { written, total })}</span>
+        ) : undefined
+      }
+      statusChip={STATUS_CHIP[report.status]}
+      statusLabel={statusLabel[report.status]}
+      working={report.status === 'generating'}
+      action={
         <Link to={`/reports/${report.id}`} className="btn btn-secondary">
           {t('studio.report.open')}
         </Link>
-      </div>
+      }
+      error={report.error}
+      // No inline rename: a report's title travels with its outline through
+      // `PATCH /reports/:id`, and the outline editor on the report's own screen
+      // is where both are edited together.
+      deleteConfirm={t('studio.report.deleteConfirm', { name: displayName })}
+      deleteBody={
+        written === 0
+          ? t('studio.report.deleteNoSections')
+          : t('studio.report.deleteSections', { count: written })
+      }
+      deleteIt={t('studio.report.deleteIt')}
+      deleting={t('studio.report.deleting')}
+      deleteNoun={t('errors.nouns.report')}
+      onDelete={(onSuccess) => {
+        remove.mutate(report.id, { onSuccess })
+      }}
+      deletePending={remove.isPending}
+      deleteError={asApiError(remove.error)}
+      resetDelete={remove.reset}
+      bindings={bindings}
+    />
+  )
+}
 
-      {report.error !== null && report.error.length > 0 && (
-        <p className="note note-danger text-sm">{report.error}</p>
-      )}
-    </li>
+/**
+ * One cheatsheet in the list.
+ *
+ * Listed rather than only created: without a row there is no way back to a sheet
+ * after a reload, and no way to delete one. The status word is the cheatsheet's
+ * own vocabulary (`pending | generating | ready | failed`), which is why it is
+ * not the deck's `STATUS_CHIP` map.
+ */
+function CheatsheetRow({
+  sheet,
+  workspaceId,
+  bindings,
+}: {
+  sheet: Cheatsheet
+  workspaceId: string
+  bindings: RowBindings
+}) {
+  const { t } = useTranslation()
+  const remove = useDeleteCheatsheet(workspaceId)
+  const rename = useRenameCheatsheet(workspaceId)
+  const statusLabel: Record<CheatsheetStatus, string> = {
+    pending: t('studio.status.generating'),
+    generating: t('studio.status.generating'),
+    ready: t('studio.status.ready'),
+    failed: t('studio.status.failed'),
+  }
+  const displayName = sheet.title.length > 0 ? sheet.title : t('studio.cheatsheet.heading')
+
+  return (
+    <ContentRow
+      title={displayName}
+      meta={<span className="meta">{sheet.scope}</span>}
+      statusChip={STATUS_CHIP[sheet.status === 'pending' ? 'generating' : sheet.status]}
+      statusLabel={statusLabel[sheet.status]}
+      working={sheet.status === 'pending' || sheet.status === 'generating'}
+      action={
+        <Link to={`/cheatsheets/${sheet.id}`} className="btn btn-secondary">
+          {t('studio.report.open')}
+        </Link>
+      }
+      error={sheet.error}
+      rename={{
+        label: t('studio.cheatsheet.rename'),
+        onSubmit: (title) => {
+          rename.mutate({ cheatsheetId: sheet.id, title })
+        },
+        pending: rename.isPending,
+        error: asApiError(rename.error),
+        reset: rename.reset,
+      }}
+      deleteConfirm={t('studio.cheatsheet.deleteConfirm', { name: displayName })}
+      deleteBody={t('studio.cheatsheet.deleteBody')}
+      deleteIt={t('studio.cheatsheet.deleteIt')}
+      deleting={t('studio.cheatsheet.deleting')}
+      deleteNoun={t('errors.nouns.cheatsheet')}
+      onDelete={(onSuccess) => {
+        remove.mutate(sheet.id, { onSuccess })
+      }}
+      deletePending={remove.isPending}
+      deleteError={asApiError(remove.error)}
+      resetDelete={remove.reset}
+      bindings={bindings}
+    />
   )
 }

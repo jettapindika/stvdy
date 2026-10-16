@@ -1097,7 +1097,8 @@
       "deleteCards_other": "{{count}} kartu ikut terhapus. Ini tidak bisa dibatalkan.",
       "deleteNoCards": "Belum ada kartu di dalamnya, jadi tidak ada yang hilang. Ini tidak bisa dibatalkan.",
       "deleting": "Menghapus",
-      "deleteIt": "Hapus dek"
+      "deleteIt": "Hapus dek",
+      "rename": "Ganti nama"
     },
     "quiz": {
       "nameLabel": "Nama kuis",
@@ -1124,7 +1125,13 @@
       },
       "untitled": "Kuis tanpa judul",
       "questions_other": "{{count}} pertanyaan",
-      "take": "Kerjakan kuis"
+      "take": "Kerjakan kuis",
+      "deleteConfirm": "Hapus \"{{name}}\"?",
+      "deleteQuestions_other": "{{count}} pertanyaan dan semua riwayat percobaan akan dihapus permanen.",
+      "deleteNoQuestions": "Kuis ini belum punya pertanyaan.",
+      "deleting": "Menghapus…",
+      "deleteIt": "Hapus kuis",
+      "rename": "Ganti nama"
     },
     "report": {
       "topicLabel": "Topik laporan",
@@ -1146,7 +1153,12 @@
       "open": "Buka laporan",
       "status": {
         "draft": "Baru kerangka"
-      }
+      },
+      "deleteConfirm": "Hapus \"{{name}}\"?",
+      "deleteSections_other": "Kerangka dan {{count}} bagian yang sudah ditulis akan dihapus permanen.",
+      "deleteNoSections": "Laporan ini belum punya bagian yang ditulis.",
+      "deleting": "Menghapus…",
+      "deleteIt": "Hapus laporan"
     },
     "cheatsheet": {
       "heading": "Contekan",
@@ -1161,7 +1173,26 @@
         "thorough": "menyeluruh"
       },
       "cost": "Butuh {{credits}} kredit. Contekan muncul di sini saat dibuat.",
-      "generate": "Buat contekan"
+      "generate": "Buat contekan",
+      "deleteConfirm": "Hapus \"{{name}}\"?",
+      "deleteBody": "Contekan akan dihapus permanen.",
+      "deleting": "Menghapus…",
+      "deleteIt": "Hapus contekan",
+      "rename": "Ganti nama"
+    },
+    "bulk": {
+      "select": "Pilih",
+      "selected_other": "{{count}} dipilih",
+      "deleteConfirm": "Hapus {{count}} item?",
+      "deleteBody": "Tindakan ini tidak bisa dibatalkan.",
+      "deleting": "Menghapus…",
+      "deleteIt": "Hapus semua",
+      "deselectAll": "Batalkan pilihan"
+    },
+    "row": {
+      "moveUp": "Naikkan",
+      "moveDown": "Turunkan",
+      "renameLabel": "Nama baru"
     }
   },
   "styleguide": {

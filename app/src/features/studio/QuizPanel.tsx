@@ -5,16 +5,21 @@ import { Link } from 'react-router'
 import { asApiError } from '@/api/errors'
 import {
   useCreateQuiz,
+  useDeleteQuiz,
   useQuizzes,
+  useRenameQuiz,
   type Difficulty,
   type QuestionTypes,
   type Quiz,
   type QuizStatus,
 } from '@/api/queries/quizzes'
 import { useSources } from '@/api/queries/sources'
+import { useBulkDelete, useReorderContent } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
 import { Select } from '@/components/ui/Select'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
+import { ContentList, type RowBindings } from '@/features/studio/ContentList'
+import { ContentRow } from '@/features/studio/ContentRow'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
 
 /**
@@ -51,6 +56,9 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
   const error = asApiError(create.error)
   const ready = title.trim().length > 0 && selected.length > 0 && !create.isPending
   const quizzesList = quizzes.data?.quizzes
+  const bulk = useBulkDelete(workspaceId)
+  const bulkError = asApiError(bulk.error)
+  const reorder = useReorderContent(workspaceId)
   // The cost and the request cap are the server's: the panel renders what
   // `GET /workspaces/:id/quizzes` serves rather than a literal that can drift from
   // the plan matrix.
@@ -177,11 +185,21 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {quizzesList !== undefined && quizzesList.length > 0 && (
-        <ul className="flex flex-col divide-y divide-border border-y border-border">
-          {quizzesList.map((quiz) => (
-            <QuizRow key={quiz.id} quiz={quiz} />
-          ))}
-        </ul>
+        <ContentList
+          items={quizzesList}
+          noun={t('errors.nouns.quizzes')}
+          onBulkDelete={(ids) => {
+            bulk.mutate({ quizIds: ids })
+          }}
+          bulkPending={bulk.isPending}
+          bulkError={bulkError}
+          onReorder={async (ids) => {
+            await reorder.mutateAsync({ quizIds: ids })
+          }}
+          row={(quiz, _index, bindings) => (
+            <QuizRow key={quiz.id} quiz={quiz} workspaceId={workspaceId} bindings={bindings} />
+          )}
+        />
       )}
     </div>
   )
@@ -191,10 +209,21 @@ export function QuizPanel({ workspaceId }: { workspaceId: string }) {
  * One generated quiz in the list.
  *
  * The chip carries its state in a word, not only in a tone, so "Generating" and
- * "Failed" are still readable in monochrome and to a screen reader.
+ * "Failed" are still readable in monochrome and to a screen reader. The row's own
+ * layout and its rename/delete modes live in `ContentRow`.
  */
-function QuizRow({ quiz }: { quiz: Quiz }) {
+function QuizRow({
+  quiz,
+  workspaceId,
+  bindings,
+}: {
+  quiz: Quiz
+  workspaceId: string
+  bindings: RowBindings
+}) {
   const { t } = useTranslation()
+  const remove = useDeleteQuiz(workspaceId)
+  const rename = useRenameQuiz(workspaceId)
   // Resolved here rather than at module scope: a constant holding copy is
   // evaluated before there is a language, so it could only ever ship one of them.
   const statusLabel: Record<QuizStatus, string> = {
@@ -202,29 +231,47 @@ function QuizRow({ quiz }: { quiz: Quiz }) {
     ready: t('studio.status.ready'),
     failed: t('studio.status.failed'),
   }
+  const displayName = quiz.title.length > 0 ? quiz.title : t('studio.quiz.untitled')
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
-          {quiz.title.length > 0 ? quiz.title : t('studio.quiz.untitled')}
-        </span>
-        <span className="meta">{t('studio.quiz.questions', { count: quiz.question_count })}</span>
-        <span className={STATUS_CHIP[quiz.status]} role="status">
-          {quiz.status === 'generating' && (
-            <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
-          )}
-          {statusLabel[quiz.status]}
-        </span>
-        {quiz.status === 'ready' && (
+    <ContentRow
+      title={displayName}
+      meta={<span className="meta">{t('studio.quiz.questions', { count: quiz.question_count })}</span>}
+      statusChip={STATUS_CHIP[quiz.status]}
+      statusLabel={statusLabel[quiz.status]}
+      working={quiz.status === 'generating'}
+      action={
+        quiz.status === 'ready' ? (
           <Link to={`/quiz/${quiz.id}`} className="btn btn-secondary">
             {t('studio.quiz.take')}
           </Link>
-        )}
-      </div>
-
-      {quiz.error !== null && quiz.error.length > 0 && (
-        <p className="note note-danger text-sm">{quiz.error}</p>
-      )}
-    </li>
+        ) : undefined
+      }
+      error={quiz.error}
+      rename={{
+        label: t('studio.quiz.rename'),
+        onSubmit: (title) => {
+          rename.mutate({ quizId: quiz.id, title })
+        },
+        pending: rename.isPending,
+        error: asApiError(rename.error),
+        reset: rename.reset,
+      }}
+      deleteConfirm={t('studio.quiz.deleteConfirm', { name: displayName })}
+      deleteBody={
+        quiz.question_count === 0
+          ? t('studio.quiz.deleteNoQuestions')
+          : t('studio.quiz.deleteQuestions', { count: quiz.question_count })
+      }
+      deleteIt={t('studio.quiz.deleteIt')}
+      deleting={t('studio.quiz.deleting')}
+      deleteNoun={t('errors.nouns.quiz')}
+      onDelete={(onSuccess) => {
+        remove.mutate(quiz.id, { onSuccess })
+      }}
+      deletePending={remove.isPending}
+      deleteError={asApiError(remove.error)}
+      resetDelete={remove.reset}
+      bindings={bindings}
+    />
   )
 }

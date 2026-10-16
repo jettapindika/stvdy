@@ -70,6 +70,7 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'chevron-down'
+  | 'chevron-up'
   | 'arrow-left'
   | 'expand'
   // Attachment
@@ -208,6 +209,7 @@ const PATHS: Record<IconName, string[]> = {
   'chevron-left': ['M15 19l-7-7 7-7'],
   'chevron-right': ['M9 5l7 7-7 7'],
   'chevron-down': ['M6 9.5l6 6 6-6'],
+  'chevron-up': ['M6 14.5l6-6 6 6'],
   'arrow-left': ['M19 12H5', 'M11 18l-6-6 6-6'],
   // Four outward arrows: the expand / full-screen control on the PDF viewer.
   expand: [

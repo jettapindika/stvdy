@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use sqlx::PgPool;
 use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::testing::TestState;
+use uuid::Uuid;
 
 mod common;
 use common::{drain_jobs, json, signed_up, workspace_with_text};
@@ -910,4 +911,128 @@ async fn the_retry_tells_the_model_what_was_wrong(pool: PgPool) {
         correction.contains("question 0"),
         "the correction must name the question, which is why the index is in the message: {correction}"
     );
+}
+
+/// Deleting a quiz tombstones it and its questions, and the attempt history survives.
+///
+/// The attempts are the point: `quiz_attempts` has no `deleted_at` column, so a delete
+/// cannot reach them, and that is the intended contract — the dashboard's "quizzes taken"
+/// figure counts distinct quizzes with an attempt in the window, and a student who deletes
+/// a quiz has still done the work. A delete that also removed attempts would silently
+/// rewrite a figure the student already saw.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deleted_quiz_is_gone_from_the_list_and_its_questions_are_tombstoned(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![reply(1)])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "quiz-deleter@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (quiz_id, question_ids) =
+        generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
+    answered(&app, &token, &quiz_id, &question_ids[0], "Membuka koneksi TCP.", None).await;
+
+    let (status, body) = json(
+        &app,
+        "DELETE",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (_, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/quizzes"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(list["quizzes"].as_array().unwrap().len(), 0, "{list}");
+
+    // Gone by id, and a second delete is 404 like the first never happened.
+    let (status, _) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The questions are tombstoned as rows, and the attempt survives.
+    let quiz_uuid = Uuid::parse_str(&quiz_id).unwrap();
+    let live_questions: i64 = sqlx::query_scalar(
+        "select count(*) from quiz_questions where quiz_id = $1 and deleted_at is null",
+    )
+    .bind(quiz_uuid)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_questions, 0, "the questions must be tombstoned with the quiz");
+
+    let attempts: i64 = sqlx::query_scalar("select count(*) from quiz_attempts where quiz_id = $1")
+        .bind(quiz_uuid)
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 1, "attempt history outlives the quiz");
+}
+
+/// Renaming a quiz changes only its title.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_quiz_can_be_renamed(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![reply(1)])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "quiz-renamer@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (quiz_id, _) = generated_quiz(&app, &harness, &token, &workspace_id, &source_id).await;
+
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::json!({ "title": "  UTS Jaringan  " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["quiz"]["title"], "UTS Jaringan", "the title is trimmed: {body}");
+    assert_eq!(body["quiz"]["question_count"], 2, "renaming must not touch questions: {body}");
+
+    let (status, _) = json(
+        &app,
+        "PATCH",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::json!({ "title": "   " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (_, quiz) = json(
+        &app,
+        "GET",
+        &format!("/quizzes/{quiz_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(quiz["quiz"]["title"], "UTS Jaringan");
 }

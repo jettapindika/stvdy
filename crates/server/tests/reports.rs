@@ -937,3 +937,106 @@ async fn the_workspace_lists_its_reports(pool: PgPool) {
         2
     );
 }
+
+/// Deleting a report tombstones it, and both routes that reach it stop answering.
+///
+/// A report is one row — the outline and the section texts both live on it — so there is no
+/// child to tombstone and nothing to leak. What the test pins is that the row stops being
+/// readable through the list *and* through the by-id read, because the list is what the
+/// Studio panel polls and the by-id read is what the report screen renders.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deleted_report_is_gone_from_the_list(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![outline_reply()])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "report-deleter@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (status, created) = report_created(&app, &workspace_id, &token, &source_id).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let report_id = created["report"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json(
+        &app,
+        "DELETE",
+        &format!("/reports/{report_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (_, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/reports"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(list["reports"].as_array().unwrap().len(), 0, "{list}");
+
+    let (status, _) = json(
+        &app,
+        "GET",
+        &format!("/reports/{report_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/reports/{report_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Renaming a report is an outline edit: the title is the outline's.
+///
+/// `PATCH /reports/:id` replaces the whole outline, so a rename is that same call with a
+/// changed `title` and every section otherwise untouched — which is also what makes the
+/// section texts survive it, because the server matches each section's text to its heading.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_report_title_is_edited_through_the_outline(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![outline_reply()])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "report-renamer@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (status, created) = report_created(&app, &workspace_id, &token, &source_id).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let report_id = created["report"]["id"].as_str().unwrap().to_string();
+
+    let before = get_report(&app, &token, &report_id).await;
+    let sections = before["report"]["outline"]["sections"].as_array().unwrap().len();
+    let mut renamed = before["report"]["outline"].clone();
+    renamed["title"] = serde_json::json!("UTS Jaringan");
+
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/reports/{report_id}"),
+        &token,
+        serde_json::json!({ "outline": renamed }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["report"]["title"], "UTS Jaringan", "{body}");
+
+    let after = get_report(&app, &token, &report_id).await;
+    assert_eq!(after["report"]["title"], "UTS Jaringan");
+    assert_eq!(
+        after["report"]["outline"]["sections"].as_array().unwrap().len(),
+        sections,
+        "a rename must not drop sections: {after}"
+    );
+}

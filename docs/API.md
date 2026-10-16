@@ -368,7 +368,32 @@ row.
   another user's or a deleted row.
 - `PATCH /workspaces/:id` body `{ "name" }` → 200
   `{ "workspace": "...WorkspaceView" }`. 400 for an empty name, 404 otherwise.
-- `DELETE /workspaces/:id` → 204. Tombstones the workspace and its sources. 404.
+- `DELETE /workspaces/:id` → 204. Tombstones the workspace, its sources, and its
+  decks, flashcards, quizzes, quiz questions, reports and cheatsheets in the same
+  transaction, so no child list outlives the workspace it belongs to; a
+  `generating` child has its `credits_spent` zeroed so `fail_and_refund` cannot
+  refund content the student deliberately deleted. 404 for another user's or a
+  deleted row.
+- `POST /workspaces/:id/bulk-delete` body
+  `{ "deck_ids"?: [uuid], "quiz_ids"?: [uuid], "report_ids"?: [uuid],
+  "cheatsheet_ids"?: [uuid] }` → 204. Tombstones every named item and, for decks
+  and quizzes, their cards and questions, in one transaction. Each id is matched
+  against this workspace and this user, so an id from another workspace, another
+  account, or one already deleted is **silently skipped** rather than refused: the
+  call is idempotent, and a batch assembled from a stale list still deletes
+  everything that is still there. A `generating` row has its `credits_spent` zeroed
+  for the same reason the single deletes do. 400 `validation` when all four arrays
+  are empty — a delete that names nothing is a client bug, not a success. 404 for
+  another user's workspace.
+- `PATCH /workspaces/:id/content-order` body
+  `{ "deck_ids"?: [uuid], "quiz_ids"?: [uuid], "report_ids"?: [uuid],
+  "cheatsheet_ids"?: [uuid] }` → 204. Sets each named item's `sort_order` to its
+  index in the array (0-based), in one transaction, which is what the Studio
+  panel's reorder controls write. An item the array omits keeps its existing
+  `sort_order`, and an id that is not this workspace's, not this user's, or already
+  deleted is skipped rather than refused. Reordering spends nothing. The four
+  content lists order by `sort_order` first, so this is the field they read. 404
+  for another user's workspace.
 
 ## Sources (Phase 1)
 
@@ -560,7 +585,8 @@ costs nothing.
 ### `GET /workspaces/:id/decks`
 
 Auth. 200 `{"decks": [Deck], "cost": {"per_batch", "batch_size",
-"max_cards"}}`, newest first, tombstones excluded. `cost` is the credit price
+"max_cards"}}`, ordered by `sort_order` then newest first, tombstones
+excluded. `cost` is the credit price
 descriptor the studio panel renders — `per_batch` is the plan matrix's
 `flashcard_batch_10`, `batch_size` the number of cards one batch covers, and
 `max_cards` the request cap `POST /workspaces/:id/decks` enforces — so the client
@@ -583,8 +609,24 @@ disappears from `GET /workspaces/:id/decks` and `GET /decks/:id` returns 404.
 
 204 No Content on success.
 
+**The credits are not refunded.** They were spent when the generation was
+requested, and deleting the result is the student's own choice. A `generating` deck
+carries `credits_spent > 0` and `fail_and_refund` claims on that column with no
+`deleted_at` filter, so the delete zeroes it — otherwise the job would refund a
+deck the student deliberately deleted. A `failed` deck's charge is left intact: it
+is a refund the boot sweep still owes.
+
 - 404 for another account's deck, one that does not exist, or one already
   deleted. A second call is 404, so the operation is idempotent.
+
+### `PATCH /decks/:id`
+
+Auth. Body `{"title": string}` → 200 `{"deck": Deck}`. Renames the deck; the rest
+of the row, and all its cards, are untouched. `title` is trimmed, and an empty or
+over-200-character title is 400 `validation`. Renaming spends nothing.
+
+- 404 for another account's deck, one that does not exist, or one already
+  deleted.
 
 ### `GET /decks/:id/due?limit=N`
 
@@ -694,7 +736,8 @@ costs nothing.
 ### `GET /workspaces/:id/quizzes`
 
 Auth. 200 `{"quizzes": [Quiz], "cost": {"per_batch", "batch_size",
-"max_questions"}}`, newest first, tombstones excluded. `cost` is the credit price
+"max_questions"}}`, ordered by `sort_order` then newest first, tombstones
+excluded. `cost` is the credit price
 descriptor the studio panel renders — `per_batch` is the plan matrix's `quiz_10`,
 `batch_size` the number of questions one batch covers, and `max_questions` the
 request cap the POST enforces — so the client never quotes a hardcoded price or
@@ -720,6 +763,38 @@ disagree. `attempt = {"id", "user_answer", "correct", "answered_at"}`, where a n
 Another account's quiz is 404, not 403: the id must not confirm that it exists.
 `Quiz.status` is `generating | ready | failed`; a `failed` quiz carries a readable
 `error` and its credits are refunded (A98).
+
+### `PATCH /quizzes/:id`
+
+Auth. Body `{"title": string}` → 200 `{"quiz": Quiz}`. Renames the quiz; its
+questions and every attempt are untouched. `title` is trimmed, and an empty or
+over-200-character title is 400 `validation`. Renaming spends nothing.
+
+- 404 for another account's quiz, one that does not exist, or one already
+  deleted.
+
+### `DELETE /quizzes/:id`
+
+Auth. Soft-deletes the quiz and all its questions (sets `deleted_at`), in one
+transaction. The quiz disappears from `GET /workspaces/:id/quizzes` and
+`GET /quizzes/:id` returns 404.
+
+204 No Content on success.
+
+**The attempt history survives.** `quiz_attempts` has no `deleted_at` column, so a
+delete cannot reach it, and that is the intended contract — the dashboard's
+"quizzes taken" figure counts the quizzes the student actually worked through, and
+deleting the quiz does not un-do the work. A delete that also removed the attempts
+would silently rewrite a figure the student has already seen.
+
+**The generation's charge is not refunded.** A `generating` quiz carries
+`credits_spent > 0` and `fail_and_refund` claims on that column with no `deleted_at`
+filter, so the delete zeroes it — otherwise the job would refund a quiz the student
+deliberately deleted. A `failed` quiz's charge is left intact: it is a refund the
+boot sweep still owes.
+
+- 404 for another account's quiz, one that does not exist, or one already
+  deleted. A second call is 404, so the operation is idempotent.
 
 ### `POST /quizzes/:id/attempts`
 
@@ -841,9 +916,9 @@ outline order.
   `insufficient_credits`; 502 `provider_error` when the model cannot produce an
   outline, in which case **the charge is refunded** and the report is left
   `failed`. 404 for another account's workspace.
-- `GET /workspaces/:id/reports` → 200 `{ "reports": [ "...ReportView" ] }`, most
-  recently updated first, tombstones excluded. Not in the spec's route list; added
-  because without it a report is unreachable after a reload.
+- `GET /workspaces/:id/reports` → 200 `{ "reports": [ "...ReportView" ] }`, ordered
+  by `sort_order` then most recently updated first, tombstones excluded. Not in the
+  spec's route list; added because without it a report is unreachable after a reload.
 - `GET /reports/:id` → 200 `{ "report": "...ReportView" }`. 404 for another
   account's report (never 403: whether an id exists is not information this route
   leaks).
@@ -866,6 +941,15 @@ outline order.
   edit is recoverable (the roadmap's conflict rule). No charge. 400 `validation`
   for an outline that does not match the contract; 404 for another account's
   report.
+- `DELETE /reports/:id` → 204. Tombstones the report (sets `deleted_at`), in one
+  transaction; it disappears from `GET /workspaces/:id/reports` and
+  `GET /reports/:id` returns 404. A report is one row — the outline and the section
+  texts both live on it — so there is no child to tombstone, and `report_revisions`
+  are left intact. **No refund:** a `generating` report's `credits_spent` is zeroed
+  so `fail_and_refund`, which claims on that column with no `deleted_at` filter,
+  cannot refund a report the student deliberately deleted; a `failed` report's
+  charge is left for the boot sweep. 404 for another account's report, one that
+  does not exist, or one already deleted; a second call is 404.
 - `POST /reports/:id/generate` body `{ "index": 0 }` → **202**
   `{ "report": "...ReportView" }` with that section in flight. The work is a
   `generate_report_section` job; poll `GET /reports/:id`.
@@ -937,10 +1021,24 @@ direct-storage contract this API does not offer.
   workspace's and finished indexing; 402 `insufficient_credits`; 404 for another
   account's workspace.
 - `GET /workspaces/:id/cheatsheets` → 200 `{ "cheatsheets": [ "...CheatsheetView" ] }`,
-  newest first. Not in the spec's route list; added for the same reason the quiz
-  list was.
+  ordered by `sort_order` then newest first. Not in the spec's route list; added for
+  the same reason the quiz list was.
 - `GET /cheatsheets/:id` → 200 `{ "cheatsheet": "...CheatsheetView" }`. 404 for
   another account's row.
+- `PATCH /cheatsheets/:id` body `{ "title": string }` → 200
+  `{ "cheatsheet": "...CheatsheetView" }`. Renames the cheatsheet; the stored
+  blocks, the rendered HTML and the print are untouched. `title` is trimmed, and an
+  empty or over-200-character title is 400 `validation`. Renaming spends nothing.
+  404 for another account's row, or one already deleted.
+- `DELETE /cheatsheets/:id` → 204. Tombstones the row (sets `deleted_at`); it
+  disappears from `GET /workspaces/:id/cheatsheets` and `GET /cheatsheets/:id`
+  returns 404. The row is a tombstone, not a row delete, so the stored objects
+  (`blocks_key`, `html_key`, `pdf_key`) are left in place for the account purge to
+  reclaim. **No refund:** a `generating` cheatsheet's `credits_spent` is zeroed so
+  `fail_and_refund` — which claims on that column with no `deleted_at` filter —
+  cannot refund a cheatsheet the student deliberately deleted, while a `failed`
+  cheatsheet's charge is left for the boot sweep. 404 for another account's row,
+  one that does not exist, or one already deleted; a second call is 404.
 - `GET /cheatsheets/:id/html` → **200 `text/html; charset=utf-8`**, the document
   itself and not a JSON envelope. The preview frame consumes it as `srcdoc`, and
   the free plan's remedy for a withheld PDF is to print this document from a
@@ -1023,7 +1121,7 @@ reads the date it will actually reset on.
 `crates/server/tests/route_sweep.rs` is the authority on how a route relates to the
 entitlement decision: `every_registered_route_is_classified` fails when a registered
 route is in neither its `ROUTES` nor its `EXEMPT`. The tables below carry that
-classification for the routes listed here — **62 rows**, each with its class and, for
+classification for the routes listed here — **71 rows**, each with its class and, for
 a swept route, the `(status, code)` an exhausted account must get.
 
 **A second axis cuts across both tables: the verified-email gate** (A43, A359). Every route
@@ -1081,16 +1179,21 @@ exportable (A149).
 | GET | `/workspaces/{id}` | reads the caller's own workspace |
 | PATCH | `/workspaces/{id}` | renaming spends nothing |
 | DELETE | `/workspaces/{id}` | deleting is the remedy a workspace refusal names |
+| POST | `/workspaces/{id}/bulk-delete` | deleting content frees the monthly counters the refusals name |
+| PATCH | `/workspaces/{id}/content-order` | reordering a list spends nothing |
 | GET | `/chunks/{id}` | reads a chunk of the caller's source |
 | GET | `/workspaces/{id}/messages` | reads the caller's own thread |
 | GET | `/workspaces/{id}/decks` | reads the caller's own decks |
 | GET | `/decks/{id}` | reads the caller's own deck |
 | DELETE | `/decks/{id}` | soft-deletes the caller's own deck and its cards |
+| PATCH | `/decks/{id}` | renaming a deck spends nothing |
 | GET | `/decks/{id}/due` | reads the caller's own due cards |
 | POST | `/flashcards/{id}/review` | a review is free (R1): studying never costs credits |
 | DELETE | `/flashcard-reviews/{id}` | undoing a review is free (R1): a delete plus a replay of the remaining history, not an inverse calculation |
 | GET | `/workspaces/{id}/quizzes` | reads the caller's own quizzes |
 | GET | `/quizzes/{id}` | reads the caller's own quiz |
+| PATCH | `/quizzes/{id}` | renaming a quiz spends nothing |
+| DELETE | `/quizzes/{id}` | soft-deletes the caller's own quiz and its questions; the attempt history stays, because the dashboard's "quizzes taken" counts work already done |
 | POST | `/quizzes/{id}/attempts` | an attempt is free (R1), like a review |
 | GET | `/quizzes/{id}/results` | reads the caller's own results |
 | GET | `/workspaces/{id}/sources` | reads the caller's own sources |
@@ -1101,7 +1204,10 @@ exportable (A149).
 | GET | `/workspaces/{id}/reports` | reads the caller's own reports |
 | GET | `/reports/{id}` | reads the caller's own report |
 | PATCH | `/reports/{id}` | editing an outline spends nothing |
+| DELETE | `/reports/{id}` | soft-deletes the caller's own report |
 | GET | `/cheatsheets/{id}` | reads the caller's own cheatsheet |
+| PATCH | `/cheatsheets/{id}` | renaming a cheatsheet spends nothing |
+| DELETE | `/cheatsheets/{id}` | soft-deletes the caller's own cheatsheet; its stored objects are reclaimed by the account purge |
 | GET | `/workspaces/{id}/cheatsheets` | reads the caller's own cheatsheets |
 | GET | `/cheatsheets/{id}/html` | the HTML is the document the credits already bought; only the PDF is gated |
 | POST | `/cheatsheets/{id}/re-render` | re-rendering is a pure function of stored blocks and charges nothing |

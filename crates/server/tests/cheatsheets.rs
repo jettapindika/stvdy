@@ -14,6 +14,7 @@ use sqlx::PgPool;
 use stvdy_core::traits::storage::Storage;
 use stvdy_core::traits::testing::ScriptedLlm;
 use stvdy_server::testing::TestState;
+use uuid::Uuid;
 
 mod common;
 use common::{document, drain_jobs, json, signed_up, workspace_with_text};
@@ -625,4 +626,113 @@ async fn the_workspace_lists_its_cheatsheets(pool: PgPool) {
     // offer.
     assert!(body["cheatsheets"][0].get("blocks_key").is_none(), "{body}");
     assert!(body["cheatsheets"][0].get("pdf_key").is_none(), "{body}");
+}
+
+/// Deleting a cheatsheet tombstones the row and leaves the stored objects alone.
+///
+/// The three `*_key` columns point into the object bucket, and a tombstone does not touch
+/// them — the account purge removes the bytes, and it already walks those columns. Asserting
+/// the keys survive is the point: a delete that nulled them would orphan the object forever,
+/// because nothing else records its name.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deleted_cheatsheet_is_gone_from_the_list_and_keeps_its_objects(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![blocks_reply()])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "sheet-deleter@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let cheatsheet_id = generated(&app, &harness, &token, &workspace_id, &source_id).await;
+
+    let (status, body) = json(
+        &app,
+        "DELETE",
+        &format!("/cheatsheets/{cheatsheet_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (_, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace_id}/cheatsheets"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(list["cheatsheets"].as_array().unwrap().len(), 0, "{list}");
+
+    let (status, _) = json(
+        &app,
+        "GET",
+        &format!("/cheatsheets/{cheatsheet_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = json(
+        &app,
+        "DELETE",
+        &format!("/cheatsheets/{cheatsheet_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let keys: (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as("select blocks_key, html_key, pdf_key from cheatsheets where id = $1")
+            .bind(Uuid::parse_str(&cheatsheet_id).unwrap())
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert!(
+        keys.0.is_some() && keys.1.is_some(),
+        "the stored object keys must survive a tombstone, or the bytes are orphaned: {keys:?}"
+    );
+}
+
+/// Renaming a cheatsheet changes its title, not its scope.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_cheatsheet_can_be_renamed(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let harness = harness.with_llm(Arc::new(ScriptedLlm::new(vec![blocks_reply()])));
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "sheet-renamer@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let cheatsheet_id = generated(&app, &harness, &token, &workspace_id, &source_id).await;
+    let before = get_cheatsheet(&app, &token, &cheatsheet_id).await;
+    let scope = before["cheatsheet"]["scope"].clone();
+
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/cheatsheets/{cheatsheet_id}"),
+        &token,
+        serde_json::json!({ "title": "  Rangkuman UTS  " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["cheatsheet"]["title"], "Rangkuman UTS", "{body}");
+    assert_eq!(body["cheatsheet"]["scope"], scope, "the scope is not the title: {body}");
+
+    let (status, _) = json(
+        &app,
+        "PATCH",
+        &format!("/cheatsheets/{cheatsheet_id}"),
+        &token,
+        serde_json::json!({ "title": "" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let after = get_cheatsheet(&app, &token, &cheatsheet_id).await;
+    assert_eq!(after["cheatsheet"]["title"], "Rangkuman UTS");
 }

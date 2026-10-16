@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use stvdy_core::config::PlanId;
 use stvdy_server::testing::TestState;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 /// One request helper for the whole suite. `token` is `Option` because the auth
 /// routes are the only ones called without a bearer.
@@ -920,4 +921,325 @@ async fn a_workspace_carries_its_course_identity(pool: PgPool) {
     assert_eq!(body["code"], "validation", "{body}");
 
     let _ = second_id;
+}
+
+/// Deleting a workspace tombstones every content row it owns, in the same transaction.
+///
+/// This is not tidiness. The entitlement counters filter on each content table's **own**
+/// `deleted_at`, not the workspace's, so a deck left live under a deleted workspace keeps
+/// counting against the student's monthly limit while being unreachable — every list route
+/// calls `owned_name` first. The student would be charged for content they cannot open and
+/// cannot delete, because the workspace that owned it is gone.
+#[sqlx::test(migrations = "../../migrations")]
+async fn deleting_a_workspace_tombstones_its_content(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let account = signup(&app, &harness, "content-cascade@example.test", "Laptop").await;
+    let token = token_of(&account);
+    let workspace = create_workspace(&app, &token, "Cascade").await;
+
+    let user_id: Uuid = sqlx::query_scalar("select id from users where email = $1")
+        .bind("content-cascade@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    let workspace_id = Uuid::parse_str(&workspace).unwrap();
+
+    // One live row per content type. The column lists differ because the required
+    // columns do: `decks.source_ids` has no default, and `cheatsheets.scope` is
+    // `not null` with no default either.
+    sqlx::query(
+        "insert into decks (user_id, workspace_id, title, source_ids, status)
+         values ($1, $2, 'live', array[]::uuid[], 'ready')",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "insert into quizzes (user_id, workspace_id, title, status)
+         values ($1, $2, 'live', 'ready')",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "insert into reports (user_id, workspace_id, title, status)
+         values ($1, $2, 'live', 'ready')",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "insert into cheatsheets (user_id, workspace_id, title, scope, status)
+         values ($1, $2, 'live', 'UTS Jaringan', 'ready')",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // A card under the deck, so the child sweep is exercised too.
+    sqlx::query(
+        "insert into flashcards (user_id, deck_id, front, back)
+         select $1, id, 'front', 'back' from decks where workspace_id = $2",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .execute(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = delete(&app, &format!("/workspaces/{workspace}"), &token).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // Four literal statements rather than one `format!` loop: `query_scalar` takes
+    // `impl SqlSafeStr`, which only `&'static str` implements, so a table name
+    // interpolated at runtime is a compile error by design.
+    let live_decks: i64 = sqlx::query_scalar(
+        "select count(*) from decks where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_decks, 0, "decks must be tombstoned with the workspace");
+
+    let live_quizzes: i64 = sqlx::query_scalar(
+        "select count(*) from quizzes where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_quizzes, 0, "quizzes must be tombstoned with the workspace");
+
+    let live_reports: i64 = sqlx::query_scalar(
+        "select count(*) from reports where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_reports, 0, "reports must be tombstoned with the workspace");
+
+    let live_cheatsheets: i64 = sqlx::query_scalar(
+        "select count(*) from cheatsheets where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        live_cheatsheets, 0,
+        "cheatsheets must be tombstoned with the workspace"
+    );
+
+    let live_cards: i64 = sqlx::query_scalar(
+        "select count(*) from flashcards f
+           join decks d on d.id = f.deck_id
+          where d.workspace_id = $1 and f.deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_cards, 0, "a deck's cards go with the deck");
+}
+
+/// Bulk delete tombstones every id in one transaction, and skips ids that are not the
+/// workspace's.
+///
+/// The skip is the contract, not an oversight: a bulk delete runs against a list the client
+/// rendered, and a row another device already deleted is a normal race, not an error worth
+/// showing. What must not happen is the whole batch failing over one stale id — that would
+/// leave the other items undeleted and the button apparently broken.
+#[sqlx::test(migrations = "../../migrations")]
+async fn bulk_delete_tombstones_the_batch_and_skips_stale_ids(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let account = signup(&app, &harness, "bulk@example.test", "Laptop").await;
+    let token = token_of(&account);
+    let workspace = create_workspace(&app, &token, "Bulk").await;
+
+    let user_id: Uuid = sqlx::query_scalar("select id from users where email = $1")
+        .bind("bulk@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    let workspace_id = Uuid::parse_str(&workspace).unwrap();
+
+    let mut deck_ids = Vec::new();
+    for index in 0..3 {
+        let id: Uuid = sqlx::query_scalar(
+            "insert into decks (user_id, workspace_id, title, source_ids, status)
+             values ($1, $2, $3, array[]::uuid[], 'ready') returning id",
+        )
+        .bind(user_id)
+        .bind(workspace_id)
+        .bind(format!("deck {index}"))
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+        deck_ids.push(id);
+    }
+    let quiz_id: Uuid = sqlx::query_scalar(
+        "insert into quizzes (user_id, workspace_id, title, source_ids, status)
+         values ($1, $2, 'quiz', array[]::uuid[], 'ready') returning id",
+    )
+    .bind(user_id)
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    // A deck in *another* workspace of the same account: it must survive, because the
+    // route's guard is the workspace as well as the user.
+    let other_workspace = create_workspace(&app, &token, "Other").await;
+    let other_id: Uuid = sqlx::query_scalar(
+        "insert into decks (user_id, workspace_id, title, source_ids, status)
+         values ($1, $2, 'elsewhere', array[]::uuid[], 'ready') returning id",
+    )
+    .bind(user_id)
+    .bind(Uuid::parse_str(&other_workspace).unwrap())
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/bulk-delete"),
+        Some(&token),
+        serde_json::json!({
+            "deck_ids": [
+                deck_ids[0].to_string(),
+                deck_ids[1].to_string(),
+                // A nil uuid that matches no row, and a real id in another workspace:
+                // both are skipped rather than failing the batch.
+                Uuid::nil().to_string(),
+                other_id.to_string(),
+            ],
+            "quiz_ids": [quiz_id.to_string()],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let live_decks: i64 = sqlx::query_scalar(
+        "select count(*) from decks where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_decks, 1, "the third deck was not in the batch");
+
+    let other_live: i64 =
+        sqlx::query_scalar("select count(*) from decks where id = $1 and deleted_at is null")
+            .bind(other_id)
+            .fetch_one(&harness.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(other_live, 1, "another workspace's deck must not be reachable");
+
+    let live_quizzes: i64 = sqlx::query_scalar(
+        "select count(*) from quizzes where workspace_id = $1 and deleted_at is null",
+    )
+    .bind(workspace_id)
+    .fetch_one(&harness.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live_quizzes, 0);
+
+    // An empty batch is a client bug, not a no-op.
+    let (status, _) = json(
+        &app,
+        "POST",
+        &format!("/workspaces/{workspace}/bulk-delete"),
+        Some(&token),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// `PATCH /workspaces/:id/content-order` sets `sort_order` from the array index, and the
+/// list route honours it.
+///
+/// Ordering by `created_at desc, id` was the old behaviour, and it is wrong for this feature
+/// for a specific reason: `created_at` defaults to `now()`, and a generation that inserts
+/// several rows in one transaction gives them the same microsecond, so the tiebreak fell
+/// through to a random uuid. A student who reorders a list must see the order they chose.
+#[sqlx::test(migrations = "../../migrations")]
+async fn content_order_sets_the_list_order(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+
+    let account = signup(&app, &harness, "reorder@example.test", "Laptop").await;
+    let token = token_of(&account);
+    let workspace = create_workspace(&app, &token, "Order").await;
+    let user_id: Uuid = sqlx::query_scalar("select id from users where email = $1")
+        .bind("reorder@example.test")
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+    let workspace_id = Uuid::parse_str(&workspace).unwrap();
+
+    let mut ids = Vec::new();
+    for index in 0..3 {
+        let id: Uuid = sqlx::query_scalar(
+            "insert into decks (user_id, workspace_id, title, source_ids, status)
+             values ($1, $2, $3, array[]::uuid[], 'ready') returning id",
+        )
+        .bind(user_id)
+        .bind(workspace_id)
+        .bind(format!("deck {index}"))
+        .fetch_one(&harness.state.pool)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+
+    // Reverse the creation order.
+    let reversed: Vec<String> = ids.iter().rev().map(Uuid::to_string).collect();
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/workspaces/{workspace}/content-order"),
+        Some(&token),
+        serde_json::json!({ "deck_ids": reversed }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (_, list) = json(
+        &app,
+        "GET",
+        &format!("/workspaces/{workspace}/decks"),
+        Some(&token),
+        serde_json::Value::Null,
+    )
+    .await;
+    let titles: Vec<&str> = list["decks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|deck| deck["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["deck 2", "deck 1", "deck 0"], "{list}");
 }

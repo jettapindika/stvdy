@@ -1928,3 +1928,52 @@ async fn deleting_a_generating_deck_does_not_refund_credits(pool: PgPool) {
         "credits_spent must be zeroed so fail_and_refund cannot refund a deleted deck"
     );
 }
+
+/// A deck can be renamed without touching its cards or its status.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_deck_can_be_renamed(pool: PgPool) {
+    let harness = TestState::new(pool);
+    harness.seed_plans().await.unwrap();
+    let llm = Arc::new(ScriptedLlm::new(vec![reply("Apa itu TCP?", "Protokol.", 1)]));
+    let harness = harness.with_llm(llm);
+    let app = stvdy_server::routes::router(harness.state.clone()).unwrap();
+    let token = signed_up(&app, &harness, "deck-renamer@example.test").await;
+    let (workspace_id, source_id) =
+        workspace_with_text(&app, &harness, &token, "Jaringan", "Modul 3", INDONESIAN).await;
+    let (_, body) = deck_created(&app, &workspace_id, &token, &source_id, 1).await;
+    let deck_id = body["deck"]["id"].as_str().unwrap().to_string();
+    drain_jobs(&harness).await;
+
+    let (status, body) = json(
+        &app,
+        "PATCH",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::json!({ "title": "  UTS Jaringan  " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["deck"]["title"], "UTS Jaringan", "the title is trimmed: {body}");
+    assert_eq!(body["deck"]["card_count"], 1, "renaming must not touch the cards: {body}");
+    assert_eq!(body["deck"]["status"], "ready", "{body}");
+
+    let (status, _) = json(
+        &app,
+        "PATCH",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::json!({ "title": "   " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (_, deck) = json(
+        &app,
+        "GET",
+        &format!("/decks/{deck_id}"),
+        &token,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(deck["deck"]["title"], "UTS Jaringan");
+}

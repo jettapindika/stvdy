@@ -1125,7 +1125,8 @@
       "deleteCards_other": "{{count}} cards go with it. This cannot be undone.",
       "deleteNoCards": "It has no cards yet, so nothing is lost. This cannot be undone.",
       "deleting": "Deleting",
-      "deleteIt": "Delete deck"
+      "deleteIt": "Delete deck",
+      "rename": "Rename"
     },
     "quiz": {
       "nameLabel": "Quiz name",
@@ -1154,7 +1155,14 @@
       "untitled": "Untitled quiz",
       "questions_one": "{{count}} question",
       "questions_other": "{{count}} questions",
-      "take": "Take quiz"
+      "take": "Take quiz",
+      "deleteConfirm": "Delete \"{{name}}\"?",
+      "deleteQuestions_one": "{{count}} question and all attempt history will be permanently deleted.",
+      "deleteQuestions_other": "{{count}} questions and all attempt history will be permanently deleted.",
+      "deleteNoQuestions": "This quiz has no questions yet.",
+      "deleting": "Deleting…",
+      "deleteIt": "Delete quiz",
+      "rename": "Rename"
     },
     "report": {
       "topicLabel": "Report topic",
@@ -1176,7 +1184,13 @@
       "open": "Open report",
       "status": {
         "draft": "Outline only"
-      }
+      },
+      "deleteConfirm": "Delete \"{{name}}\"?",
+      "deleteSections_one": "The outline and {{count}} generated section will be permanently deleted.",
+      "deleteSections_other": "The outline and {{count}} generated sections will be permanently deleted.",
+      "deleteNoSections": "This report has no generated sections yet.",
+      "deleting": "Deleting…",
+      "deleteIt": "Delete report"
     },
     "cheatsheet": {
       "heading": "Cheatsheet",
@@ -1191,7 +1205,27 @@
         "thorough": "thorough"
       },
       "cost": "Costs {{credits}} credits. The cheatsheet appears here while it is generated.",
-      "generate": "Generate cheatsheet"
+      "generate": "Generate cheatsheet",
+      "deleteConfirm": "Delete \"{{name}}\"?",
+      "deleteBody": "The cheatsheet will be permanently deleted.",
+      "deleting": "Deleting…",
+      "deleteIt": "Delete cheatsheet",
+      "rename": "Rename"
+    },
+    "bulk": {
+      "select": "Select",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "deleteConfirm": "Delete {{count}} items?",
+      "deleteBody": "This action cannot be undone.",
+      "deleting": "Deleting…",
+      "deleteIt": "Delete all",
+      "deselectAll": "Deselect all"
+    },
+    "row": {
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "renameLabel": "New name"
     }
   },
   "styleguide": {

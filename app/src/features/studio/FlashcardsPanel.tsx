@@ -7,12 +7,16 @@ import {
   useCreateDeck,
   useDecks,
   useDeleteDeck,
+  useRenameDeck,
   type Deck,
   type DeckStatus,
 } from '@/api/queries/flashcards'
 import { useSources } from '@/api/queries/sources'
+import { useBulkDelete, useReorderContent } from '@/api/queries/workspaces'
 import { Field } from '@/components/ui/Field'
 import { ApiErrorNotice, EmptyState, SkeletonRows } from '@/components/ui/States'
+import { ContentList, type RowBindings } from '@/features/studio/ContentList'
+import { ContentRow } from '@/features/studio/ContentRow'
 import { SourcePicker } from '@/features/workspaces/SourcePicker'
 
 /**
@@ -44,6 +48,9 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
   const error = asApiError(create.error)
   const ready = title.trim().length > 0 && selected.length > 0 && !create.isPending
   const decksList = decks.data?.decks
+  const bulk = useBulkDelete(workspaceId)
+  const bulkError = asApiError(bulk.error)
+  const reorder = useReorderContent(workspaceId)
   // The cost and the request cap are the server's: the panel renders what
   // `GET /workspaces/:id/decks` serves rather than a literal that can drift from
   // the plan matrix.
@@ -118,11 +125,21 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
       )}
 
       {decksList !== undefined && decksList.length > 0 && (
-        <ul className="flex flex-col divide-y divide-border border-y border-border">
-          {decksList.map((deck) => (
-            <DeckRow key={deck.id} deck={deck} workspaceId={workspaceId} />
-          ))}
-        </ul>
+        <ContentList
+          items={decksList}
+          noun={t('errors.nouns.decks')}
+          onBulkDelete={(ids) => {
+            bulk.mutate({ deckIds: ids })
+          }}
+          bulkPending={bulk.isPending}
+          bulkError={bulkError}
+          onReorder={async (ids) => {
+            await reorder.mutateAsync({ deckIds: ids })
+          }}
+          row={(deck, _index, bindings) => (
+            <DeckRow key={deck.id} deck={deck} workspaceId={workspaceId} bindings={bindings} />
+          )}
+        />
       )}
     </div>
   )
@@ -133,13 +150,21 @@ export function FlashcardsPanel({ workspaceId }: { workspaceId: string }) {
  *
  * The chip carries its state in a word, not only in a tone — the same rule the
  * source rows follow — so "Generating" and "Failed" are still readable in
- * monochrome and to a screen reader.
+ * monochrome and to a screen reader. The row's own layout and its rename/delete
+ * modes live in `ContentRow`, which the four panels share.
  */
-function DeckRow({ deck, workspaceId }: { deck: Deck; workspaceId: string }) {
+function DeckRow({
+  deck,
+  workspaceId,
+  bindings,
+}: {
+  deck: Deck
+  workspaceId: string
+  bindings: RowBindings
+}) {
   const { t } = useTranslation()
   const remove = useDeleteDeck(workspaceId)
-  const removeError = asApiError(remove.error)
-  const [confirming, setConfirming] = useState(false)
+  const rename = useRenameDeck(workspaceId)
   // Resolved here rather than at module scope: a constant holding copy is
   // evaluated before there is a language, so it could only ever ship one of them.
   const statusLabel: Record<DeckStatus, string> = {
@@ -149,101 +174,45 @@ function DeckRow({ deck, workspaceId }: { deck: Deck; workspaceId: string }) {
   }
   const displayName = deck.title.length > 0 ? deck.title : t('studio.deck.untitled')
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {/* `w-full … @md:w-auto @md:flex-1` is load-bearing, and it is the row fix
-            this panel needs rather than a text one. The three siblings are all
-            effectively fixed-width (a count, a status chip, a link) while `flex-1`
-            gives this span a flex basis of `0`, so the title is left the remainder —
-            and with `overflow-wrap: anywhere` (the panel container's rule, which is
-            what stops a long Indonesian word overflowing the box) its min-content is
-            **one character**, so nothing stops the row from squeezing it there.
-            Measured in Chromium on this screen's own fixture: the deck title rendered
-            **24px wide and 308px tall** at 100% text — a line per word — and 18px wide
-            and 1452px tall at 200%.
-
-            The condition is the *panel's* width, not the window's: a 1365px window
-            gives each panel ~157px of content while a 390px phone gives one panel
-            ~350px, so a viewport breakpoint would be the wrong test in both
-            directions. `@container` on the panel content box plus `@md:` (28rem of
-            container) asks the question that matters — is there room for the title
-            and the three chips on one line — and because container breakpoints are
-            rem-based, the threshold doubles with the reader's text size, which is
-            exactly when more room is needed. `ReportRow` carries the same shape with
-            a viewport `sm:` because its own measurement was a phone one. */}
-        <span className="w-full min-w-0 wrap-anywhere font-medium @md:w-auto @md:flex-1">
-          {displayName}
-        </span>
-        <span className="meta">{t('studio.deck.cards', { count: deck.card_count })}</span>
-        <span className={STATUS_CHIP[deck.status]} role="status">
-          {deck.status === 'generating' && (
-            <span className="h-2 w-2 animate-working rounded-full bg-current" aria-hidden="true" />
-          )}
-          {statusLabel[deck.status]}
-        </span>
-        {deck.status === 'ready' && (
+    <ContentRow
+      title={displayName}
+      meta={<span className="meta">{t('studio.deck.cards', { count: deck.card_count })}</span>}
+      statusChip={STATUS_CHIP[deck.status]}
+      statusLabel={statusLabel[deck.status]}
+      working={deck.status === 'generating'}
+      action={
+        deck.status === 'ready' ? (
           <Link to={`/study/${deck.id}`} className="btn btn-secondary">
             {t('nav.study')}
           </Link>
-        )}
-        {!confirming && (
-          <button
-            type="button"
-            className="btn btn-quiet text-danger text-sm"
-            onClick={() => { setConfirming(true) }}
-          >
-            {t('actions.delete')}
-          </button>
-        )}
-      </div>
-
-      {confirming && (
-        <div className="note note-danger flex flex-col items-start gap-2">
-          <p className="font-medium">
-            {t('studio.deck.deleteConfirm', { name: displayName })}
-          </p>
-          <p className="text-small">
-            {deck.card_count === 0
-              ? t('studio.deck.deleteNoCards')
-              : t('studio.deck.deleteCards', { count: deck.card_count })}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              autoFocus
-              disabled={remove.isPending}
-              onClick={() => {
-                remove.mutate(deck.id, {
-                  onSuccess: () => { setConfirming(false) },
-                })
-              }}
-            >
-              {remove.isPending
-                ? t('studio.deck.deleting')
-                : t('studio.deck.deleteIt')}
-            </button>
-            <button
-              type="button"
-              className="btn btn-quiet"
-              onClick={() => {
-                remove.reset()
-                setConfirming(false)
-              }}
-            >
-              {t('actions.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {removeError !== null && (
-        <ApiErrorNotice error={removeError} noun={t('errors.nouns.deck')} />
-      )}
-
-      {deck.error !== null && deck.error.length > 0 && (
-        <p className="note note-danger text-sm">{deck.error}</p>
-      )}
-    </li>
+        ) : undefined
+      }
+      error={deck.error}
+      rename={{
+        label: t('studio.deck.rename'),
+        onSubmit: (title) => {
+          rename.mutate({ deckId: deck.id, title })
+        },
+        pending: rename.isPending,
+        error: asApiError(rename.error),
+        reset: rename.reset,
+      }}
+      deleteConfirm={t('studio.deck.deleteConfirm', { name: displayName })}
+      deleteBody={
+        deck.card_count === 0
+          ? t('studio.deck.deleteNoCards')
+          : t('studio.deck.deleteCards', { count: deck.card_count })
+      }
+      deleteIt={t('studio.deck.deleteIt')}
+      deleting={t('studio.deck.deleting')}
+      deleteNoun={t('errors.nouns.deck')}
+      onDelete={(onSuccess) => {
+        remove.mutate(deck.id, { onSuccess })
+      }}
+      deletePending={remove.isPending}
+      deleteError={asApiError(remove.error)}
+      resetDelete={remove.reset}
+      bindings={bindings}
+    />
   )
 }
