@@ -211,3 +211,33 @@ export function useRecordAttempt(quizId: string) {
       client.invalidateQueries({ queryKey: quizKeys.results(quizId), exact: true }),
   })
 }
+
+/**
+ * `DELETE /quizzes/:id` — soft-delete a quiz and its questions.
+ *
+ * Invalidates the workspace's quiz list and the dashboard.
+ */
+export function useDeleteQuiz(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (quizId: string) => api.delete(`/quizzes/${quizId}`),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: quizKeys.quizzes(workspaceId) })
+      await client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/**
+ * `PATCH /quizzes/:id` — rename a quiz.
+ */
+export function useRenameQuiz(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ quizId, title }: { quizId: string; title: string }) =>
+      api.patch<{ quiz: Quiz }>(`/quizzes/${quizId}`, { title }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: quizKeys.quizzes(workspaceId) })
+    },
+  })
+}

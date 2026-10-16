@@ -279,3 +279,19 @@ export function useExportReport(reportId: string) {
     },
   })
 }
+
+/**
+ * `DELETE /reports/:id` — soft-delete a report.
+ *
+ * Invalidates the workspace's report list and the dashboard.
+ */
+export function useDeleteReport(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (reportId: string) => api.delete(`/reports/${reportId}`),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: reportKeys.reports(workspaceId) })
+      await client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}

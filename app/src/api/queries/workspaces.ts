@@ -121,3 +121,55 @@ export function useDeleteWorkspace() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: workspaceKeys.all }),
   })
 }
+
+/** The content ids a bulk delete or a reorder names, by kind. */
+export interface ContentIds {
+  deckIds?: string[]
+  quizIds?: string[]
+  reportIds?: string[]
+  cheatsheetIds?: string[]
+}
+
+function contentBody(ids: ContentIds) {
+  return {
+    deck_ids: ids.deckIds ?? [],
+    quiz_ids: ids.quizIds ?? [],
+    report_ids: ids.reportIds ?? [],
+    cheatsheet_ids: ids.cheatsheetIds ?? [],
+  }
+}
+
+/**
+ * `POST /workspaces/:id/bulk-delete` — tombstone several content items at once.
+ *
+ * Invalidates `['workspaces', id]`, which prefix-matches every content list for
+ * the workspace (decks, quizzes, reports, cheatsheets), plus the dashboard.
+ */
+export function useBulkDelete(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: ContentIds) =>
+      api.post(`/workspaces/${workspaceId}/bulk-delete`, contentBody(ids)),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/**
+ * `PATCH /workspaces/:id/content-order` — set each item's `sort_order` from its
+ * index in the array. Items omitted keep their existing order.
+ *
+ * Invalidates the content lists but not the dashboard: reordering changes no
+ * count.
+ */
+export function useReorderContent(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: ContentIds) =>
+      api.patch(`/workspaces/${workspaceId}/content-order`, contentBody(ids)),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] }),
+  })
+}

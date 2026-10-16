@@ -59,7 +59,31 @@ export interface CheatsheetResponse {
 }
 
 export const cheatsheetKeys = {
+  cheatsheets: (workspaceId: string) => ['workspaces', workspaceId, 'cheatsheets'] as const,
   cheatsheet: (cheatsheetId: string) => ['cheatsheets', cheatsheetId] as const,
+}
+
+/**
+ * The workspace's cheatsheets.
+ *
+ * Polls while any sheet is still `pending` or `generating`, the same shape the
+ * single-sheet query uses: a fresh sheet is `pending` before the job starts.
+ */
+export function useCheatsheets(workspaceId: string) {
+  return useQuery({
+    queryKey: cheatsheetKeys.cheatsheets(workspaceId),
+    queryFn: async ({ signal }) =>
+      api.get<{ cheatsheets: Cheatsheet[] }>(`/workspaces/${workspaceId}/cheatsheets`, {
+        signal,
+      }),
+    enabled: workspaceId.length > 0,
+    refetchInterval: (query) =>
+      (query.state.data?.cheatsheets ?? []).some(
+        (sheet) => sheet.status !== 'ready' && sheet.status !== 'failed',
+      )
+        ? 1500
+        : false,
+  })
 }
 
 export function useCheatsheet(cheatsheetId: string) {
@@ -161,6 +185,36 @@ export function useExportCheatsheetPdf(cheatsheetId: string) {
     mutationFn: async () => {
       const response = await apiRaw(`/cheatsheets/${cheatsheetId}/pdf`)
       return await response.blob()
+    },
+  })
+}
+
+/**
+ * `DELETE /cheatsheets/:id` — soft-delete a cheatsheet.
+ *
+ * Invalidates the workspace's cheatsheet list and the dashboard.
+ */
+export function useDeleteCheatsheet(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (cheatsheetId: string) => api.delete(`/cheatsheets/${cheatsheetId}`),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: cheatsheetKeys.cheatsheets(workspaceId) })
+      await client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/**
+ * `PATCH /cheatsheets/:id` — rename a cheatsheet.
+ */
+export function useRenameCheatsheet(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ cheatsheetId, title }: { cheatsheetId: string; title: string }) =>
+      api.patch<CheatsheetResponse>(`/cheatsheets/${cheatsheetId}`, { title }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: cheatsheetKeys.cheatsheets(workspaceId) })
     },
   })
 }

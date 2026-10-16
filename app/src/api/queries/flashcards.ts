@@ -178,3 +178,21 @@ export function useDeleteDeck(workspaceId: string) {
     },
   })
 }
+
+/**
+ * `PATCH /decks/:id` — rename a deck.
+ *
+ * Invalidates the workspace's deck list and the dashboard so the new title
+ * appears everywhere immediately.
+ */
+export function useRenameDeck(workspaceId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ deckId, title }: { deckId: string; title: string }) =>
+      api.patch<{ deck: Deck }>(`/decks/${deckId}`, { title }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: flashcardKeys.decks(workspaceId) })
+      await client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
