@@ -117,7 +117,11 @@ export function PageHeader({
   eyebrow,
   action,
 }: {
-  title: string
+  /**
+   * The page's own heading. A node rather than a string, because a screen that
+   * renames in place swaps the heading for its input.
+   */
+  title: ReactNode
   subtitle?: string
   eyebrow?: string
   action?: ReactNode

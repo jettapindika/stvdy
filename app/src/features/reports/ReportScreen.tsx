@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { asApiError, type ApiError } from '@/api/errors'
 import {
   EXPORT_FORMATS,
   readableOutline,
+  useDeleteReport,
   useExportReport,
   useGenerateSection,
   useReport,
@@ -24,6 +25,7 @@ import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice, EmptyState, LoadingState, SkeletonRows } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { PLANS, REPORT_CREDITS, planForFormat } from '@/features/billing/plans'
+import { DetailDelete, InlineTitleForm } from '@/features/studio/DetailActions'
 import { saveBlob } from '@/lib/download'
 import { DEFAULT_TIMEZONE, formatInZone } from '@/lib/time'
 
@@ -84,9 +86,13 @@ function ReportPage({ children }: { children: ReactNode }) {
 
 export function ReportScreen() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { reportId = '' } = useParams()
   const report = useReport(reportId)
   const error = asApiError(report.error)
+  const remove = useDeleteReport(report.data?.report.workspace_id ?? '')
+  const renameOutline = useUpdateOutline(reportId)
+  const [renaming, setRenaming] = useState(false)
 
   const data = report.data?.report
   const outline = data?.outline == null ? null : readableOutline(data.outline)
@@ -169,6 +175,9 @@ export function ReportScreen() {
       : data.status === 'ready'
         ? t('reports.status.ready')
         : t('reports.status.generating')
+  // The delete confirm's count, from the payload the screen already holds: the
+  // sections that actually have a body, not the outline's length.
+  const written = data.sections.filter((section) => section.body_md !== null).length
 
   return (
     <ReportPage>
@@ -195,9 +204,72 @@ export function ReportScreen() {
         eyebrow={
           course === null ? t('reports.eyebrow') : t('reports.eyebrowCourse', { course })
         }
-        title={data.title}
+        title={
+          renaming ? (
+            <InlineTitleForm
+              defaultValue={outline.title}
+              label={t('studio.row.renameLabel')}
+              pending={renameOutline.isPending}
+              onSubmit={(title) => {
+                // A report's title is part of its outline — `PATCH /reports/:id`
+                // derives it from `outline.title` — so a rename sends the outline
+                // with only that field changed. A top-level `title` would be
+                // ignored by the route.
+                renameOutline.mutate(
+                  { ...outline, title },
+                  {
+                    onSuccess: () => {
+                      setRenaming(false)
+                    },
+                  },
+                )
+              }}
+              onCancel={() => {
+                renameOutline.reset()
+                setRenaming(false)
+              }}
+            />
+          ) : (
+            data.title
+          )
+        }
         subtitle={t('reports.subtitle')}
-        action={<span className="chip font-mono text-meta">{status}</span>}
+        action={
+          <div className="flex flex-wrap items-start gap-2">
+            <span className="chip font-mono text-meta">{status}</span>
+            {!renaming && (
+              <button
+                type="button"
+                className="btn btn-quiet text-sm"
+                onClick={() => {
+                  setRenaming(true)
+                }}
+              >
+                {t('studio.report.rename')}
+              </button>
+            )}
+            <DetailDelete
+              confirm={t('studio.report.deleteConfirm', { name: data.title })}
+              body={
+                written === 0
+                  ? t('studio.report.deleteNoSections')
+                  : t('studio.report.deleteSections', { count: written })
+              }
+              deleteIt={t('studio.report.deleteIt')}
+              deleting={t('studio.report.deleting')}
+              noun={t('errors.nouns.report')}
+              error={asApiError(remove.error)}
+              pending={remove.isPending}
+              reset={remove.reset}
+              onDelete={(onSuccess) => {
+                remove.mutate(reportId, { onSuccess })
+              }}
+              onDeleted={() => {
+                void navigate(`/workspaces/${data.workspace_id}`)
+              }}
+            />
+          </div>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">

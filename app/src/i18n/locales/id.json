@@ -1158,7 +1158,8 @@
       "deleteSections_other": "Kerangka dan {{count}} bagian yang sudah ditulis akan dihapus permanen.",
       "deleteNoSections": "Laporan ini belum punya bagian yang ditulis.",
       "deleting": "Menghapus…",
-      "deleteIt": "Hapus laporan"
+      "deleteIt": "Hapus laporan",
+      "rename": "Ganti nama"
     },
     "cheatsheet": {
       "heading": "Contekan",

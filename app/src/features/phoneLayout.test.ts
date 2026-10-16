@@ -231,17 +231,26 @@ describe('the workspace panels survive 200% text', () => {
     // 390px phone leaves ~350px, so the viewport `sm:` these rows used to carry fired
     // on the desktop window and handed the title back the squeeze. `@md` is 28rem *of
     // container* and rem-based, so its threshold doubles with the reader's text size.
+    // The three Studio panels no longer each carry their own title span: the row's
+    // markup lives once in `ContentRow` and each panel renders that. So the guard is
+    // the shared row plus the workspace card, and the panels are checked for actually
+    // using the shared row — four copies of the same class list is what this test used
+    // to assert, and is exactly what the refactor removed.
     const titles = [
       read('features/workspaces/WorkspaceScreen.tsx'),
-      read('features/studio/FlashcardsPanel.tsx'),
-      read('features/studio/QuizPanel.tsx'),
-      read('features/studio/ReportPanel.tsx'),
+      read('features/studio/ContentRow.tsx'),
     ].flatMap((source) =>
       [...source.matchAll(/className="([^"]*min-w-0[^"]*font-medium[^"]*)"/g)].map(
         (match) => match[1],
       ),
     )
-    expect(titles.length, 'the four title spans must exist').toBe(4)
+    expect(titles.length, 'the shared row and the workspace card must carry a title span').toBe(2)
+    for (const panel of ['FlashcardsPanel', 'QuizPanel', 'ReportPanel']) {
+      expect(
+        read(`features/studio/${panel}.tsx`),
+        `${panel} must render the shared row, or its titles lose the permission`,
+      ).toContain('ContentRow')
+    }
     for (const title of titles) {
       expect(title).toContain('wrap-anywhere')
       expect(title).not.toContain('break-words')

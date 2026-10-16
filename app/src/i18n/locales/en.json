@@ -1190,7 +1190,8 @@
       "deleteSections_other": "The outline and {{count}} generated sections will be permanently deleted.",
       "deleteNoSections": "This report has no generated sections yet.",
       "deleting": "Deleting…",
-      "deleteIt": "Delete report"
+      "deleteIt": "Delete report",
+      "rename": "Rename"
     },
     "cheatsheet": {
       "heading": "Cheatsheet",

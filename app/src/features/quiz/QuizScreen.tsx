@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
 import {
+  useDeleteQuiz,
   useQuiz,
   useQuizResults,
   useRecordAttempt,
+  useRenameQuiz,
   type QuizQuestion,
 } from '@/api/queries/quizzes'
 import { useSources } from '@/api/queries/sources'
@@ -15,6 +17,7 @@ import { PageHeader, Section, WidgetHeading } from '@/components/layout/Section'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { SourcePassage } from '@/components/ui/SourcePassage'
 import { ApiErrorNotice, EmptyState, LoadingState, SkeletonRows } from '@/components/ui/States'
+import { DetailDelete, InlineTitleForm } from '@/features/studio/DetailActions'
 
 /**
  * Quiz mode: one question at a time, then the score and the weak topics.
@@ -145,6 +148,7 @@ function OptionRow({
 
 export function QuizScreen() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { quizId = '' } = useParams()
   const quiz = useQuiz(quizId)
   const results = useQuizResults(quizId)
@@ -152,6 +156,9 @@ export function QuizScreen() {
   const sources = useSources(workspaceId)
   const workspace = useWorkspace(workspaceId)
   const record = useRecordAttempt(quizId)
+  const remove = useDeleteQuiz(workspaceId)
+  const rename = useRenameQuiz(workspaceId)
+  const [renaming, setRenaming] = useState(false)
 
   const [index, setIndex] = useState(0)
   const [phase, setPhase] = useState<Phase>('answering')
@@ -435,7 +442,33 @@ export function QuizScreen() {
 
       <PageHeader
         eyebrow={phase === 'results' ? resultsEyebrow : (courseLabel ?? undefined)}
-        title={phase === 'results' ? t('quiz.results.title') : quizTitle}
+        title={
+          renaming ? (
+            <InlineTitleForm
+              defaultValue={quiz.data?.quiz.title ?? ''}
+              label={t('studio.row.renameLabel')}
+              pending={rename.isPending}
+              onSubmit={(title) => {
+                rename.mutate(
+                  { quizId, title },
+                  {
+                    onSuccess: () => {
+                      setRenaming(false)
+                    },
+                  },
+                )
+              }}
+              onCancel={() => {
+                rename.reset()
+                setRenaming(false)
+              }}
+            />
+          ) : phase === 'results' ? (
+            t('quiz.results.title')
+          ) : (
+            quizTitle
+          )
+        }
         subtitle={
           phase === 'results'
             ? t('quiz.results.subtitle')
@@ -444,19 +477,55 @@ export function QuizScreen() {
               : undefined
         }
         action={
-          // Ending early is a local decision — the attempts are already recorded, so the
-          // summary is whatever the server holds. Nothing is thrown away by asking for it.
-          phase === 'results' ? undefined : (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setPhase('results')
+          <div className="flex flex-wrap items-start gap-2">
+            {/* Ending early is a local decision — the attempts are already recorded, so
+                the summary is whatever the server holds. Nothing is thrown away by
+                asking for it. */}
+            {phase !== 'results' && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setPhase('results')
+                }}
+              >
+                {t('quiz.endQuiz')}
+              </button>
+            )}
+            {!renaming && (
+              <button
+                type="button"
+                className="btn btn-quiet text-sm"
+                onClick={() => {
+                  setRenaming(true)
+                }}
+              >
+                {t('studio.quiz.rename')}
+              </button>
+            )}
+            <DetailDelete
+              confirm={t('studio.quiz.deleteConfirm', { name: quizTitle })}
+              body={
+                (quiz.data?.questions.length ?? 0) === 0
+                  ? t('studio.quiz.deleteNoQuestions')
+                  : t('studio.quiz.deleteQuestions', {
+                      count: quiz.data?.questions.length ?? 0,
+                    })
+              }
+              deleteIt={t('studio.quiz.deleteIt')}
+              deleting={t('studio.quiz.deleting')}
+              noun={t('errors.nouns.quiz')}
+              error={asApiError(remove.error)}
+              pending={remove.isPending}
+              reset={remove.reset}
+              onDelete={(onSuccess) => {
+                remove.mutate(quizId, { onSuccess })
               }}
-            >
-              {t('quiz.endQuiz')}
-            </button>
-          )
+              onDeleted={() => {
+                void navigate(`/workspaces/${workspaceId}`)
+              }}
+            />
+          </div>
         }
       />
 

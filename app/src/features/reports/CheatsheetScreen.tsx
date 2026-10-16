@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { asApiError } from '@/api/errors'
 import {
   useCheatsheet,
   useCheatsheetHtml,
+  useDeleteCheatsheet,
   useExportCheatsheetPdf,
+  useRenameCheatsheet,
   useRerenderCheatsheet,
 } from '@/api/queries/cheatsheets'
 import { PageFooter, PageHeader, Section } from '@/components/layout/Section'
@@ -14,6 +16,7 @@ import { LockedFeature } from '@/components/ui/LockedFeature'
 import { ApiErrorNotice, EmptyState, LoadingState } from '@/components/ui/States'
 import { useSession } from '@/features/auth/useSession'
 import { PLANS, planForFormat } from '@/features/billing/plans'
+import { DetailDelete, InlineTitleForm } from '@/features/studio/DetailActions'
 import { saveBlob } from '@/lib/download'
 
 /**
@@ -53,6 +56,9 @@ export function CheatsheetScreen() {
   const { cheatsheetId = '' } = useParams()
   const cheatsheet = useCheatsheet(cheatsheetId)
   const error = asApiError(cheatsheet.error)
+  const workspaceId = cheatsheet.data?.cheatsheet.workspace_id ?? ''
+  const rename = useRenameCheatsheet(workspaceId)
+  const [renaming, setRenaming] = useState(false)
 
   if (cheatsheet.isPending) {
     return (
@@ -105,10 +111,47 @@ export function CheatsheetScreen() {
             ? sheet.scope
             : t('cheatsheet.eyebrow', { scope: sheet.scope, date: sheet.exam_date })
         }
-        title={sheet.title}
+        title={
+          renaming ? (
+            <InlineTitleForm
+              defaultValue={sheet.title}
+              label={t('studio.row.renameLabel')}
+              pending={rename.isPending}
+              onSubmit={(title) => {
+                rename.mutate(
+                  { cheatsheetId, title },
+                  {
+                    onSuccess: () => {
+                      setRenaming(false)
+                    },
+                  },
+                )
+              }}
+              onCancel={() => {
+                rename.reset()
+                setRenaming(false)
+              }}
+            />
+          ) : (
+            sheet.title
+          )
+        }
         subtitle={t('cheatsheet.subtitle', {
           depth: t(`cheatsheet.depth.${sheet.depth}`),
         })}
+        action={
+          !renaming ? (
+            <button
+              type="button"
+              className="btn btn-quiet text-sm"
+              onClick={() => {
+                setRenaming(true)
+              }}
+            >
+              {t('studio.cheatsheet.rename')}
+            </button>
+          ) : undefined
+        }
       />
 
       {generating && <LoadingState label={t('cheatsheet.generating')} />}
@@ -117,7 +160,12 @@ export function CheatsheetScreen() {
 
       <Section title={t('cheatsheet.actions.title')}>
         <p className="text-label text-muted">{t('cheatsheet.actions.hint')}</p>
-        <CheatsheetActions cheatsheetId={sheet.id} pageCount={sheet.page_count} />
+        <CheatsheetActions
+          cheatsheetId={sheet.id}
+          workspaceId={sheet.workspace_id}
+          title={sheet.title}
+          pageCount={sheet.page_count}
+        />
       </Section>
 
       {sheet.template_version !== null && (
@@ -253,15 +301,21 @@ function CheatsheetPreview({
  */
 function CheatsheetActions({
   cheatsheetId,
+  workspaceId,
+  title,
   pageCount,
 }: {
   cheatsheetId: string
+  workspaceId: string
+  title: string
   pageCount: number | null
 }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const session = useSession()
   const rerender = useRerenderCheatsheet(cheatsheetId)
   const exportPdf = useExportCheatsheetPdf(cheatsheetId)
+  const remove = useDeleteCheatsheet(workspaceId)
   // Null until the account is known, so this screen never states a plan fact it
   // has not been told: "not available on your plan" is a claim about the plan, and
   // it must not appear while the plan is still being read.
@@ -320,6 +374,23 @@ function CheatsheetActions({
       {/* Re-rendering is free, and saying so is the honesty rule applied to a
           button that would otherwise look like the paid one beside it. */}
       <p className="text-caption text-muted">{t('cheatsheet.rerender.free')}</p>
+
+      <DetailDelete
+        confirm={t('studio.cheatsheet.deleteConfirm', { name: title })}
+        body={t('studio.cheatsheet.deleteBody')}
+        deleteIt={t('studio.cheatsheet.deleteIt')}
+        deleting={t('studio.cheatsheet.deleting')}
+        noun={t('errors.nouns.cheatsheet')}
+        error={asApiError(remove.error)}
+        pending={remove.isPending}
+        reset={remove.reset}
+        onDelete={(onSuccess) => {
+          remove.mutate(cheatsheetId, { onSuccess })
+        }}
+        onDeleted={() => {
+          void navigate(`/workspaces/${workspaceId}`)
+        }}
+      />
 
       {exportError !== null && (
         <ApiErrorNotice error={exportError} noun={t('errors.nouns.export')} />
